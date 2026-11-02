@@ -609,6 +609,9 @@ async function handleProbe(
  * - `kind`：`isRelay` 为真 → `'relay'`；否则按 host 判定内网 / 公网；
  * - `url`：`state.base`（音乐根，**不含**任何凭证——`normalizeBase` 已丢弃 userinfo）；
  * - `label`：中继「FN 中继」/ 内网「内网直连」/ 公网「公网直连」。
+ * - `bandwidthHint`：**仅中继链路有值**——完整的带宽提示文案（实测中继约 0.5–4 Mbps，
+ *   无损与下载建议在局域网内进行）。这里给**完整**文案而不是「带宽受限」四个字，
+ *   是为了让渲染进程不需要自己拼装文案（渲染进程的兜底文案只在主进程没给值时才用）。
  */
 function handleConnectionInfo(session: SessionManager): ConnectionInfo | null {
   const state = session.state
@@ -620,7 +623,9 @@ function handleConnectionInfo(session: SessionManager): ConnectionInfo | null {
   const label = isRelay ? 'FN 中继' : kind === 'lan' ? '内网直连' : '公网直连'
 
   const info: ConnectionInfo = { kind, url: state.base, label, isRelay }
-  if (isRelay) info.bandwidthHint = '带宽受限'
+  if (isRelay) {
+    info.bandwidthHint = '中继带宽受限（约 0.5–4 Mbps），无损与下载建议在局域网内进行'
+  }
   return info
 }
 

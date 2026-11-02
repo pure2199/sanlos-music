@@ -29,7 +29,7 @@ import { LoginPage } from '../src/pages/LoginPage'
 import { ConnectionBadge } from '../src/components/ConnectionBadge'
 import { useSessionStore } from '../src/state/sessionStore'
 import { useSettingsStore } from '../src/state/settingsStore'
-import { DEFAULT_HTTP_PORT } from '../shared/constants'
+import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT } from '../shared/constants'
 import type { AuthSessionInfo, CandidateInfo, ServerInfo } from '../shared/bridge'
 import type { ConnectionInfo } from '../shared/types'
 
@@ -214,6 +214,127 @@ describe('LoginPage 地址模式', () => {
     await user.click(screen.getByRole('button', { name: '检测服务器' }))
 
     expect(await screen.findByText('服务器响应异常（HTTP 500）')).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 默认端口补全（简报 I.6 · 控制器 2026-11-03 更正）
+//
+// `normalizeBase`（`electron/connection.ts`）**只补协议与 `/music` 路径，不补端口**——
+// 用户只填 `192.168.1.10` 时请求会打到 80 端口，而 fnOS 音乐服务在 5666 / 5667。
+// 渲染进程侧必须在交给 `serverInfo()` / `login()` 之前补默认端口；
+// **显式写了端口的地址必须原样保留**。
+// ---------------------------------------------------------------------------
+
+describe('默认端口补全', () => {
+  it('只填 host → 补 http 默认端口（DEFAULT_HTTP_PORT）', async () => {
+    const user = userEvent.setup()
+    render(<LoginPage />)
+
+    const input = screen.getByPlaceholderText(/NAS 地址/)
+    await user.clear(input)
+    await user.type(input, '192.168.1.10')
+    await user.click(screen.getByRole('button', { name: '检测服务器' }))
+
+    await waitFor(() => expect(bridge.serverInfo).toHaveBeenCalledTimes(1))
+    expect(bridge.serverInfo).toHaveBeenCalledWith(`http://192.168.1.10:${DEFAULT_HTTP_PORT}`)
+  })
+
+  it('https 地址 → 补 https 默认端口（DEFAULT_HTTPS_PORT）', async () => {
+    const user = userEvent.setup()
+    render(<LoginPage />)
+
+    const input = screen.getByPlaceholderText(/NAS 地址/)
+    await user.clear(input)
+    await user.type(input, 'https://192.168.1.10')
+    await user.click(screen.getByRole('button', { name: '检测服务器' }))
+
+    await waitFor(() => expect(bridge.serverInfo).toHaveBeenCalledTimes(1))
+    expect(bridge.serverInfo).toHaveBeenCalledWith(
+      `https://192.168.1.10:${DEFAULT_HTTPS_PORT}`,
+    )
+  })
+
+  it('显式端口原样保留（不改写成默认端口）', async () => {
+    const user = userEvent.setup()
+    render(<LoginPage />)
+
+    const input = screen.getByPlaceholderText(/NAS 地址/)
+    await user.clear(input)
+    await user.type(input, '192.168.1.10:1234')
+    await user.click(screen.getByRole('button', { name: '检测服务器' }))
+
+    await waitFor(() => expect(bridge.serverInfo).toHaveBeenCalledTimes(1))
+    expect(bridge.serverInfo).toHaveBeenCalledWith('192.168.1.10:1234')
+    expect(bridge.serverInfo).not.toHaveBeenCalledWith(
+      `http://192.168.1.10:${DEFAULT_HTTP_PORT}`,
+    )
+  })
+
+  it('显式 :80 原样保留（钉住「URL 会把默认端口规范化掉」的坑）', async () => {
+    const user = userEvent.setup()
+    render(<LoginPage />)
+
+    const input = screen.getByPlaceholderText(/NAS 地址/)
+    await user.clear(input)
+    await user.type(input, 'http://192.168.1.10:80')
+    await user.click(screen.getByRole('button', { name: '检测服务器' }))
+
+    await waitFor(() => expect(bridge.serverInfo).toHaveBeenCalledTimes(1))
+    // ⚠️ 鉴别力：若实现改用 `new URL(x).port` 判断端口，`:80` 会被 URL 规范化成空串
+    //    → 这里会被补成 5666，断言就会失败。
+    expect(bridge.serverInfo).toHaveBeenCalledWith('http://192.168.1.10:80')
+  })
+
+  it('登录时也用补完端口的地址', async () => {
+    const user = userEvent.setup()
+    render(<LoginPage />)
+
+    const input = screen.getByPlaceholderText(/NAS 地址/)
+    await user.clear(input)
+    await user.type(input, '192.168.1.10')
+    await user.type(screen.getByLabelText('账号'), 'demo')
+    await user.type(screen.getByLabelText('密码'), 'pw')
+    await user.click(screen.getByRole('button', { name: '登录' }))
+
+    await waitFor(() => expect(bridge.login).toHaveBeenCalledTimes(1))
+    expect(bridge.login).toHaveBeenCalledWith({
+      server: `http://192.168.1.10:${DEFAULT_HTTP_PORT}`,
+      username: 'demo',
+      password: 'pw',
+      mode: 'password',
+    })
+  })
+
+  it('候选链路地址原样使用（不补默认端口）', async () => {
+    const user = userEvent.setup()
+    // 候选地址**没有端口**（中继走 443，补 5667 会打错端口）。
+    const candidate: CandidateInfo = {
+      address: 'https://example-fn-id.fnos.net',
+      label: 'FN 中继',
+      kind: 'relay',
+      isRelay: true,
+      ok: true,
+    }
+    bridge.probe.mockResolvedValue([candidate])
+
+    render(<LoginPage />)
+    await user.click(screen.getByRole('button', { name: 'FN ID' }))
+    await user.type(screen.getByPlaceholderText(/FN ID/), 'example-fn-id')
+    await user.click(screen.getByRole('button', { name: '探测链路' }))
+    await user.click(await screen.findByRole('button', { name: /FN 中继/ }))
+
+    await user.type(screen.getByLabelText('账号'), 'demo')
+    await user.type(screen.getByLabelText('密码'), 'pw')
+    await user.click(screen.getByRole('button', { name: '登录' }))
+
+    await waitFor(() => expect(bridge.login).toHaveBeenCalledTimes(1))
+    expect(bridge.login).toHaveBeenCalledWith({
+      server: candidate.address,
+      username: 'demo',
+      password: 'pw',
+      mode: 'password',
+    })
   })
 })
 
@@ -481,13 +602,30 @@ describe('ConnectionBadge', () => {
       url: 'https://example-fn-id.fnos.net/music',
       label: 'FN 中继',
       isRelay: true,
-      bandwidthHint: '带宽受限',
+      // 用一个与兜底文案**不同**的探针值：本用例要证明的是
+      // 「主进程给的值优先，兜底文案不出现」，而不是碰巧文案相同。
+      bandwidthHint: '主进程自定义带宽提示',
     } satisfies ConnectionInfo)
 
     render(<ConnectionBadge />)
 
-    expect(await screen.findByText('带宽受限')).toBeTruthy()
+    expect(await screen.findByText('主进程自定义带宽提示')).toBeTruthy()
     expect(screen.queryByText(/0.5–4 Mbps/)).toBeNull()
+  })
+
+  it('主进程给的中继带宽提示按原文展示（与 electron/ipc.ts 的文案一致）', async () => {
+    bridge.connectionInfo.mockResolvedValue({
+      kind: 'relay',
+      url: 'https://example-fn-id.fnos.net/music',
+      label: 'FN 中继',
+      isRelay: true,
+      bandwidthHint:
+        '中继带宽受限（约 0.5–4 Mbps），无损与下载建议在局域网内进行',
+    } satisfies ConnectionInfo)
+
+    render(<ConnectionBadge />)
+
+    expect(await screen.findByText(/中继带宽受限（约 0\.5–4 Mbps）/)).toBeTruthy()
   })
 
   it('中继链路没有带宽提示时展示兜底文案', async () => {

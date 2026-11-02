@@ -655,7 +655,11 @@ describe('auth:connection-info', () => {
     expect(info.isRelay).toBe(true)
     expect(info.label).toBe('FN 中继')
     expect(info.url).toBe('https://example-fn-id.fnos.net/music')
-    expect(info.bandwidthHint).toBe('带宽受限')
+    // ⚠️ 2026-11-03 控制器裁定：主进程的带宽提示改为**完整**文案
+    //    （原为「带宽受限」四个字，丢掉了实测的 0.5–4 Mbps 与局域网建议）。
+    expect(info.bandwidthHint).toBe(
+      '中继带宽受限（约 0.5–4 Mbps），无损与下载建议在局域网内进行',
+    )
   })
 
   it('内网会话 → kind 为 lan', async () => {

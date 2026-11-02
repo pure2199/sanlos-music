@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactElement } from '
 
 import type { CandidateInfo, ServerInfo } from '../../shared/bridge'
 import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT } from '../../shared/constants'
+import { withDefaultPort } from '../lib/address'
 import { getBridge } from '../lib/bridge'
 import { KIND_LABELS } from '../lib/connection'
 import { useSessionStore } from '../state/sessionStore'
@@ -122,16 +123,24 @@ export function LoginPage(): ReactElement {
     })()
   }, [setSession, setConnection])
 
-  /** 登录用的服务器基址：FN ID 模式取选中的候选地址，否则取地址输入框。 */
-  const effectiveServer = target === 'fnid' ? (selectedAddress ?? '') : address.trim()
+  /**
+   * 登录用的服务器基址。
+   *
+   * - FN ID 模式：取选中的候选地址——**原样使用**（候选自带端口，不补默认端口）；
+   * - 地址模式：取地址输入框，并**补默认端口**（只填 host 时否则会打到 80 端口）。
+   */
+  const effectiveServer =
+    target === 'fnid' ? (selectedAddress ?? '') : withDefaultPort(address.trim())
 
   /** 地址模式：读取服务器信息（名称 / 版本 / 是否支持 NAS 账号登录）。 */
   const handleCheckServer = async (): Promise<void> => {
-    const value = address.trim()
-    if (!value) {
+    const raw = address.trim()
+    if (!raw) {
       setError('请填写服务器地址')
       return
     }
+    // ⚠️ 只填 host 时补默认端口（`normalizeBase` 不补端口，否则会打到 80 端口）。
+    const value = withDefaultPort(raw)
     const bridge = getBridge()
     if (!bridge) {
       setError(BRIDGE_UNAVAILABLE)
@@ -324,7 +333,7 @@ export function LoginPage(): ReactElement {
                 spellCheck={false}
               />
               <p className="fnm-login__hint">
-                未填写端口时按协议使用默认端口：HTTP {DEFAULT_HTTP_PORT} / HTTPS{' '}
+                未填写端口时按协议自动补默认端口：HTTP {DEFAULT_HTTP_PORT} / HTTPS{' '}
                 {DEFAULT_HTTPS_PORT}
               </p>
               <button
