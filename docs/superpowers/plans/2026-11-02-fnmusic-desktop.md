@@ -403,11 +403,11 @@ describe('buildCandidates', () => {
     const c = buildCandidates('myfn', parseConnectionParams({ publicIpv6: ['2409::1'] }))
     expect(c[0].address).toBe('http://[2409::1]:5666')
   })
-  it('中继回退到 fnId.5ddd.com 且仅 https', () => {
+  it('中继回退到 fnId.fnos.net 且仅 https', () => {
     const c = buildCandidates('myfn', parseConnectionParams({}))
     const relay = c.filter((x) => x.kind === 'relay')
     expect(relay).toHaveLength(1)
-    expect(relay[0].address).toBe('https://myfn.5ddd.com')
+    expect(relay[0].address).toBe('https://myfn.fnos.net')
     expect(relay[0].isRelay).toBe(true)
   })
 })
