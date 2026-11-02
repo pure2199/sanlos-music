@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import { registerAuthIpc } from './ipc'
 import { TrustedHosts } from './cert'
+import { createHttpStack } from './http'
 import { registerFnmSchemePrivileges, registerProxy } from './proxy'
 import { SessionManager } from './session'
 
@@ -24,28 +25,43 @@ app
   .then(() => {
     // 2. ready 之后才创建会话管理器：`safeStorage` 与 `app.getPath('userData')`
     //    在 ready 之前都不可用。
-    const session = new SessionManager()
-
+    //
     // 受信 host 集合：**只**放行「用户填过的服务器 host」与
     // 「由 FN ID 推导出来的中继域名」。同一个实例要同时交给
     // `registerAuthIpc`（登录 / 探测时登记）与证书校验回调（放行判定）。
     const trusted = new TrustedHosts()
 
-    // 3. `fnm://` 协议代理（渲染进程唯一的出网出口）。
-    registerProxy(session)
+    // 3. 出网通道（Task 9b）：**Chromium 分区栈**。
+    //
+    //    主进程对 NAS 的流量（会话层 / 探测 / 代理 / server-info）全部走它，
+    //    而不是 Node 的全局 `fetch`（undici）——只有 Chromium 栈才受
+    //    `setCertificateVerifyProc` 管辖，「只放行用户填写的 host」才真正生效。
+    //    分区名带信任版本号（`fn-nas-v<epoch>`）：信任集合一变就换分区，
+    //    绕开旧分区里缓存的证书错误（规格 §15.9 的实测结论）。
+    //
+    //    ⚠️ 会话层 / 代理层 / 认证 IPC 必须共用**同一个**实例，
+    //    否则各层的信任版本号各走各的。
+    const http = createHttpStack({ trusted })
 
-    // 4. 认证 IPC（渲染进程的登录页通过 `window.fn` 调用）。
-    registerAuthIpc(session, { trusted })
+    const session = new SessionManager({ http })
 
-    // 5. 证书放行：**只**对 `trusted` 里的 host 放行自签 / 非受信证书。
+    // 4. `fnm://` 协议代理（渲染进程唯一的出网出口）。
+    registerProxy(session, { http })
+
+    // 5. 认证 IPC（渲染进程的登录页通过 `window.fn` 调用）。
+    registerAuthIpc(session, { trusted, http })
+
+    // 6. 证书放行：**只**对 `trusted` 里的 host 放行自签 / 非受信证书。
     //    ⚠️ 绝不无条件 `callback(0)`——未登记的 host 一律走 Chromium 默认校验
     //    （`verify` 返回 `-3`），其余站点照常校验。
     //    ⚠️ `session` 这个名字已被会话管理器占用，故 Electron 的 session 模块取别名。
+    //    （分区 session 上的 verify proc 由 `HttpStack` 自己注册；
+    //    这里额外给 defaultSession 也挂一份，覆盖渲染进程自己发起的请求。）
     electronSession.defaultSession.setCertificateVerifyProc((request, callback) => {
       callback(trusted.verify(request.hostname))
     })
 
-    // 6. 恢复上次会话（Task 7 的生命周期约定：启动时 `load()`）。
+    // 7. 恢复上次会话（Task 7 的生命周期约定：启动时 `load()`）。
     //    失败（文件不存在 / 损坏 / 解密失败）不影响启动，界面会显示未登录。
     session.load()
 

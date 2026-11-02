@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 
 import { registerAuthIpc, type IpcMainLike } from '../electron/ipc'
 import { TrustedHosts } from '../electron/cert'
+import { createHttpStack, type ElectronSessionLike, type HttpStack } from '../electron/http'
 import type { SessionManager, SessionState } from '../electron/session'
 
 // ---------------------------------------------------------------------------
@@ -120,6 +121,7 @@ function setup(
     fetchImpl?: typeof fetch
     trusted?: TrustedHosts
     nasLoginHandler?: (args: { server: string; deviceId: string }) => Promise<void>
+    http?: HttpStack
   } = {},
 ): { handlers: Map<string, Handler>; trusted: TrustedHosts } {
   const { ipcMain, handlers } = fakeIpcMain()
@@ -129,8 +131,41 @@ function setup(
     trusted,
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
     ...(opts.nasLoginHandler ? { nasLoginHandler: opts.nasLoginHandler } : {}),
+    ...(opts.http ? { http: opts.http } : {}),
   })
   return { handlers, trusted }
+}
+
+/**
+ * 假 Electron `session` 模块（Task 9b 的 Chromium 分区栈替身）。
+ *
+ * 记录每次请求落在**哪个分区**上，以及**发请求的那一刻**该 host 在信任集合里的状态
+ * （`trustedAtRequest`）——后者用来证明「登记发生在请求之前」。
+ */
+function fakeElectronSession(trusted: TrustedHosts): {
+  mod: ElectronSessionLike
+  requests: Array<{ partition: string; url: string; trustedAtRequest: number }>
+} {
+  const requests: Array<{ partition: string; url: string; trustedAtRequest: number }> = []
+  const mod: ElectronSessionLike = {
+    fromPartition(name) {
+      return {
+        fetch: async (input: unknown) => {
+          const url = String(input)
+          let host = ''
+          try {
+            host = new URL(url).hostname
+          } catch {
+            host = ''
+          }
+          requests.push({ partition: name, url, trustedAtRequest: trusted.verify(host) })
+          return jsonResponse({ code: 0, msg: '', data: {} })
+        },
+        setCertificateVerifyProc: () => {},
+      }
+    },
+  }
+  return { mod, requests }
 }
 
 /** 造一个 `fetch` 替身：按 URL 前缀路由。 */
@@ -340,6 +375,11 @@ describe('auth:login', () => {
     // 模拟「服务端把口令回显在消息里」的 worst case：message / stack / cause 都带口令。
     const cause = new Error('底层异常：sup3rsecret')
     const err = new Error('登录失败：口令 sup3rsecret 不对', { cause })
+    // ⚠️ 必须**先**物化 stack：V8 的 `stack` 是惰性物化的，
+    //    若等到断言时再读，它会用**已经改写过**的 message 重新拼出首行——
+    //    那样「只改 message」的写法也能通过断言，本用例就没有鉴别力了。
+    //    先读一次把带口令的原始 stack 固化下来，之后只有**真的改写 stack** 才能通过。
+    void err.stack
     session.passwordLogin.mockRejectedValue(err)
     const { handlers } = setup(session)
 
@@ -774,6 +814,93 @@ describe('受信 host 登记', () => {
 
     await expect(invoke(handlers, 'auth:probe', 'a/b')).rejects.toThrow(/FN ID 格式无效/)
     expect(trusted.verify('a')).toBe(-3)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 9b：信任登记与「换分区」的时机（追加要求 A / B）
+// ---------------------------------------------------------------------------
+
+describe('信任集合变化 → 换 Chromium 分区（追加要求 A / B）', () => {
+  it('server-info 在**第一次请求之前**就登记用户填写的 host（请求那一刻它已受信）', async () => {
+    const trusted = new TrustedHosts()
+    const fake = fakeElectronSession(trusted)
+    const http = createHttpStack({ session: fake.mod })
+    const session = fakeSession()
+    const { handlers } = setup(session, { trusted, http })
+
+    await invoke(handlers, 'auth:server-info', 'https://192.168.1.2:5667')
+
+    expect(trusted.verify('192.168.1.2')).toBe(0)
+    expect(fake.requests).toHaveLength(1)
+    // 发请求的那一刻，这个 host **已经**在信任集合里
+    // （否则第一次握手就会失败，而 Chromium 会把证书错误按 host:port 缓存住）。
+    expect(fake.requests[0]?.trustedAtRequest).toBe(0)
+    // 顺序：登记 → bump epoch → 请求 → 请求落在**新**分区上。
+    expect(fake.requests[0]?.partition).toBe('fn-nas-v1')
+  })
+
+  it('信任集合没变时不换分区（不白白丢掉 Chromium 的连接池）', async () => {
+    const trusted = new TrustedHosts()
+    const fake = fakeElectronSession(trusted)
+    const http = createHttpStack({ session: fake.mod })
+    const session = fakeSession()
+    const { handlers } = setup(session, { trusted, http })
+
+    await invoke(handlers, 'auth:server-info', 'https://192.168.1.2:5667')
+    await invoke(handlers, 'auth:server-info', 'https://192.168.1.2:5667')
+
+    expect(fake.requests.map((r) => r.partition)).toEqual(['fn-nas-v1', 'fn-nas-v1'])
+    expect(http.partitionName()).toBe('fn-nas-v1')
+  })
+
+  it('login 也在登录请求之前登记 host（集合变化才换分区）', async () => {
+    const trusted = new TrustedHosts()
+    const fake = fakeElectronSession(trusted)
+    const http = createHttpStack({ session: fake.mod })
+    const session = fakeSession()
+    const { handlers } = setup(session, { trusted, http })
+
+    await invoke(handlers, 'auth:login', {
+      server: 'https://192.168.1.2:5667',
+      username: 'demo',
+      password: 'pw',
+      mode: 'password',
+    })
+
+    // 登录请求走会话层（不在本替身里），但**登记**必须已经发生。
+    expect(trusted.verify('192.168.1.2')).toBe(0)
+    expect(http.partitionName()).toBe('fn-nas-v1')
+  })
+
+  it('probe 登记 FN ID 推导出的中继域名并换分区；候选 host 一个都不登记', async () => {
+    stubFetch({
+      'https://5ddd.com/api/v1/fn/con': () =>
+        jsonResponse({
+          code: 0,
+          msg: '',
+          data: {
+            ipv4: ['192.168.1.2'],
+            publicIpv4: [],
+            publicIpv6: [],
+            fn: [],
+            port: { httpPort: 5666, httpsPort: 5667 },
+          },
+        }),
+    })
+    const trusted = new TrustedHosts()
+    const fake = fakeElectronSession(trusted)
+    const http = createHttpStack({ session: fake.mod })
+    const session = fakeSession()
+    const { handlers } = setup(session, { trusted, http })
+
+    await invoke(handlers, 'auth:probe', 'demo')
+
+    expect(trusted.verify('demo.fnos.net')).toBe(0)
+    expect(http.partitionName()).toBe('fn-nas-v1')
+    // 候选 host 在被探测时**未受信**（审查 I2：候选一律不预登记）。
+    expect(fake.requests.length).toBeGreaterThan(0)
+    expect(fake.requests.every((r) => r.trustedAtRequest === -3)).toBe(true)
   })
 })
 

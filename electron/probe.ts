@@ -34,6 +34,7 @@
 import { API_PREFIX, CODE_OK, CODE_TOKEN_EXPIRED, MUSIC_PATH, RELAY_COOKIE_KEY, RELAY_COOKIE_MODE } from '../shared/constants'
 import { authx, buildCookie } from './sign'
 import type { Candidate } from './connection'
+import type { HttpStack } from './http'
 
 /** 探测参数。 */
 export interface ProbeOptions {
@@ -54,6 +55,14 @@ export interface ProbeOptions {
    * 后者报「连接超时（端口无响应）」——措辞不同，排查方向也不同。
    */
   signal?: AbortSignal
+  /**
+   * 出网通道（Task 9b：Chromium 分区栈）。
+   *
+   * 缺省时用全局 `fetch`（单测里 `vi.stubGlobal('fetch', …)` 仍然有效）。
+   * Electron 运行时里应当注入与其它层**同一个** `HttpStack` 实例，
+   * 这样探测到的链路与后续业务请求走的是同一个 Chromium 分区。
+   */
+  http?: HttpStack
 }
 
 /** 单条候选的探测结果。 */
@@ -166,7 +175,7 @@ const TIMEOUT_CODES = new Set([
 ])
 
 /** 视为「TLS 握手失败」的错误码前缀。 */
-const TLS_CODE_PREFIXES = ['CERT_', 'UNABLE_TO_VERIFY', 'DEPTH_ZERO', 'SELF_SIGNED']
+const TLS_CODE_PREFIXES = ['CERT_', 'ERR_CERT', 'UNABLE_TO_VERIFY', 'DEPTH_ZERO', 'SELF_SIGNED']
 
 /** 视为「TLS 握手失败」的 message 片段（覆盖 `ERR_TLS_CERT_ALTNAME_INVALID` 这类码）。 */
 const TLS_MESSAGE_RE = /certificate|self-signed|altname/i
@@ -288,6 +297,48 @@ async function readEnvelope(res: Response): Promise<Record<string, unknown> | nu
 // ---------------------------------------------------------------------------
 
 /**
+ * Node 定时器的最大毫秒数（32 位有符号数上限）。
+ *
+ * `setTimeout` 的延时**大于**这个值会被折算成 1ms（并打印 `TimeoutOverflowWarning`），
+ * 于是「49 天的超时」会变成「1ms 就超时」。故兜底计时器必须夹到这个上限。
+ */
+const MAX_TIMER_MS = 2147483647
+
+/**
+ * 带超时兜底的请求：**绝不让探测挂死**。
+ *
+ * 为什么要这一层：`init.signal` 能不能真的中止 Chromium 栈的请求，取决于
+ * `session.fetch` 的实现（Task 9b 的运行时实测结论见报告）。
+ * 万一它**不认** `signal`，光靠 `AbortSignal.timeout()` 就会让探测永远挂着
+ * （界面卡在「正在探测」）。故这里额外用 `Promise.race` + 定时器兜底：
+ * 无论底层 fetch 认不认 signal，超时一到就一定返回。
+ *
+ * - 正常路径：fetch 先完成 → 返回响应；
+ * - fetch 被 signal 中止 → 返回 fetch 的异常（`AbortError` / `TimeoutError`）；
+ * - fetch 不认 signal → 定时器到点，抛 `TimeoutError`（归类为「连接超时」）。
+ */
+async function fetchWithTimeout(
+  doFetch: (url: string, init: RequestInit) => Promise<Response>,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<Response> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      onTimeout()
+      reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+    }, Math.min(timeoutMs, MAX_TIMER_MS))
+  })
+  try {
+    return await Promise.race([doFetch(url, init), timeout])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
  * 探测单条候选。**永远不会抛异常**——失败一律转成 `ok: false` + `error`。
  *
  * 判定规则（控制器裁定，修复轮次 1）：
@@ -315,15 +366,30 @@ async function probeOne(candidate: Candidate, opts: ProbeOptions): Promise<Probe
   // 外部取消要报「请求被取消」，不能混成「连接超时（端口无响应）」。
   // 信号在 try 内创建：万一构造失败也不会把异常抛给调用方。
   let timeoutSignal: AbortSignal | undefined
+  let raceTimedOut = false
   try {
     timeoutSignal = AbortSignal.timeout(timeoutMs)
     const signal = opts.signal ? AbortSignal.any([timeoutSignal, opts.signal]) : timeoutSignal
 
-    const res = await fetch(url, {
-      method: 'GET',
-      headers,
-      signal,
-    })
+    // 出网通道：注入的 `HttpStack`（Chromium 分区栈）优先，否则全局 `fetch`
+    // （在**调用时**解析，故 Vitest 的 `vi.stubGlobal('fetch', …)` 仍然有效）。
+    const doFetch = opts.http
+      ? (u: string, i: RequestInit): Promise<Response> => opts.http!.fetch(u, i)
+      : (u: string, i: RequestInit): Promise<Response> => globalThis.fetch(u, i)
+
+    const res = await fetchWithTimeout(
+      doFetch,
+      url,
+      {
+        method: 'GET',
+        headers,
+        signal,
+      },
+      timeoutMs,
+      () => {
+        raceTimedOut = true
+      },
+    )
 
     // 状态码是可达性的唯一依据（M5：health 的业务码不可信）。
     if (res.status >= 400) {
@@ -362,7 +428,7 @@ async function probeOne(candidate: Candidate, opts: ProbeOptions): Promise<Probe
     return { candidate, ok: true, error: redact(reason, token) }
   } catch (err) {
     // 区分「我们自己的超时」与「调用方取消」：前者是连接超时，后者是请求被取消。
-    const timedOut = timeoutSignal?.aborted === true
+    const timedOut = raceTimedOut || timeoutSignal?.aborted === true
     const cancelled = !timedOut && opts.signal?.aborted === true
     return { candidate, ok: false, error: classifyProbeError(err, { timedOut, cancelled }) }
   }

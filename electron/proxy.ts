@@ -54,6 +54,7 @@
 import { API_PREFIX } from '../shared/constants'
 import { authx, buildCookie } from './sign'
 import { SessionStateError, type SessionManager } from './session'
+import { createHttpStack, type HttpStack } from './http'
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -172,6 +173,14 @@ export interface ProxyOptions {
   protocol?: ProtocolLike
   /** 二进制（流式）路径白名单；缺省为 `DEFAULT_BINARY_PATHS`。 */
   binaryPaths?: readonly string[]
+  /**
+   * 出网通道（Task 9b：Chromium 分区栈）。
+   *
+   * 缺省时自建一个（单测里回落到全局 `fetch`）。
+   * ⚠️ 主进程应当注入与会话层**同一个**实例——否则两条路径会走不同的 Chromium 分区，
+   * 证书放行与换分区就对不上了。
+   */
+  http?: HttpStack
 }
 
 /** 上游请求的构造入参。 */
@@ -499,6 +508,7 @@ async function proxyBinary(
   rest: string,
   query: string,
   isRelay: boolean,
+  http: HttpStack,
 ): Promise<Response> {
   const stateError = checkSession(session)
   if (stateError) return errorResponse(errorMessage(stateError))
@@ -518,7 +528,7 @@ async function proxyBinary(
   }
 
   const send = (): Promise<Response> =>
-    fetch(
+    http.fetch(
       buildUpstreamRequest(
         { method, url, headers: request.headers },
         session.state.token,
@@ -605,7 +615,7 @@ async function renewSession(session: SessionManager): Promise<boolean> {
 async function handleProxyRequest(
   session: SessionManager,
   request: Request,
-  opts: { isRelay?: () => boolean; binaryPaths: readonly string[] },
+  opts: { isRelay?: () => boolean; binaryPaths: readonly string[]; http: HttpStack },
 ): Promise<Response> {
   try {
     return await dispatch(session, request, opts)
@@ -619,7 +629,7 @@ async function handleProxyRequest(
 async function dispatch(
   session: SessionManager,
   request: Request,
-  opts: { isRelay?: () => boolean; binaryPaths: readonly string[] },
+  opts: { isRelay?: () => boolean; binaryPaths: readonly string[]; http: HttpStack },
 ): Promise<Response> {
   const target = parseTarget(request.url)
   if (!target) return errorResponse('无法识别的 fnm:// 请求地址')
@@ -637,7 +647,7 @@ async function dispatch(
   const isRelay = opts.isRelay?.() ?? session.state.isRelay
 
   if (opts.binaryPaths.includes(target.rest)) {
-    return await proxyBinary(session, request, target.rest, target.query, isRelay)
+    return await proxyBinary(session, request, target.rest, target.query, isRelay, opts.http)
   }
   return await proxyJson(session, request, target.rest, target.query, isRelay)
 }
@@ -695,7 +705,9 @@ export function registerProxy(session: SessionManager, opts: ProxyOptions = {}):
   }
 
   const binaryPaths = opts.binaryPaths ?? DEFAULT_BINARY_PATHS
+  // 出网通道：注入优先；没注入就自建一个（单测里回落到全局 fetch）。
+  const http = opts.http ?? createHttpStack()
   protocol.handle(SCHEME, (request) =>
-    handleProxyRequest(session, request, { isRelay: opts.isRelay, binaryPaths }),
+    handleProxyRequest(session, request, { isRelay: opts.isRelay, binaryPaths, http }),
   )
 }

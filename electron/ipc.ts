@@ -43,6 +43,7 @@ import { TrustedHosts } from './cert'
 import { probeCandidates } from './probe'
 import { authx } from './sign'
 import { SessionStateError, type SessionManager } from './session'
+import { createHttpStack, type HttpStack } from './http'
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -104,12 +105,25 @@ export type NasLoginHandler = (args: NasLoginArgs) => Promise<void>
 export interface AuthIpcOptions {
   /** `ipcMain` 替身；缺省时惰性取 Electron 的 `ipcMain`。 */
   ipcMain?: IpcMainLike
-  /** `fetch` 替身；缺省时用全局 `fetch`。 */
+  /**
+   * `fetch` 替身；缺省时用全局 `fetch`。
+   *
+   * 它是**整个出网通道的回落实现**（`auth:server-info` 与 `auth:probe` 都用它）——
+   * 单测里注入它，就等于告诉模块「没有 Electron 栈，用这个替身发请求」。
+   */
   fetchImpl?: typeof fetch
   /** 受信 host 集合；缺省时内部 new 一个（注入共享实例才能让证书放行立刻生效）。 */
   trusted?: TrustedHosts
   /** NAS 账号登录处理器；未注入时 `mode: 'nas'` 抛可读错误。 */
   nasLoginHandler?: NasLoginHandler
+  /**
+   * 出网通道（Task 9b：Chromium 分区栈）。
+   *
+   * 缺省时自建一个（`fetchImpl` 作为回落）。主进程应当注入**同一个**实例给
+   * 会话层 / 代理层 / 认证 IPC——否则各层的信任版本号各走各的，
+   * 「信任集合变了 → 换分区」就对不上了。
+   */
+  http?: HttpStack
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +258,30 @@ function serverLabelOf(base: string): string | null {
 }
 
 /**
+ * 登记受信 host，并在**信任集合真的变了**时换 Chromium 分区（追加要求 A / B）。
+ *
+ * 三处登记点（用户填写的 host / 登录成功的 base / FN ID 推导出的中继域名）
+ * **全部走这一条路径**，避免某处漏掉「换分区」——
+ * 漏掉的后果是：Chromium 按 `host:port` 缓存的证书错误还在，
+ * 用户明明放行了却仍然连不上（规格 §15.9 的实测结论：
+ * `clearCache()` / `clearHostResolverCache()` 都清不掉，只有换分区才行）。
+ *
+ * 顺序必须是「登记 → bump epoch → 发起请求」：
+ * - **登记**让 verify proc 之后放行这个 host；
+ * - **bump** 让下一次请求落到新分区（绕开旧分区缓存的证书错误）。
+ *
+ * @returns 本次是否**新增**了一个 host（`false` = 已是受信 host，或解析不出 host）。
+ */
+function trustHost(url: string, trusted: TrustedHosts, http: HttpStack): boolean {
+  const changed = trusted.add(url)
+  if (changed) {
+    // 信任集合真的变了 → 换分区（其余情况不换：换分区会丢掉 Chromium 的连接池）。
+    http.bumpTrustEpoch()
+  }
+  return changed
+}
+
+/**
  * 是否是**内网**地址段（用于区分「内网直连」与「公网直连」）。
  *
  * 判定规则（控制器裁定 + 审查 M5 补正）：
@@ -321,15 +359,26 @@ function toSessionInfo(session: SessionManager): AuthSessionInfo {
  * - 只回 `{ serverName, serverVersion, supportsNasLogin }` 三个字段，
  *   **不把整个 `sys/config` 透出去**；
  * - `supportsNasLogin` = `!!data.nasOAuth?.clientId`（实测 `nasOAuth` 里**没有** `url`）。
+ *
+ * ⚠️ **追加要求 A**：用户填写的 host 必须在**第一次请求它之前**就登记进信任集合。
+ * 本处理器是用户填完地址后的**第一次**请求；若此时才登记，第一次握手就会失败，
+ * 而 Chromium 会把这个证书错误按 `host:port` 缓存住——用户后来放行了也连不上
+ * （规格 §15.9 的实测：只有换分区才行）。
  */
-async function handleServerInfo(arg: unknown, fetchImpl: typeof fetch): Promise<ServerInfo> {
+async function handleServerInfo(
+  arg: unknown,
+  http: HttpStack,
+  trusted: TrustedHosts,
+): Promise<ServerInfo> {
   const base = requireBase(arg)
+  // 顺序：登记 → bump epoch（集合真的变了才 bump）→ 发起请求。
+  trustHost(base, trusted, http)
   const url = `${base}${API_PREFIX}/sys/config`
 
   let res: Response
   try {
     // 该端点免凭证：只带 authx（服务端当前不校验，但按上游语义发送）。
-    res = await fetchImpl(url, { method: 'GET', headers: { authx: authx('GET', url) } })
+    res = await http.fetch(url, { method: 'GET', headers: { authx: authx('GET', url) } })
   } catch (cause) {
     throw new Error('无法连接服务器（网络不可达或服务未响应）', { cause })
   }
@@ -388,6 +437,7 @@ async function handleLogin(
   arg: unknown,
   trusted: TrustedHosts,
   nasLoginHandler: NasLoginHandler | undefined,
+  http: HttpStack,
 ): Promise<AuthSessionInfo> {
   const args = asRecord(arg)
   const server = readString(args?.['server'])
@@ -395,6 +445,10 @@ async function handleLogin(
   const password = readString(args?.['password'])
   const mode = args?.['mode'] === 'nas' ? 'nas' : 'password'
   const base = requireBase(server)
+
+  // ⚠️ 追加要求 A：登录请求本身也打在这个 host 上 → **请求之前**就登记 + 换分区。
+  //    （用户显式输入即显式信任；登记失败不影响登录本身。）
+  trustHost(base, trusted, http)
 
   if (mode === 'nas') {
     if (!nasLoginHandler) {
@@ -417,7 +471,6 @@ async function handleLogin(
   }
 
   persistSession(session)
-  trusted.add(base)
   return toSessionInfo(session)
 }
 
@@ -507,7 +560,11 @@ async function handleRelogin(session: SessionManager): Promise<boolean> {
  *
  * 其余候选（内网 IP、公网 IP、接口返回的 `fn[]` 域名）**一个都不登记**。
  */
-async function handleProbe(arg: unknown, trusted: TrustedHosts): Promise<CandidateInfo[]> {
+async function handleProbe(
+  arg: unknown,
+  trusted: TrustedHosts,
+  http: HttpStack,
+): Promise<CandidateInfo[]> {
   const fnId = readString(arg).trim()
   if (!fnId) throw new Error('缺少 FN ID')
   // FN ID 只能是字母数字与 `-` / `_`：它会被拼进域名（`<fnId>.fnos.net`），
@@ -525,12 +582,12 @@ async function handleProbe(arg: unknown, trusted: TrustedHosts): Promise<Candida
   }
 
   const candidates = buildCandidates(fnId, params)
-  const results = await probeCandidates(candidates)
+  const results = await probeCandidates(candidates, { http })
 
   // (b) 只登记「用户自己的 FN ID 推导出的中继域名」。
   const relayHost = `${fnId}${RELAY_DOMAIN_SUFFIX}`
   if (hostOf(relayHost) === relayHost.toLowerCase()) {
-    trusted.add(relayHost)
+    trustHost(relayHost, trusted, http)
   }
 
   return results.map((result) => {
@@ -585,17 +642,19 @@ export function registerAuthIpc(session: SessionManager, opts: AuthIpcOptions = 
     throw new Error('无法注册认证 IPC：当前进程没有可用的 ipcMain（缺少 Electron 运行时）')
   }
 
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch
   const trusted = opts.trusted ?? new TrustedHosts()
   const nasLoginHandler = opts.nasLoginHandler
+  // 出网通道：注入优先；没注入就自建一个（`fetchImpl` 作为回落实现）。
+  // ⚠️ 会话层 / 代理层 / 本模块必须共用**同一个**实例（信任版本号才能对上）。
+  const http = opts.http ?? createHttpStack({ trusted, fetchImpl: opts.fetchImpl })
 
-  ipcMain.handle('auth:server-info', (_event, arg) => handleServerInfo(arg, fetchImpl))
+  ipcMain.handle('auth:server-info', (_event, arg) => handleServerInfo(arg, http, trusted))
   ipcMain.handle('auth:login', (_event, arg) =>
-    handleLogin(session, arg, trusted, nasLoginHandler),
+    handleLogin(session, arg, trusted, nasLoginHandler, http),
   )
   ipcMain.handle('auth:restore', () => handleRestore(session))
   ipcMain.handle('auth:logout', () => handleLogout(session))
   ipcMain.handle('auth:relogin', () => handleRelogin(session))
-  ipcMain.handle('auth:probe', (_event, arg) => handleProbe(arg, trusted))
+  ipcMain.handle('auth:probe', (_event, arg) => handleProbe(arg, trusted, http))
   ipcMain.handle('auth:connection-info', () => handleConnectionInfo(session))
 }

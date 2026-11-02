@@ -37,6 +37,7 @@ import {
 } from '../shared/constants'
 import { authx, buildCookie, sha256 } from './sign'
 import { hostOf, normalizeBase } from './connection'
+import { createHttpStack, type HttpStack } from './http'
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -97,6 +98,17 @@ export interface SessionManagerOptions {
    * `P0` 模式本身保留（计划要求文件头支持它），但必须由调用方显式开启。
    */
   allowPlaintextFallback?: boolean
+  /**
+   * 出网通道（Task 9b：Chromium 分区栈）。
+   *
+   * 缺省时**惰性** new 一个 `HttpStack`——Electron 运行时里走 Chromium 分区 session
+   * （这样 `setCertificateVerifyProc` 的证书放行才真正生效），单测里回落到全局 `fetch`
+   * （Vitest 的 `vi.stubGlobal('fetch', …)` 仍然有效）。
+   *
+   * ⚠️ 主进程应当注入**同一个**实例给会话层、代理层与认证 IPC——
+   * 否则各层的信任版本号会各走各的，证书放行与换分区就对不上了。
+   */
+  http?: HttpStack
 }
 
 /** `request()` 的可选参数。 */
@@ -395,6 +407,9 @@ export class SessionManager {
   /** 正在进行的续期任务（并发调用共享同一个 Promise，保证只发一次登录请求）。 */
   private inflightRelogin: Promise<boolean> | null = null
 
+  /** 出网通道（惰性解析：注入优先，其次自建一个 Chromium 分区栈）。 */
+  private httpStack: HttpStack | null = null
+
   /** NAS 模式的续期处理器（由 Task 11 的 OAuth 静默续期注入）：返回新的 token 字符串。 */
   private nasRelogin: (() => Promise<string>) | null = null
 
@@ -445,6 +460,19 @@ export class SessionManager {
   /** 当前时间（可注入固定值）。 */
   private now(): number {
     return (this.options.now ?? Date.now)()
+  }
+
+  /**
+   * 出网通道（惰性解析）。
+   *
+   * 注入优先；没注入就自建一个 `HttpStack`——Electron 运行时里走 Chromium 分区栈，
+   * 单测里回落到全局 `fetch`。
+   */
+  private http(): HttpStack {
+    if (!this.httpStack) {
+      this.httpStack = this.options.http ?? createHttpStack()
+    }
+    return this.httpStack
   }
 
   // -------------------------------------------------------------------------
@@ -754,7 +782,8 @@ export class SessionManager {
     }
     if (bodyString !== undefined) headers['content-type'] = 'application/json'
     try {
-      return await fetch(url, { method, headers, body: bodyString })
+      // 走出网通道（Electron 运行时里 = Chromium 分区栈，证书放行才真正生效）。
+      return await this.http().fetch(url, { method, headers, body: bodyString })
     } catch (cause) {
       // 消息里**不含** URL 与凭证，只说明「连不上」。
       throw new Error('无法连接音乐服务（网络不可达或服务未响应）', { cause })
@@ -769,7 +798,7 @@ export class SessionManager {
   ): Promise<unknown> {
     let res: Response
     try {
-      res = await fetch(url, { method: 'POST', headers, body })
+      res = await this.http().fetch(url, { method: 'POST', headers, body })
     } catch (cause) {
       throw new Error('无法连接音乐服务（网络不可达或服务未响应）', { cause })
     }

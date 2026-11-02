@@ -95,11 +95,21 @@ export class TrustedHosts {
    * 入参可以是完整 URL（`https://nas.local:5666/music`）、`host:port`（`nas.local:5666`）
    * 或裸 host / 裸 IPv6（`nas.local`、`2409::1`）。
    * 解析不出 host 的输入（空串、非法 URL）会被忽略，不会污染集合。
+   *
+   * @returns `true` = 本次**新增**了一个 host（集合真的变了）；
+   *   `false` = 已是受信 host，或输入解析不出 host（集合没变）。
+   *
+   * ⚠️ 这个返回值是「信任集合变化」的**唯一**判据：主进程据此决定要不要
+   * `bumpTrustEpoch()`（换 Chromium 分区，绕开旧分区缓存的证书错误）。
+   * 每次都 bump 会白白丢掉 Chromium 的连接池，故**必须**按需调用。
+   * 老调用方忽略返回值即可（行为不变，向后兼容）。
    */
-  add(url: string): void {
+  add(url: string): boolean {
     const host = normalizeHost(url)
-    if (!host) return
+    if (!host) return false
+    if (this.trusted.has(host)) return false
     this.trusted.add(host)
+    return true
   }
 
   /**
