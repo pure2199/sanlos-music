@@ -203,6 +203,40 @@ export interface RawLyric {
 const T0 = 1792563278
 
 // ---------------------------------------------------------------------------
+// 系统配置（`GET /music/api/v1/sys/config`）
+// ---------------------------------------------------------------------------
+
+/**
+ * `sys/config` 的返回内容（**服务端原始形状**）。
+ *
+ * ⚠️ **实测（规格 §15.8，2026-11-02 真实 NAS）**：
+ * - 真实路径是 **`/music/api/v1/sys/config`**（在音乐 API 前缀下）；
+ *   实测 `/sys/config` → **HTTP 404 + HTML**。
+ * - 真实 `data` 形如
+ *   `{ nasOAuth: { clientId: 'EDDLUH2WLY' }, serverGUID, serverName, serverVersion,
+ *      mediasrvVersion, capabilities: { folderView, libraryReconnect } }`
+ *   —— `nasOAuth` 里**没有** `url` 字段（授权地址由客户端自行拼装，Task 11）。
+ *
+ * `musicEnabled` / `musicVersion` / `supportRelay` 是早期 mock 自己加的字段：
+ * 与真实响应不冲突，故保留（删掉只会让依赖它们的旧用例无谓地变红）。
+ *
+ * ⚠️ `nasOAuth.clientId` **必须存在**：客户端据此判断「是否支持 NAS 账号登录」，
+ *    缺了这个字段 `supportsNasLogin` 永远是 `false`。
+ */
+export const SYS_CONFIG = {
+  nasOAuth: { clientId: 'EDDLUH2WLY' },
+  serverGUID: 'mock-server-guid',
+  serverName: '纯音乐',
+  serverVersion: '1.0.10',
+  mediasrvVersion: '0.8.43',
+  capabilities: { folderView: false, libraryReconnect: true },
+  // 早期 mock 的自定义字段（保留，见上方说明）
+  musicEnabled: true,
+  musicVersion: '1.0.0',
+  supportRelay: true,
+}
+
+// ---------------------------------------------------------------------------
 // 专辑（3 张，al1–al3）
 // ---------------------------------------------------------------------------
 

@@ -198,11 +198,23 @@ describe('mock server 登录与 token', () => {
   it('免 token 端点：health / sys/config / password-login', async () => {
     const s = createMockServer()
     expect((await getJson(s, `${API}/health`)).code).toBe(0)
-    expect((await getJson(s, '/sys/config')).code).toBe(0)
+    // ⚠️ 实测（规格 §15.8）：sys/config 在**音乐 API 前缀**下，旧的 `/sys/config` 是 404。
+    expect((await getJson(s, `${API}/sys/config`)).code).toBe(0)
     expect(
       (await postJson(s, `${API}/user/password-login`, { username: 'demo', password: 'x' }))
         .code,
     ).toBe(0)
+    s.close()
+  })
+
+  it('sys/config 的形状与真实 NAS 一致（nasOAuth.clientId 存在）', async () => {
+    const s = createMockServer()
+    const r = await getJson(s, `${API}/sys/config`)
+    expect(r.code).toBe(0)
+    expect(r.data.nasOAuth.clientId).toBe('EDDLUH2WLY')
+    expect(r.data.serverName).toBe('纯音乐')
+    expect(r.data.serverVersion).toBe('1.0.10')
+    expect(r.data.capabilities).toEqual({ folderView: false, libraryReconnect: true })
     s.close()
   })
 

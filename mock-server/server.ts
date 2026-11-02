@@ -23,7 +23,7 @@
 // 凭证：业务端点一律要求凭证，取值通道与真实 NAS 一致——**Cookie 头**里的 `music-token=<token>`
 // （见 `electron/sign.ts` 的 `buildCookie()`；中继链路还在同一个 Cookie 头里带 `mode=relay`，mock 忽略它）。
 // mock 额外容忍一个独立的 `music-token:` 请求头（仅调试便利），两者同时存在时以 Cookie 为准。
-// 免凭证的端点只有 `/music/api/v1/health`、`/sys/config`、`/music/api/v1/user/password-login`。
+// 免凭证的端点只有 `/music/api/v1/health`、`/music/api/v1/sys/config`、`/music/api/v1/user/password-login`。
 //
 // 播放历史：`GET /music/api/v1/play-history/list`（实测确认端点存在、默认 50 条、total=414），
 // 但**条目字段形状未实测**——mock 返回的是占位形状（`guid` + `playTime` + 内嵌 `track`），
@@ -47,6 +47,7 @@ import {
   PLAY_HISTORY,
   PLAYLISTS,
   SONGS,
+  SYS_CONFIG,
   TRACK_GENRES,
   type RawAlbum,
   type RawArtist,
@@ -114,17 +115,9 @@ function closeServerAsync(server: Server): Promise<void> {
   })
 }
 
-/** `/sys/config` 的返回内容。 */
-const SYS_CONFIG = {
-  musicEnabled: true,
-  musicVersion: '1.0.0',
-  supportRelay: true,
-}
-
 // ---------------------------------------------------------------------------
 // 类型
 // ---------------------------------------------------------------------------
-
 /** mock 的可变状态；测试与后续任务可直接读写。 */
 export interface MockState {
   /** 已收藏的曲目 guid。 */
@@ -754,7 +747,9 @@ export function createMockServer(): MockServer {
     }
 
     // 免 token 端点：系统配置
-    if (method === 'GET' && path === '/sys/config') {
+    // ⚠️ 实测（规格 §15.8）：真实路径在**音乐 API 前缀**下 —— `/music/api/v1/sys/config`；
+    // 旧的 `/sys/config` 实测是 404 + HTML。
+    if (method === 'GET' && path === `${API_BASE}/sys/config`) {
       sendJson(res, ok(SYS_CONFIG))
       return
     }
