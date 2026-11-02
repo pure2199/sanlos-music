@@ -645,7 +645,7 @@ describe('auth:probe', () => {
 describe('auth:connection-info', () => {
   it('中继会话 → kind 为 relay', async () => {
     const session = fakeSession({
-      base: 'https://<FN-ID>.fnos.net/music',
+      base: 'https://example-fn-id.fnos.net/music',
       isRelay: true,
     })
     const { handlers } = setup(session)
@@ -654,7 +654,7 @@ describe('auth:connection-info', () => {
     expect(info.kind).toBe('relay')
     expect(info.isRelay).toBe(true)
     expect(info.label).toBe('FN 中继')
-    expect(info.url).toBe('https://<FN-ID>.fnos.net/music')
+    expect(info.url).toBe('https://example-fn-id.fnos.net/music')
     expect(info.bandwidthHint).toBe('带宽受限')
   })
 

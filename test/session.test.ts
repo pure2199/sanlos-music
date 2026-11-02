@@ -188,7 +188,7 @@ describe('密码登录请求', () => {
     const m = new SessionManager()
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ code: 0, data: { userToken: 'TK' } }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
-    await m.passwordLogin('https://<FN-ID>.fnos.net/music', 'demo', 'pw')
+    await m.passwordLogin('https://example-fn-id.fnos.net/music', 'demo', 'pw')
 
     const call = readCalls(fetchMock)[0]!
     expect(headerOf(call, 'cookie')).toBe('mode=relay')
@@ -313,7 +313,7 @@ describe('request()', () => {
     const m = new SessionManager()
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ code: 0, data: { userToken: 'TK' } }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
-    await m.passwordLogin('https://<FN-ID>.fnos.net/music', 'demo', 'pw', { isRelay: true })
+    await m.passwordLogin('https://example-fn-id.fnos.net/music', 'demo', 'pw', { isRelay: true })
     fetchMock.mockClear()
 
     await m.request('track/list')
@@ -335,7 +335,7 @@ describe('request()', () => {
     const m = new SessionManager()
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ code: 0, data: { userToken: 'TK' } }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
-    await m.passwordLogin('https://<FN-ID>.fnos.net/music', 'demo', 'pw', { isRelay: true })
+    await m.passwordLogin('https://example-fn-id.fnos.net/music', 'demo', 'pw', { isRelay: true })
     fetchMock.mockClear()
 
     await m.request('track/list', { isRelay: false })
@@ -550,13 +550,13 @@ describe('save() / load() / clear()', () => {
     )
 
     const m = new SessionManager({ storage: fakeStorage(), filePath })
-    await m.passwordLogin('https://<FN-ID>.fnos.net/music', 'demo', 'pw')
+    await m.passwordLogin('https://example-fn-id.fnos.net/music', 'demo', 'pw')
     m.save()
 
     const restored = new SessionManager({ storage: fakeStorage(), filePath })
     expect(restored.load()).toBe(true)
     expect(restored.state.isRelay).toBe(true)
-    expect(restored.state.base).toBe('https://<FN-ID>.fnos.net/music')
+    expect(restored.state.base).toBe('https://example-fn-id.fnos.net/music')
   })
 
   it('文件不存在时 load() 返回 false 且不抛异常', () => {

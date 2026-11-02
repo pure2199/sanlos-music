@@ -418,7 +418,7 @@ Token 定义在 `src/ui/theme/tokens.ts`，每套主题一组变量；组件只�
 
 ## 15. 实测校验与规格修正（2026-11-02，真实 NAS）
 
-用 `tools/fn-probe.mjs`、`fn-api-probe.mjs`、`fn-transcode-probe.mjs`、`fn-codec-census.mjs` 对真实 NAS（FN ID `<FN-ID>`，fnOS 音乐 1.0.10）完成端到端实测。本节覆盖上文相应内容，以本节为准。
+用 `tools/fn-probe.mjs`、`fn-api-probe.mjs`、`fn-transcode-probe.mjs`、`fn-codec-census.mjs` 对真实 NAS（FN ID `<fnId>`，fnOS 音乐 1.0.10）完成端到端实测。本节覆盖上文相应内容，以本节为准。
 
 ### 15.1 实测链路
 
@@ -429,10 +429,10 @@ FN 连接参数返回：
 | 内网 IPv4 | `192.168.100.xxx` |
 | 公网 IPv4 | `117.182.192.247` |
 | 公网 IPv6 | `2409:8a5c:...`（2 个） |
-| 中继域名 | `<FN-ID>.fnos.net:443` |
+| 中继域名 | `<fnId>.fnos.net:443` |
 | 端口 | `httpPort=5666`、`httpsPort=5667` ✅ 与规格假设一致 |
 
-9 条候选探测结果：内网 IPv4 超时（当前不在局域网）、公网 IPv6 `ECONNREFUSED`、公网 IPv4 超时、**中继 `https://<FN-ID>.fnos.net` HTTP 200 命中**。
+9 条候选探测结果：内网 IPv4 超时（当前不在局域网）、公网 IPv6 `ECONNREFUSED`、公网 IPv4 超时、**中继 `https://<fnId>.fnos.net` HTTP 200 命中**。
 
 ### 15.2 规格修正（7 条）
 
@@ -560,7 +560,7 @@ FN 连接参数返回：
      "capabilities": { "folderView": false, "libraryReconnect": true } } }
    ```
 
-   → **§2.2 里写的 `data.nasOAuth.url` 并不存在**。OAuth 授权地址必须**自行拼装**：`<服务器根>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=飞牛音乐`（`<服务器根>` = 去掉 `/music` 后的服务器根，例如 `https://<FN-ID>.fnos.net`）。
+   → **§2.2 里写的 `data.nasOAuth.url` 并不存在**。OAuth 授权地址必须**自行拼装**：`<服务器根>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=飞牛音乐`（`<服务器根>` = 去掉 `/music` 后的服务器根，例如 `https://<fnId>.fnos.net`）。
 3. **`/music/api/v1/health` 实测返回的是 HTML（HTTP 200），不是 JSON** —— 说明该路径在 NAS 上并不存在，NAS 的 SPA 回退把首页 HTML 返回了。这进一步坐实实测修正 M5：**探测可达性只能看 HTTP 状态码**，任何「解析业务码」的写法在这里都会失效。
 4. **登录响应的 `data` 实测为 `{ userToken, user: { guid, name, role, lastAccessedAt, createdAt, updatedAt } }`** —— **不含 `deviceId`**。客户端必须保留自己生成的 deviceId（Task 7 已按 `data.deviceId ?? 请求时的 deviceId` 实现，正确）。
 
