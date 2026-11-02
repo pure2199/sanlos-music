@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
+    // DOM 断言扩展 + 组件清理（Task 10b）。
+    setupFiles: ['./test/setup.ts'],
     include: ['test/**/*.{test,spec}.{ts,tsx}', 'src/**/*.{test,spec}.{ts,tsx}'],
     // 尚无测试文件时也算通过（exit 0）。
     passWithNoTests: true,

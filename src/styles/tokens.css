@@ -1,0 +1,45 @@
+/*
+ * 语义化设计令牌（Task 10b）。
+ *
+ * ⚠️ 本文件是渲染进程里**唯一**允许出现具体色值的地方。
+ *    组件样式（src/pages/*.css、src/components/*.css、src/styles/app-shell.css）
+ *    一律用 `var(--token)` 引用，**不得**出现 `#hex` / `rgb()` / `hsl()`。
+ *
+ * Task 18/19 的双主题（Apple Music 风 / Windows 11 Fluent 风）只需为两套主题
+ * 各写一组变量覆盖（例如 `[data-theme='fluent'] { --accent: ...; }`），
+ * **不需要重写任何组件**。
+ */
+
+:root {
+  /* 表面层级 */
+  --surface: #f2f2f7;
+  --surface-raised: #ffffff;
+  --surface-sunken: #e7e7ec;
+
+  /* 文本 */
+  --text-primary: #1d1d1f;
+  --text-secondary: #63636a;
+  --text-inverse: #ffffff;
+
+  /* 主色 */
+  --accent: #0a66ff;
+  --accent-hover: #0a54cc;
+  --accent-text: #ffffff;
+
+  /* 描边 */
+  --border: #d6d6db;
+  --border-strong: #a8a8ae;
+
+  /* 状态色 */
+  --danger: #b3261e;
+  --danger-surface: #fdecea;
+  --warning: #8a6100;
+  --warning-surface: #fff4d6;
+  --success: #1d7a3f;
+  --success-surface: #e7f5ec;
+  --disabled: #a8a8ae;
+
+  /* 阴影与焦点环 */
+  --shadow: #0000001f;
+  --focus-ring: #0a66ff59;
+}

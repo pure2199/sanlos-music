@@ -1,0 +1,99 @@
+/*
+ * 连接链路指示器样式（Task 10b）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
+ */
+
+.fnm-badge {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.fnm-badge__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fnm-badge__caret {
+  color: var(--text-secondary);
+}
+
+.fnm-badge__hint {
+  margin: 0;
+  max-width: 320px;
+  font-size: 12px;
+  color: var(--warning);
+}
+
+.fnm-badge__panel {
+  min-width: 280px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+
+.fnm-badge__url {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.fnm-badge__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fnm-badge__candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fnm-badge__candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.fnm-badge__candidate-label {
+  font-weight: 600;
+}
+
+.fnm-badge__candidate-kind,
+.fnm-badge__candidate-status {
+  color: var(--text-secondary);
+}
+
+.fnm-badge__candidate-address {
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.fnm-badge__candidate-note {
+  color: var(--warning);
+}
+
+.fnm-badge__candidate[data-status='unreachable'] .fnm-badge__candidate-note {
+  color: var(--danger);
+}
