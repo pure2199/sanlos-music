@@ -30,12 +30,14 @@ export const VERIFY_REJECT = -3
  *
  * 规则（只有这三条，别加通配符）：
  * 1. **去端口**：`nas.local:5666` → `nas.local`（端口不同也算同一个 host）。
+ *    —— 信任粒度是 **host 级**：登记 `nas.local:5666` 也会信任 `nas.local:8443`。
+ *    这是控制器明文要求的「去端口」，本轮不改，仅备注。
  * 2. **去 IPv6 方括号**：`[2409::1]` → `2409::1`。
  * 3. **小写归一**：比较时大小写不敏感（`NAS.Local` → `nas.local`）。
  *
  * 完整 URL（含 `://`）走 `hostOf` 取 hostname，顺带丢掉路径、查询串与 userinfo；
  * 裸 host 走同一个解析器；只有 `hostOf` 解析不了的**裸 IPv6 字面量**（如 `2409::1`）
- * 才按原样（小写）保留——它的多个冒号是地址本身的一部分，不是端口。
+ * 才走 IPv6 兜底分支——**该分支只接受真正能解析成 IPv6 字面量的输入**。
  */
 export function normalizeHost(input: string): string {
   const raw = input.trim().toLowerCase()
@@ -44,8 +46,32 @@ export function normalizeHost(input: string): string {
   if (viaUrl) return viaUrl
   // hostOf 解析失败：只可能是裸 IPv6 字面量或非法输入。
   if (raw.includes('://')) return ''
-  if ((raw.match(/:/g) ?? []).length > 1) return raw
-  return ''
+  return bareIpv6Host(raw)
+}
+
+/**
+ * 裸 IPv6 字面量兜底：只有**真正能解析成 IPv6 字面量**的输入才被接受。
+ *
+ * 做法：套上中括号交给 URL 解析器（`new URL('http://[2409::1]')`）。
+ * 解析器会严格校验 IPv6 结构，于是
+ * - `2409::1`、`::`、`2409:0:0:0:0:0:0:1` → 接受（并给出**规范形式**）；
+ * - `::::`、`nas.local:5666:extra`、`fe80::1%25eth0`、`2409::1]` → 一律拒绝（返回空串）。
+ *
+ * 拒绝的输入**不进受信集合**（`add` 忽略它），也不会被 `verify` 命中。
+ * 返回规范形式（去方括号）而不是原样字符串，是为了让「裸字面量」与
+ * 「方括号 / URL 形式」归一到同一个键（Chromium 的 `req.hostname` 也是规范形式）。
+ */
+function bareIpv6Host(raw: string): string {
+  // IPv6 字面量至少含两个冒号；少于两个的一定不是 IPv6。
+  if ((raw.match(/:/g) ?? []).length < 2) return ''
+  try {
+    const u = new URL(`http://[${raw}]`)
+    const host = u.hostname.toLowerCase()
+    if (!host.startsWith('[') || !host.endsWith(']')) return ''
+    return host.slice(1, -1)
+  } catch {
+    return ''
+  }
 }
 
 /**

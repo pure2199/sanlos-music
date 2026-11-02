@@ -8,9 +8,12 @@
 // - 复用 Task 4 的 `Candidate`（地址基址**不含** `/music`）与 Task 3 的
 //   `authx` / `buildCookie`。
 //
-// 四条实测约束（改错任何一条都会让探测结论失真）：
+// 实测约束（改错任何一条都会让探测结论失真）：
 // - M5：**`GET /music/api/v1/health` 的响应不是可靠的 JSON**（实测 `code=null`）。
-//   故链路可达性**只以 HTTP 状态码为准**，未登录分支**不解析业务码**。
+//   故链路可达性**只以 HTTP 状态码为准**：HTTP `< 400` 即为**可达**，无论响应体长什么样
+//   （非 JSON / 数组 / 缺 `code` / `code=null` 一律可达）；未登录分支**不解析业务码**。
+// - 业务码**只补充 `error` 文案、不决定 `ok`**：实测部分 fnOS 音乐端点会回
+//   `code=100001 unknown error`——服务端明明有响应，把它判成「不可达」是错的。
 // - M2：**中继链路下所有请求都必须带 `Cookie: mode=relay`**，否则中继不识别请求、
 //   返回 HTML 错误页。探测中继候选时同样要带（无 token 时也只带 `mode=relay`）。
 // - M8：服务端**不校验** `authx`，但客户端仍按上游语义发送（官方 Web 端会发）。
@@ -20,8 +23,15 @@
 // - **绝不**把 token / 密码写进 `error` 文案、异常消息或日志。
 //   `error` 只由固定文案与**服务端 `msg`** 组成；即便服务端把 token 回显在 `msg` 里，
 //   也会被就地打码。
+//
+// 消费方须知（**`error` 不等于「不可达」**，Task 10 的派发会带上这条）：
+// - **可达性只看 HTTP 状态码**：`< 400` 即 `ok: true`，无论响应体长什么样
+//   （非 JSON / 数组 / 缺 `code` / `code=null` 都是可达）。
+// - `ok: true` 时 `error` **可能非空**（如「token 已失效」、服务端业务码 `msg`），
+//   它只是**备注**，**不能**被读成「链路不可达」；判可达只看 `ok`。
+// - `ok: false` 时 `error` 必非空（连接失败 / HTTP >= 400）。
 
-import { API_PREFIX, CODE_OK, CODE_TOKEN_EXPIRED, MUSIC_PATH, RELAY_COOKIE_MODE } from '../shared/constants'
+import { API_PREFIX, CODE_OK, CODE_TOKEN_EXPIRED, MUSIC_PATH, RELAY_COOKIE_KEY, RELAY_COOKIE_MODE } from '../shared/constants'
 import { authx, buildCookie } from './sign'
 import type { Candidate } from './connection'
 
@@ -29,17 +39,40 @@ import type { Candidate } from './connection'
 export interface ProbeOptions {
   /** 当前登录凭证；非空表示「已登录」，探测 `track/list` 以便校验 token 是否被接受。 */
   token?: string
-  /** 统一覆盖默认超时（毫秒）；缺省时直连 3s、中继 10s。 */
+  /**
+   * 统一覆盖默认超时（毫秒）；缺省时直连 3s、中继 10s。
+   *
+   * - `0` / 负数 / 非有限数视为**未提供**，回落到默认超时。
+   * - 合法值会被夹到 `[1, 4294967295]`（`AbortSignal.timeout` 的硬上限，
+   *   越界会抛 `RangeError`，导致请求根本没发出去）。
+   */
   timeoutMs?: number
+  /**
+   * 外部取消信号（可选）：调用方要中止整批探测时传入。
+   *
+   * 外部取消与「我们自己的超时」是**两回事**：前者报「请求被取消」，
+   * 后者报「连接超时（端口无响应）」——措辞不同，排查方向也不同。
+   */
+  signal?: AbortSignal
 }
 
 /** 单条候选的探测结果。 */
 export interface ProbeResult {
   /** 被探测的候选。 */
   candidate: Candidate
-  /** 链路是否可达（HTTP 状态码 < 400 即视为可达）。 */
+  /**
+   * 链路是否可达——**只由 HTTP 状态码决定**（`< 400` 即为可达）。
+   *
+   * 消费方判可达**只看这个字段**：不要用 `error` 是否为空来推断（见下）。
+   */
   ok: boolean
-  /** 失败原因 / 备注（可读中文，**不含凭证**）；`ok` 为真时也可能存在（如 token 已失效）。 */
+  /**
+   * 失败原因 / 备注（可读中文，**不含凭证**）。
+   *
+   * - `ok === false`：一定是失败原因，**必非空**。
+   * - `ok === true`：**可能非空**（如「token 已失效」、服务端业务码 `msg`）——
+   *   这是**备注**，**不代表链路不可达**。
+   */
   error?: string
 }
 
@@ -52,6 +85,42 @@ export const PROBE_TIMEOUT_DIRECT_MS = 3000
 
 /** 中继候选的默认超时（毫秒）；中继多一跳，给宽一点。 */
 export const PROBE_TIMEOUT_RELAY_MS = 10000
+
+/**
+ * 探测超时的下界（毫秒）。
+ *
+ * `AbortSignal.timeout(0)` 等于「立即中止」，不是任何有意义的超时；`timeoutMs: 0`
+ * 一律按「未提供」处理（回落到默认 3s / 10s）。
+ */
+export const PROBE_TIMEOUT_MIN_MS = 1
+
+/**
+ * 探测超时的上界（毫秒）。
+ *
+ * `AbortSignal.timeout` 的硬上限是 4294967295；越过它会抛 `RangeError`，
+ * 于是请求**根本没发出去**，每个候选都会变成「连接失败（网络异常或服务未响应）」——
+ * 看起来像网络问题，实际是入参越界。故这里把超时**夹**到这个区间内。
+ *
+ * 注：Node 的定时器内部是 32 位有符号数，**大于 2147483647 的值会被折算成 1ms**
+ * （并打印 `TimeoutOverflowWarning`）。这是 Node 层面的行为，不是本模块能绕开的；
+ * 夹到上限后**至少请求会真的发出去**，超时也归类为「连接超时」而不是「连接失败」。
+ */
+export const PROBE_TIMEOUT_MAX_MS = 4294967295
+
+/**
+ * 把 `opts.timeoutMs` 解析成实际使用的超时（毫秒）。
+ *
+ * - **未提供 / 非法值**（非有限数、负数、`0`）→ 回落到该链路的默认超时
+ *   （直连 3s、中继 10s）。`0` 几乎总是调用方的 bug，按字面「存在即覆盖」会让
+ *   每个候选 ~5ms 就以「连接超时」失败。
+ * - **合法值** → 夹到 `[PROBE_TIMEOUT_MIN_MS, PROBE_TIMEOUT_MAX_MS]`
+ *   并取整（`AbortSignal.timeout` 只接受整数）。
+ */
+function resolveTimeoutMs(raw: unknown, isRelay: boolean): number {
+  const fallback = isRelay ? PROBE_TIMEOUT_RELAY_MS : PROBE_TIMEOUT_DIRECT_MS
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return fallback
+  return Math.min(Math.max(Math.floor(raw), PROBE_TIMEOUT_MIN_MS), PROBE_TIMEOUT_MAX_MS)
+}
 
 // ---------------------------------------------------------------------------
 // 错误文案（固定文案，绝不含凭证）
@@ -77,6 +146,12 @@ export const PROBE_ERROR_UNKNOWN = '连接失败（网络异常或服务未响�
 
 /** token 已失效（链路可达，但需要先续期再重探）。 */
 export const PROBE_ERROR_TOKEN_EXPIRED = 'token 已失效'
+
+/**
+ * 请求被取消（**不是**超时）：外部取消信号触发时用这句，
+ * 免得把「调用方主动取消」说成「端口无响应」。
+ */
+export const PROBE_ERROR_ABORTED = '请求被取消'
 
 // ---------------------------------------------------------------------------
 // 错误归类
@@ -123,8 +198,16 @@ function collectCauses(err: unknown): { codes: string[]; messages: string[]; nam
  *
  * 归类依据是 `cause.code`（以及 TLS 场景下的 `cause.message`），
  * **不靠匹配 `err.message` 的中文或英文片段**——底层文案随 Node / undici 版本变化。
+ *
+ * `ctx` 用来区分**谁**中止了请求（M7）：
+ * - `timedOut`：是**我们自己的**超时信号中止的 → 归类为「连接超时（端口无响应）」。
+ * - `cancelled`：是**调用方传入的外部信号**中止的 → 归类为「请求被取消」
+ *   （外部取消不是超时，说成「端口无响应」会误导排查方向）。
  */
-export function classifyProbeError(err: unknown): string {
+export function classifyProbeError(
+  err: unknown,
+  ctx: { timedOut?: boolean; cancelled?: boolean } = {},
+): string {
   const { codes, messages, names } = collectCauses(err)
   const has = (code: string): boolean => codes.includes(code)
   if (has('ENOTFOUND') || has('EAI_AGAIN')) return PROBE_ERROR_DNS
@@ -133,8 +216,14 @@ export function classifyProbeError(err: unknown): string {
   if (has('ENETUNREACH') || has('EHOSTUNREACH')) return PROBE_ERROR_UNREACHABLE
   if (codes.some((c) => TLS_CODE_PREFIXES.some((p) => c.startsWith(p)))) return PROBE_ERROR_TLS
   if (messages.some((m) => TLS_MESSAGE_RE.test(m))) return PROBE_ERROR_TLS
+  // 我们自己的超时信号已经触发 → 连接超时。
+  if (ctx.timedOut) return PROBE_ERROR_TIMEOUT
+  // 异常名含 Timeout（如 `TimeoutError`）→ 连接超时。
   if (names.some((n) => n.includes('Timeout'))) return PROBE_ERROR_TIMEOUT
-  if (names.some((n) => n === 'AbortError')) return PROBE_ERROR_TIMEOUT
+  // 调用方主动取消 → 请求被取消（**不是**超时）。
+  if (ctx.cancelled) return PROBE_ERROR_ABORTED
+  // `AbortError`：不是我们自己的超时（那会是 `TimeoutError`）→ 外部取消。
+  if (names.some((n) => n === 'AbortError')) return PROBE_ERROR_ABORTED
   return PROBE_ERROR_UNKNOWN
 }
 
@@ -152,8 +241,14 @@ function redact(text: string, token: string): string {
 // 请求构造
 // ---------------------------------------------------------------------------
 
-/** 中继链路专用 Cookie（无 token 时也要带，否则中继不认请求）。 */
-const RELAY_ONLY_COOKIE = `mode=${RELAY_COOKIE_MODE}`
+/**
+ * 中继链路专用 Cookie（无 token 时也要带，否则中继不认请求）。
+ *
+ * 键名取自 `shared/constants.ts` 的 `RELAY_COOKIE_KEY`（单一真相源）。
+ * 注：`electron/sign.ts` 的 `buildCookie()` 里那一处仍写着字面量 `mode=relay`
+ * （Task 3 已审查文件，本轮不动），**Task 24 打包前**统一收敛到本常量。
+ */
+const RELAY_ONLY_COOKIE = `${RELAY_COOKIE_KEY}=${RELAY_COOKIE_MODE}`
 
 /**
  * 探测请求的 Cookie。
@@ -194,29 +289,40 @@ async function readEnvelope(res: Response): Promise<Record<string, unknown> | nu
 
 /**
  * 探测单条候选。**永远不会抛异常**——失败一律转成 `ok: false` + `error`。
+ *
+ * 判定规则（控制器裁定，修复轮次 1）：
+ * - **可达性只看 HTTP 状态码**：`< 400` 即 `ok: true`，**无论响应体长什么样**。
+ * - 业务码**只补充 `error` 文案，不影响 `ok`**：
+ *   - `99999` → 可达 + 「token 已失效」；
+ *   - 其它数值型非 0 码 → 可达 + 服务端 `msg`（无 msg 记 `code=<n>`）——
+ *     实测部分 fnOS 音乐端点会回 `code=100001 unknown error`，服务端明明有响应，
+ *     把它判成「不可达」是错的；
+ *   - 缺 `code` / `code=null` / 非 JSON / 数组 → 可达，只记一句不误导的说明。
  */
 async function probeOne(candidate: Candidate, opts: ProbeOptions): Promise<ProbeResult> {
   const token = typeof opts.token === 'string' ? opts.token : ''
   const loggedIn = token.length > 0
   const isRelay = candidate.isRelay || candidate.kind === 'relay'
-  // `opts.timeoutMs` 存在即统一覆盖所有候选的默认超时；只有非法值（非有限数 / 负数）才回落默认。
-  const timeoutMs =
-    typeof opts.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) && opts.timeoutMs >= 0
-      ? opts.timeoutMs
-      : isRelay
-        ? PROBE_TIMEOUT_RELAY_MS
-        : PROBE_TIMEOUT_DIRECT_MS
+  // `opts.timeoutMs` 非法（0 / 负数 / 非有限数）时回落到默认；合法值夹到 AbortSignal 的合法区间。
+  const timeoutMs = resolveTimeoutMs(opts.timeoutMs, isRelay)
 
   const url = probeUrl(candidate, loggedIn)
   const headers: Record<string, string> = { authx: authx('GET', url) }
   const cookie = probeCookie(token, isRelay)
   if (cookie) headers['cookie'] = cookie
 
+  // 我们自己的超时信号（超时后 reason 是 `TimeoutError`）；调用方给了外部信号就并联——
+  // 外部取消要报「请求被取消」，不能混成「连接超时（端口无响应）」。
+  // 信号在 try 内创建：万一构造失败也不会把异常抛给调用方。
+  let timeoutSignal: AbortSignal | undefined
   try {
+    timeoutSignal = AbortSignal.timeout(timeoutMs)
+    const signal = opts.signal ? AbortSignal.any([timeoutSignal, opts.signal]) : timeoutSignal
+
     const res = await fetch(url, {
       method: 'GET',
       headers,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     })
 
     // 状态码是可达性的唯一依据（M5：health 的业务码不可信）。
@@ -229,26 +335,36 @@ async function probeOne(candidate: Candidate, opts: ProbeOptions): Promise<Probe
 
     const envelope = await readEnvelope(res)
     if (envelope === null) {
-      // 响应体不是 JSON：不报错（状态码 < 400 即视为可达）。
+      // 响应体不是 JSON（或不是对象）：服务端**有响应** → 可达，不报错。
       return { candidate, ok: true }
     }
 
     const code = envelope['code']
-    if (code === undefined) {
-      // 不是业务信封：既没有 code 也没有 msg 可依据，视为该端点不是音乐服务接口。
-      return { candidate, ok: false, error: '响应格式异常（缺少 code）' }
+    if (code === undefined || code === null) {
+      // 不是业务信封（缺 `code` / `code=null`）：服务端**有响应** → 可达。
+      // 不写 `error`：这不是失败，附一句说明反而容易被读成「不可达」（见文件头「消费方须知」）。
+      return { candidate, ok: true }
+    }
+    if (typeof code !== 'number' || !Number.isFinite(code)) {
+      // 业务码不是数值：同样不是可判定的信封，但服务端有响应 → 可达。
+      return { candidate, ok: true }
     }
     if (code === CODE_OK) return { candidate, ok: true }
     if (code === CODE_TOKEN_EXPIRED) {
       // 服务端有响应 → 链路可达；是否先续期由上层决定。
       return { candidate, ok: true, error: PROBE_ERROR_TOKEN_EXPIRED }
     }
+    // 其它数值型非 0 码：服务端**有响应**（实测 `code=100001 unknown error`）→ 链路可达；
+    // 业务码只补充 `error` 文案，**不影响** `ok`。
     const msg = envelope['msg']
     const reason =
       typeof msg === 'string' && msg.trim() !== '' ? msg : `code=${String(code)}`
-    return { candidate, ok: false, error: redact(reason, token) }
+    return { candidate, ok: true, error: redact(reason, token) }
   } catch (err) {
-    return { candidate, ok: false, error: classifyProbeError(err) }
+    // 区分「我们自己的超时」与「调用方取消」：前者是连接超时，后者是请求被取消。
+    const timedOut = timeoutSignal?.aborted === true
+    const cancelled = !timedOut && opts.signal?.aborted === true
+    return { candidate, ok: false, error: classifyProbeError(err, { timedOut, cancelled }) }
   }
 }
 

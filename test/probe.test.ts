@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { TrustedHosts } from '../electron/cert'
+import { TrustedHosts, normalizeHost } from '../electron/cert'
 import { probeCandidates } from '../electron/probe'
 import type { Candidate } from '../electron/connection'
 
@@ -102,6 +102,48 @@ describe('TrustedHosts 归一化与精确匹配', () => {
     t.add('http://')
     expect(t.verify('')).toBe(-3)
     expect(t.verify('http://')).toBe(-3)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 裸 IPv6 兜底分支的输入校验（M4）
+//
+// 兜底分支只接受**真正能解析成 IPv6 字面量**的输入；畸形输入按无效处理
+// （不登记 / 视为未命中），不能污染受信集合。
+// ---------------------------------------------------------------------------
+
+describe('normalizeHost 裸 IPv6 兜底分支', () => {
+  it('合法的裸 IPv6 字面量被接受并归一成规范形式', () => {
+    expect(normalizeHost('2409::1')).toBe('2409::1')
+    expect(normalizeHost('2409:0:0:0:0:0:0:1')).toBe('2409::1')
+    expect(normalizeHost('2409::1'.toUpperCase())).toBe('2409::1')
+    expect(normalizeHost('::')).toBe('::')
+  })
+
+  it('畸形输入一律归一成空串（不登记）', () => {
+    expect(normalizeHost('::::')).toBe('')
+    expect(normalizeHost('nas.local:5666:extra')).toBe('')
+    expect(normalizeHost('fe80::1%25eth0')).toBe('')
+    expect(normalizeHost('2409::1]')).toBe('')
+    expect(normalizeHost('1.2.3.4')).toBe('1.2.3.4') // 正常 IPv4 走 URL 分支
+  })
+
+  it('畸形输入既不登记也不命中', () => {
+    const t = new TrustedHosts()
+    t.add('::::')
+    t.add('nas.local:5666:extra')
+    t.add('fe80::1%25eth0')
+    expect(t.verify('::::')).toBe(-3)
+    expect(t.verify('nas.local:5666:extra')).toBe(-3)
+    expect(t.verify('fe80::1%25eth0')).toBe(-3)
+  })
+
+  it('合法裸 IPv6 仍可登记并命中', () => {
+    const t = new TrustedHosts()
+    t.add('2409::1')
+    expect(t.verify('2409::1')).toBe(0)
+    expect(t.verify('2409:0:0:0:0:0:0:1')).toBe(0)
+    expect(t.verify('evil.com')).toBe(-3)
   })
 })
 
@@ -268,11 +310,89 @@ describe('probeCandidates 超时', () => {
     expect(spy.mock.calls.map((c) => c[0])).toEqual([1234, 1234])
   })
 
-  it('opts.timeoutMs 存在即覆盖（含 0），不做「非法值才回落」的额外判断', async () => {
+  it('timeoutMs 为 0 视为未提供，回落到默认超时', async () => {
     const spy = vi.spyOn(AbortSignal, 'timeout')
     mockFetch(() => fakeResponse({ text: 'ok' }))
     await probeCandidates([LAN, RELAY], { timeoutMs: 0 })
-    expect(spy.mock.calls.map((c) => c[0])).toEqual([0, 0])
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([3000, 10000])
+  })
+
+  it('timeoutMs 为负数 / 非有限数同样回落默认超时', async () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout')
+    mockFetch(() => fakeResponse({ text: 'ok' }))
+    await probeCandidates([LAN], { timeoutMs: -5 })
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([3000])
+    spy.mockClear()
+    await probeCandidates([LAN], { timeoutMs: Number.NaN })
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([3000])
+    spy.mockClear()
+    await probeCandidates([LAN], { timeoutMs: Number.POSITIVE_INFINITY })
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([3000])
+  })
+
+  it('timeoutMs 越界时被夹到 AbortSignal 的合法区间（不会抛 RangeError、fetch 仍会发出）', async () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout')
+    const calls = mockFetch(() => fakeResponse({ text: 'ok' }))
+    const results = await probeCandidates([LAN], { timeoutMs: 1e300 })
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([4294967295])
+    // 关键：请求**真的发出去了**（此前越界会抛 RangeError，fetch 根本没被调用）
+    expect(calls).toHaveLength(1)
+    expect(results[0]!.ok).toBe(true)
+  })
+
+  it('timeoutMs 小于 1 时夹到 1ms（不会退化成「立即中止」）', async () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout')
+    mockFetch(() => fakeResponse({ text: 'ok' }))
+    await probeCandidates([LAN], { timeoutMs: 0.4 })
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([1])
+  })
+
+  it('超时信号真的到达 fetch（init.signal 是 AbortSignal）', async () => {
+    const calls = mockFetch(() => fakeResponse({ text: 'ok' }))
+    await probeCandidates([LAN], { timeoutMs: 1234 })
+    const signal = calls[0]!.init.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect((signal as AbortSignal).aborted).toBe(false)
+  })
+
+  it('超时真的会把请求中止（signal.aborted 变为 true，并归类为连接超时）', async () => {
+    // 模拟一个「永远不返回」的请求：只有被中止才结束。
+    let seen: AbortSignal | undefined
+    globalThis.fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      seen = init.signal as AbortSignal
+      return await new Promise<Response>((_resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('never aborted')), 5000)
+        seen!.addEventListener('abort', () => {
+          clearTimeout(timer)
+          reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+        })
+      })
+    }) as unknown as typeof fetch
+
+    const results = await probeCandidates([LAN], { timeoutMs: 30 })
+    expect(seen).toBeInstanceOf(AbortSignal)
+    expect(seen!.aborted).toBe(true)
+    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.error).toContain('连接超时')
+  })
+
+  it('调用方传入的外部信号中止时，报「请求被取消」而不是「连接超时」', async () => {
+    const controller = new AbortController()
+    globalThis.fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      const signal = init.signal as AbortSignal
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(new DOMException('This operation was aborted', 'AbortError'))
+        })
+      })
+    }) as unknown as typeof fetch
+
+    const pending = probeCandidates([LAN], { signal: controller.signal })
+    controller.abort()
+    const results = await pending
+    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.error).toContain('请求被取消')
+    expect(results[0]!.error).not.toContain('连接超时')
   })
 })
 
@@ -351,17 +471,17 @@ describe('probeCandidates 判定规则', () => {
     expect(results[0]!.error).toContain('token 已失效')
   })
 
-  it('其它非 0 业务码 → 不可用，记服务端 msg', async () => {
+  it('其它非 0 业务码 → 仍算可达（服务端明明有响应），只记服务端 msg', async () => {
     mockFetch(() => fakeResponse({ status: 200, json: { code: 100001, msg: 'unknown error' } }))
     const results = await probeCandidates([LAN], { token: 'tok' })
-    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.ok).toBe(true)
     expect(results[0]!.error).toContain('unknown error')
   })
 
-  it('非 0 业务码且无 msg 时记 code=<n>', async () => {
+  it('非 0 业务码且无 msg 时记 code=<n>（仍算可达）', async () => {
     mockFetch(() => fakeResponse({ status: 200, json: { code: 100001 } }))
     const results = await probeCandidates([LAN], { token: 'tok' })
-    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.ok).toBe(true)
     expect(results[0]!.error).toContain('code=100001')
   })
 
@@ -398,6 +518,41 @@ describe('probeCandidates 判定规则', () => {
     const results = await probeCandidates([LAN], { token: 'tok' })
     expect(results[0]!.ok).toBe(true)
     expect(results[0]!.error).toBeUndefined()
+  })
+
+  it('已登录分支响应体缺少 code → 仍算可达（不判不可用）', async () => {
+    mockFetch(() => fakeResponse({ status: 200, json: {} }))
+    const results = await probeCandidates([LAN], { token: 'tok' })
+    expect(results[0]!.ok).toBe(true)
+    expect(results[0]!.error ?? '').not.toContain('不可用')
+  })
+
+  it('已登录分支 code=null → 仍算可达（不判不可用）', async () => {
+    mockFetch(() => fakeResponse({ status: 200, json: { code: null } }))
+    const results = await probeCandidates([LAN], { token: 'tok' })
+    expect(results[0]!.ok).toBe(true)
+    expect(results[0]!.error ?? '').not.toContain('不可用')
+  })
+
+  it('响应体是数组 → 仍算可达', async () => {
+    mockFetch(() => fakeResponse({ status: 200, json: [] }))
+    const results = await probeCandidates([LAN], { token: 'tok' })
+    expect(results[0]!.ok).toBe(true)
+  })
+
+  it('可达性只看 HTTP 状态码：HTTP >= 400 一律不可用（无论业务码是什么）', async () => {
+    mockFetch(() => fakeResponse({ status: 503, json: { code: 0 } }))
+    const results = await probeCandidates([LAN], { token: 'tok' })
+    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.error).toContain('503')
+  })
+
+  it('ok=true 时 error 只是备注，消费方不能把它读成「不可达」', async () => {
+    mockFetch(() => fakeResponse({ status: 200, json: { code: 99999, msg: 'token expired' } }))
+    const results = await probeCandidates([LAN], { token: 'tok' })
+    // 可达 + 带备注：判可达只看 ok，error 非空不代表不可达。
+    expect(results[0]!.ok).toBe(true)
+    expect(results[0]!.error).toBeTruthy()
   })
 })
 
