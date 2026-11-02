@@ -665,7 +665,11 @@ export class SessionManager {
           return false
         }
         if (!token) {
-          this.lastReloginError = new SessionStateError(
+          // ⚠️ handler 已经记下**更具体**的原因时（例如「fnOS 登录已过期」），
+          //    **保留它**，不要覆盖成通用文案——
+          //    否则「可操作」的信息（用户该重新登录 NAS 账号了）到不了诊断与用户。
+          //    handler 没记原因时，行为与之前**完全一致**（通用文案）。
+          this.lastReloginError ??= new SessionStateError(
             'NO_CREDENTIAL',
             'OAuth 静默续期失败：未取得新 token',
           )

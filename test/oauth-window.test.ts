@@ -443,6 +443,72 @@ describe('NAS 账号静默续期处理器', () => {
     expect(session.state.token).toBe('TK-OLD')
   })
 
+  it('失败原因透出到 session.lastReloginError（不是通用文案）', async () => {
+    const { session, handlers } = setup({
+      openWindow: async () => {
+        throw new Error('fnOS 登录已过期')
+      },
+    })
+    await handlers.nasReloginHandler()
+    expect(session.lastReloginError).toBeInstanceOf(Error)
+    expect((session.lastReloginError as Error).message).toContain('fnOS 登录已过期')
+  })
+
+  it('relogin() 失败时保留 handler 记下的具体原因（session.ts 不覆盖成通用文案）', async () => {
+    const { session, handlers } = setup({
+      openWindow: async () => {
+        throw new Error('fnOS 登录已过期')
+      },
+    })
+    session.setNasRelogin(handlers.nasReloginHandler)
+    await expect(session.relogin()).resolves.toBe(false)
+    expect((session.lastReloginError as Error).message).toContain('fnOS 登录已过期')
+  })
+
+  it('失败原因里不含授权 code', async () => {
+    const { http } = fakeHttp((url) =>
+      url.endsWith('/sys/config')
+        ? jsonResponse({ code: 0, msg: '', data: { nasOAuth: { clientId: CLIENT_ID } } })
+        : jsonResponse({ code: 1, msg: 'invalid code: CODE-SECRET' }),
+    )
+    const session = new SessionManager({ http })
+    session.state = nasState()
+    const { nasReloginHandler } = createNasOAuthHandlers({
+      session,
+      http,
+      trusted: new TrustedHosts(),
+      openWindow: async () => 'CODE-SECRET',
+    })
+    await nasReloginHandler()
+    expect(session.lastReloginError).toBeInstanceOf(Error)
+    expect((session.lastReloginError as Error).message).not.toContain('CODE-SECRET')
+  })
+
+  it('静默续期失败时**不写** device id（失败不留半截状态）', async () => {
+    const { http } = fakeHttp((url) =>
+      url.endsWith('/sys/config')
+        ? jsonResponse({ code: 0, msg: '', data: { nasOAuth: { clientId: CLIENT_ID } } })
+        : jsonResponse({ code: 1, msg: '授权被拒绝' }),
+    )
+    const session = new SessionManager({ http })
+    session.state = nasState(BASE, '')
+    const { nasReloginHandler } = createNasOAuthHandlers({
+      session,
+      http,
+      trusted: new TrustedHosts(),
+      openWindow: async () => 'CODE-2',
+    })
+    await nasReloginHandler()
+    expect(session.state.deviceId).toBe('')
+  })
+
+  it('静默续期成功时才补上 device id', async () => {
+    const { session, handlers } = setup()
+    session.state = nasState(BASE, '')
+    await handlers.nasReloginHandler()
+    expect(session.state.deviceId).not.toBe('')
+  })
+
   it('接进 SessionManager.setNasRelogin 后，relogin() 换上新 token', async () => {
     const { session, handlers } = setup()
     session.setNasRelogin(handlers.nasReloginHandler)
@@ -510,6 +576,26 @@ describe('凭证不泄露', () => {
     }).catch((e: unknown) => e)
     expect((err as Error).message).not.toContain('TK-SECRET')
   })
+
+  it('网络异常时错误与 cause 的 stack 里也不含授权 code（只脱敏 message 的回归会红）', async () => {
+    const { http } = fakeHttp(() => {
+      // 底层异常的 message 与 stack 首行都带着授权码。
+      throw new Error('connect ECONNREFUSED for CODE-SECRET')
+    })
+    const err = await exchangeAuthCode({
+      base: BASE,
+      code: 'CODE-SECRET',
+      deviceId: 'DEV-1',
+      http,
+    }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).not.toContain('CODE-SECRET')
+    expect((err as Error).stack ?? '').not.toContain('CODE-SECRET')
+    const cause = (err as { cause?: unknown }).cause
+    expect(cause).toBeInstanceOf(Error)
+    expect((cause as Error).message).not.toContain('CODE-SECRET')
+    expect((cause as Error).stack ?? '').not.toContain('CODE-SECRET')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -565,7 +651,7 @@ function fakeElectronSession() {
   return { mod, procs, partitions }
 }
 
-/** 假 BrowserWindow：可手动触发导航事件。 */
+/** 假 BrowserWindow：可手动触发导航事件与窗口级事件（`closed`）。 */
 function fakeBrowserWindow() {
   const instances: FakeWindow[] = []
 
@@ -584,11 +670,23 @@ function fakeBrowserWindow() {
         for (const listener of this.listeners.get(channel) ?? []) listener(...args)
       },
     }
+    /** 窗口级事件监听（目前只有 `closed`）。 */
+    readonly listeners = new Map<string, ((...args: unknown[]) => void)[]>()
     readonly options: Record<string, unknown>
     destroyed = false
     constructor(options: Record<string, unknown>) {
       this.options = options
       instances.push(this)
+    }
+    /** 窗口级事件注册（`closed` 等）。 */
+    on(channel: string, listener: (...args: unknown[]) => void): void {
+      const list = this.listeners.get(channel) ?? []
+      list.push(listener)
+      this.listeners.set(channel, list)
+    }
+    /** 触发窗口级事件（如用户点 X 关窗 → `closed`）。 */
+    emit(channel: string, ...args: unknown[]): void {
+      for (const listener of this.listeners.get(channel) ?? []) listener(...args)
     }
     destroy(): void {
       this.destroyed = true
@@ -609,6 +707,20 @@ function verifyWith(
     result = r
   })
   return result
+}
+
+/**
+ * 等到假窗口被创建。
+ *
+ * 直接调 `runOAuthWindowWith` 时窗口是**同步**创建的，但走 NAS 登录处理器时
+ * 前面还有一次 `sys/config` 的 HTTP 请求，要先把微任务队列排空。
+ */
+async function waitForWindow(instances: unknown[]): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (instances.length > 0) return
+    await Promise.resolve()
+  }
+  throw new Error('授权窗口没有被创建')
 }
 
 describe('授权窗口的分区与安全边界', () => {
@@ -720,6 +832,176 @@ describe('授权窗口的分区与安全边界', () => {
     await vi.advanceTimersByTimeAsync(6000)
     await expectation
     expect(instances[0]!.options['show']).toBe(false)
+  })
+
+  // -------------------------------------------------------------------------
+  // 复审 I-1（必修）：用户手动关闭授权窗口 → 登录页锁死 5 分钟
+  // -------------------------------------------------------------------------
+
+  it('用户手动关掉授权窗口 → 立即 reject（不是等 5 分钟超时）', async () => {
+    vi.useFakeTimers()
+    const { mod } = fakeElectronSession()
+    const { Ctor, instances } = fakeBrowserWindow()
+    const promise = runOAuthWindowWith(
+      { BrowserWindow: Ctor, session: mod },
+      { url: 'https://nas.local:5667/signin', redirect: `${BASE}/oauth/result` },
+    )
+    const expectation = expect(promise).rejects.toThrow(/授权窗口已关闭/)
+    await Promise.resolve()
+    instances[0]!.emit('closed')
+    // ⚠️ **没有推进任何定时器**：说明是「关窗即结束」，
+    //    而不是等 `DEFAULT_TIMEOUT_MS`（5 分钟）才超时。
+    await expectation
+  })
+
+  it('关窗与超时是**两回事**（文案能区分）', async () => {
+    const { mod } = fakeElectronSession()
+    const { Ctor, instances } = fakeBrowserWindow()
+    const promise = runOAuthWindowWith(
+      { BrowserWindow: Ctor, session: mod },
+      { url: 'https://nas.local:5667/signin', redirect: `${BASE}/oauth/result` },
+    )
+    await Promise.resolve()
+    instances[0]!.emit('closed')
+    const err = await promise.catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    const message = (err as Error).message
+    expect(message).toContain('授权窗口已关闭')
+    expect(message).not.toContain('授权超时')
+  })
+
+  it('关窗后 NAS 登录处理器立即 reject，且不提交半成品会话', async () => {
+    const { mod } = fakeElectronSession()
+    const { Ctor, instances } = fakeBrowserWindow()
+    const electron = { BrowserWindow: Ctor, session: mod }
+    const { http } = fakeHttp(nasRoutes())
+    const session = new SessionManager({ http })
+    const { nasLoginHandler } = createNasOAuthHandlers({
+      session,
+      http,
+      trusted: new TrustedHosts(),
+      // 走真实的窗口实现（注入假 Electron），这样 `closed` 的处理路径被真正跑到。
+      openWindow: (opts) => runOAuthWindowWith(electron, opts),
+    })
+    const promise = nasLoginHandler({ server: BASE, deviceId: '' })
+    const expectation = expect(promise).rejects.toThrow(/授权窗口已关闭/)
+    await waitForWindow(instances)
+    instances[0]!.emit('closed')
+    await expectation
+    // 授权没成功 → 会话里**不许**出现 mode/token。
+    expect(session.state.token).toBe('')
+    expect(session.state.mode).not.toBe('nas')
+  })
+
+  // -------------------------------------------------------------------------
+  // 复审 Minor 3：did-fail-load 只认主框架
+  // -------------------------------------------------------------------------
+
+  it('子框架加载失败不打断授权（fnOS 登录页里的验证码 / 第三方挂件）', async () => {
+    const { mod } = fakeElectronSession()
+    const { Ctor, instances } = fakeBrowserWindow()
+    const promise = runOAuthWindowWith(
+      { BrowserWindow: Ctor, session: mod },
+      { url: 'https://nas.local:5667/signin', redirect: `${BASE}/oauth/result` },
+    )
+    await Promise.resolve()
+    instances[0]!.webContents.emit(
+      'did-fail-load',
+      {},
+      -2,
+      'ERR_FAILED',
+      'https://nas.local:5667/captcha-frame',
+      false,
+    )
+    // 子框架失败**不该**结束授权：继续走到 redirect 仍能拿到 code。
+    instances[0]!.webContents.emit(
+      'will-redirect',
+      { preventDefault: () => {} },
+      `${BASE}/oauth/result?code=CODE-1`,
+    )
+    await expect(promise).resolves.toBe('CODE-1')
+  })
+
+  it('主框架加载失败才终止授权', async () => {
+    const { mod } = fakeElectronSession()
+    const { Ctor, instances } = fakeBrowserWindow()
+    const promise = runOAuthWindowWith(
+      { BrowserWindow: Ctor, session: mod },
+      { url: 'https://nas.local:5667/signin', redirect: `${BASE}/oauth/result` },
+    )
+    await Promise.resolve()
+    instances[0]!.webContents.emit(
+      'did-fail-load',
+      {},
+      -2,
+      'ERR_FAILED',
+      'https://nas.local:5667/signin',
+      true,
+    )
+    await expect(promise).rejects.toThrow(/授权页面加载失败/)
+  })
+
+  // -------------------------------------------------------------------------
+  // 复审 Minor 7：二次加载要重新计时（旧定时器必须清掉）
+  // -------------------------------------------------------------------------
+
+  it('页面二次加载时重新计时 6s（旧定时器被清掉，不会锚在第一次加载上）', async () => {
+    vi.useFakeTimers()
+    const { mod } = fakeElectronSession()
+    const { Ctor, instances } = fakeBrowserWindow()
+    const promise = runOAuthWindowWith(
+      { BrowserWindow: Ctor, session: mod },
+      {
+        url: 'https://nas.local:5667/signin',
+        redirect: `${BASE}/oauth/result`,
+        silent: true,
+      },
+    )
+    let rejected = false
+    void promise.catch(() => {
+      rejected = true
+    })
+    const expectation = expect(promise).rejects.toThrow('fnOS 登录已过期')
+    await Promise.resolve()
+    instances[0]!.webContents.emit('did-finish-load')
+    await vi.advanceTimersByTimeAsync(3000)
+    // 第二次加载 → 重新计时 6s。
+    instances[0]!.webContents.emit('did-finish-load')
+    await vi.advanceTimersByTimeAsync(3000)
+    // 距**第一次**加载已 6s，但旧定时器已清 → 不该在这里结束。
+    expect(rejected).toBe(false)
+    // 再过 3s（距**第二次**加载满 6s）→ 结束。
+    await vi.advanceTimersByTimeAsync(3000)
+    await expectation
+    expect(rejected).toBe(true)
+  })
+
+  // -------------------------------------------------------------------------
+  // 复审补测：窗口安全项
+  // -------------------------------------------------------------------------
+
+  it('窗口按安全默认值创建（contextIsolation / nodeIntegration / sandbox）', async () => {
+    const { mod } = fakeElectronSession()
+    const { Ctor, instances } = fakeBrowserWindow()
+    const promise = runOAuthWindowWith(
+      { BrowserWindow: Ctor, session: mod },
+      { url: 'https://nas.local:5667/signin', redirect: `${BASE}/oauth/result` },
+    )
+    await Promise.resolve()
+    const webPreferences = instances[0]!.options['webPreferences'] as {
+      contextIsolation?: boolean
+      nodeIntegration?: boolean
+      sandbox?: boolean
+    }
+    expect(webPreferences.contextIsolation).toBe(true)
+    expect(webPreferences.nodeIntegration).toBe(false)
+    expect(webPreferences.sandbox).toBe(true)
+    instances[0]!.webContents.emit(
+      'will-redirect',
+      { preventDefault: () => {} },
+      `${BASE}/oauth/result?code=CODE-1`,
+    )
+    await expect(promise).resolves.toBe('CODE-1')
   })
 })
 

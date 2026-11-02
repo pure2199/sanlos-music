@@ -19,6 +19,8 @@
 //   （与 `electron/http.ts` 的 `opts.session`、`electron/ipc.ts` 的 `opts.ipcMain` 同一套接缝写法）。
 // - **渲染进程永远拿不到 token**：`code` / `userToken` 只在主进程内存里流转，
 //   **绝不**出现在抛出的错误消息里（`code` 是一次性凭证，仍属敏感项）。
+// - **日志里也不含凭证**：本模块唯一的 `console.*` 是静默续期失败时的那条
+//   `console.warn`，内容是本模块自己的固定文案（授权 `code` 会被抹掉）。
 // - **绝不全局 `callback(0)`**：授权分区上的证书校验回调只用
 //   `callback(trusted.verify(request.hostname))`——命中放行（`0`）、未命中交回
 //   Chromium 默认校验（`-3`）。
@@ -48,7 +50,7 @@ import { hostOf, normalizeBase } from './connection'
 import { TrustedHosts } from './cert'
 import type { ElectronSessionLike, HttpStack } from './http'
 import { authx } from './sign'
-import { newDeviceId, type SessionManager } from './session'
+import { newDeviceId, SessionStateError, type SessionManager } from './session'
 import type { NasLoginHandler } from './ipc'
 
 // ---------------------------------------------------------------------------
@@ -67,6 +69,14 @@ export interface WebContentsLike {
 export interface BrowserWindowLike {
   /** 窗口的 webContents。 */
   readonly webContents: WebContentsLike
+  /**
+   * 注册**窗口级**事件监听（目前只用到 `closed`）。
+   *
+   * ⚠️ **少了它，用户手动关掉授权窗口（点 X）时我们就收不到通知**，
+   *    `auth:login` 会一直 pending 到 5 分钟超时 → 渲染进程的登录页
+   *    （`setBusy(true)` 复位不了）被锁死 5 分钟。
+   */
+  on(channel: string, listener: (...args: unknown[]) => void): void
   /** 销毁窗口。 */
   destroy(): void
 }
@@ -528,6 +538,14 @@ export async function runOAuthWindowWith(
       else finish(new Error('NAS 账号授权失败：服务器拒绝了本次授权请求'))
     }
 
+    // ⚠️ 用户手动关掉授权窗口（点右上角 X）时必须**立即**结束，
+    //    否则 `auth:login` 一直 pending 到 5 分钟超时，
+    //    渲染进程登录页的 `setBusy(true)` 复位不了 → 整页锁死 5 分钟。
+    //    这条与「授权超时」是**两回事**：用户主动取消 ≠ 超时，文案要能区分。
+    win.on('closed', () => {
+      finish(new Error('授权窗口已关闭：已取消本次 NAS 账号授权'))
+    })
+
     win.webContents.on('will-redirect', (event: unknown, target: unknown) => {
       const url = typeof target === 'string' ? target : ''
       if (!isRedirectTarget(url, redirect)) return
@@ -551,15 +569,36 @@ export async function runOAuthWindowWith(
       onRedirect(typeof target === 'string' ? target : '')
     })
 
-    win.webContents.on('did-fail-load', (_event: unknown, code: unknown, description: unknown) => {
-      // -3 = ERR_ABORTED：被我们 `preventDefault()` 掉的跳转，不是失败。
-      if (typeof code === 'number' && code === -3) return
-      const reason = typeof description === 'string' && description.length > 0 ? description : '未知错误'
-      finish(new Error(`授权页面加载失败：${reason}`))
-    })
+    win.webContents.on(
+      'did-fail-load',
+      (
+        _event: unknown,
+        code: unknown,
+        description: unknown,
+        _validatedURL: unknown,
+        isMainFrame: unknown,
+      ) => {
+        // -3 = ERR_ABORTED：被我们 `preventDefault()` 掉的跳转，不是失败。
+        if (typeof code === 'number' && code === -3) return
+        // ⚠️ 只看**主框架**：fnOS 登录页里的子框架（验证码、第三方挂件）加载失败
+        //    不该打断正在进行的授权。
+        //    `isMainFrame === false` 才忽略；字段缺失时按主框架处理（宁可报错也不静默卡住）。
+        if (isMainFrame === false) return
+        const reason =
+          typeof description === 'string' && description.length > 0 ? description : '未知错误'
+        finish(new Error(`授权页面加载失败：${reason}`))
+      },
+    )
 
     win.webContents.on('did-finish-load', () => {
       if (!silent) return
+      // ⚠️ 页面二次加载时**先清掉旧的定时器**：否则旧定时器先到，
+      //    等待窗口实际锚定在**第一次**加载上（与「加载完成后 6s」的语义有偏差），
+      //    旧定时器也会泄漏。
+      if (silentTimer) {
+        clearTimeout(silentTimer)
+        silentTimer = null
+      }
       // 静默模式：加载完成后 6s 内没有跳回回调 → fnOS 登录已过期。
       silentTimer = setTimeout(() => finish(new Error('fnOS 登录已过期')), SILENT_WAIT_MS)
     })
@@ -757,11 +796,13 @@ export function createNasOAuthHandlers(opts: NasOAuthOptions): NasOAuthHandlers 
   }
 
   const nasReloginHandler = async (): Promise<string> => {
+    // 授权码在**窗口返回之后**才有值；失败时要靠它把错误消息里的凭证抹掉。
+    let authCode = ''
     try {
       const base = requireMusicBase(opts.session.state.base)
       const clientId = await fetchNasClientId(base, opts.http)
 
-      const code = await openWindow({
+      authCode = await openWindow({
         url: buildAuthorizeUrl({ base, clientId }),
         redirect: redirectUriOf(base),
         silent: true,
@@ -770,19 +811,50 @@ export function createNasOAuthHandlers(opts: NasOAuthOptions): NasOAuthHandlers 
       })
 
       // 静默续期沿用同一个 device id（它标识的是这台客户端）。
-      let deviceId = opts.session.state.deviceId
-      if (!deviceId) {
-        deviceId = newDeviceId()
-        // 会话里原本没有 device id（异常状态）：补上，免得与服务器绑定的 id 对不上。
-        opts.session.state.deviceId = deviceId
-      }
+      const existingDeviceId = opts.session.state.deviceId
+      const deviceId = existingDeviceId || newDeviceId()
 
-      return await exchangeAuthCode({ base, code, deviceId, http: opts.http })
-    } catch {
-      // 契约：失败返回**空串**，不抛穿。
+      const token = await exchangeAuthCode({ base, code: authCode, deviceId, http: opts.http })
+
+      // ⚠️ 拿到 token **之后**才写 deviceId：失败时一个字节都不动会话状态
+      //    （否则失败会留下一个既没绑定成功、也不回滚的 device id）。
+      if (!existingDeviceId) opts.session.state.deviceId = deviceId
+      return token
+    } catch (err) {
+      // 契约：失败返回**空串**，不抛穿（调用方按空串判断）。
+      recordReloginFailure(opts.session, err, authCode)
       return ''
     }
   }
 
   return { nasLoginHandler, nasReloginHandler }
+}
+
+/**
+ * 记录一次 NAS 静默续期的失败。
+ *
+ * ⚠️ **失败原因必须透出**：否则 `session.ts` 只能记下通用的
+ * 「OAuth 静默续期失败：未取得新 token」，
+ * 「fnOS 登录已过期」这类**可操作**信息就既到不了诊断、也到不了用户。
+ *
+ * 落点两处：
+ * - `session.lastReloginError`：主进程的诊断通道（`session.ts` 会**保留**它，
+ *   不覆盖成通用文案）；
+ * - 一条 `console.warn`：让用户 / 运维在主进程日志里直接看到原因。
+ *
+ * ⚠️ 原因里**不含**授权 `code`（一次性凭证）与 `userToken`：
+ * `authCode` 会被抹掉，其余文案都是本模块自己的固定字符串。
+ */
+function recordReloginFailure(
+  session: SessionManager,
+  err: unknown,
+  authCode: string,
+): void {
+  const raw = err instanceof Error ? err.message : '未知错误'
+  const reason = redact(raw, authCode)
+  session.lastReloginError = new SessionStateError(
+    'NO_CREDENTIAL',
+    `OAuth 静默续期失败：${reason}`,
+  )
+  console.warn(`[fnmusic] OAuth 静默续期失败：${reason}`)
 }
