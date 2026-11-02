@@ -25,7 +25,7 @@
 
 import { randomBytes } from 'node:crypto'
 import { Buffer } from 'node:buffer'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import {
@@ -89,6 +89,14 @@ export interface SessionManagerOptions {
   filePath?: string
   /** 时间源（便于测试注入固定时间）。 */
   now?: () => number
+  /**
+   * 是否允许在**没有可用加密**时以明文落盘（文件头 `P0`）。
+   *
+   * 默认 `false`：**没有可用加密就拒绝写盘**（抛 `SessionStateError('NO_ENCRYPTION')`），
+   * 不做静默降级——明文文件里含 token 与明文口令。
+   * `P0` 模式本身保留（计划要求文件头支持它），但必须由调用方显式开启。
+   */
+  allowPlaintextFallback?: boolean
 }
 
 /** `request()` 的可选参数。 */
@@ -114,6 +122,45 @@ export class SessionApiError extends Error {
   constructor(message: string, code: number) {
     super(message)
     this.name = 'SessionApiError'
+    this.code = code
+  }
+}
+
+/**
+ * 会话状态错误码（**可判别**，上层据此分支，不要靠中文文案做字符串匹配）。
+ *
+ * - `NO_SESSION`：没有会话基址（未连接服务器）；
+ * - `NO_CREDENTIAL`：没有身份凭据（未登录 / 续期未取到 token）；
+ * - `NO_STORAGE`：会话文件路径不可用；
+ * - `NO_ENCRYPTION`：没有可用加密，且未显式允许明文回退；
+ * - `SAVE_FAILED`：写盘失败（含加密异常）；
+ * - `LOAD_CORRUPTED`：会话文件内容损坏；
+ * - `LOAD_DECRYPT_FAILED`：会话文件解密失败（例如在 `app.ready` 之前调用了 `load()`）；
+ * - `STALE`：续期结果作废（期间会话已被显式登录 / 登出替换）。
+ */
+export type SessionStateErrorCode =
+  | 'NO_SESSION'
+  | 'NO_CREDENTIAL'
+  | 'NO_STORAGE'
+  | 'NO_ENCRYPTION'
+  | 'SAVE_FAILED'
+  | 'LOAD_CORRUPTED'
+  | 'LOAD_DECRYPT_FAILED'
+  | 'STALE'
+
+/**
+ * 会话状态错误：与「服务端业务错误」（`SessionApiError`）分开。
+ *
+ * Task 8 的代理与 Task 11 的 OAuth 流程需要区分「没有会话 / 没有凭据 / 会话文件坏了」，
+ * 故用 `code` 做判别，而不是匹配中文文案。消息里**不含任何凭证**。
+ */
+export class SessionStateError extends Error {
+  /** 可判别的错误码（见 `SessionStateErrorCode`）。 */
+  readonly code: SessionStateErrorCode
+
+  constructor(code: SessionStateErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'SessionStateError'
     this.code = code
   }
 }
@@ -301,9 +348,15 @@ async function readJson(res: Response): Promise<any> {
  * 主进程会话管理器：持有 token / 密码，负责登录、续期与带签名的业务请求。
  *
  * 生命周期：
- * - 启动时 `load()` 恢复上次会话（文件不存在 / 损坏 / 解密失败时返回 `false`，不抛异常）；
- * - 登录成功后由调用方 `save()` 落盘（DPAPI 加密）；
+ * - 启动时 `load()` 恢复上次会话（文件不存在 / 损坏 / 解密失败时返回 `false`，不抛异常；
+ *   失败原因见 `lastLoadError`）；
+ * - 登录成功后由调用方 `save()` 落盘（DPAPI 加密；续期成功后由管理器自动落盘）；
  * - 登出时 `clear()` 删除文件并清空内存状态。
+ *
+ * **世代号（generation）语义**：每次**显式**登录（`passwordLogin` / `nasLogin`）、
+ * 恢复会话（`load()`）与登出（`clear()`）都会让世代号 +1。
+ * 续期（`relogin()`）在发起时记下世代号，落地时若世代号已变（期间发生过显式登录 / 登出），
+ * 则**丢弃续期自己的结果**——既不覆盖更新的会话，也**不销毁**更新的会话。
  */
 export class SessionManager {
   /** 当前会话状态（主进程内存）。 */
@@ -311,6 +364,17 @@ export class SessionManager {
 
   /** 最近一次续期失败的原因（**不含凭证**，仅供上层诊断）。 */
   lastReloginError: Error | null = null
+
+  /**
+   * 最近一次 `load()` 失败的原因。
+   *
+   * `null` = 没有失败（要么成功，要么「文件不存在」这种正常的「没登录」状态）；
+   * 非 `null` 时 `code` 可判别失败类型（`LOAD_DECRYPT_FAILED` / `LOAD_CORRUPTED` / …）。
+   */
+  lastLoadError: SessionStateError | null = null
+
+  /** 最近一次 `save()` 失败的原因（续期落盘失败时供上层诊断）。 */
+  lastSaveError: SessionStateError | null = null
 
   private readonly options: SessionManagerOptions
 
@@ -320,10 +384,14 @@ export class SessionManager {
   /** 正在进行的续期任务（并发调用共享同一个 Promise，保证只发一次登录请求）。 */
   private inflightRelogin: Promise<boolean> | null = null
 
-  /** NAS 模式的续期处理器（由 Task 11 的 OAuth 静默续期注入）。 */
-  private nasRelogin: (() => Promise<boolean>) | null = null
+  /** NAS 模式的续期处理器（由 Task 11 的 OAuth 静默续期注入）：返回新的 token 字符串。 */
+  private nasRelogin: (() => Promise<string>) | null = null
 
-  /** 世代计数：`clear()` 递增，用于作废「清理之前发起、清理之后落地」的续期结果。 */
+  /**
+   * 世代计数：显式登录 / 恢复会话 / 登出各 +1。
+   *
+   * 续期发起时记下当时的世代号，落地时不一致就**丢弃自己的结果**（不动 `this.state`）。
+   */
   private generation = 0
 
   constructor(options: SessionManagerOptions = {}) {
@@ -350,7 +418,10 @@ export class SessionManager {
   private resolveFilePath(): string {
     const filePath = this.defaults().filePath
     if (!filePath) {
-      throw new Error('会话文件路径不可用：当前进程没有 Electron 运行时，且未注入 filePath')
+      throw new SessionStateError(
+        'NO_STORAGE',
+        '会话文件路径不可用：当前进程没有 Electron 运行时，且未注入 filePath',
+      )
     }
     return filePath
   }
@@ -379,6 +450,9 @@ export class SessionManager {
    * - 成功后把 token、设备 id、账号与**明文密码**写入内存状态（明文密码供 `relogin()` 用）。
    *
    * 失败时抛 `SessionApiError`（消息含服务端 `msg`，属性 `code` 带业务码），且**不改动**已有状态。
+   *
+   * **竞态语义**：这是**显式登录**，开始时会让任何在飞行的续期作废（世代号 +1）；
+   * 新状态先构建到局部变量，只有世代号仍然匹配时才提交——**绝不覆盖更新的会话**。
    */
   async passwordLogin(
     base: string,
@@ -386,9 +460,32 @@ export class SessionManager {
     password: string,
     opts: { isRelay?: boolean } = {},
   ): Promise<void> {
+    // 先校验地址：纯输入错误不该作废在飞行的续期。
+    const root = requireMusicRoot(base)
+    this.generation += 1
+    const generation = this.generation
+    const next = await this.performPasswordLogin(root, username, password, opts)
+    // 期间又发生了显式登录 / 登出 / 恢复会话：本次结果作废（不覆盖更新的会话）。
+    if (generation !== this.generation) return
+    this.state = next
+  }
+
+  /**
+   * 密码登录的 HTTP 部分：拿到新状态但**不提交**到 `this.state`。
+   *
+   * 提交与否由调用方按世代号判断（显式登录与续期共用这段逻辑，避免两条路径语义漂移）。
+   */
+  private async performPasswordLogin(
+    base: string,
+    username: string,
+    password: string,
+    opts: { isRelay?: boolean },
+  ): Promise<SessionState> {
     const root = requireMusicRoot(base)
     const isRelay = opts.isRelay ?? isRelayHost(root)
-    const deviceId = this.state.deviceId || newDeviceId()
+    // 设备 id 是**服务端作用域**的：换了服务器必须重新生成，不能把上一台服务器的 device id 带过去。
+    const deviceId =
+      this.state.base === root && this.state.deviceId ? this.state.deviceId : newDeviceId()
     const body = JSON.stringify({ username, password: sha256(password), deviceId })
     const url = `${root}${API_PREFIX}/user/password-login`
 
@@ -416,7 +513,7 @@ export class SessionManager {
     }
     const user = asRecord(data?.['user'])
 
-    this.state = {
+    return {
       base: root,
       mode: 'password',
       token,
@@ -432,14 +529,20 @@ export class SessionManager {
    *
    * 职责边界：OAuth 授权窗口（`auth-login` 换 token）与静默续期属于 **Task 11**
    * （`electron/oauthWindow.ts`）；本方法只负责把 `mode` / `base` / `deviceId` / `isRelay` 落到状态里，
-   * token 由 Task 11 拿到后写回（续期入口是 `setNasRelogin()`）。
+   * token 由 Task 11 拿到后交给 `setNasRelogin()` 的处理器返回。
    *
    * 本方法**不发起任何网络请求**。
+   *
+   * **竞态语义**：这是**显式登录**，开始时会让任何在飞行的续期作废（世代号 +1），
+   * 因此在飞行的密码续期**不会**把 NAS 会话覆写回 `mode: 'password'`。
    */
   async nasLogin(base: string, deviceId: string, opts: { isRelay?: boolean } = {}): Promise<void> {
+    // 先校验地址：纯输入错误不该作废在飞行的续期。
     const root = requireMusicRoot(base)
+    this.generation += 1
+    const generation = this.generation
     const isRelay = opts.isRelay ?? isRelayHost(root)
-    this.state = {
+    const next: SessionState = {
       base: root,
       mode: 'nas',
       token: '',
@@ -448,15 +551,23 @@ export class SessionManager {
       password: '',
       isRelay,
     }
+    // 期间又发生了显式登录 / 登出：本次结果作废（不覆盖更新的会话）。
+    if (generation !== this.generation) return
+    this.state = next
   }
 
   /**
    * 安装 NAS 模式的续期处理器（**接缝**，由 Task 11 注入）。
    *
-   * handler 负责完成 OAuth 静默续期并把新 token 写回 `state.token`；
-   * 返回 `true` 表示续期成功。未安装时 `relogin()` 返回 `false`（**不伪造 token**）。
+   * handler 负责完成 OAuth 静默续期并**返回新的 token 字符串**（空串表示失败）。
+   *
+   * ⚠️ 契约说明：handler **不直接改** `state.token`，而是把新 token 返回给管理器，
+   *    由管理器在世代守卫下提交——否则「续期在飞行中、期间用户又显式登录」时，
+   *    handler 会把旧 token 写进新的会话里（这正是审查 I2 指出的覆盖问题）。
+   *
+   * 未安装 handler 时 `relogin()` 返回 `false`（**不伪造 token**）。
    */
-  setNasRelogin(handler: () => Promise<boolean>): void {
+  setNasRelogin(handler: () => Promise<string>): void {
     this.nasRelogin = handler
   }
 
@@ -467,7 +578,7 @@ export class SessionManager {
   /**
    * 静默续期。
    *
-   * - `mode === 'password'`：用保存的**明文密码**重新 `passwordLogin`；
+   * - `mode === 'password'`：用保存的**明文密码**重新登录；
    * - `mode === 'nas'`：交给 Task 11 注入的 OAuth 续期处理器（未安装则返回 `false`）。
    *
    * **并发共享同一个 in-flight Promise**：同时触发多次 `relogin()` 时实际只发一次登录请求，
@@ -475,6 +586,8 @@ export class SessionManager {
    *
    * 任何失败都**返回 `false` 而不抛异常**（原因记在 `lastReloginError`）：
    * 上层（`request()`）要靠这个返回值决定是否把 `99999` 原样抛回渲染层。
+   *
+   * 续期成功后会**把新 token 落盘**（写盘失败不影响续期本身，原因记在 `lastSaveError`）。
    */
   relogin(): Promise<boolean> {
     if (this.inflightRelogin) return this.inflightRelogin
@@ -492,35 +605,78 @@ export class SessionManager {
     try {
       if (this.state.mode === 'nas') {
         if (!this.nasRelogin) {
-          this.lastReloginError = new Error('NAS 模式尚未安装 OAuth 续期处理器（Task 11）')
+          this.lastReloginError = new SessionStateError(
+            'NO_SESSION',
+            'NAS 模式尚未安装 OAuth 续期处理器（Task 11）',
+          )
           return false
         }
-        const ok = await this.nasRelogin()
-        if (!ok) {
-          this.lastReloginError = new Error('OAuth 静默续期失败')
+        const token = await this.nasRelogin()
+        // 期间发生了显式登录 / 登出：**丢弃续期自己的结果**，不动 `this.state`。
+        if (generation !== this.generation) {
+          this.lastReloginError = new SessionStateError(
+            'STALE',
+            '续期结果已过期（期间会话已被替换），已丢弃',
+          )
           return false
         }
-        if (generation !== this.generation) return false
-        return this.state.token.length > 0
+        if (!token) {
+          this.lastReloginError = new SessionStateError(
+            'NO_CREDENTIAL',
+            'OAuth 静默续期失败：未取得新 token',
+          )
+          return false
+        }
+        this.state = { ...this.state, token }
+        this.persist()
+        return true
       }
 
       // 独立账号：用保存的明文密码重新登录。
       if (!this.state.password) {
-        this.lastReloginError = new Error('没有保存密码，无法自动续期')
+        this.lastReloginError = new SessionStateError('NO_CREDENTIAL', '没有保存密码，无法自动续期')
         return false
       }
-      await this.passwordLogin(this.state.base, this.state.username, this.state.password, {
-        isRelay: this.state.isRelay,
-      })
-      // 期间若发生过 `clear()`（登出），本次续期的结果作废。
+      const next = await this.performPasswordLogin(
+        this.state.base,
+        this.state.username,
+        this.state.password,
+        { isRelay: this.state.isRelay },
+      )
+      // 期间发生了显式登录 / 登出：**丢弃续期自己的结果**，不动 `this.state`
+      // （早期实现在这里把状态清空，会把用户刚建立的新会话误删——表现为「莫名其妙登出」）。
       if (generation !== this.generation) {
-        this.state = emptyState()
+        this.lastReloginError = new SessionStateError(
+          'STALE',
+          '续期结果已过期（期间会话已被替换），已丢弃',
+        )
         return false
       }
+      this.state = next
+      this.persist()
       return this.state.token.length > 0
     } catch (err) {
       this.lastReloginError = err instanceof Error ? err : new Error(String(err))
       return false
+    }
+  }
+
+  /**
+   * 续期成功后把新状态落盘（**写盘失败不影响续期本身**）。
+   *
+   * 为什么由管理器自己落盘、而不是暴露 `onSessionChanged` 回调：
+   * `session.bin` 的写入方只有本管理器一个；把落盘策略推给调用方，
+   * 就会出现「续期成功但没人记得 save」——那正是审查 I3 指出的缺陷（每次启动都恢复一个已失效的 token）。
+   */
+  private persist(): void {
+    try {
+      this.save()
+      this.lastSaveError = null
+    } catch (err) {
+      this.lastSaveError =
+        err instanceof SessionStateError
+          ? err
+          : new SessionStateError('SAVE_FAILED', '会话保存失败：无法写入会话文件', { cause: err })
     }
   }
 
@@ -544,8 +700,12 @@ export class SessionManager {
     path: string,
     opts: SessionRequestOptions = {},
   ): Promise<{ status: number; json: any }> {
-    if (!this.state.base) throw new Error('尚未连接服务器：缺少会话基址')
-    if (!this.state.token) throw new Error('尚未登录：缺少身份凭据')
+    if (!this.state.base) {
+      throw new SessionStateError('NO_SESSION', '尚未连接服务器：缺少会话基址')
+    }
+    if (!this.state.token) {
+      throw new SessionStateError('NO_CREDENTIAL', '尚未登录：缺少身份凭据')
+    }
 
     const method = (opts.method ?? 'GET').toUpperCase()
     const relative = path.replace(/^\/+/, '')
@@ -607,13 +767,18 @@ export class SessionManager {
    *
    * 文件格式：`<2 字节文件头><载荷>`。
    * - `E1`：载荷是 `safeStorage.encryptString()` 的密文（Windows DPAPI）；
-   * - `P0`：载荷是**明文 JSON**——仅在 `safeStorage.isEncryptionAvailable() === false` 时使用，
-   *   此时文件里含 token 与明文密码，**安全性显著降低**（无法加密时的降级路径）。
+   * - `P0`：载荷是**明文 JSON**——只在**显式**允许明文回退
+   *   （`allowPlaintextFallback: true`）且没有可用加密时使用；
+   *   此时文件里含 token 与明文密码，**安全性显著降低**。
    *
    * 载荷是 `{ version, savedAt, state }`；`load()` 同时兼容裸的 state 对象。
    *
-   * 加密过程出错（`encryptString` 抛异常）时**直接抛错**，不静默降级成明文——
-   * 悄悄把明文写盘比保存失败更糟。
+   * **不做静默降级**：
+   * - 没有可用加密且未显式允许明文 → 抛 `SessionStateError('NO_ENCRYPTION')`，**不写任何文件**；
+   * - 加密过程出错（`encryptString` 抛异常）→ 抛 `SessionStateError('SAVE_FAILED')`，
+   *   **不降级成明文**（悄悄把明文写盘比保存失败更糟）。
+   *
+   * **原子写**：先写 `<file>.tmp` 再 `rename` 覆盖，避免写到一半崩溃留下截断的会话文件。
    */
   save(): void {
     const filePath = this.resolveFilePath()
@@ -624,20 +789,44 @@ export class SessionManager {
       state: this.state,
     })
 
-    let header = HEADER_PLAINTEXT
+    let header: string
     let body: Buffer
     if (storage && storage.isEncryptionAvailable()) {
       header = HEADER_ENCRYPTED
-      body = storage.encryptString(payload)
+      try {
+        body = storage.encryptString(payload)
+      } catch (cause) {
+        // 加密失败：**不降级成明文**，直接报错（没有写出任何文件）。
+        throw new SessionStateError(
+          'SAVE_FAILED',
+          '会话加密失败：safeStorage 加密异常（已放弃写入，未降级为明文）',
+          { cause },
+        )
+      }
     } else {
+      if (!this.options.allowPlaintextFallback) {
+        throw new SessionStateError(
+          'NO_ENCRYPTION',
+          '会话加密不可用（safeStorage 不可用），拒绝以明文落盘；如确需降级请显式开启 allowPlaintextFallback',
+        )
+      }
+      header = HEADER_PLAINTEXT
       body = Buffer.from(payload, 'utf8')
     }
 
+    const tmpPath = `${filePath}.tmp`
     try {
       mkdirSync(dirname(filePath), { recursive: true })
-      writeFileSync(filePath, Buffer.concat([Buffer.from(header, 'utf8'), body]))
+      writeFileSync(tmpPath, Buffer.concat([Buffer.from(header, 'utf8'), body]))
+      renameSync(tmpPath, filePath)
     } catch (cause) {
-      throw new Error('会话保存失败：无法写入会话文件', { cause })
+      // 半成品临时文件不能留下（否则下次启动会把它当成会话文件）。
+      try {
+        rmSync(tmpPath, { force: true })
+      } catch {
+        // 清理失败不掩盖原始错误。
+      }
+      throw new SessionStateError('SAVE_FAILED', '会话保存失败：无法写入会话文件', { cause })
     }
   }
 
@@ -646,12 +835,25 @@ export class SessionManager {
    *
    * 返回是否恢复成功。**文件不存在 / 内容损坏 / 解密失败都返回 `false` 且不抛异常**，
    * 此时内存状态保持原样（不会写进半截状态）。
+   *
+   * **失败可观测**（控制器裁定）：
+   * - 文件不存在 = 正常的「没登录」→ 返回 `false`，`lastLoadError` 保持 `null`；
+   * - 解密失败 / 文件损坏 → 返回 `false`，并写入 `lastLoadError`（带可判别的 `code`）
+   *   + 一条**不含凭证**的 `console.warn`。
+   *   这样调用方能区分「失败不是没登录，而是解密失败」（例如在 `app.ready` 之前调用了 `load()`）。
    */
   load(): boolean {
+    this.lastLoadError = null
+
     let filePath: string
     try {
       filePath = this.resolveFilePath()
-    } catch {
+    } catch (err) {
+      this.failLoad(
+        'NO_STORAGE',
+        '会话文件路径不可用（当前进程没有 Electron 运行时，且未注入 filePath）',
+        err,
+      )
       return false
     }
 
@@ -659,32 +861,71 @@ export class SessionManager {
     try {
       raw = readFileSync(filePath)
     } catch {
+      // 文件不存在 = 正常的「没登录」状态，不报错、不告警。
       return false
     }
 
     try {
-      if (raw.length < 2) return false
+      if (raw.length < 2) {
+        this.failLoad('LOAD_CORRUPTED', '会话文件已损坏（长度不足）')
+        return false
+      }
       const header = raw.subarray(0, 2).toString('utf8')
       const body = raw.subarray(2)
 
       let text: string
       if (header === HEADER_ENCRYPTED) {
         const storage = this.resolveStorage()
-        if (!storage) return false
-        text = storage.decryptString(body)
+        if (!storage) {
+          this.failLoad('LOAD_DECRYPT_FAILED', '会话文件已加密，但当前环境没有可用的 safeStorage（无法解密）')
+          return false
+        }
+        try {
+          text = storage.decryptString(body)
+        } catch (cause) {
+          this.failLoad(
+            'LOAD_DECRYPT_FAILED',
+            '会话解密失败（可能是在 app.ready 之前调用了 load()，或文件来自其它系统账户）',
+            cause,
+          )
+          return false
+        }
       } else if (header === HEADER_PLAINTEXT) {
         text = body.toString('utf8')
       } else {
+        this.failLoad('LOAD_CORRUPTED', '会话文件头标记无法识别')
         return false
       }
 
       const state = extractState(JSON.parse(text) as unknown)
-      if (!state) return false
+      if (!state) {
+        this.failLoad('LOAD_CORRUPTED', '会话文件内容不是有效的会话记录')
+        return false
+      }
+      // 恢复出来的会话作废任何在飞行的续期。
+      this.generation += 1
       this.state = state
       return true
-    } catch {
+    } catch (cause) {
+      this.failLoad('LOAD_CORRUPTED', '会话文件内容损坏（无法解析）', cause)
       return false
     }
+  }
+
+  /**
+   * 记录一次 `load()` 失败：写 `lastLoadError` + 打一条**不含凭证**的告警。
+   *
+   * ⚠️ 告警里**只写本函数给定的固定文案**，**不写原始异常消息**：
+   * `JSON.parse` 的报错会带上一小段文件内容（明文回退时就是口令片段），
+   * 原始原因只留在 `lastLoadError.cause` 里供调用方判断，不进日志。
+   */
+  private failLoad(code: SessionStateErrorCode, message: string, cause?: unknown): void {
+    this.lastLoadError = new SessionStateError(
+      code,
+      message,
+      cause === undefined ? undefined : { cause },
+    )
+    console.warn(`[fnmusic] 会话加载失败：${message}`)
   }
 
   /**
@@ -695,7 +936,9 @@ export class SessionManager {
   clear(): void {
     this.generation += 1
     try {
-      rmSync(this.resolveFilePath(), { force: true })
+      const filePath = this.resolveFilePath()
+      rmSync(filePath, { force: true })
+      rmSync(`${filePath}.tmp`, { force: true })
     } catch {
       // 文件不存在或路径不可用：忽略。
     }

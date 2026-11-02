@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { SessionManager, type SafeStorageLike } from '../electron/session'
+import { SessionManager, SessionStateError, type SafeStorageLike, type SessionState } from '../electron/session'
 import { CODE_TOKEN_EXPIRED } from '../shared/constants'
 
 // ---------------------------------------------------------------------------
@@ -65,6 +65,54 @@ function headerOf(call: FetchCall, name: string): string | undefined {
 /** 取请求体字符串。 */
 function bodyOf(call: FetchCall): string {
   return typeof call.init.body === 'string' ? call.init.body : String(call.init.body ?? '')
+}
+
+/** 读回落盘文件里的会话状态（用于断言「续期后的新 token 是否已落盘」）。 */
+function readSavedState(filePath: string, storage: SafeStorageLike): SessionState | null {
+  const raw = readFileSync(filePath)
+  const header = raw.subarray(0, 2).toString('utf8')
+  const body = raw.subarray(2)
+  const text = header === 'E1' ? storage.decryptString(body) : body.toString('utf8')
+  const parsed = JSON.parse(text) as { state?: SessionState }
+  return parsed.state ?? null
+}
+
+/** 读回落盘载荷（用于断言 `savedAt` 等元信息）。 */
+function readSavedPayload(filePath: string, storage: SafeStorageLike): Record<string, unknown> {
+  const raw = readFileSync(filePath)
+  const header = raw.subarray(0, 2).toString('utf8')
+  const body = raw.subarray(2)
+  const text = header === 'E1' ? storage.decryptString(body) : body.toString('utf8')
+  return JSON.parse(text) as Record<string, unknown>
+}
+
+/**
+ * 手动闸门：让某一次请求挂起，用来构造「续期在飞行中」的竞态。
+ *
+ * `reached()` 在挂起的请求真正进入 fetch 之后才 resolve —— 断言因此是确定性的，
+ * 不依赖任何定时器。
+ */
+function createGate(): {
+  wait: () => Promise<void>
+  reached: () => Promise<void>
+  release: () => void
+} {
+  let release!: () => void
+  let markReached!: () => void
+  const waitPromise = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const reachedPromise = new Promise<void>((resolve) => {
+    markReached = resolve
+  })
+  return {
+    wait: async () => {
+      markReached()
+      await waitPromise
+    },
+    reached: () => reachedPromise,
+    release: () => release(),
+  }
 }
 
 afterEach(() => {
@@ -217,15 +265,20 @@ describe('nasLogin', () => {
     expect(m.state.token).toBe('')
   })
 
-  it('安装续期处理器后由处理器完成续期', async () => {
+  it('安装续期处理器后由处理器完成续期（handler 返回新 token）', async () => {
     const m = new SessionManager()
     await m.nasLogin('http://127.0.0.1:5666/music', 'DEV1')
-    m.setNasRelogin(async () => {
-      m.state.token = 'TK-NAS'
-      return true
-    })
+    m.setNasRelogin(async () => 'TK-NAS')
     expect(await m.relogin()).toBe(true)
     expect(m.state.token).toBe('TK-NAS')
+  })
+
+  it('handler 返回空串表示续期失败（不伪造 token）', async () => {
+    const m = new SessionManager()
+    await m.nasLogin('http://127.0.0.1:5666/music', 'DEV1')
+    m.setNasRelogin(async () => '')
+    expect(await m.relogin()).toBe(false)
+    expect(m.state.token).toBe('')
   })
 })
 
@@ -483,6 +536,7 @@ describe('save() / load() / clear()', () => {
   it('内容损坏时 load() 返回 false 且不抛异常', () => {
     const filePath = tempFile()
     writeFileSync(filePath, 'XX这不是会话文件')
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
     const m = new SessionManager({ storage: fakeStorage(), filePath })
     expect(m.load()).toBe(false)
     expect(m.state.token).toBe('')
@@ -491,14 +545,19 @@ describe('save() / load() / clear()', () => {
   it('解密抛错时 load() 返回 false 且不抛异常', () => {
     const filePath = tempFile()
     writeFileSync(filePath, Buffer.concat([Buffer.from('E1', 'utf8'), Buffer.from('乱码', 'utf8')]))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
     const m = new SessionManager({ storage: fakeStorage({ failDecrypt: true }), filePath })
     expect(m.load()).toBe(false)
     expect(m.state.token).toBe('')
   })
 
-  it('明文回退（DPAPI 不可用）时以 P0 开头落盘', () => {
+  it('明文回退（DPAPI 不可用且显式 opt-in）时以 P0 开头落盘', () => {
     const filePath = tempFile()
-    const m = new SessionManager({ storage: fakeStorage({ available: false }), filePath })
+    const m = new SessionManager({
+      storage: fakeStorage({ available: false }),
+      filePath,
+      allowPlaintextFallback: true,
+    })
     m.state = { base: 'http://127.0.0.1:5666/music', mode: 'password', token: 'TK', deviceId: 'D', username: 'demo', password: 'pw', isRelay: false }
     m.save()
 
@@ -539,5 +598,399 @@ describe('save() / load() / clear()', () => {
   it('文件路径不可用时 save() 抛可读错误（不把凭证写到别处）', () => {
     const m = new SessionManager({ storage: fakeStorage() })
     expect(() => m.save()).toThrow(/会话文件路径不可用/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1：M1 明文回退改为显式 opt-in
+// ---------------------------------------------------------------------------
+
+describe('明文回退必须显式开启（M1）', () => {
+  const session = {
+    base: 'http://127.0.0.1:5666/music',
+    mode: 'password',
+    token: 'TK',
+    deviceId: 'D',
+    username: 'demo',
+    password: 'pw',
+    isRelay: false,
+  } as const
+
+  it('没有可用加密且未开启 allowPlaintextFallback 时拒绝写盘', () => {
+    const filePath = tempFile()
+    const m = new SessionManager({ filePath }) // 既没有 storage，也没有 opt-in
+    m.state = { ...session }
+    expect(() => m.save()).toThrow(/拒绝以明文落盘/)
+    expect(existsSync(filePath)).toBe(false)
+  })
+
+  it('DPAPI 不可用且未开启 opt-in 时同样拒绝写盘', () => {
+    const filePath = tempFile()
+    const m = new SessionManager({ storage: fakeStorage({ available: false }), filePath })
+    m.state = { ...session }
+    expect(() => m.save()).toThrow(/拒绝以明文落盘/)
+    expect(existsSync(filePath)).toBe(false)
+  })
+
+  it('显式开启 allowPlaintextFallback 后才写 P0 明文', () => {
+    const filePath = tempFile()
+    const m = new SessionManager({
+      storage: fakeStorage({ available: false }),
+      filePath,
+      allowPlaintextFallback: true,
+    })
+    m.state = { ...session }
+    m.save()
+
+    const raw = readFileSync(filePath)
+    expect(raw.subarray(0, 2).toString('utf8')).toBe('P0')
+    expect(raw.toString('utf8')).toContain('pw')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1：M2 类型化的会话状态错误
+// ---------------------------------------------------------------------------
+
+describe('SessionStateError（M2）', () => {
+  it('未连接时抛 SessionStateError(code=NO_SESSION)', async () => {
+    const m = new SessionManager()
+    const err = await m.request('track/list').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(SessionStateError)
+    expect((err as SessionStateError).code).toBe('NO_SESSION')
+  })
+
+  it('未登录时抛 SessionStateError(code=NO_CREDENTIAL)', async () => {
+    const m = new SessionManager()
+    await m.nasLogin('http://127.0.0.1:5666/music', 'DEV1')
+    const err = await m.request('track/list').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(SessionStateError)
+    expect((err as SessionStateError).code).toBe('NO_CREDENTIAL')
+  })
+
+  it('save() 的路径不可用错误也是 SessionStateError', () => {
+    const m = new SessionManager({ storage: fakeStorage() })
+    const err = (() => {
+      try {
+        m.save()
+        return null
+      } catch (e) {
+        return e
+      }
+    })()
+    expect(err).toBeInstanceOf(SessionStateError)
+    expect((err as SessionStateError).code).toBe('NO_STORAGE')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1：M3 原子写
+// ---------------------------------------------------------------------------
+
+describe('原子写（M3）', () => {
+  it('save() 之后不残留 .tmp 文件', () => {
+    const filePath = tempFile()
+    const m = new SessionManager({ storage: fakeStorage(), filePath })
+    m.state = { base: 'http://127.0.0.1:5666/music', mode: 'password', token: 'TK', deviceId: 'D', username: 'demo', password: 'pw', isRelay: false }
+    m.save()
+    expect(existsSync(`${filePath}.tmp`)).toBe(false)
+    expect(existsSync(filePath)).toBe(true)
+  })
+
+  it('写入失败时原会话文件保持完好（不会被写坏）', () => {
+    const filePath = tempFile()
+    const m = new SessionManager({ storage: fakeStorage(), filePath })
+    m.state = { base: 'http://127.0.0.1:5666/music', mode: 'password', token: 'TK1', deviceId: 'D', username: 'demo', password: 'pw', isRelay: false }
+    m.save()
+    const before = readFileSync(filePath)
+
+    // 把临时路径占成目录 → 写临时文件失败 → 覆盖步骤不会发生
+    mkdirSync(`${filePath}.tmp`)
+    m.state = { ...m.state, token: 'TK2' }
+    expect(() => m.save()).toThrow(/会话保存失败/)
+
+    // 原子写的关键：失败的保存**没有**破坏原有会话文件
+    expect(readFileSync(filePath)).toEqual(before)
+    const restored = new SessionManager({ storage: fakeStorage(), filePath })
+    expect(restored.load()).toBe(true)
+    expect(restored.state.token).toBe('TK1')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1：M4 安全分支的测试
+// ---------------------------------------------------------------------------
+
+describe('安全相关分支（M4）', () => {
+  it('encryptString 抛错时 save() 抛错且不写任何文件（不降级成明文）', () => {
+    const filePath = tempFile()
+    const storage: SafeStorageLike = {
+      isEncryptionAvailable: () => true,
+      encryptString: () => {
+        throw new Error('加密失败（测试注入）')
+      },
+      decryptString: () => '',
+    }
+    const m = new SessionManager({ storage, filePath })
+    m.state = { base: 'http://127.0.0.1:5666/music', mode: 'password', token: 'TK', deviceId: 'D', username: 'demo', password: 'pw', isRelay: false }
+    expect(() => m.save()).toThrow(/会话加密失败/)
+    expect(existsSync(filePath)).toBe(false)
+    expect(existsSync(`${filePath}.tmp`)).toBe(false)
+  })
+
+  it('落盘载荷记录注入的 savedAt 与格式版本', () => {
+    const filePath = tempFile()
+    const m = new SessionManager({ storage: fakeStorage(), filePath, now: () => 1700000000000 })
+    m.state = { base: 'http://127.0.0.1:5666/music', mode: 'password', token: 'TK', deviceId: 'D', username: 'demo', password: 'pw', isRelay: false }
+    m.save()
+
+    const payload = readSavedPayload(filePath, fakeStorage())
+    expect(payload['savedAt']).toBe(1700000000000)
+    expect(payload['version']).toBe(1)
+  })
+
+  it('nas 模式的会话也能 load 还原', async () => {
+    const filePath = tempFile()
+    const m = new SessionManager({ storage: fakeStorage(), filePath })
+    await m.nasLogin('http://127.0.0.1:5666/music', 'DEV1')
+    m.state = { ...m.state, token: 'TK-NAS' }
+    m.save()
+
+    const restored = new SessionManager({ storage: fakeStorage(), filePath })
+    expect(restored.load()).toBe(true)
+    expect(restored.state.mode).toBe('nas')
+    expect(restored.state.base).toBe('http://127.0.0.1:5666/music')
+    expect(restored.state.deviceId).toBe('DEV1')
+    expect(restored.state.token).toBe('TK-NAS')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1：M5 device id 的作用域
+// ---------------------------------------------------------------------------
+
+describe('device id 的作用域（M5）', () => {
+  it('换服务器时重新生成 device id，同服务器续期时沿用', async () => {
+    const bodies: string[] = []
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body ?? ''))
+      return new Response(JSON.stringify({ code: 0, data: { userToken: 'TK' } }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager()
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
+    const first = JSON.parse(bodies[0]!).deviceId as string
+
+    // 换一台服务器 → device id 必须重新生成（不能复用上一台服务器的）
+    await m.passwordLogin('http://192.168.1.10:5666/music', 'demo', 'pw')
+    const second = JSON.parse(bodies[1]!).deviceId as string
+    expect(second).not.toBe(first)
+
+    // 同一台服务器续期 → 沿用原 device id
+    await m.relogin()
+    const third = JSON.parse(bodies[2]!).deviceId as string
+    expect(third).toBe(second)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1：控制器裁定 —— load() 失败必须可观测
+// ---------------------------------------------------------------------------
+
+describe('load() 失败的痕迹（控制器裁定）', () => {
+  it('文件不存在属于正常的「没登录」：lastLoadError 保持 null', () => {
+    const m = new SessionManager({ storage: fakeStorage(), filePath: tempFile() })
+    expect(m.load()).toBe(false)
+    expect(m.lastLoadError).toBeNull()
+  })
+
+  it('解密失败时 lastLoadError 带可判别的 code，并打不含凭证的告警', () => {
+    const filePath = tempFile()
+    writeFileSync(filePath, Buffer.concat([Buffer.from('E1', 'utf8'), Buffer.from('乱码', 'utf8')]))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const m = new SessionManager({ storage: fakeStorage({ failDecrypt: true }), filePath })
+    expect(m.load()).toBe(false)
+    expect(m.lastLoadError).toBeInstanceOf(SessionStateError)
+    expect(m.lastLoadError?.code).toBe('LOAD_DECRYPT_FAILED')
+
+    const logged = warnSpy.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(logged).toMatch(/会话加载失败/)
+    expect(logged).not.toContain('乱码')
+  })
+
+  it('损坏文件的内容不会泄漏进告警日志', () => {
+    const filePath = tempFile()
+    // 截断 + 尾巴垃圾：JSON.parse 的报错信息里会带上文件内容片段
+    writeFileSync(filePath, 'P0{"password":"TOPSECRET"} GARBAGE')
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const m = new SessionManager({ storage: fakeStorage(), filePath })
+    expect(m.load()).toBe(false)
+    expect(m.lastLoadError?.code).toBe('LOAD_CORRUPTED')
+
+    const logged = warnSpy.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(logged).toMatch(/会话加载失败/)
+    expect(logged).not.toContain('TOPSECRET')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1：I1 / I2 / I3 续期竞态
+// ---------------------------------------------------------------------------
+
+describe('续期竞态（I1 / I2 / I3）', () => {
+  /** 构造「下一次登录请求挂起」的 fetch 替身。 */
+  function renewalGate(): {
+    fetchMock: ReturnType<typeof vi.fn>
+    gateNext: () => void
+    gate: ReturnType<typeof createGate>
+  } {
+    const gate = createGate()
+    let gateNext = false
+    let loginCount = 0
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/user/password-login')) {
+        loginCount += 1
+        if (gateNext) {
+          gateNext = false
+          await gate.wait()
+        }
+        return new Response(
+          JSON.stringify({ code: 0, data: { userToken: `TK${loginCount}`, deviceId: 'D' } }),
+          { status: 200 },
+        )
+      }
+      return new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 })
+    })
+    return {
+      fetchMock,
+      gateNext: () => {
+        gateNext = true
+      },
+      gate,
+    }
+  }
+
+  it('过期续期不会清空更新的会话（I1）', async () => {
+    const { fetchMock, gateNext, gate } = renewalGate()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager()
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
+    expect(m.state.token).toBe('TK1')
+
+    gateNext()
+    const relogin = m.relogin()
+    await gate.reached() // 续期请求已发出并挂起
+
+    m.clear() // 登出
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'userB', 'pwB')
+    expect(m.state.token).toBe('TK3')
+
+    gate.release() // 放行过期的续期
+    expect(await relogin).toBe(false)
+
+    // 关键：新建立的会话**没有被销毁**
+    expect(m.state.token).toBe('TK3')
+    expect(m.state.username).toBe('userB')
+    expect(m.state.base).toBe('http://127.0.0.1:5666/music')
+    expect(m.state.mode).toBe('password')
+  })
+
+  it('过期续期不会覆盖更新的显式登录（I2）', async () => {
+    const { fetchMock, gateNext, gate } = renewalGate()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager()
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'userA', 'pwA')
+    expect(m.state.username).toBe('userA')
+
+    gateNext()
+    const relogin = m.relogin()
+    await gate.reached()
+
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'userB', 'pwB')
+    expect(m.state.username).toBe('userB')
+
+    gate.release()
+    expect(await relogin).toBe(false)
+
+    // 关键：状态没有被回退到 userA
+    expect(m.state.username).toBe('userB')
+    expect(m.state.token).toBe('TK3')
+  })
+
+  it('在飞行的密码续期不会把 NAS 会话覆写回 password 模式（I2 的 NAS 变体）', async () => {
+    const { fetchMock, gateNext, gate } = renewalGate()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager()
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'userA', 'pwA')
+
+    gateNext()
+    const relogin = m.relogin()
+    await gate.reached()
+
+    await m.nasLogin('http://127.0.0.1:5666/music', 'DEV-NAS')
+    expect(m.state.mode).toBe('nas')
+
+    gate.release()
+    expect(await relogin).toBe(false)
+
+    // 关键：NAS 会话没有被覆写回 mode=password
+    expect(m.state.mode).toBe('nas')
+    expect(m.state.deviceId).toBe('DEV-NAS')
+    expect(m.state.username).toBe('')
+  })
+
+  it('续期成功后新 token 会落盘（I3）', async () => {
+    const filePath = tempFile()
+    let loginCount = 0
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/user/password-login')) {
+        loginCount += 1
+        return new Response(
+          JSON.stringify({ code: 0, data: { userToken: `TK${loginCount}`, deviceId: 'D' } }),
+          { status: 200 },
+        )
+      }
+      return new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager({ storage: fakeStorage(), filePath })
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
+    m.save()
+    expect(readSavedState(filePath, fakeStorage())?.token).toBe('TK1')
+
+    expect(await m.relogin()).toBe(true)
+    expect(m.state.token).toBe('TK2')
+    // 关键：文件里也是新 token（否则每次启动都要恢复一个已失效的 token）
+    expect(readSavedState(filePath, fakeStorage())?.token).toBe('TK2')
+  })
+
+  it('续期落盘失败不影响续期本身（写盘失败只记录 lastSaveError）', async () => {
+    let loginCount = 0
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/user/password-login')) {
+        loginCount += 1
+        return new Response(
+          JSON.stringify({ code: 0, data: { userToken: `TK${loginCount}`, deviceId: 'D' } }),
+          { status: 200 },
+        )
+      }
+      return new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    // 没有注入 filePath → 续期成功但落盘失败
+    const m = new SessionManager({ storage: fakeStorage() })
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
+    expect(await m.relogin()).toBe(true)
+    expect(m.state.token).toBe('TK2')
+    expect(m.lastSaveError).toBeInstanceOf(SessionStateError)
+    expect(m.lastSaveError?.code).toBe('NO_STORAGE')
   })
 })
