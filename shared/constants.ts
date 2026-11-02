@@ -59,6 +59,26 @@ export const RELAY_COOKIE_KEY = 'mode'
 export const RELAY_DOMAIN_SUFFIX = '.fnos.net'
 
 // ---------------------------------------------------------------------------
+// NAS 账号 OAuth（Task 11）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 实测（规格 §15.8 第 2 条）：`GET <base>/api/v1/sys/config` 返回的
+// `data.nasOAuth` 里**只有 `clientId`，没有 `url` 字段**——授权地址必须**自行拼装**：
+//
+//   <服务器根>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=飞牛音乐
+//
+// 这里集中放**唯一一份**字面量：中文应用名与回调路径不许散落在多个文件里。
+
+/** NAS 账号 OAuth 的应用名（授权地址的 `app_name` 参数；拼进 query 前要 URL 编码）。 */
+export const NAS_OAUTH_APP_NAME = '飞牛音乐'
+
+/** NAS 账号 OAuth 的登录页路径（拼在**服务器根**之后：`<服务器根>/signin`）。 */
+export const NAS_OAUTH_SIGNIN_PATH = '/signin'
+
+/** NAS 账号 OAuth 的回调路径（拼在**音乐根**之后：`<base>/oauth/result`）。 */
+export const NAS_OAUTH_REDIRECT_PATH = '/oauth/result'
+
+// ---------------------------------------------------------------------------
 // 业务码
 // ---------------------------------------------------------------------------
 

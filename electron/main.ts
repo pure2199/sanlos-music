@@ -4,6 +4,7 @@ import path from 'node:path'
 import { registerAuthIpc } from './ipc'
 import { TrustedHosts } from './cert'
 import { createHttpStack } from './http'
+import { createNasOAuthHandlers } from './oauthWindow'
 import { registerFnmSchemePrivileges, registerProxy } from './proxy'
 import { SessionManager } from './session'
 
@@ -48,10 +49,25 @@ app
     // 4. `fnm://` 协议代理（渲染进程唯一的出网出口）。
     registerProxy(session, { http })
 
-    // 5. 认证 IPC（渲染进程的登录页通过 `window.fn` 调用）。
-    registerAuthIpc(session, { trusted, http })
+    // 5. NAS 账号 OAuth（Task 11）：授权窗口 + 静默续期。
+    //
+    //    ⚠️ **必须注入同一个 `HttpStack` 实例**（追加要求 F）：
+    //    `createHttpStack()` 不传 `trusted` 时会内部 new 一个**空**信任集合，
+    //    自签 NAS 直接连不上且极难排查。
+    //    ⚠️ `trusted` 也必须是同一个实例：授权分区上的证书放行要用同一份信任集合。
+    const { nasLoginHandler, nasReloginHandler } = createNasOAuthHandlers({
+      session,
+      http,
+      trusted,
+    })
 
-    // 6. 证书放行：**只**对 `trusted` 里的 host 放行自签 / 非受信证书。
+    //    静默续期（Task 7 的 `setNasRelogin` 契约）：返回新 token，空串 = 失败。
+    session.setNasRelogin(nasReloginHandler)
+
+    // 6. 认证 IPC（渲染进程的登录页通过 `window.fn` 调用）。
+    registerAuthIpc(session, { trusted, http, nasLoginHandler })
+
+    // 7. 证书放行：**只**对 `trusted` 里的 host 放行自签 / 非受信证书。
     //    ⚠️ 绝不无条件 `callback(0)`——未登记的 host 一律走 Chromium 默认校验
     //    （`verify` 返回 `-3`），其余站点照常校验。
     //    ⚠️ `session` 这个名字已被会话管理器占用，故 Electron 的 session 模块取别名。
@@ -61,7 +77,7 @@ app
       callback(trusted.verify(request.hostname))
     })
 
-    // 7. 恢复上次会话（Task 7 的生命周期约定：启动时 `load()`）。
+    // 8. 恢复上次会话（Task 7 的生命周期约定：启动时 `load()`）。
     //    失败（文件不存在 / 损坏 / 解密失败）不影响启动，界面会显示未登录。
     session.load()
 

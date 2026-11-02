@@ -330,8 +330,13 @@ function isRelayHost(base: string): boolean {
   return host.length > 0 && host.endsWith(RELAY_DOMAIN_SUFFIX)
 }
 
-/** 生成 16 字节随机 hex 的设备 id（规格 §2.2）。 */
-function newDeviceId(): string {
+/**
+ * 生成 16 字节随机 hex 的设备 id（规格 §2.2）。
+ *
+ * ⚠️ **导出**是为了让 Task 11 的 OAuth 流程用**同一个**生成规则
+ * （设备 id 是服务端作用域的凭证，两处各写一套会漂）。
+ */
+export function newDeviceId(): string {
   return randomBytes(16).toString('hex')
 }
 
