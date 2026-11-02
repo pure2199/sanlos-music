@@ -1,4 +1,4 @@
-appId: com.trim.music.desktop
+appId: com.fnmusic.desktop
 productName: 飞牛音乐
 copyright: Copyright © 2026 fnmusic-desktop
 
@@ -16,8 +16,14 @@ win:
     - target: nsis
       arch:
         - x64
+    - target: portable
+      arch:
+        - x64
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  artifactName: ${productName}-${version}-setup.${ext}
+  artifactName: FN-Music-Setup-${version}.${ext}
+
+portable:
+  artifactName: FN-Music-Portable-${version}.${ext}

@@ -3,6 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      起步级 CSP：
+      - script-src/style-src 需要 'unsafe-inline'：vite dev server 会注入 react-refresh 内联脚本，
+        渲染进程也会使用内联样式；
+      - img-src / media-src 允许 fnm:、blob:、data:、http(s):，供后续任务加载封面、HLS 与音频流；
+      - connect-src 允许 fnm: 与 http(s):（直连 NAS），并显式放行 dev server 的 HMR WebSocket。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: fnm: http: https:; media-src 'self' data: blob: fnm: http: https:; font-src 'self' data:; connect-src 'self' data: blob: fnm: http: https: ws://127.0.0.1:5173 ws://localhost:5173; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
+    />
     <title>飞牛音乐</title>
   </head>
   <body>
