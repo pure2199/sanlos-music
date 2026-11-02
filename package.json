@@ -1,0 +1,52 @@
+{
+  "name": "fnmusic-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "飞牛音乐 Windows 桌面客户端",
+  "author": "fnmusic-desktop",
+  "license": "MIT",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "postinstall": "node scripts/ensure-electron.cjs",
+    "dev": "concurrently -k -n vite,electron -c cyan,magenta \"vite\" \"npm:dev:electron\"",
+    "dev:electron": "npm run build:electron && wait-on http-get://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --target=node20 --format=cjs --external:electron --outdir=dist-electron",
+    "build": "npm run build:electron && vite build",
+    "prestart": "npm run build:electron",
+    "start": "electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "dist": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^10.0.6",
+    "cross-env": "^10.1.0",
+    "electron": "^32.3.3",
+    "electron-builder": "^26.18.0",
+    "electron-store": "^12.0.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.3",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9",
+    "wait-on": "^9.5.1"
+  },
+  "allowScripts": {
+    "electron@32.3.3": true,
+    "esbuild@0.21.5": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.28.2": true
+  },
+  "dependencies": {
+    "hls.js": "^1.7.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.7"
+  }
+}

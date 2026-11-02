@@ -8,3 +8,6 @@ Thumbs.db
 .vite/
 coverage/
 *.local
+.superpowers/
+*.exe
+dist-electron/
