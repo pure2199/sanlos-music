@@ -1,42 +1,61 @@
 import { describe, it, expect } from 'vitest'
-import { createMockServer, type MockServer } from '../mock-server/server'
+import { networkInterfaces } from 'node:os'
+import {
+  createMockServer,
+  isLoopbackAddress,
+  resolvePage,
+  resolvePageSize,
+  type MockServer,
+} from '../mock-server/server'
 import { sha256 } from '../electron/sign'
 
 // ---------------------------------------------------------------------------
 // Task 5：Mock server（无 NAS 开发前提）
 //
 // 简报 Step 1 的三条用例（health / 登录 / 收藏）**逐字保留其测试意图**；
-// 唯一改动：业务端点要求 `music-token` 头，收藏用例改为「先登录拿 token 再带上头」，
-// 理由见控制器裁定 §3.1（简报 Step 3 要求校验 token，与 Step 1 的收藏用例不带 token 冲突）。
+// 唯一改动：业务端点要求凭证，收藏用例改为「先登录拿 token 再带上凭证」，
+// 理由见控制器裁定 §3.1（简报 Step 3 要求校验凭证，与 Step 1 的收藏用例不带凭证冲突）。
+//
+// 凭证通道：**Cookie 头** `music-token=<token>`（真实 NAS 就是这么传的，
+// 见 `electron/sign.ts` 的 `buildCookie()`；中继链路还在同一个 Cookie 头里带 `mode=relay`）。
+// 测试 helper 默认走 Cookie，以免把「独立 music-token 请求头」这种调试便利当成正式契约。
 // ---------------------------------------------------------------------------
 
 const API = '/music/api/v1'
 
-/** 登录并取回 token（口令既接受明文 'x'，也接受 sha256('x')）。 */
+/** 登录并取回 token（口令既接受明文 'x'，也接受 sha256('x')）；失败直接抛错，不返回空串。 */
 async function login(s: MockServer, password = 'x'): Promise<string> {
   const r = await fetch(`${s.url}${API}/user/password-login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ username: 'demo', password, deviceId: 'd' }),
   })
-  const body = (await r.json()) as { code: number; data?: { userToken?: string } }
-  return body.data?.userToken ?? ''
+  const body = (await r.json()) as {
+    code: number
+    msg?: string
+    data?: { userToken?: string }
+  }
+  const token = body.data?.userToken
+  if (body.code !== 0 || !token) {
+    throw new Error(`登录失败：code=${body.code} msg=${body.msg ?? ''}`)
+  }
+  return token
 }
 
-/** 带 token 的 GET，返回业务信封。 */
+/** 带 Cookie 凭证的 GET，返回业务信封。 */
 async function getJson(
   s: MockServer,
   path: string,
   token?: string,
 ): Promise<{ status: number; code: number; msg: string; data: any }> {
   const r = await fetch(`${s.url}${path}`, {
-    headers: token ? { 'music-token': token } : {},
+    headers: token ? { cookie: `music-token=${token}` } : {},
   })
   const body = (await r.json()) as any
   return { status: r.status, code: body.code, msg: body.msg, data: body.data }
 }
 
-/** 带 token 的 POST，返回业务信封。 */
+/** 带 Cookie 凭证的 POST，返回业务信封。 */
 async function postJson(
   s: MockServer,
   path: string,
@@ -47,12 +66,22 @@ async function postJson(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...(token ? { 'music-token': token } : {}),
+      ...(token ? { cookie: `music-token=${token}` } : {}),
     },
     body: JSON.stringify(body),
   })
   const bodyOut = (await r.json()) as any
   return { status: r.status, code: bodyOut.code, msg: bodyOut.msg, data: bodyOut.data }
+}
+
+/** 本机的非回环 IPv4（用于 M6 的「真实来源地址」用例）。 */
+function findNonLoopbackIPv4(): string | undefined {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const item of list ?? []) {
+      if (item.family === 'IPv4' && !item.internal) return item.address
+    }
+  }
+  return undefined
 }
 
 describe('mock server', () => {
@@ -139,7 +168,7 @@ describe('mock server 登录与 token', () => {
     s2.close()
   })
 
-  it('业务端点不带 token 时业务码为 99999（HTTP 仍为 200）', async () => {
+  it('业务端点不带凭证时业务码为 99999（HTTP 仍为 200）', async () => {
     const s = createMockServer()
     const r = await getJson(s, `${API}/track/list`)
     expect(r.status).toBe(200)
@@ -175,7 +204,7 @@ describe('mock server 登录与 token', () => {
     s.close()
   })
 
-  it('全部业务端点都要求 token（逐个端点核对）', async () => {
+  it('全部业务端点都要求凭证（逐个端点核对）', async () => {
     const s = createMockServer()
     const paths = [
       '/user/me',
@@ -206,12 +235,85 @@ describe('mock server 登录与 token', () => {
       '/lyric/list',
     ]
     for (const path of paths) {
-      // token 校验发生在方法分发之前，因此 GET / POST 都应返回 99999。
+      // 凭证闸门发生在方法分发之前，因此 GET / POST 都应返回 99999。
       const viaGet = await getJson(s, `${API}${path}`)
-      expect(viaGet.code, `GET ${path} 应当要求 token`).toBe(99999)
+      expect(viaGet.code, `GET ${path} 应当要求凭证`).toBe(99999)
       const viaPost = await postJson(s, `${API}${path}`, {})
-      expect(viaPost.code, `POST ${path} 应当要求 token`).toBe(99999)
+      expect(viaPost.code, `POST ${path} 应当要求凭证`).toBe(99999)
     }
+    s.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 凭证通道：Cookie（真实 NAS 的形状）
+// ---------------------------------------------------------------------------
+
+describe('mock server 从 Cookie 读取凭证', () => {
+  it('Cookie: music-token=<token> 的业务请求返回 code 0', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const r = await fetch(`${s.url}${API}/user/me`, {
+      headers: { cookie: `music-token=${token}` },
+    })
+    expect(r.status).toBe(200)
+    expect(((await r.json()) as any).code).toBe(0)
+    s.close()
+  })
+
+  it('Cookie 里的 token 不匹配时返回 99999', async () => {
+    const s = createMockServer()
+    const r = await fetch(`${s.url}${API}/user/me`, {
+      headers: { cookie: 'music-token=wrong' },
+    })
+    expect(((await r.json()) as any).code).toBe(99999)
+    s.close()
+  })
+
+  it('Cookie 里同时带 mode=relay 仍可用（中继标记不是凭证）', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const r = await fetch(`${s.url}${API}/track/list`, {
+      headers: { cookie: `music-token=${token}; mode=relay` },
+    })
+    const body = (await r.json()) as any
+    expect(body.code).toBe(0)
+    expect(body.data.list.length).toBe(8)
+    s.close()
+  })
+
+  it('Cookie 与独立 music-token 头同时存在时以 Cookie 为准', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const other = await login(s)
+    const r = await fetch(`${s.url}${API}/user/me`, {
+      headers: { cookie: `music-token=${token}`, 'music-token': other },
+    })
+    // Cookie 里的 token 有效 → 放行；随后用另一个 token 登出，验证退出的是 Cookie 里的那个。
+    expect(((await r.json()) as any).code).toBe(0)
+    await fetch(`${s.url}${API}/user/logout`, {
+      method: 'POST',
+      headers: { cookie: `music-token=${token}`, 'music-token': other },
+      body: '{}',
+    })
+    const afterCookie = await fetch(`${s.url}${API}/user/me`, {
+      headers: { cookie: `music-token=${token}` },
+    })
+    expect(((await afterCookie.json()) as any).code).toBe(99999)
+    const afterHeader = await fetch(`${s.url}${API}/user/me`, {
+      headers: { 'music-token': other },
+    })
+    expect(((await afterHeader.json()) as any).code).toBe(0)
+    s.close()
+  })
+
+  it('独立的 music-token 请求头仍被容忍（仅调试便利）', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const r = await fetch(`${s.url}${API}/user/me`, {
+      headers: { 'music-token': token },
+    })
+    expect(((await r.json()) as any).code).toBe(0)
     s.close()
   })
 })
@@ -259,12 +361,38 @@ describe('mock server 列表信封与分页', () => {
     s.close()
   })
 
-  it('size 上限 2000', async () => {
+  it('每页条数上限是 2000（纯函数钉住实现退化）', () => {
+    // 这一组是「size 上限」这条硬约束的真正守卫：fixtures 只有 8 首，
+    // 靠 HTTP 断言 list.length 无法区分 size=8 / 200 / 2000。
+    expect(resolvePageSize('5000')).toBe(2000)
+    expect(resolvePageSize('2001')).toBe(2000)
+    expect(resolvePageSize('2000')).toBe(2000)
+    expect(resolvePageSize('500')).toBe(500)
+    expect(resolvePageSize('0')).toBe(200)
+    expect(resolvePageSize('-1')).toBe(200)
+    expect(resolvePageSize('abc')).toBe(200)
+    expect(resolvePageSize('')).toBe(200)
+    expect(resolvePageSize(null)).toBe(200)
+    expect(resolvePageSize(undefined)).toBe(200)
+  })
+
+  it('页码解析：非法值回落 1', () => {
+    expect(resolvePage('1')).toBe(1)
+    expect(resolvePage('7')).toBe(7)
+    expect(resolvePage('0')).toBe(1)
+    expect(resolvePage('-3')).toBe(1)
+    expect(resolvePage('abc')).toBe(1)
+    expect(resolvePage(null)).toBe(1)
+    expect(resolvePage(undefined)).toBe(1)
+  })
+
+  it('size 超过上限的请求不报错（上限本身由纯函数用例守住）', async () => {
     const s = createMockServer()
     const token = await login(s)
-    const r = await getJson(s, `${API}/track/list?size=999999`, token)
+    const r = await getJson(s, `${API}/track/list?size=5000`, token)
     expect(r.code).toBe(0)
     expect(r.data.list.length).toBe(8)
+    expect(r.data.total).toBe(8)
     s.close()
   })
 })
@@ -375,6 +503,57 @@ describe('mock server 收藏与歌单写回', () => {
     expect(r.msg.length).toBeGreaterThan(0)
     s.close()
   })
+
+  it('add-track 传入不存在的曲目返回非 0 且不部分写入', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const r = await postJson(
+      s,
+      `${API}/playlist/add-track`,
+      { guid: 'p1', trackGUIDs: ['t3', 'nope'] },
+      token,
+    )
+    expect(r.code).toBe(1)
+    expect(r.msg).toBe('歌曲不存在')
+    // 不部分写入：t3 也不该被加进去
+    expect(s.state.playlists.get('p1')?.tracks).toEqual(['t1', 't2'])
+    s.close()
+  })
+
+  it('remove-track 传入不存在的曲目返回非 0 且不部分写入', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const r = await postJson(
+      s,
+      `${API}/playlist/remove-track`,
+      { guid: 'p1', trackGUIDs: ['t1', 'nope'] },
+      token,
+    )
+    expect(r.code).toBe(1)
+    expect(r.msg).toBe('歌曲不存在')
+    expect(s.state.playlists.get('p1')?.tracks).toEqual(['t1', 't2'])
+    s.close()
+  })
+
+  it('歌单改名后 updatedAt 刷新', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const created = await postJson(s, `${API}/playlist/create`, { name: '待改名' }, token)
+    const guid = created.data.guid as string
+    const before = await getJson(s, `${API}/playlist/list`, token)
+    const target = before.data.list.find((p: any) => p.guid === guid)
+    expect(target.createdAt).toBeTruthy()
+    expect(target.updatedAt).toBe(target.createdAt)
+
+    await postJson(s, `${API}/playlist/update`, { guid, name: '已改名' }, token)
+    const after = await getJson(s, `${API}/playlist/list`, token)
+    const updated = after.data.list.find((p: any) => p.guid === guid)
+    expect(updated.name).toBe('已改名')
+    expect(new Date(updated.updatedAt).getTime()).toBeGreaterThan(
+      new Date(updated.createdAt).getTime(),
+    )
+    s.close()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -391,6 +570,23 @@ describe('mock server 搜索、歌词与音频流', () => {
     expect(albums.data.total).toBe(3)
     const artists = await getJson(s, `${API}/search/artist?q=${encodeURIComponent('示例歌手甲')}`, token)
     expect(artists.data.total).toBe(1)
+    s.close()
+  })
+
+  it('缺关键字的搜索返回空列表而不是全量', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    for (const path of ['/search/track', '/search/album', '/search/artist']) {
+      const missing = await getJson(s, `${API}${path}`, token)
+      expect(missing.code, `${path} 缺关键字`).toBe(0)
+      expect(missing.data.list, `${path} 缺关键字不应返回全量`).toEqual([])
+      expect(missing.data.total, `${path} 缺关键字`).toBe(0)
+
+      const blank = await getJson(s, `${API}${path}?q=%20%20`, token)
+      expect(blank.code, `${path} 空白关键字`).toBe(0)
+      expect(blank.data.list, `${path} 空白关键字不应返回全量`).toEqual([])
+      expect(blank.data.total, `${path} 空白关键字`).toBe(0)
+    }
     s.close()
   })
 
@@ -412,7 +608,7 @@ describe('mock server 搜索、歌词与音频流', () => {
     const s = createMockServer()
     const token = await login(s)
     const r = await fetch(`${s.url}${API}/track/stream?guid=t1`, {
-      headers: { 'music-token': token },
+      headers: { cookie: `music-token=${token}` },
     })
     expect(r.status).toBe(200)
     expect(r.headers.get('content-type')).toContain('audio/wav')
@@ -435,7 +631,7 @@ describe('mock server 搜索、歌词与音频流', () => {
 // ---------------------------------------------------------------------------
 
 describe('mock server 端点清单', () => {
-  it('简报点名的端点全部实现（不返回 404）', async () => {
+  it('简报点名的 GET 端点全部可用（业务码为 0）', async () => {
     const s = createMockServer()
     const token = await login(s)
     const getPaths = [
@@ -448,7 +644,6 @@ describe('mock server 端点清单', () => {
       '/track/artist-detail/list',
       '/track/genre-detail/list',
       '/track/playlist-detail/list',
-      '/track/stream',
       '/favorite-track/list',
       '/artist/list',
       '/genre/list',
@@ -458,34 +653,97 @@ describe('mock server 端点清单', () => {
       '/search/artist',
       '/lyric/list',
     ]
-    const postPaths = [
-      '/user/logout',
-      '/favorite-track/create',
-      '/favorite-track/delete',
-      '/playlist/create',
-      '/playlist/update',
-      '/playlist/delete',
-      '/playlist/add-track',
-      '/playlist/remove-track',
-    ]
     for (const path of getPaths) {
       const r = await getJson(s, `${API}${path}`, token)
-      expect(r.code, `GET ${path} 不应返回 404`).not.toBe(404)
+      expect(r.code, `GET ${path} 应当成功`).toBe(0)
     }
-    for (const path of postPaths) {
-      const r = await postJson(s, `${API}${path}`, {}, token)
-      expect(r.code, `POST ${path} 不应返回 404`).not.toBe(404)
-    }
+    // /track/stream 返回二进制，单独断言。
+    const stream = await fetch(`${s.url}${API}/track/stream?guid=t1`, {
+      headers: { cookie: `music-token=${token}` },
+    })
+    expect(stream.status).toBe(200)
+    expect(stream.headers.get('content-type')).toContain('audio/wav')
     s.close()
   })
 
-  it('未知路径返回非 0 业务码', async () => {
+  it('简报点名的 POST 端点全部可用（业务码为 0）', async () => {
     const s = createMockServer()
     const token = await login(s)
-    const r = await getJson(s, `${API}/not-exist`, token)
-    expect(r.code).not.toBe(0)
-    expect(r.code).toBe(404)
+    const postCases: Array<[string, unknown]> = [
+      ['/favorite-track/create', { trackGUID: 't1' }],
+      ['/favorite-track/delete', { trackGUID: 't1' }],
+      ['/playlist/create', { name: '清单用歌单' }],
+      ['/playlist/update', { guid: 'p1', name: 'p1 改名' }],
+      ['/playlist/delete', { guid: 'p2' }],
+      ['/playlist/add-track', { guid: 'p1', trackGUIDs: ['t1'] }],
+      ['/playlist/remove-track', { guid: 'p1', trackGUIDs: ['t1'] }],
+    ]
+    for (const [path, body] of postCases) {
+      const r = await postJson(s, `${API}${path}`, body, token)
+      expect(r.code, `POST ${path} 应当成功`).toBe(0)
+    }
+    // 登放最后：它会让当前 token 失效。
+    const logout = await postJson(s, `${API}/user/logout`, {}, token)
+    expect(logout.code).toBe(0)
     s.close()
+  })
+
+  it('未知路径返回 404（即使没有凭证，也不是 99999）', async () => {
+    const s = createMockServer()
+    const withToken = await getJson(s, `${API}/not-exist`, await login(s))
+    expect(withToken.code).toBe(404)
+    expect(withToken.msg).toBe('接口不存在')
+    const withoutToken = await getJson(s, `${API}/not-exist`)
+    expect(withoutToken.code).toBe(404)
+    s.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 只允许本机访问
+// ---------------------------------------------------------------------------
+
+describe('mock server 只允许本机访问', () => {
+  it('回环判定：回环地址放行，非回环地址拒绝', () => {
+    expect(isLoopbackAddress('127.0.0.1')).toBe(true)
+    expect(isLoopbackAddress('127.0.0.53')).toBe(true)
+    expect(isLoopbackAddress('::1')).toBe(true)
+    expect(isLoopbackAddress('::ffff:127.0.0.1')).toBe(true)
+    expect(isLoopbackAddress('192.168.1.172')).toBe(false)
+    expect(isLoopbackAddress('::ffff:192.168.1.172')).toBe(false)
+    expect(isLoopbackAddress('10.0.0.1')).toBe(false)
+    expect(isLoopbackAddress('fe80::1')).toBe(false)
+    expect(isLoopbackAddress(undefined)).toBe(false)
+    expect(isLoopbackAddress('')).toBe(false)
+  })
+
+  it('来自非回环地址的请求被拒绝（真实来源地址）', async () => {
+    const lan = findNonLoopbackIPv4()
+    const s = createMockServer()
+    const port = new URL(s.url).port
+    try {
+      let response: { code: number; msg: string } | null = null
+      let networkError: unknown = null
+      if (lan) {
+        try {
+          const r = await fetch(`http://${lan}:${port}${API}/health`)
+          response = (await r.json()) as { code: number; msg: string }
+        } catch (cause) {
+          networkError = cause
+        }
+      }
+      if (response) {
+        expect(response.code).toBe(1)
+        expect(response.msg).toBe('仅允许本机访问')
+      } else {
+        // 环境不允许走 LAN 路径（没有非回环 IPv4，或被防火墙拦下）：
+        // 退回到纯函数判定，断言的仍是同一条规则（非回环地址一律判为拒绝）。
+        expect(networkError === null || networkError instanceof Error).toBe(true)
+        expect(isLoopbackAddress(lan ?? '192.168.1.172')).toBe(false)
+      }
+    } finally {
+      s.close()
+    }
   })
 })
 

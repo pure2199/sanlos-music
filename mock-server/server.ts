@@ -3,6 +3,16 @@
 // 用途：Task 6+（API 客户端、登录界面、曲库浏览、播放、收藏、歌单、歌词）在没有真实 NAS 时
 // 也能开发与测试。本 server 是 Task 6+ 的**唯一数据来源**。
 //
+// ⚠️ 安全边界：**该服务仅限本机开发使用，不得暴露到局域网。**
+// 端口 0 由系统分配，而 `listen(0)` 不带 host 时 Node 会把 socket 绑定到所有网卡
+// （带 host 会把绑定推迟到 nextTick，导致 `url` 无法同步返回，见 createMockServer 的说明），
+// 因此 mock 在**请求侧**加了回环守卫：来源地址不是回环的请求一律拒绝
+// （`{ code: 1, msg: '仅允许本机访问' }`）。
+// 此外 mock 的口令是公开的字面量 `x`，任何能连到端口的人都能登录——不要把它开到局域网或公网。
+//
+// 已知取舍：`/album/list` 的 `sort=newTrackAddedAt,desc` **接受但忽略**——
+// fixtures 里没有 `newTrackAddedAt` 字段，真实排序语义要等 Task 6 实测校准。
+//
 // 约定（与真实 NAS 保持一致，客户端靠业务码而不是 HTTP 状态码判断成败）：
 // - 所有 JSON 响应统一信封 `{ code: 0, msg: '', data: ... }`；
 //   出错时返回 `{ code: <非 0>, msg: '<可读中文>' }`，**HTTP 状态码仍是 200**；
@@ -10,8 +20,10 @@
 // - 所有列表型端点（含 detail 型）统一返回 `data: { list: [...], total: <全量条数> }`；
 // - 所有列表型端点都支持服务端分页：`page`（1 起）+ `size`（默认 200，上限 2000）。
 //
-// token：业务端点一律要求 `music-token` 头（值必须是本 mock 签发的 token）；
-// 免 token 的端点只有 `/music/api/v1/health`、`/sys/config`、`/music/api/v1/user/password-login`。
+// 凭证：业务端点一律要求凭证，取值通道与真实 NAS 一致——**Cookie 头**里的 `music-token=<token>`
+// （见 `electron/sign.ts` 的 `buildCookie()`；中继链路还在同一个 Cookie 头里带 `mode=relay`，mock 忽略它）。
+// mock 额外容忍一个独立的 `music-token:` 请求头（仅调试便利），两者同时存在时以 Cookie 为准。
+// 免凭证的端点只有 `/music/api/v1/health`、`/sys/config`、`/music/api/v1/user/password-login`。
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
@@ -31,6 +43,8 @@ import {
   PLAYLISTS,
   SONGS,
   TRACK_GENRES,
+  type RawAlbum,
+  type RawArtist,
   type RawPlaylist,
   type RawSong,
 } from './fixtures'
@@ -43,10 +57,10 @@ import {
 const API_BASE = `${MUSIC_PATH}${API_PREFIX}`
 
 /** 列表端点默认每页条数。 */
-const DEFAULT_PAGE_SIZE = 200
+export const DEFAULT_PAGE_SIZE = 200
 
 /** 列表端点每页条数上限（真实 NAS 同量级，防止一次性拉全量曲库）。 */
-const MAX_PAGE_SIZE = 2000
+export const MAX_PAGE_SIZE = 2000
 
 /** mock 的正确口令（明文）。 */
 const VALID_PASSWORD = 'x'
@@ -112,6 +126,13 @@ interface RouteCtx {
 /** 路由处理函数。 */
 type RouteHandler = (ctx: RouteCtx) => void
 
+/**
+ * 歌单元数据（**不含 `name`**）。
+ *
+ * 歌单名称以 `MockState.playlists` 为唯一真相源，元数据里再存一份就是会漂移的死字段。
+ */
+type PlaylistMeta = Omit<RawPlaylist, 'name'>
+
 // ---------------------------------------------------------------------------
 // 工具函数
 // ---------------------------------------------------------------------------
@@ -122,24 +143,33 @@ const ok = <T>(data: T): OkEnvelope<T> => ({ code: CODE_OK, msg: '', data })
 /** 失败信封：业务码非 0，HTTP 状态码仍是 200。 */
 const err = (code: number, msg: string): ErrEnvelope => ({ code, msg })
 
-/** 读取正整数分页参数；非法值回落默认值。 */
-function readPage(query: URLSearchParams): number {
-  const raw = Number(query.get('page') ?? '1')
-  if (!Number.isFinite(raw) || raw < 1) return 1
-  return Math.floor(raw)
+/**
+ * 页码解析规则（导出以便单测钉住兜底行为）。
+ *
+ * 非法值（缺省 / 0 / 负数 / 非数字）一律回落 1。
+ */
+export function resolvePage(raw: string | null | undefined): number {
+  const value = Number(raw ?? '1')
+  if (!Number.isFinite(value) || value < 1) return 1
+  return Math.floor(value)
 }
 
-/** 读取每页条数；非法值回落默认值，超过上限则截断。 */
-function readSize(query: URLSearchParams): number {
-  const raw = Number(query.get('size') ?? String(DEFAULT_PAGE_SIZE))
-  if (!Number.isFinite(raw) || raw < 1) return DEFAULT_PAGE_SIZE
-  return Math.min(Math.floor(raw), MAX_PAGE_SIZE)
+/**
+ * 每页条数解析规则（导出以便单测钉住**上限**与兜底行为）。
+ *
+ * 非法值（缺省 / 0 / 负数 / 非数字）回落 `DEFAULT_PAGE_SIZE`；
+ * 超过 `MAX_PAGE_SIZE` 一律截断到上限（真实 NAS 曲库 17.3 万首，不能一次性拉全量）。
+ */
+export function resolvePageSize(raw: string | null | undefined): number {
+  const value = Number(raw ?? String(DEFAULT_PAGE_SIZE))
+  if (!Number.isFinite(value) || value < 1) return DEFAULT_PAGE_SIZE
+  return Math.min(Math.floor(value), MAX_PAGE_SIZE)
 }
 
 /** 服务端分页：返回该页切片与全量 total。 */
 function paginate<T>(items: T[], query: URLSearchParams): { list: T[]; total: number } {
-  const page = readPage(query)
-  const size = readSize(query)
+  const page = resolvePage(query.get('page'))
+  const size = resolvePageSize(query.get('size'))
   const start = (page - 1) * size
   return { list: items.slice(start, start + size), total: items.length }
 }
@@ -180,11 +210,59 @@ function strArrayField(body: Record<string, unknown>, key: string): string[] {
   return value.filter((item): item is string => typeof item === 'string')
 }
 
-/** 取请求头里的 token。 */
+/**
+ * 从 `Cookie` 头里取指定键的值。
+ *
+ * 真实 NAS 的凭证就是 Cookie（见 `electron/sign.ts` 的 `buildCookie()`：
+ * `music-token=<token>; mode=relay`），因此 **Cookie 是 token 的唯一真实读取通道**。
+ * `mode=relay`（中继模式）不是凭证键，这里只按名字取 `music-token`，中继标记自然被忽略。
+ */
+function readCookie(req: IncomingMessage, key: string): string | undefined {
+  const raw = req.headers.cookie
+  if (!raw) return undefined
+  for (const part of raw.split(';')) {
+    const separator = part.indexOf('=')
+    if (separator < 0) continue
+    if (part.slice(0, separator).trim() !== key) continue
+    const value = part.slice(separator + 1).trim()
+    if (!value) continue
+    try {
+      return decodeURIComponent(value)
+    } catch {
+      return value
+    }
+  }
+  return undefined
+}
+
+/**
+ * 读取请求携带的 token。
+ *
+ * 主通道是 **Cookie**：`Cookie: music-token=<token>`（真实 NAS 就是这么传的；
+ * 中继链路还会在同一个 Cookie 头里附加 `mode=relay`，mock 不因此拒绝）。
+ * 额外容忍一个独立的 `music-token:` 请求头（仅方便调试）；两者同时存在时**以 Cookie 为准**。
+ */
 function readToken(req: IncomingMessage): string | undefined {
+  const fromCookie = readCookie(req, MUSIC_TOKEN_COOKIE)
+  if (fromCookie) return fromCookie
   const raw = req.headers[MUSIC_TOKEN_COOKIE]
-  const token = Array.isArray(raw) ? raw[0] : raw
-  return token && token.length > 0 ? token : undefined
+  const fromHeader = Array.isArray(raw) ? raw[0] : raw
+  return fromHeader && fromHeader.length > 0 ? fromHeader : undefined
+}
+
+/**
+ * 判断来源地址是否属于本机回环（导出以便单测）。
+ *
+ * Node 在双栈 socket 上把 IPv4 来源记成 IPv4-mapped IPv6（`::ffff:127.0.0.1`），
+ * 因此这一形式也要判为回环。
+ */
+export function isLoopbackAddress(remoteAddress: string | undefined): boolean {
+  if (!remoteAddress) return false
+  const address = remoteAddress.trim().toLowerCase()
+  if (!address) return false
+  if (address === '::1') return true
+  const mapped = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address
+  return mapped === '127.0.0.1' || mapped.startsWith('127.')
 }
 
 /** 发送 JSON 响应。 */
@@ -261,9 +339,35 @@ export function createMockServer(): MockServer {
   /** 本实例签发的 token（每个 mock 实例独立）。 */
   const tokens = new Set<string>()
 
-  /** 歌单元数据（封面 / 描述 / 时间戳），与 `state.playlists` 分开存放以保持 MockState 的既定形状。 */
-  const playlistMeta = new Map<string, RawPlaylist>()
-  for (const playlist of PLAYLISTS) playlistMeta.set(playlist.guid, { ...playlist })
+  /**
+   * 歌单元数据（封面 / 描述 / 时间戳），与 `state.playlists` 分开存放以保持 MockState 的既定形状。
+   *
+   * **不含 `name`**：歌单名称以 `state.playlists` 为唯一真相源，这里再存一份就是会漂移的死字段。
+   */
+  const playlistMeta = new Map<string, PlaylistMeta>()
+  for (const playlist of PLAYLISTS) {
+    playlistMeta.set(playlist.guid, {
+      guid: playlist.guid,
+      coverId: playlist.coverId,
+      trackCount: playlist.trackCount,
+      description: playlist.description,
+      createdAt: playlist.createdAt,
+      updatedAt: playlist.updatedAt,
+    })
+  }
+
+  /**
+   * 单调递增的 ISO 时间戳。
+   *
+   * 同一毫秒内的两次写回要能被区分（`playlist/update` 必须刷新 `updatedAt`），
+   * 因此这里保证返回值**严格递增**（落在同一毫秒时人为 +1ms）。
+   */
+  let lastTimestampMs = 0
+  const nextTimestamp = (): string => {
+    const now = Date.now()
+    lastTimestampMs = now > lastTimestampMs ? now : lastTimestampMs + 1
+    return new Date(lastTimestampMs).toISOString()
+  }
 
   // ---- 工具（依赖上面的状态） ----
 
@@ -273,15 +377,14 @@ export function createMockServer(): MockServer {
   const playlistList = (): RawPlaylist[] =>
     [...state.playlists.values()].map((playlist) => {
       const meta = playlistMeta.get(playlist.guid)
-      const now = new Date().toISOString()
       return {
         guid: playlist.guid,
         name: playlist.name,
         coverId: meta?.coverId ?? null,
         trackCount: playlist.tracks.length,
         description: meta?.description ?? null,
-        createdAt: meta?.createdAt ?? now,
-        updatedAt: meta?.updatedAt ?? now,
+        createdAt: meta?.createdAt ?? null,
+        updatedAt: meta?.updatedAt ?? null,
       }
     })
 
@@ -294,8 +397,19 @@ export function createMockServer(): MockServer {
     return `p${max + 1}`
   }
 
-  const searchKeyword = (query: URLSearchParams): string =>
-    (query.get('q') ?? query.get('keyword') ?? '').trim().toLowerCase()
+  /**
+   * 搜索关键字。
+   *
+   * 缺 `q` / `q` 去空白后为空 → 返回 `undefined`（**不是空串**）：
+   * 空串会让 `includes('')` 对每条都为真，等于「成功返回全量」，
+   * 正好把「一次性拉全量曲库」的客户端 bug 掩盖掉（真实 NAS 是 17.3 万首）。
+   */
+  const searchKeyword = (query: URLSearchParams): string | undefined => {
+    const raw = query.get('q') ?? query.get('keyword')
+    if (raw === null) return undefined
+    const trimmed = raw.trim().toLowerCase()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
 
   // ---- 路由表（业务端点，均要求 token） ----
 
@@ -419,11 +533,10 @@ export function createMockServer(): MockServer {
       return
     }
     const guid = nextPlaylistGuid()
-    const now = new Date().toISOString()
+    const now = nextTimestamp()
     state.playlists.set(guid, { guid, name, tracks: [] })
     playlistMeta.set(guid, {
       guid,
-      name,
       coverId: null,
       trackCount: 0,
       description: null,
@@ -450,8 +563,9 @@ export function createMockServer(): MockServer {
       return
     }
     playlist.name = name
+    // 改名要刷新 updatedAt（否则 /playlist/list 会一直返回旧时间戳）。
     const meta = playlistMeta.get(guid)
-    if (meta) meta.name = name
+    if (meta) meta.updatedAt = nextTimestamp()
     sendJson(res, ok({ guid }))
   })
 
@@ -477,7 +591,16 @@ export function createMockServer(): MockServer {
       sendJson(res, err(1, '歌单不存在'))
       return
     }
-    for (const trackGuid of strArrayField(body, 'trackGUIDs')) {
+    const trackGuids = strArrayField(body, 'trackGUIDs')
+    // 逐个校验曲目存在性：不存在则整个请求失败（不部分写入），
+    // 否则 /playlist/list 的 trackCount 会与 /track/playlist-detail/list 的 total 永久不一致。
+    for (const trackGuid of trackGuids) {
+      if (!songByGuid(trackGuid)) {
+        sendJson(res, err(1, '歌曲不存在'))
+        return
+      }
+    }
+    for (const trackGuid of trackGuids) {
       if (!playlist.tracks.includes(trackGuid)) playlist.tracks.push(trackGuid)
     }
     sendJson(res, ok({ guid, trackCount: playlist.tracks.length }))
@@ -494,13 +617,25 @@ export function createMockServer(): MockServer {
       sendJson(res, err(1, '歌单不存在'))
       return
     }
-    const removing = new Set(strArrayField(body, 'trackGUIDs'))
-    playlist.tracks = playlist.tracks.filter((trackGuid) => !removing.has(trackGuid))
+    const removing = strArrayField(body, 'trackGUIDs')
+    for (const trackGuid of removing) {
+      if (!songByGuid(trackGuid)) {
+        sendJson(res, err(1, '歌曲不存在'))
+        return
+      }
+    }
+    const removingSet = new Set(removing)
+    playlist.tracks = playlist.tracks.filter((trackGuid) => !removingSet.has(trackGuid))
     sendJson(res, ok({ guid, trackCount: playlist.tracks.length }))
   })
 
   getRoutes.set(`${API_BASE}/search/track`, ({ res, query }) => {
     const keyword = searchKeyword(query)
+    if (!keyword) {
+      // 缺关键字 / 关键字为空 → 空列表（不返回全量）。
+      sendJson(res, ok(paginate<RawSong>([], query)))
+      return
+    }
     const hits = SONGS.filter(
       (song) =>
         song.title.toLowerCase().includes(keyword) ||
@@ -512,6 +647,10 @@ export function createMockServer(): MockServer {
 
   getRoutes.set(`${API_BASE}/search/album`, ({ res, query }) => {
     const keyword = searchKeyword(query)
+    if (!keyword) {
+      sendJson(res, ok(paginate<RawAlbum>([], query)))
+      return
+    }
     const hits = ALBUMS.filter(
       (album) =>
         album.name.toLowerCase().includes(keyword) ||
@@ -522,6 +661,10 @@ export function createMockServer(): MockServer {
 
   getRoutes.set(`${API_BASE}/search/artist`, ({ res, query }) => {
     const keyword = searchKeyword(query)
+    if (!keyword) {
+      sendJson(res, ok(paginate<RawArtist>([], query)))
+      return
+    }
     const hits = ARTISTS.filter((artist) => artist.name.toLowerCase().includes(keyword))
     sendJson(res, ok(paginate(hits, query)))
   })
@@ -540,6 +683,13 @@ export function createMockServer(): MockServer {
     const path = url.pathname.replace(/\/+$/, '') || '/'
     const method = (req.method ?? 'GET').toUpperCase()
     const query = url.searchParams
+
+    // 回环守卫：socket 监听所有网卡（见文件头），非本机来源一律拒绝，
+    // 避免这个「口令 x 即可登录」的 dev 服务被同网段机器访问。
+    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+      sendJson(res, err(1, '仅允许本机访问'))
+      return
+    }
 
     // 免 token 端点：health
     if (method === 'GET' && path === `${API_BASE}/health`) {
@@ -571,7 +721,16 @@ export function createMockServer(): MockServer {
       return
     }
 
-    // 其余端点一律要求 music-token 头（缺失或不匹配 → 业务码 99999，HTTP 仍是 200）。
+    // 未知路径先判 404（业务码非 0），**再**走 token 闸门：
+    // 否则客户端把路径写错时看到的是「token 失效」，会白白触发一次静默续期再重试。
+    const known = getRoutes.has(path) || postRoutes.has(path)
+    if (!known) {
+      sendJson(res, err(404, '接口不存在'))
+      return
+    }
+
+    // 其余端点一律要求凭证（真实 NAS 从 Cookie 头读 `music-token`）；
+    // 缺失或不匹配 → 业务码 99999，HTTP 仍是 200。
     const token = readToken(req)
     if (!token || !tokens.has(token)) {
       sendJson(res, err(CODE_TOKEN_EXPIRED, 'invalid token'))
@@ -591,8 +750,7 @@ export function createMockServer(): MockServer {
     const routes = method === 'GET' ? getRoutes : method === 'POST' ? postRoutes : undefined
     const handler = routes?.get(path)
     if (!handler) {
-      const known = getRoutes.has(path) || postRoutes.has(path)
-      sendJson(res, known ? err(405, '请求方法不支持') : err(404, '接口不存在'))
+      sendJson(res, err(405, '请求方法不支持'))
       return
     }
     handler({ res, query, body, token })
