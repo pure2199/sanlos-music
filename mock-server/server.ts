@@ -24,6 +24,10 @@
 // （见 `electron/sign.ts` 的 `buildCookie()`；中继链路还在同一个 Cookie 头里带 `mode=relay`，mock 忽略它）。
 // mock 额外容忍一个独立的 `music-token:` 请求头（仅调试便利），两者同时存在时以 Cookie 为准。
 // 免凭证的端点只有 `/music/api/v1/health`、`/sys/config`、`/music/api/v1/user/password-login`。
+//
+// 播放历史：`GET /music/api/v1/play-history/list`（实测确认端点存在、默认 50 条、total=414），
+// 但**条目字段形状未实测**——mock 返回的是占位形状（`guid` + `playTime` + 内嵌 `track`），
+// Task 16 需按真实响应校准。
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
@@ -40,6 +44,7 @@ import {
   GENRES,
   INITIAL_PLAYLIST_TRACKS,
   LYRICS,
+  PLAY_HISTORY,
   PLAYLISTS,
   SONGS,
   TRACK_GENRES,
@@ -68,6 +73,29 @@ const VALID_PASSWORD = 'x'
 /** mock 的正确口令（SHA-256 小写十六进制），供发送摘要的客户端使用。 */
 const VALID_PASSWORD_SHA256 =
   '2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881'
+
+/**
+ * WHATWG fetch 的**禁用端口**清单（`fetch` 规范附录 B）。
+ *
+ * 这些端口有协议语义（FTP/SMTP/IMAP/…），规范禁止脚本用 `fetch` 访问它们：
+ * 打过去会直接抛 `TypeError: fetch failed` / `Error: bad port`，**请求根本不会发出**。
+ *
+ * 为什么 mock 要专门避开：本机用 `listen(0)` 让系统分配端口，而 Windows 的动态端口范围
+ * 默认从 **1024** 起（`netsh int ipv4 show dynamicport tcp`），系统又是**顺序往上**分配的——
+ * 一次测试跑出四十来个 mock server，就很容易从 9xxx 一路分配到 **10080**（本清单内），
+ * 于是那个 server 变成「谁都连不上」，表现为随机飘红的 `bad port`。
+ * 显式避开即可根除（而不是让测试去重试）。
+ */
+export const FETCH_BLOCKED_PORTS: ReadonlySet<number> = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 77, 79, 87, 95, 101, 102, 103,
+  104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512,
+  513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 564, 567, 587, 601, 636, 989, 990,
+  993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4160, 5060, 5061, 6000, 6566, 6665, 6666, 6667,
+  6668, 6669, 6697, 10080,
+])
+
+/** 分配端口的最大尝试次数（落在禁用端口上就换一个）。 */
+const MAX_PORT_ATTEMPTS = 10
 
 /** `/sys/config` 的返回内容。 */
 const SYS_CONFIG = {
@@ -676,6 +704,11 @@ export function createMockServer(): MockServer {
     sendJson(res, ok(paginate(list, query)))
   })
 
+  // 播放历史（实测确认的端点；条目形状未实测，见 fixtures 的说明）。
+  getRoutes.set(`${API_BASE}/play-history/list`, ({ res, query }) => {
+    sendJson(res, ok(paginate(PLAY_HISTORY, query)))
+  })
+
   // ---- 请求处理 ----
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -756,19 +789,34 @@ export function createMockServer(): MockServer {
     handler({ res, query, body, token })
   }
 
-  const server = createServer((req, res) => {
+  const requestHandler = (req: IncomingMessage, res: ServerResponse): void => {
     handle(req, res).catch((cause: unknown) => {
       sendJson(
         res,
         err(1, `mock 内部错误：${cause instanceof Error ? cause.message : String(cause)}`),
       )
     })
-  })
+  }
 
   // 端口 0 = 由系统分配；不带 host 时绑定是同步的，address() 立刻可用。
-  server.listen(0)
-  const address = server.address()
-  const port = typeof address === 'object' && address !== null ? address.port : 0
+  // 落在 fetch 的「禁用端口」上就关掉重开（系统会分配下一个端口）——
+  // 见 FETCH_BLOCKED_PORTS 的说明：这类端口 `fetch` 根本不让连。
+  let server = createServer(requestHandler)
+  let port = 0
+  for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt += 1) {
+    server.listen(0)
+    const address = server.address()
+    port = typeof address === 'object' && address !== null ? address.port : 0
+    if (!FETCH_BLOCKED_PORTS.has(port)) break
+    server.closeAllConnections?.()
+    server.closeIdleConnections?.()
+    try {
+      server.close()
+    } catch {
+      // 未监听时 close() 会抛 ERR_SERVER_NOT_RUNNING，忽略即可。
+    }
+    server = createServer(requestHandler)
+  }
 
   let closed = false
 

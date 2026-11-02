@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { networkInterfaces } from 'node:os'
 import {
   createMockServer,
+  FETCH_BLOCKED_PORTS,
   isLoopbackAddress,
   resolvePage,
   resolvePageSize,
@@ -233,6 +234,7 @@ describe('mock server 登录与 token', () => {
       '/search/album',
       '/search/artist',
       '/lyric/list',
+      '/play-history/list',
     ]
     for (const path of paths) {
       // 凭证闸门发生在方法分发之前，因此 GET / POST 都应返回 99999。
@@ -627,6 +629,48 @@ describe('mock server 搜索、歌词与音频流', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 播放历史（Task 6 补齐的端点）
+// ---------------------------------------------------------------------------
+
+describe('mock server 播放历史', () => {
+  it('播放历史端点返回 { list, total }，条目内嵌原始歌曲', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const r = await getJson(s, `${API}/play-history/list`, token)
+    expect(r.code).toBe(0)
+    expect(Array.isArray(r.data.list)).toBe(true)
+    expect(r.data.total).toBe(4)
+    expect(r.data.list[0].guid).toBe('h1')
+    // 条目内嵌的是服务端原始歌曲形状（guid / title / duration 毫秒），不是领域模型。
+    expect(r.data.list[0].track.guid).toBe('t1')
+    expect(r.data.list[0].track.title).toBe('示例曲目 1')
+    expect(r.data.list[0].track.duration).toBe(185000)
+    s.close()
+  })
+
+  it('播放历史支持服务端分页，total 始终是全量', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const p1 = await getJson(s, `${API}/play-history/list?page=1&size=2`, token)
+    const p2 = await getJson(s, `${API}/play-history/list?page=2&size=2`, token)
+    expect(p1.data.list.length).toBe(2)
+    expect(p2.data.list.length).toBe(2)
+    expect(p1.data.total).toBe(4)
+    expect(p2.data.total).toBe(4)
+    expect(p1.data.list[0].guid).toBe('h1')
+    expect(p2.data.list[0].guid).toBe('h3')
+    s.close()
+  })
+
+  it('播放历史端点需要凭证', async () => {
+    const s = createMockServer()
+    const r = await getJson(s, `${API}/play-history/list`)
+    expect(r.code).toBe(99999)
+    s.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 端点清单核对
 // ---------------------------------------------------------------------------
 
@@ -652,6 +696,7 @@ describe('mock server 端点清单', () => {
       '/search/album',
       '/search/artist',
       '/lyric/list',
+      '/play-history/list',
     ]
     for (const path of getPaths) {
       const r = await getJson(s, `${API}${path}`, token)
@@ -752,6 +797,18 @@ describe('mock server 只允许本机访问', () => {
 // ---------------------------------------------------------------------------
 
 describe('mock server 生命周期', () => {
+  it('端口不会落在 fetch 的禁用端口上（否则 fetch 直接报 bad port）', async () => {
+    // 本机动态端口范围从 1024 起且顺序往上分配，一次测试跑出四十来个 mock server
+    // 就可能路过 10080 这类禁用端口——落在上面时 fetch 根本不让连（随机飘红）。
+    const s = createMockServer()
+    const port = Number(new URL(s.url).port)
+    expect(FETCH_BLOCKED_PORTS.has(port)).toBe(false)
+    expect(port).toBeGreaterThan(0)
+    // 该端口确实可用。
+    expect((await getJson(s, `${API}/health`)).code).toBe(0)
+    s.close()
+  })
+
   it('close() 之后端口释放，请求不再可达', async () => {
     const s = createMockServer()
     const url = s.url

@@ -6,6 +6,7 @@
 //
 // 实测要点（与真实 NAS 保持一致）：
 // - `duration` 与 `audioSpec.duration` 的单位是**毫秒**；
+// - `audioSpec.bitrate` 的单位是**比特/秒（bps）**（领域模型 `Song.bitrate` 是 kbps，映射时 ÷1000）；
 // - `coverId` 形如 `cover_<16 位小写十六进制>`，无封面时为 `null`；
 // - `year` / `trackNo` / `discNo` / `releaseDate` 可能为 `null`（不是 0）；
 // - 歌曲对象内的 `genres` 恒为空数组，风格需单独查询；
@@ -27,7 +28,7 @@ export interface RawAudioSpec {
   sampleRate?: number | null
   /** 声道数。 */
   channel?: number | null
-  /** 比特率（kbps）。 */
+  /** 比特率（**bps**，比特/秒）。 */
   bitrate?: number | null
   /** 编码格式。 */
   codec?: string | null
@@ -151,6 +152,22 @@ export interface RawLyric {
   offset: number
 }
 
+/**
+ * 服务端原始播放历史条目。
+ *
+ * ⚠️ **占位形状**：真实 NAS 的播放历史条目字段**只实测到「端点存在、默认 50 条、total=414」**，
+ *    具体字段形状未实测。本形状（`guid` + `playTime` + 内嵌 `track`）是按常见实现推导的，
+ *    Task 16 必须按真实响应校准。
+ */
+export interface RawHistoryItem {
+  /** 条目 guid。 */
+  guid: string
+  /** 播放时间。 */
+  playTime: string
+  /** 对应的歌曲（服务端原始 JSON）。 */
+  track: RawSong
+}
+
 // ---------------------------------------------------------------------------
 // 曲目（8 首，t1–t8）
 //
@@ -175,7 +192,7 @@ export const SONGS: RawSong[] = [
       bitDepth: 16,
       sampleRate: 44100,
       channel: 2,
-      bitrate: 900,
+      bitrate: 900000,
       codec: 'flac',
       container: 'flac',
       duration: 185000,
@@ -203,7 +220,7 @@ export const SONGS: RawSong[] = [
       bitDepth: 16,
       sampleRate: 44100,
       channel: 2,
-      bitrate: 320,
+      bitrate: 320000,
       codec: 'mp3',
       container: 'mp3',
       duration: 212500,
@@ -255,7 +272,7 @@ export const SONGS: RawSong[] = [
       bitDepth: 24,
       sampleRate: 96000,
       channel: 2,
-      bitrate: 1400,
+      bitrate: 1400000,
       codec: 'flac',
       container: 'flac',
       duration: 240000,
@@ -280,7 +297,7 @@ export const SONGS: RawSong[] = [
       bitDepth: 16,
       sampleRate: 44100,
       channel: 2,
-      bitrate: 900,
+      bitrate: 900000,
       codec: 'flac',
       container: 'flac',
       duration: 176400,
@@ -305,7 +322,7 @@ export const SONGS: RawSong[] = [
       bitDepth: 16,
       sampleRate: 44100,
       channel: 2,
-      bitrate: 320,
+      bitrate: 320000,
       codec: 'mp3',
       container: 'mp3',
       duration: 203000,
@@ -330,7 +347,7 @@ export const SONGS: RawSong[] = [
       bitDepth: 16,
       sampleRate: 44100,
       channel: 2,
-      bitrate: 900,
+      bitrate: 900000,
       codec: 'flac',
       container: 'flac',
       duration: 221000,
@@ -355,7 +372,7 @@ export const SONGS: RawSong[] = [
     audioSpec: {
       bitDepth: 16,
       channel: 2,
-      bitrate: 256,
+      bitrate: 256000,
       codec: 'mp3',
       container: 'mp3',
       duration: 165000,
@@ -476,6 +493,28 @@ export const INITIAL_PLAYLIST_TRACKS: Record<string, string[]> = {
   p1: ['t1', 't2'],
   p2: ['t6'],
 }
+
+// ---------------------------------------------------------------------------
+// 播放历史（4 条）
+//
+// ⚠️ **占位形状**：真实 NAS 的播放历史条目字段未实测（只确认了「端点存在、默认 50 条、total=414」），
+//    这里按「条目内嵌一首原始歌曲」推导，Task 16 需按真实响应校准。
+// ---------------------------------------------------------------------------
+
+/** 按 guid 取原始歌曲（取不到直接抛错——fixtures 写错了要立刻暴露，不能静默产生空洞条目）。 */
+function songByGuid(guid: string): RawSong {
+  const song = SONGS.find((item) => item.guid === guid)
+  if (!song) throw new Error(`fixtures 里没有 guid 为 ${guid} 的歌曲`)
+  return song
+}
+
+/** 示例播放历史条目集合。 */
+export const PLAY_HISTORY: RawHistoryItem[] = [
+  { guid: 'h1', playTime: '2026-01-05T09:00:00.000Z', track: songByGuid('t1') },
+  { guid: 'h2', playTime: '2026-01-05T09:30:00.000Z', track: songByGuid('t3') },
+  { guid: 'h3', playTime: '2026-01-05T10:15:00.000Z', track: songByGuid('t5') },
+  { guid: 'h4', playTime: '2026-01-05T11:45:00.000Z', track: songByGuid('t7') },
+]
 
 // ---------------------------------------------------------------------------
 // 歌词
