@@ -564,6 +564,29 @@ FN 连接参数返回：
 3. **`/music/api/v1/health` 实测返回的是 HTML（HTTP 200），不是 JSON** —— 说明该路径在 NAS 上并不存在，NAS 的 SPA 回退把首页 HTML 返回了。这进一步坐实实测修正 M5：**探测可达性只能看 HTTP 状态码**，任何「解析业务码」的写法在这里都会失效。
 4. **登录响应的 `data` 实测为 `{ userToken, user: { guid, name, role, lastAccessedAt, createdAt, updatedAt } }`** —— **不含 `deviceId`**。客户端必须保留自己生成的 deviceId（Task 7 已按 `data.deviceId ?? 请求时的 deviceId` 实现，正确）。
 
+### 15.9 证书放行的运行时事实（Electron 32.3.3 / Chromium 128 实测）
+
+Task 10 实现后在真实 Electron 主进程里做了一组对照实验，结论如下（**这决定了「证书放行」怎么实现**）：
+
+| 实验 | 结果 |
+| --- | --- |
+| `net.fetch` 能否设置 `Cookie` 头（浏览器 Fetch 规范里 `Cookie` 是 forbidden header） | **能** —— 实测请求头原样到达：`cookie: "music-token=ABC123; mode=relay"`、`authx` 也在 |
+| `net.fetch` 是否走 `session.defaultSession.setCertificateVerifyProc` | **走** —— verify proc 被调用（`hostname=localhost`）；回调 `0` → 放行成功，回调 `-3` → `net::ERR_CERT_AUTHORITY_INVALID` |
+| 第一次证书校验失败后，再信任并重试同一 `host:port` | **仍然失败** —— Chromium 按 host:port 缓存证书错误 |
+| `session.clearCache()` 能否清掉该缓存 | **不能** |
+| `session.clearHostResolverCache()` 能否清掉该缓存 | **不能** |
+| **换一个 Electron 分区（partition）** 后重试同一 `host:port` | **成功** —— 新分区有独立的证书错误缓存 |
+
+**由此确定的设计（Task 9b）**：
+
+1. 主进程对 NAS 的出网流量改走 **Electron 分区 session**（`session.fromPartition(name).fetch(...)`），而不是 Node 的全局 `fetch`（undici）—— 只有 Chromium 栈才受 `setCertificateVerifyProc` 管辖。
+2. 分区名**带一个信任版本号**，形如 `fn-nas-v<epoch>`：每次**信任集合变化**（用户新增/移除受信 host）就 `epoch++` 并改用新分区，从而绕开旧分区里缓存的证书错误。新分区用 `{ cache: false }`。
+3. **用户输入的服务器 host 必须在第一次请求它之前就登记进信任集合**（用户显式输入即显式信任），否则第一次握手失败会把错误缓存住。
+4. FN ID 探测阶段候选 host 尚未受信 → 自签 HTTPS 候选会失败并缓存错误；用户放行后因 `epoch++` 换了新分区，该 host 立即可用。
+5. 未受信的 host 一律走 Chromium 默认校验（verify proc 返回 `-3`）——**绝不**全局 `callback(0)`。
+
+**影响面**：真实用户的当前链路是**中继** `https://<fnId>.fnos.net`（实测证书有效，Node fetch 直接可用），局域网 HTTP（5666）也不需要证书；只有「HTTPS 直连 + 自签证书」这一种场景依赖本条。
+
 <deliver-assets>
 <media type="file" src="C:\Users\<USER>\.minimax\sessions\<SESSION>\workspace\docs\superpowers\specs\2026-11-02-fnmusic-desktop-design.md" caption="设计规格（含真实 NAS 实测校验、7 条规格修正与字段形状实测 §15.7）" />
 </deliver-assets>

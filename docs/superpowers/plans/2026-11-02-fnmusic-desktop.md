@@ -732,6 +732,43 @@ describe('TrustedHosts', () => {
 
 ---
 
+### Task 9b: 主进程 NAS 流量走 Chromium 分区栈（让证书放行真正生效）
+
+> **为什么插在 Task 9 与 Task 10 之间**（控制器，2026-11-02）：Task 10 审查发现 `setCertificateVerifyProc` 挂在 Chromium 网络栈，而会话层 / 探测 / 代理走的是 Node 的全局 `fetch`（undici）—— Chromium 栈**从不连接 NAS host**，证书放行整套机制空转。实测依据见规格 §15.9，设计已确定，故拆为独立任务。**当前用户的链路是中继（证书有效）且局域网走 HTTP，故本任务不阻塞 Task 10b 的界面开发，但必须在真实 NAS 验收前完成。**
+
+**Files:**
+- Create: `electron/http.ts`
+- Modify: `electron/session.ts`, `electron/probe.ts`, `electron/proxy.ts`, `electron/ipc.ts`, `electron/main.ts`
+- Test: `test/http-stack.test.ts`
+
+**Interfaces:**
+- Consumes: `TrustedHosts`（Task 9）、`SessionManager`（Task 7）
+- Produces:
+  - `createHttpStack(opts?: { trusted?: TrustedHosts; epoch?: number; partitionPrefix?: string; fetchImpl?: typeof fetch }): HttpStack`
+  - `interface HttpStack { fetch(input: string | URL, init?: RequestInit): Promise<Response>; bumpTrustEpoch(): void }`
+
+- [ ] **Step 1: 写失败测试** — 覆盖：分区名随 `epoch` 变化；`bumpTrustEpoch()` 后用新分区；Electron 不可用时回落到注入的 `fetchImpl`；verify proc 按 `trusted.verify(hostname)` 放行/拒绝。
+
+- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 3: 实现 electron/http.ts**
+
+- 分区名 `fn-nas-v<epoch>`，用 `session.fromPartition(name, { cache: false })`。
+- 每个分区注册 `setCertificateVerifyProc((request, callback) => { callback(trusted.verify(request.hostname)) })`。
+- `bumpTrustEpoch()` → `epoch++`，此后用新分区（**绕开旧分区缓存的证书错误**，实测 `clearCache()`/`clearHostResolverCache()` 都无效，只有换分区才行）。
+- Electron 不可用（单测环境）→ 回落到 `opts.fetchImpl` 或全局 `fetch`。
+- 模块顶层不得 import Electron；Electron 相关调用一律惰性解析。
+
+- [ ] **Step 4: 把主进程所有 NAS 出网点切过来**
+
+`electron/session.ts`（`request` / `passwordLogin`）、`electron/probe.ts`（探测）、`electron/proxy.ts`（二进制流式路径）、`electron/ipc.ts`（`auth:server-info`）统一改用 `HttpStack.fetch`。各模块保留原有的 `fetchImpl` 注入点（单测不得依赖 Electron）。
+
+`electron/main.ts`：创建 `HttpStack`（与 `TrustedHosts` 共享同一实例）；**每次信任集合变化**（用户新增受信 host）后调用 `bumpTrustEpoch()`。
+
+- [ ] **Step 5: 运行测试确认通过**
+- [ ] **Step 6: 提交** — `git commit -m "feat: 主进程 NAS 流量走 Chromium 分区栈以支持证书放行"`
+
+---
+
 ### Task 10: 主进程认证 IPC 与 `window.fn` 桥
 
 > **计划顺序修正（控制器，2026-11-02）**：原 Task 10 只列渲染进程文件，却要求消费 `electron/ipc.ts` 的 `auth:*` 处理器并产出 `electron/preload.ts` 暴露的 `window.fn` —— 而 `electron/ipc.ts` 原计划在 Task 17 才创建。**登录界面没有主进程侧就是空壳**，故把主进程认证链路提前到本任务，Task 17 改为在已有 `electron/ipc.ts` 上追加托盘/SMTC 处理器。渲染进程的登录页与状态管理拆到 **Task 10b**。
