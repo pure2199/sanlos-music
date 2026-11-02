@@ -1,38 +1,57 @@
 // 歌单接口。
 //
 // 体量例外：实测该账号歌单 **2 个**（规格 §15.3 记载该账号歌单为空），
-// 歌单列表按「体量小、允许一次取回」处理：单次请求 `size=2000`（服务端上限），
-// 避免服务端默认每页 200 带来的静默截断。
+// 但服务端默认页长是 200、且 `size` 上限只在 `track/list` 上验过——
+// 歌单列表同样采用**分页循环取全**（每页 200 条，按 `total` 终止，带安全页数上限），
+// 不依赖「一次 size=2000 就能拿全」的假设。
+//
 // **歌单里的歌曲**是曲库数据（可能上千首），因此仍然分页。
 
 import type { Playlist, Song } from '../../shared/types'
-import { apiCall, mapPlaylist, mapSong, MAX_PAGE_SIZE, normalizePage } from './client'
+import {
+  apiCall,
+  DEFAULT_PAGE_SIZE,
+  fetchAllByPaging,
+  mapPlaylist,
+  mapSong,
+  normalizePage,
+  normalizePageNumber,
+  normalizePageSize,
+} from './client'
 import type { Page, RawPage, RawPlaylist, RawSong } from './types'
 
-/** 列表型接口的默认每页条数。 */
-const DEFAULT_PAGE_SIZE = 50
+/** 全量取回时的单页条数（与服务端默认页长一致）。 */
+const FULL_FETCH_PAGE_SIZE = 200
+
+/** 全量取回的安全上限（页数）。 */
+const MAX_FULL_FETCH_PAGES = 50
 
 /** 歌单相关接口。 */
 export const playlistApi = {
-  /** 歌单列表（一次取回全部；实测 2 个）。 */
+  /** 歌单列表（分页循环取全）。 */
   async list(): Promise<Playlist[]> {
-    const raw = normalizePage<RawPlaylist>(
-      await apiCall<RawPage<RawPlaylist>>('/playlist/list', { query: { size: MAX_PAGE_SIZE } }),
-    )
-    return raw.list.map((playlist) => mapPlaylist(playlist))
+    return fetchAllByPaging<RawPlaylist, Playlist>('/playlist/list', mapPlaylist, {
+      pageSize: FULL_FETCH_PAGE_SIZE,
+      maxPages: MAX_FULL_FETCH_PAGES,
+    })
   },
 
   /** 某歌单里的歌曲（分页）。 */
   async songs(id: string, page = 1, size = DEFAULT_PAGE_SIZE): Promise<Page<Song>> {
     const raw = normalizePage<RawSong>(
       await apiCall<RawPage<RawSong>>('/track/playlist-detail/list', {
-        query: { playlistGUID: id, page, size },
+        query: { playlistGUID: id, page: normalizePageNumber(page), size: normalizePageSize(size) },
       }),
     )
     return { list: raw.list.map((song) => mapSong(song)), total: raw.total }
   },
 
-  /** 新建歌单，返回新歌单的 guid（服务端不回显名字，查不到时返回空串）。 */
+  /**
+   * 新建歌单，返回新歌单的 guid（服务端不回显名字，查不到时返回空串）。
+   *
+   * ⚠️ **返回形状未实测**（客户端按「回显 `guid`，缺失则兜底 `''`」处理），
+   *    真实响应校准项见联调清单 **Step J**。
+   */
   async create(name: string): Promise<string> {
     const data = await apiCall<{ guid?: string }>('/playlist/create', {
       method: 'POST',

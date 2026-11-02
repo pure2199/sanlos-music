@@ -1,5 +1,17 @@
 import { describe, it, expect, vi, afterEach, beforeAll, beforeEach, afterAll } from 'vitest'
-import { ApiError, apiCall, mapAlbum, mapArtist, mapPlaylist, mapSong } from '../src/api/client'
+import {
+  ApiError,
+  ApiNetworkError,
+  apiCall,
+  mapAlbum,
+  mapArtist,
+  mapLyric,
+  mapPlaylist,
+  mapSong,
+  normalizePageNumber,
+  normalizePageSize,
+  toIsoTimestamp,
+} from '../src/api/client'
 import { libraryApi } from '../src/api/library'
 import { favoriteApi } from '../src/api/favorite'
 import { playlistApi } from '../src/api/playlist'
@@ -20,6 +32,10 @@ import { createMockServer, type MockServer } from '../mock-server/server'
 // - 单元段：桩掉 `fetch`，钉死「URL / 方法 / 请求体 / 响应解析 / 映射规则」；
 // - 集成段：真的起一个 mock server，用 fetch 包装器把 `fnm://srv/...` 翻译成
 //   `<mock>/music/api/v1/...` 并补上服务端要求的凭据，走真实 HTTP。
+//
+// ⚠️ 字段形状以**规格 §15.7（真实 NAS 实测）**为准：
+//   歌曲带 `isFavorite`；专辑**没有 `year`**（只有 `releaseDate`）；播放历史条目**就是歌曲对象**；
+//   `createdAt` / `updatedAt` 是 **Unix 秒**（领域层归一为 ISO 串）。
 // ---------------------------------------------------------------------------
 
 /** 一次 fetch 调用的快照。 */
@@ -71,6 +87,23 @@ function stubEnvelopeFetch(envelope: unknown, status = 200): FetchCall[] {
     calls.push({ url, ...snapshot(init) })
     const text = typeof envelope === 'string' ? envelope : JSON.stringify(envelope)
     return new Response(text, { status })
+  })
+  return calls
+}
+
+/**
+ * 装一个**按次序**返回不同信封的 fetch 桩（用于测分页循环）。
+ *
+ * 序列用完后重复最后一个。
+ */
+function stubSequenceFetch(payloads: unknown[]): FetchCall[] {
+  const calls: FetchCall[] = []
+  let index = 0
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    calls.push({ url, ...snapshot(init) })
+    const payload = payloads[Math.min(index, payloads.length - 1)]
+    index += 1
+    return new Response(JSON.stringify(payload), { status: 200 })
   })
   return calls
 }
@@ -143,9 +176,19 @@ describe('apiCall', () => {
     await expect(apiCall('/album/list')).rejects.toThrow('服务器响应异常（HTTP 502）')
   })
 
-  it('响应是 JSON 但不是信封时同样抛 HTTP 异常', async () => {
+  it('响应是 JSON 但不是信封时说「响应不是预期信封」（不报 HTTP 异常）', async () => {
     stubEnvelopeFetch({ hello: 'world' }, 200)
-    await expect(apiCall('/album/list')).rejects.toThrow('服务器响应异常（HTTP 200）')
+    await expect(apiCall('/album/list')).rejects.toThrow('响应不是预期信封')
+  })
+
+  it('fetch 自身抛错时包装成 ApiNetworkError（保留 cause）', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('fetch failed')
+    })
+    const error = await apiCall('/album/list').catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(ApiNetworkError)
+    expect((error as ApiNetworkError).message).toContain('无法连接音乐服务')
+    expect((error as ApiNetworkError).cause).toBeInstanceOf(TypeError)
   })
 
   it('data 缺失时返回空对象', async () => {
@@ -194,6 +237,61 @@ describe('apiCall', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 分页参数归一
+// ---------------------------------------------------------------------------
+
+describe('分页参数归一', () => {
+  it('页码非法值回落 1，小数向下取整', () => {
+    expect(normalizePageNumber(0)).toBe(1)
+    expect(normalizePageNumber(-3)).toBe(1)
+    expect(normalizePageNumber(Number.NaN)).toBe(1)
+    expect(normalizePageNumber(Number.POSITIVE_INFINITY)).toBe(1)
+    expect(normalizePageNumber(2.9)).toBe(2)
+    expect(normalizePageNumber(5)).toBe(5)
+  })
+
+  it('每页条数非法值回落默认，超上限截断到 2000', () => {
+    expect(normalizePageSize(0)).toBe(50)
+    expect(normalizePageSize(-1)).toBe(50)
+    expect(normalizePageSize(Number.NaN)).toBe(50)
+    expect(normalizePageSize(30.9)).toBe(30)
+    expect(normalizePageSize(5000)).toBe(2000)
+    expect(normalizePageSize(200)).toBe(200)
+  })
+
+  it('业务模块在入口就归一（不会把 page=0 / size=NaN 发出去）', async () => {
+    const calls = stubEnvelopeFetch({ code: 0, msg: '', data: { list: [], total: 0 } })
+    await libraryApi.songs(0, 0)
+    expect(calls[0]?.url).toBe('fnm://srv/track/list?page=1&size=50')
+    await libraryApi.songs(Number.NaN, -5)
+    expect(calls[1]?.url).toBe('fnm://srv/track/list?page=1&size=50')
+    await libraryApi.songs(2.7, 5000)
+    expect(calls[2]?.url).toBe('fnm://srv/track/list?page=2&size=2000')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 时间归一
+// ---------------------------------------------------------------------------
+
+describe('时间归一（Unix 秒 → ISO 8601）', () => {
+  it('Unix 秒转 ISO 串', () => {
+    expect(toIsoTimestamp(1792563278)).toBe(new Date(1792563278 * 1000).toISOString())
+  })
+
+  it('已经是字符串就原样保留', () => {
+    expect(toIsoTimestamp('2026-01-01T00:00:00.000Z')).toBe('2026-01-01T00:00:00.000Z')
+  })
+
+  it('缺失 / 非法值归一为 null', () => {
+    expect(toIsoTimestamp(null)).toBeNull()
+    expect(toIsoTimestamp(undefined)).toBeNull()
+    expect(toIsoTimestamp(Number.NaN)).toBeNull()
+    expect(toIsoTimestamp('')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 映射规则
 // ---------------------------------------------------------------------------
 
@@ -214,9 +312,25 @@ describe('mapSong', () => {
     expect(s.bitrate).toBe(900)
   })
 
+  it('favorite 取服务端 isFavorite（实测真实歌曲带该字段）', () => {
+    expect(mapSong({ guid: 'g', title: 'T', isFavorite: true }).favorite).toBe(true)
+    expect(mapSong({ guid: 'g', title: 'T', isFavorite: false }).favorite).toBe(false)
+  })
+
+  it('isFavorite 缺失 / 非布尔时按未收藏处理', () => {
+    expect(mapSong({ guid: 'g', title: 'T' }).favorite).toBe(false)
+    expect(mapSong({ guid: 'g', title: 'T', isFavorite: null }).favorite).toBe(false)
+  })
+
   it('合法封面（xxx_<hex>）原样保留，null 封面置空串', () => {
-    expect(mapSong({ guid: 'g', title: 'T', coverId: 'cover_0123456789abcdef' }).coverId).toBe(
-      'cover_0123456789abcdef',
+    expect(mapSong({ guid: 'g', title: 'T', coverId: 'track_0123456789abcdef' }).coverId).toBe(
+      'track_0123456789abcdef',
+    )
+    expect(mapSong({ guid: 'g', title: 'T', coverId: 'album_0123456789abcdef' }).coverId).toBe(
+      'album_0123456789abcdef',
+    )
+    expect(mapSong({ guid: 'g', title: 'T', coverId: 'artist_0123456789abcdef' }).coverId).toBe(
+      'artist_0123456789abcdef',
     )
     expect(mapSong({ guid: 'g', title: 'T', coverId: null }).coverId).toBe('')
     expect(mapSong({ guid: 'g', title: 'T' }).coverId).toBe('')
@@ -227,7 +341,7 @@ describe('mapSong', () => {
     const s = mapSong({
       guid: 'g',
       title: 'T',
-      audioSpec: { path: '/music/x/y.MP3' },
+      audioSpec: { path: '/vol02/1000-0-music/x/y.MP3' },
     })
     expect(s.codec).toBe('MP3')
   })
@@ -278,10 +392,6 @@ describe('mapSong', () => {
     expect(s.albumId).toBe('al1')
   })
 
-  it('favorite 恒为 false（收藏态由 favoriteApi 维护）', () => {
-    expect(mapSong({ guid: 'g', title: 'T' }).favorite).toBe(false)
-  })
-
   it('audioSpec 原样透传：duration 仍是毫秒、bitrate 仍是 bps', () => {
     const s = mapSong({
       guid: 'g',
@@ -292,16 +402,17 @@ describe('mapSong', () => {
         channel: 2,
         bitrate: 900000,
         codec: 'flac',
-        container: 'flac',
+        container: '',
         duration: 185000,
         format: 'flac',
-        path: '/music/sample/t1.flac',
+        path: '/vol02/1000-0-music/sample/t1.flac',
         size: 30000000,
       },
     })
     expect(s.audioSpec?.duration).toBe(185000)
     expect(s.audioSpec?.bitrate).toBe(900000)
-    expect(s.audioSpec?.path).toBe('/music/sample/t1.flac')
+    expect(s.audioSpec?.container).toBe('')
+    expect(s.audioSpec?.path).toBe('/vol02/1000-0-music/sample/t1.flac')
   })
 
   it('audioSpec 缺失时该字段缺省', () => {
@@ -309,14 +420,24 @@ describe('mapSong', () => {
   })
 })
 
-describe('mapAlbum / mapArtist / mapPlaylist', () => {
+describe('mapAlbum / mapArtist / mapPlaylist / mapLyric', () => {
   it('专辑：guid→id、name→title、coverId 无封面为 null、trackCount 缺失为 0', () => {
     const album = mapAlbum({ guid: 'al1', name: '专辑一' })
     expect(album.id).toBe('al1')
     expect(album.title).toBe('专辑一')
     expect(album.coverId).toBeNull()
     expect(album.trackCount).toBe(0)
-    expect(album.year).toBeNull()
+  })
+
+  it('专辑：year 由 releaseDate 前 4 位派生（实测专辑没有 year 字段）', () => {
+    expect(mapAlbum({ guid: 'al1', name: 'A', releaseDate: '2005-04-01' }).year).toBe(2005)
+    expect(mapAlbum({ guid: 'al1', name: 'A', releaseDate: '2011-05-20' }).year).toBe(2011)
+  })
+
+  it('专辑：releaseDate 缺失 / 形态不对时 year 为 null', () => {
+    expect(mapAlbum({ guid: 'al1', name: 'A', releaseDate: null }).year).toBeNull()
+    expect(mapAlbum({ guid: 'al1', name: 'A' }).year).toBeNull()
+    expect(mapAlbum({ guid: 'al1', name: 'A', releaseDate: '未知' }).year).toBeNull()
   })
 
   it('专辑：多歌手用 " / " 连接，artistId 取首个', () => {
@@ -348,6 +469,44 @@ describe('mapAlbum / mapArtist / mapPlaylist', () => {
     expect(playlist.coverId).toBeNull()
     expect(playlist.trackCount).toBe(0)
     expect(playlist.description).toBeNull()
+  })
+
+  it('歌单：createdAt / updatedAt 归一为 ISO 串（实测服务端给 Unix 秒）', () => {
+    const playlist = mapPlaylist({ guid: 'p1', name: '歌单一', createdAt: 1792563278, updatedAt: 1792563278 })
+    expect(playlist.createdAt).toBe(new Date(1792563278 * 1000).toISOString())
+    expect(playlist.updatedAt).toBe(new Date(1792563278 * 1000).toISOString())
+  })
+
+  it('歌单：缺失的时间字段归一为 null，字符串时间原样保留', () => {
+    expect(mapPlaylist({ guid: 'p1', name: 'x' }).createdAt).toBeNull()
+    expect(mapPlaylist({ guid: 'p1', name: 'x', createdAt: '2026-01-01T00:00:00.000Z' }).createdAt).toBe(
+      '2026-01-01T00:00:00.000Z',
+    )
+  })
+
+  it('歌词：时间归一为 ISO 串，isLRC / offset / content 原样', () => {
+    const lyric = mapLyric({
+      guid: 'ly1',
+      source: 'local',
+      content: '[00:00.00]歌词',
+      createdAt: 1792563278,
+      updatedAt: 1792563279,
+      isLRC: true,
+      offset: 12,
+    })
+    expect(lyric.createdAt).toBe(new Date(1792563278 * 1000).toISOString())
+    expect(lyric.updatedAt).toBe(new Date(1792563279 * 1000).toISOString())
+    expect(lyric.isLRC).toBe(true)
+    expect(lyric.offset).toBe(12)
+    expect(lyric.content).toBe('[00:00.00]歌词')
+  })
+
+  it('歌词：缺失的时间为 null，isLRC 缺失按 false，offset 缺失按 0', () => {
+    const lyric = mapLyric({ guid: 'ly1', source: 'local', content: 'x' })
+    expect(lyric.createdAt).toBeNull()
+    expect(lyric.updatedAt).toBeNull()
+    expect(lyric.isLRC).toBe(false)
+    expect(lyric.offset).toBe(0)
   })
 })
 
@@ -405,8 +564,8 @@ describe('各 API 方法的端点与参数', () => {
       method: 'GET',
     },
     {
-      name: 'libraryApi.genreSongs',
-      call: () => libraryApi.genreSongs('g1', 'Pop', 1, 10),
+      name: 'libraryApi.genreSongs（没有 name 参数，服务端只认 guid）',
+      call: () => libraryApi.genreSongs('g1', 1, 10),
       urls: ['fnm://srv/track/genre-detail/list?genreGUID=g1&page=1&size=10'],
       method: 'GET',
     },
@@ -423,9 +582,9 @@ describe('各 API 方法的端点与参数', () => {
       method: 'GET',
     },
     {
-      name: 'favoriteApi.list',
+      name: 'favoriteApi.list（分页循环取全，第一页 size=200）',
       call: () => favoriteApi.list(),
-      urls: ['fnm://srv/favorite-track/list?size=2000'],
+      urls: ['fnm://srv/favorite-track/list?page=1&size=200'],
       method: 'GET',
     },
     {
@@ -443,9 +602,9 @@ describe('各 API 方法的端点与参数', () => {
       body: { trackGUID: 't1' },
     },
     {
-      name: 'playlistApi.list',
+      name: 'playlistApi.list（分页循环取全，第一页 size=200）',
       call: () => playlistApi.list(),
-      urls: ['fnm://srv/playlist/list?size=2000'],
+      urls: ['fnm://srv/playlist/list?page=1&size=200'],
       method: 'GET',
     },
     {
@@ -515,14 +674,30 @@ describe('各 API 方法的端点与参数', () => {
     })
   }
 
-  it('searchApi.query 并发打三个搜索端点', async () => {
+  it('searchApi.query 并发打三个搜索端点（无条件透传分页参数）', async () => {
     const calls = stubEnvelopeFetch(listPayload)
-    await searchApi.query('示例')
+    await searchApi.query('示例', { page: 2, size: 30 })
     expect(calls.map((call) => call.url).sort()).toEqual([
-      'fnm://srv/search/album?q=%E7%A4%BA%E4%BE%8B',
-      'fnm://srv/search/artist?q=%E7%A4%BA%E4%BE%8B',
-      'fnm://srv/search/track?q=%E7%A4%BA%E4%BE%8B',
+      'fnm://srv/search/album?q=%E7%A4%BA%E4%BE%8B&page=2&size=30',
+      'fnm://srv/search/artist?q=%E7%A4%BA%E4%BE%8B&page=2&size=30',
+      'fnm://srv/search/track?q=%E7%A4%BA%E4%BE%8B&page=2&size=30',
     ])
+  })
+
+  it('searchApi.query 默认带上 page=1 / size=50', async () => {
+    const calls = stubEnvelopeFetch(listPayload)
+    await searchApi.query('a')
+    expect(calls[0]?.url).toContain('page=1&size=50')
+  })
+
+  it('searchApi.query 返回三个 Page 结构（带 total）', async () => {
+    stubEnvelopeFetch({ code: 0, msg: '', data: { list: [{ guid: 'g', title: 'T' }], total: 42 } })
+    const result = await searchApi.query('a')
+    expect(result.tracks.total).toBe(42)
+    expect(result.tracks.list).toHaveLength(1)
+    expect(result.tracks.list[0]?.id).toBe('g')
+    expect(result.albums.total).toBe(42)
+    expect(result.artists.total).toBe(42)
   })
 
   it('列表型方法把 { list, total } 一起返回', async () => {
@@ -538,6 +713,57 @@ describe('各 API 方法的端点与参数', () => {
     const songs = await libraryApi.songs()
     expect(songs.list).toEqual([])
     expect(songs.total).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 收藏 / 歌单的全量取回（分页循环）
+// ---------------------------------------------------------------------------
+
+describe('收藏 / 歌单的分页循环取全', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  /** 造 n 条最小歌曲原始对象。 */
+  const rawSongs = (prefix: string, count: number) =>
+    Array.from({ length: count }, (_, index) => ({ guid: `${prefix}${index}`, title: `T${index}` }))
+
+  it('收藏列表按 total 翻页取全（实测 251 首 > 服务端默认页长 200）', async () => {
+    const calls = stubSequenceFetch([
+      { code: 0, msg: '', data: { list: rawSongs('t', 200), total: 250 } },
+      { code: 0, msg: '', data: { list: rawSongs('x', 50), total: 250 } },
+    ])
+    const favorites = await favoriteApi.list()
+    expect(favorites).toHaveLength(250)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.url).toBe('fnm://srv/favorite-track/list?page=1&size=200')
+    expect(calls[1]?.url).toBe('fnm://srv/favorite-track/list?page=2&size=200')
+  })
+
+  it('歌单列表同样按 total 翻页取全', async () => {
+    const calls = stubSequenceFetch([
+      { code: 0, msg: '', data: { list: [{ guid: 'p1', name: '歌单一' }], total: 3 } },
+      { code: 0, msg: '', data: { list: [{ guid: 'p2', name: '歌单二' }], total: 3 } },
+      { code: 0, msg: '', data: { list: [{ guid: 'p3', name: '歌单三' }], total: 3 } },
+    ])
+    const playlists = await playlistApi.list()
+    expect(playlists.map((item) => item.id)).toEqual(['p1', 'p2', 'p3'])
+    expect(calls).toHaveLength(3)
+  })
+
+  it('全量取回有安全页数上限（不会无限翻页）', async () => {
+    const calls = stubSequenceFetch([
+      { code: 0, msg: '', data: { list: rawSongs('t', 1), total: 999999 } },
+    ])
+    const favorites = await favoriteApi.list()
+    expect(calls).toHaveLength(50)
+    expect(favorites).toHaveLength(50)
+  })
+
+  it('某一页返回空列表就停止（不再发请求）', async () => {
+    const calls = stubSequenceFetch([{ code: 0, msg: '', data: { list: [], total: 100 } }])
+    const favorites = await favoriteApi.list()
+    expect(favorites).toEqual([])
+    expect(calls).toHaveLength(1)
   })
 })
 
@@ -572,8 +798,8 @@ describe('API 客户端与 mock server 集成', () => {
     vi.unstubAllGlobals()
   })
 
-  afterAll(() => {
-    mock.close()
+  afterAll(async () => {
+    await mock.close()
   })
 
   it('libraryApi.songs 返回领域模型与分页 total', async () => {
@@ -585,7 +811,7 @@ describe('API 客户端与 mock server 集成', () => {
     expect(first?.id).toBe('t1')
     expect(first?.title).toBe('示例曲目 1')
     expect(first?.duration).toBe(185)
-    expect(first?.coverId).toBe('cover_0123456789abcdef')
+    expect(first?.coverId).toBe('track_0123456789abcdef')
     expect(first?.artist).toBe('示例歌手甲')
     expect(first?.artistId).toBe('a1')
     expect(first?.album).toBe('示例专辑一')
@@ -597,10 +823,12 @@ describe('API 客户端与 mock server 集成', () => {
     expect(first?.year).toBe(2003)
     expect(first?.trackNo).toBe(3)
     expect(first?.discNo).toBe(1)
-    expect(first?.favorite).toBe(false)
+    // 服务端给的收藏态（fixtures 里 t1 是已收藏）。
+    expect(first?.favorite).toBe(true)
     // audioSpec 原样透传：duration 仍是毫秒，bitrate 仍是 bps。
     expect(first?.audioSpec?.duration).toBe(185000)
     expect(first?.audioSpec?.bitrate).toBe(900000)
+    expect(first?.audioSpec?.container).toBe('')
   })
 
   it('多歌手与空封面、null 年份的歌曲映射正确', async () => {
@@ -615,9 +843,10 @@ describe('API 客户端与 mock server 集成', () => {
     expect(second?.discNo).toBeNull()
     expect(second?.codec).toBe('MP3')
     expect(second?.bitrate).toBe(320)
+    expect(second?.favorite).toBe(false)
   })
 
-  it('专辑 / 歌手 / 风格 / 详情接口可用', async () => {
+  it('专辑 / 歌手 / 风格 / 详情接口可用（专辑年份由 releaseDate 派生）', async () => {
     const firstPage = await libraryApi.albums(1, 2)
     expect(firstPage.list).toHaveLength(2)
     expect(firstPage.total).toBe(3)
@@ -625,17 +854,24 @@ describe('API 客户端与 mock server 集成', () => {
 
     const albums = await libraryApi.albums(1, 3)
     expect(albums.list).toHaveLength(3)
-    // al3 没有封面：专辑实体的 coverId 约定是 null（与 Song 的空串不同）。
+    // al1 的 releaseDate 是 2003-07-31 → 年份 2003；al2 是 2005-04-01 → 2005。
+    expect(albums.list[0]?.year).toBe(2003)
+    expect(albums.list[1]?.year).toBe(2005)
+    // al3 没有封面也没有 releaseDate：专辑实体的 coverId / year 约定是 null。
     expect(albums.list[2]?.coverId).toBeNull()
+    expect(albums.list[2]?.year).toBeNull()
 
     const album = await libraryApi.album('al1')
     expect(album?.title).toBe('示例专辑一')
     expect(album?.artist).toBe('示例歌手甲')
+    expect(album?.year).toBe(2003)
 
     const artists = await libraryApi.artists()
     expect(artists.list).toHaveLength(2)
     expect(artists.total).toBe(2)
     expect(artists.list[0]?.name).toBe('示例歌手甲')
+    expect(artists.list[0]?.coverId).toBe('artist_0123456789abcdef')
+    expect(artists.list[1]?.coverId).toBeNull()
 
     const genres = await libraryApi.genres()
     expect(genres.list).toHaveLength(2)
@@ -647,13 +883,14 @@ describe('API 客户端与 mock server 集成', () => {
     expect((await libraryApi.albumSongs('al1')).total).toBe(4)
     expect((await libraryApi.artistAlbums('a1')).total).toBe(2)
     expect((await libraryApi.artistSongs('a1')).total).toBe(6)
-    expect((await libraryApi.genreSongs('g1', 'Pop')).total).toBe(5)
+    expect((await libraryApi.genreSongs('g1')).total).toBe(5)
   })
 
-  it('收藏可写入并回读', async () => {
+  it('收藏可写入并回读（收藏态来自服务端）', async () => {
     await favoriteApi.set('t1', true)
     const favorites = await favoriteApi.list()
     expect(favorites.map((song) => song.id)).toEqual(['t1'])
+    expect(favorites[0]?.favorite).toBe(true)
 
     await favoriteApi.set('t1', false)
     expect(await favoriteApi.list()).toEqual([])
@@ -663,6 +900,8 @@ describe('API 客户端与 mock server 集成', () => {
     const before = await playlistApi.list()
     expect(before).toHaveLength(2)
     expect(before[0]?.name).toBe('示例歌单一')
+    // 时间字段归一为 ISO 串（mock 给的是 Unix 秒）。
+    expect(before[0]?.createdAt).toBe(new Date(1792563278 * 1000).toISOString())
 
     const guid = await playlistApi.create('新建歌单')
     expect(guid).toBe('p3')
@@ -683,19 +922,20 @@ describe('API 客户端与 mock server 集成', () => {
     expect(songs.list[0]?.id).toBe('t1')
   })
 
-  it('搜索并发返回三类结果', async () => {
+  it('搜索并发返回三类结果（带 total）', async () => {
     const result = await searchApi.query('示例')
-    expect(result.tracks.length).toBe(8)
-    expect(result.albums.length).toBe(3)
-    expect(result.artists.length).toBe(2)
-    expect(result.tracks[0]?.id).toBe('t1')
+    expect(result.tracks.total).toBe(8)
+    expect(result.tracks.list).toHaveLength(8)
+    expect(result.albums.total).toBe(3)
+    expect(result.artists.total).toBe(2)
+    expect(result.tracks.list[0]?.id).toBe('t1')
   })
 
   it('搜索空关键字返回空结果（不返回全量）', async () => {
     const result = await searchApi.query('   ')
-    expect(result.tracks).toEqual([])
-    expect(result.albums).toEqual([])
-    expect(result.artists).toEqual([])
+    expect(result.tracks.list).toEqual([])
+    expect(result.albums.list).toEqual([])
+    expect(result.artists.list).toEqual([])
   })
 
   it('歌词取第一条原文，无歌词返回空串', async () => {
@@ -708,18 +948,17 @@ describe('API 客户端与 mock server 集成', () => {
     const list = await lyricApi.list('t1')
     expect(list).toHaveLength(1)
     expect(list[0]?.source).toBe('local')
+    // 时间已归一为 ISO 串（mock 给 Unix 秒）。
+    expect(list[0]?.createdAt).toBe(new Date(1792563278 * 1000).toISOString())
   })
 
-  it('播放历史分页可读且映射成领域歌曲', async () => {
+  it('播放历史分页可读（条目就是歌曲对象，直接走 mapSong）', async () => {
     const history = await historyApi.list(1, 2)
     expect(history.list).toHaveLength(2)
     expect(history.total).toBe(4)
     expect(history.list[0]?.id).toBe('t1')
     expect(history.list[0]?.duration).toBe(185)
-
-    const items = await historyApi.listItems(1, 4)
-    expect(items.list).toHaveLength(4)
-    expect(items.list[0]?.playTime).toBe('2026-01-05T09:00:00.000Z')
+    expect(history.list[0]?.favorite).toBe(true)
   })
 
   it('渲染进程发给主进程代理的请求不带任何凭据', async () => {

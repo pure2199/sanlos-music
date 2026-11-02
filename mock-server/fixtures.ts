@@ -4,20 +4,45 @@
 // 领域模型（`Song` / `Album` / …）由 Task 6 的 `mapSong` / `mapAlbum` 负责从这些原始字段转换而来，
 // 因此这里的字段名用服务端的 `guid` / `name` / `coverId` / `audioSpec`，而不是领域模型的 `id` / `title`。
 //
-// 实测要点（与真实 NAS 保持一致）：
+// ⚠️ **字段形状以规格 §15.7（2026-11-02 二次联调实测）为准**：
+// - 歌曲 `{ guid, title, coverId, year, discNo, trackNo, isrc, duration, isCue,
+//   createdAt, updatedAt, album{...}, artists[{...}], genres: [], audioSpec{...}, isFavorite }`；
+// - 专辑 `{ guid, name, coverId, releaseDate, barcode, createdAt, updatedAt, artists[{...}], trackCount }`
+//   —— **没有 `year`**，只有 `releaseDate`；
+// - 歌手 `{ guid, name, coverId, createdAt, updatedAt, trackCount, albumCount }`；
+// - 歌手条目（出现在 `album.artists` / `song.artists` 里）`{ guid, name, coverId, createdAt, updatedAt }`；
+// - 收藏条目 / 播放历史条目 = **完整歌曲对象**（不是 `{ track: … }` 包装）；
+// - 风格 `{ guid, name, coverId(null), trackCount }`；
 // - `duration` 与 `audioSpec.duration` 的单位是**毫秒**；
 // - `audioSpec.bitrate` 的单位是**比特/秒（bps）**（领域模型 `Song.bitrate` 是 kbps，映射时 ÷1000）；
-// - `coverId` 形如 `cover_<16 位小写十六进制>`，无封面时为 `null`；
-// - `year` / `trackNo` / `discNo` / `releaseDate` 可能为 `null`（不是 0）；
-// - 歌曲对象内的 `genres` 恒为空数组，风格需单独查询；
-// - 风格名存在大小写重复（如 `Pop` 与 `POP`），故 guid 与 name 各自独立。
+// - `createdAt` / `updatedAt` 是 **Unix 秒**（不是 ISO 字符串）；
+// - `coverId` 形如 `track_<hex>` / `album_<hex>` / `artist_<hex>`（无封面为 `null`）；
+// - `audioSpec.container` 实测为空串 `""`；`audioSpec.path` 是 NAS 绝对路径。
+//
+// 保留的边界覆盖（Task 5 审查确认过的，不要丢）：
+// - t2 / t4 无封面（coverId 为 `null`）；a2 无头像；
+// - t2 / t6 的 year / trackNo / discNo 为 `null`；al3 的 releaseDate 为 `null`；
+// - t2 / t4 为多歌手；
+// - t3 缺 `bitrate` 与 `sampleRate`，t8 缺 `sampleRate`（稀疏 audioSpec）；
+// - 风格名大小写重复（`Pop` 与 `POP`），故 guid 与 name 各自独立；
+// - `isFavorite` 有 `true` 也有 `false` 两种样本。
 
-/** 服务端原始命名引用（歌曲里的歌手、专辑对象里的歌手）。 */
+/** 服务端原始命名引用（歌曲里的歌手、专辑对象里的歌手、歌曲内嵌的专辑）。 */
 export interface RawRef {
   /** 唯一标识。 */
   guid: string
   /** 名称。 */
   name: string
+  /** 头像 / 封面 id（无则 `null`）。 */
+  coverId?: string | null
+  /** 发行日期（内嵌专辑有）。 */
+  releaseDate?: string | null
+  /** 条码（内嵌专辑有）。 */
+  barcode?: string | null
+  /** 创建时间（Unix 秒）。 */
+  createdAt?: number | null
+  /** 更新时间（Unix 秒）。 */
+  updatedAt?: number | null
 }
 
 /** 服务端原始音频规格（稀疏，字段可能缺失或为 null）。 */
@@ -32,13 +57,13 @@ export interface RawAudioSpec {
   bitrate?: number | null
   /** 编码格式。 */
   codec?: string | null
-  /** 容器格式。 */
+  /** 容器格式（实测为空串）。 */
   container?: string | null
   /** 时长（毫秒）。 */
   duration?: number | null
   /** 容器 / 扩展名。 */
   format?: string | null
-  /** NAS 上的文件路径。 */
+  /** NAS 上的文件路径（绝对路径）。 */
   path?: string | null
   /** 文件大小（字节）。 */
   size?: number | null
@@ -46,7 +71,7 @@ export interface RawAudioSpec {
 
 /** 服务端原始风格。 */
 export interface RawGenre {
-  /** 风格唯一标识。 */
+  /** 风格 guid。 */
   guid: string
   /** 风格原始名称（保留服务端大小写）。 */
   name: string
@@ -64,11 +89,11 @@ export interface RawSong {
   title: string
   /** 时长（**毫秒**）。 */
   duration: number
-  /** 封面 id；无封面为 null。 */
+  /** 封面 id；无封面为 null（形如 `track_<hex>`）。 */
   coverId: string | null
   /** 歌手列表（可能多歌手）。 */
   artists: RawRef[]
-  /** 所属专辑。 */
+  /** 所属专辑（内嵌完整专辑对象）。 */
   album: RawRef
   /** 音频规格（稀疏）。 */
   audioSpec: RawAudioSpec
@@ -78,28 +103,40 @@ export interface RawSong {
   trackNo: number | null
   /** 碟号，可能为 null。 */
   discNo: number | null
-  /** 发行日期，可能为 null。 */
-  releaseDate: string | null
+  /** 国际标准录音码。 */
+  isrc: string | null
+  /** 是否为 cue 切片。 */
+  isCue: boolean
+  /** 创建时间（Unix 秒）。 */
+  createdAt: number
+  /** 更新时间（Unix 秒）。 */
+  updatedAt: number
   /** 风格列表（实测恒为空数组）。 */
   genres: RawGenre[]
+  /** **服务端给出的收藏态**（实测 true / false 都有）。 */
+  isFavorite: boolean
 }
 
-/** 服务端原始专辑。 */
+/** 服务端原始专辑（**没有 `year` 字段**，只有 `releaseDate`）。 */
 export interface RawAlbum {
   /** 专辑 guid。 */
   guid: string
   /** 专辑名。 */
   name: string
-  /** 封面 id；无封面为 null。 */
+  /** 封面 id；无封面为 null（形如 `album_<hex>`）。 */
   coverId: string | null
-  /** 专辑歌手。 */
-  artists: RawRef[]
-  /** 发行年份，可能为 null。 */
-  year: number | null
-  /** 歌曲数。 */
-  trackCount: number
   /** 发行日期，可能为 null。 */
   releaseDate: string | null
+  /** 条码。 */
+  barcode: string | null
+  /** 创建时间（Unix 秒）。 */
+  createdAt: number
+  /** 更新时间（Unix 秒）。 */
+  updatedAt: number
+  /** 专辑歌手。 */
+  artists: RawRef[]
+  /** 歌曲数。 */
+  trackCount: number
 }
 
 /** 服务端原始歌手。 */
@@ -108,15 +145,19 @@ export interface RawArtist {
   guid: string
   /** 歌手名。 */
   name: string
-  /** 头像 id；实测为 null。 */
+  /** 头像 id；无封面为 null（形如 `artist_<hex>`）。 */
   coverId: string | null
+  /** 创建时间（Unix 秒）。 */
+  createdAt: number
+  /** 更新时间（Unix 秒）。 */
+  updatedAt: number
   /** 专辑数。 */
   albumCount: number
   /** 歌曲数。 */
   trackCount: number
 }
 
-/** 服务端原始歌单。 */
+/** 服务端原始歌单（⚠️ 该账号 `playlist/list` 返回空列表，形状仍未实测）。 */
 export interface RawPlaylist {
   /** 歌单 guid。 */
   guid: string
@@ -128,10 +169,10 @@ export interface RawPlaylist {
   trackCount: number
   /** 描述，可能为 null。 */
   description: string | null
-  /** 创建时间（ISO 字符串）。 */
-  createdAt: string | null
-  /** 更新时间（ISO 字符串）。 */
-  updatedAt: string | null
+  /** 创建时间（Unix 秒；形状未实测，故可空）。 */
+  createdAt: number | null
+  /** 更新时间（Unix 秒；形状未实测，故可空）。 */
+  updatedAt: number | null
 }
 
 /** 服务端原始歌词条目。 */
@@ -142,251 +183,24 @@ export interface RawLyric {
   source: string
   /** LRC 原文。 */
   content: string
-  /** 创建时间。 */
-  createdAt: string | null
-  /** 更新时间。 */
-  updatedAt: string | null
+  /** 创建时间（Unix 秒）。 */
+  createdAt: number
+  /** 更新时间（Unix 秒）。 */
+  updatedAt: number
   /** 是否为 LRC 格式。 */
   isLRC: boolean
   /** 时间偏移（毫秒）。 */
   offset: number
 }
 
-/**
- * 服务端原始播放历史条目。
- *
- * ⚠️ **占位形状**：真实 NAS 的播放历史条目字段**只实测到「端点存在、默认 50 条、total=414」**，
- *    具体字段形状未实测。本形状（`guid` + `playTime` + 内嵌 `track`）是按常见实现推导的，
- *    Task 16 必须按真实响应校准。
- */
-export interface RawHistoryItem {
-  /** 条目 guid。 */
-  guid: string
-  /** 播放时间。 */
-  playTime: string
-  /** 对应的歌曲（服务端原始 JSON）。 */
-  track: RawSong
-}
-
 // ---------------------------------------------------------------------------
-// 曲目（8 首，t1–t8）
+// 时间戳常量（Unix 秒）
 //
-// 覆盖的边界：
-// - t2 / t4 无封面（coverId 为 null）；
-// - t2 / t6 的 year / trackNo / discNo / releaseDate 为 null；
-// - t2 / t4 为多歌手；
-// - t3 缺 `bitrate` 与 `sampleRate`，t8 缺 `sampleRate`（稀疏 audioSpec）；
-// - t6 所在专辑 al3 的 year / releaseDate 为 null。
+// 固定值而不是 `Date.now()`：fixtures 必须可复现，且能断言归一后的 ISO 串。
 // ---------------------------------------------------------------------------
 
-/** 示例曲目集合。 */
-export const SONGS: RawSong[] = [
-  {
-    guid: 't1',
-    title: '示例曲目 1',
-    duration: 185000,
-    coverId: 'cover_0123456789abcdef',
-    artists: [{ guid: 'a1', name: '示例歌手甲' }],
-    album: { guid: 'al1', name: '示例专辑一' },
-    audioSpec: {
-      bitDepth: 16,
-      sampleRate: 44100,
-      channel: 2,
-      bitrate: 900000,
-      codec: 'flac',
-      container: 'flac',
-      duration: 185000,
-      format: 'flac',
-      path: '/music/sample/t1.flac',
-      size: 30000000,
-    },
-    year: 2003,
-    trackNo: 3,
-    discNo: 1,
-    releaseDate: '2003-07-31',
-    genres: [],
-  },
-  {
-    guid: 't2',
-    title: '示例曲目 2',
-    duration: 212500,
-    coverId: null,
-    artists: [
-      { guid: 'a1', name: '示例歌手甲' },
-      { guid: 'a2', name: '示例歌手乙' },
-    ],
-    album: { guid: 'al1', name: '示例专辑一' },
-    audioSpec: {
-      bitDepth: 16,
-      sampleRate: 44100,
-      channel: 2,
-      bitrate: 320000,
-      codec: 'mp3',
-      container: 'mp3',
-      duration: 212500,
-      format: 'mp3',
-      path: '/music/sample/t2.mp3',
-      size: 8500000,
-    },
-    year: null,
-    trackNo: null,
-    discNo: null,
-    releaseDate: null,
-    genres: [],
-  },
-  {
-    guid: 't3',
-    title: '示例曲目 3',
-    duration: 198000,
-    coverId: 'cover_fedcba9876543210',
-    artists: [{ guid: 'a2', name: '示例歌手乙' }],
-    album: { guid: 'al2', name: '示例专辑二' },
-    // 稀疏 audioSpec：实测服务端会缺 bitrate / sampleRate。
-    audioSpec: {
-      bitDepth: null,
-      channel: 2,
-      codec: 'aac',
-      container: 'm4a',
-      duration: 198000,
-      format: 'm4a',
-      path: '/music/sample/t3.m4a',
-      size: 4200000,
-    },
-    year: 2011,
-    trackNo: 1,
-    discNo: 1,
-    releaseDate: '2011-05-20',
-    genres: [],
-  },
-  {
-    guid: 't4',
-    title: '示例曲目 4',
-    duration: 240000,
-    coverId: null,
-    artists: [
-      { guid: 'a2', name: '示例歌手乙' },
-      { guid: 'a1', name: '示例歌手甲' },
-    ],
-    album: { guid: 'al2', name: '示例专辑二' },
-    audioSpec: {
-      bitDepth: 24,
-      sampleRate: 96000,
-      channel: 2,
-      bitrate: 1400000,
-      codec: 'flac',
-      container: 'flac',
-      duration: 240000,
-      format: 'flac',
-      path: '/music/sample/t4.flac',
-      size: 42000000,
-    },
-    year: 2011,
-    trackNo: 2,
-    discNo: 1,
-    releaseDate: '2011-05-20',
-    genres: [],
-  },
-  {
-    guid: 't5',
-    title: '示例曲目 5',
-    duration: 176400,
-    coverId: 'cover_1122334455667788',
-    artists: [{ guid: 'a1', name: '示例歌手甲' }],
-    album: { guid: 'al2', name: '示例专辑二' },
-    audioSpec: {
-      bitDepth: 16,
-      sampleRate: 44100,
-      channel: 2,
-      bitrate: 900000,
-      codec: 'flac',
-      container: 'flac',
-      duration: 176400,
-      format: 'flac',
-      path: '/music/sample/t5.flac',
-      size: 29000000,
-    },
-    year: 2011,
-    trackNo: 3,
-    discNo: 1,
-    releaseDate: '2011-05-20',
-    genres: [],
-  },
-  {
-    guid: 't6',
-    title: '示例曲目 6',
-    duration: 203000,
-    coverId: 'cover_8899aabbccddeeff',
-    artists: [{ guid: 'a2', name: '示例歌手乙' }],
-    album: { guid: 'al3', name: '示例专辑三' },
-    audioSpec: {
-      bitDepth: 16,
-      sampleRate: 44100,
-      channel: 2,
-      bitrate: 320000,
-      codec: 'mp3',
-      container: 'mp3',
-      duration: 203000,
-      format: 'mp3',
-      path: '/music/sample/t6.mp3',
-      size: 8100000,
-    },
-    year: null,
-    trackNo: null,
-    discNo: null,
-    releaseDate: null,
-    genres: [],
-  },
-  {
-    guid: 't7',
-    title: '示例曲目 7',
-    duration: 221000,
-    coverId: 'cover_0f1e2d3c4b5a6978',
-    artists: [{ guid: 'a1', name: '示例歌手甲' }],
-    album: { guid: 'al1', name: '示例专辑一' },
-    audioSpec: {
-      bitDepth: 16,
-      sampleRate: 44100,
-      channel: 2,
-      bitrate: 900000,
-      codec: 'flac',
-      container: 'flac',
-      duration: 221000,
-      format: 'flac',
-      path: '/music/sample/t7.flac',
-      size: 36000000,
-    },
-    year: 2003,
-    trackNo: 4,
-    discNo: 1,
-    releaseDate: '2003-07-31',
-    genres: [],
-  },
-  {
-    guid: 't8',
-    title: '示例曲目 8',
-    duration: 165000,
-    coverId: 'cover_9988776655443322',
-    artists: [{ guid: 'a1', name: '示例歌手甲' }],
-    album: { guid: 'al1', name: '示例专辑一' },
-    // 只缺 sampleRate。
-    audioSpec: {
-      bitDepth: 16,
-      channel: 2,
-      bitrate: 256000,
-      codec: 'mp3',
-      container: 'mp3',
-      duration: 165000,
-      format: 'mp3',
-      path: '/music/sample/t8.mp3',
-      size: 5300000,
-    },
-    year: 2003,
-    trackNo: 1,
-    discNo: 1,
-    releaseDate: '2003-07-31',
-    genres: [],
-  },
-]
+/** 基准时间戳（Unix 秒）：2026-10-21T08:54:38Z。 */
+const T0 = 1792563278
 
 // ---------------------------------------------------------------------------
 // 专辑（3 张，al1–al3）
@@ -397,29 +211,60 @@ export const ALBUMS: RawAlbum[] = [
   {
     guid: 'al1',
     name: '示例专辑一',
-    coverId: 'cover_0123456789abcdef',
-    artists: [{ guid: 'a1', name: '示例歌手甲' }],
-    year: 2003,
-    trackCount: 4,
+    coverId: 'album_0123456789abcdef',
     releaseDate: '2003-07-31',
+    barcode: '6941234567890',
+    createdAt: T0,
+    updatedAt: T0,
+    artists: [
+      {
+        guid: 'a1',
+        name: '示例歌手甲',
+        coverId: 'artist_0123456789abcdef',
+        createdAt: T0,
+        updatedAt: T0,
+      },
+    ],
+    trackCount: 4,
   },
   {
     guid: 'al2',
     name: '示例专辑二',
-    coverId: 'cover_fedcba9876543210',
-    artists: [{ guid: 'a2', name: '示例歌手乙' }],
-    year: 2011,
+    coverId: 'album_fedcba9876543210',
+    releaseDate: '2005-04-01',
+    barcode: '6941234567891',
+    createdAt: T0,
+    updatedAt: T0,
+    artists: [
+      {
+        guid: 'a2',
+        name: '示例歌手乙',
+        coverId: null,
+        createdAt: T0,
+        updatedAt: T0,
+      },
+    ],
     trackCount: 3,
-    releaseDate: '2011-05-20',
   },
   {
+    // 无封面、无发行日期 → 领域模型的 year 派生不出来，保持 null。
     guid: 'al3',
     name: '示例专辑三',
     coverId: null,
-    artists: [{ guid: 'a1', name: '示例歌手甲' }],
-    year: null,
-    trackCount: 1,
     releaseDate: null,
+    barcode: null,
+    createdAt: T0,
+    updatedAt: T0,
+    artists: [
+      {
+        guid: 'a1',
+        name: '示例歌手甲',
+        coverId: 'artist_0123456789abcdef',
+        createdAt: T0,
+        updatedAt: T0,
+      },
+    ],
+    trackCount: 1,
   },
 ]
 
@@ -429,8 +274,354 @@ export const ALBUMS: RawAlbum[] = [
 
 /** 示例歌手集合。 */
 export const ARTISTS: RawArtist[] = [
-  { guid: 'a1', name: '示例歌手甲', coverId: null, albumCount: 2, trackCount: 6 },
-  { guid: 'a2', name: '示例歌手乙', coverId: null, albumCount: 1, trackCount: 4 },
+  {
+    guid: 'a1',
+    name: '示例歌手甲',
+    coverId: 'artist_0123456789abcdef',
+    createdAt: T0,
+    updatedAt: T0,
+    albumCount: 2,
+    trackCount: 6,
+  },
+  {
+    // 无头像（封面为 null）。
+    guid: 'a2',
+    name: '示例歌手乙',
+    coverId: null,
+    createdAt: T0,
+    updatedAt: T0,
+    albumCount: 1,
+    trackCount: 4,
+  },
+]
+
+// ---------------------------------------------------------------------------
+// 曲目（8 首，t1–t8）
+//
+// 覆盖的边界：
+// - t2 / t4 无封面（coverId 为 null）；
+// - t2 / t6 的 year / trackNo / discNo 为 null；
+// - t2 / t4 为多歌手；
+// - t3 缺 `bitrate` 与 `sampleRate`，t8 缺 `sampleRate`（稀疏 audioSpec）；
+// - t1 / t4 的 `isFavorite` 为 true，其余为 false；
+// - t6 所在专辑 al3 的 releaseDate 为 null。
+// ---------------------------------------------------------------------------
+
+/** 示例曲目集合。 */
+export const SONGS: RawSong[] = [
+  {
+    guid: 't1',
+    title: '示例曲目 1',
+    duration: 185000,
+    coverId: 'track_0123456789abcdef',
+    artists: [
+      { guid: 'a1', name: '示例歌手甲', coverId: 'artist_0123456789abcdef', createdAt: T0, updatedAt: T0 },
+    ],
+    album: {
+      guid: 'al1',
+      name: '示例专辑一',
+      coverId: 'album_0123456789abcdef',
+      releaseDate: '2003-07-31',
+      barcode: '6941234567890',
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    audioSpec: {
+      bitDepth: 16,
+      sampleRate: 44100,
+      channel: 2,
+      bitrate: 900000,
+      codec: 'flac',
+      container: '',
+      duration: 185000,
+      format: 'flac',
+      path: '/vol02/1000-0-music/sample/t1.flac',
+      size: 30000000,
+    },
+    year: 2003,
+    trackNo: 3,
+    discNo: 1,
+    isrc: 'CNA120300001',
+    isCue: false,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: true,
+  },
+  {
+    guid: 't2',
+    title: '示例曲目 2',
+    duration: 212500,
+    coverId: null,
+    artists: [
+      { guid: 'a1', name: '示例歌手甲', coverId: 'artist_0123456789abcdef', createdAt: T0, updatedAt: T0 },
+      { guid: 'a2', name: '示例歌手乙', coverId: null, createdAt: T0, updatedAt: T0 },
+    ],
+    album: {
+      guid: 'al1',
+      name: '示例专辑一',
+      coverId: 'album_0123456789abcdef',
+      releaseDate: '2003-07-31',
+      barcode: '6941234567890',
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    audioSpec: {
+      bitDepth: 16,
+      sampleRate: 44100,
+      channel: 2,
+      bitrate: 320000,
+      codec: 'mp3',
+      container: '',
+      duration: 212500,
+      format: 'mp3',
+      path: '/vol02/1000-0-music/sample/t2.mp3',
+      size: 8500000,
+    },
+    year: null,
+    trackNo: null,
+    discNo: null,
+    isrc: null,
+    isCue: false,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: false,
+  },
+  {
+    guid: 't3',
+    title: '示例曲目 3',
+    duration: 198000,
+    coverId: 'track_fedcba9876543210',
+    artists: [
+      { guid: 'a2', name: '示例歌手乙', coverId: null, createdAt: T0, updatedAt: T0 },
+    ],
+    album: {
+      guid: 'al2',
+      name: '示例专辑二',
+      coverId: 'album_fedcba9876543210',
+      releaseDate: '2005-04-01',
+      barcode: '6941234567891',
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    // 稀疏 audioSpec：实测服务端会缺 bitrate / sampleRate。
+    audioSpec: {
+      bitDepth: null,
+      channel: 2,
+      codec: 'aac',
+      container: '',
+      duration: 198000,
+      format: 'm4a',
+      path: '/vol02/1000-0-music/sample/t3.m4a',
+      size: 4200000,
+    },
+    year: 2005,
+    trackNo: 1,
+    discNo: 1,
+    isrc: 'CNA120500003',
+    isCue: false,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: false,
+  },
+  {
+    guid: 't4',
+    title: '示例曲目 4',
+    duration: 240000,
+    coverId: null,
+    artists: [
+      { guid: 'a2', name: '示例歌手乙', coverId: null, createdAt: T0, updatedAt: T0 },
+      { guid: 'a1', name: '示例歌手甲', coverId: 'artist_0123456789abcdef', createdAt: T0, updatedAt: T0 },
+    ],
+    album: {
+      guid: 'al2',
+      name: '示例专辑二',
+      coverId: 'album_fedcba9876543210',
+      releaseDate: '2005-04-01',
+      barcode: '6941234567891',
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    audioSpec: {
+      bitDepth: 24,
+      sampleRate: 96000,
+      channel: 2,
+      bitrate: 1400000,
+      codec: 'flac',
+      container: '',
+      duration: 240000,
+      format: 'flac',
+      path: '/vol02/1000-0-music/sample/t4.flac',
+      size: 42000000,
+    },
+    year: 2005,
+    trackNo: 2,
+    discNo: 1,
+    isrc: 'CNA120500004',
+    isCue: false,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: true,
+  },
+  {
+    guid: 't5',
+    title: '示例曲目 5',
+    duration: 176400,
+    coverId: 'track_1122334455667788',
+    artists: [
+      { guid: 'a1', name: '示例歌手甲', coverId: 'artist_0123456789abcdef', createdAt: T0, updatedAt: T0 },
+    ],
+    album: {
+      guid: 'al2',
+      name: '示例专辑二',
+      coverId: 'album_fedcba9876543210',
+      releaseDate: '2005-04-01',
+      barcode: '6941234567891',
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    audioSpec: {
+      bitDepth: 16,
+      sampleRate: 44100,
+      channel: 2,
+      bitrate: 900000,
+      codec: 'flac',
+      container: '',
+      duration: 176400,
+      format: 'flac',
+      path: '/vol02/1000-0-music/sample/t5.flac',
+      size: 29000000,
+    },
+    year: 2005,
+    trackNo: 3,
+    discNo: 1,
+    isrc: 'CNA120500005',
+    isCue: false,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: false,
+  },
+  {
+    guid: 't6',
+    title: '示例曲目 6',
+    duration: 203000,
+    coverId: 'track_8899aabbccddeeff',
+    artists: [
+      { guid: 'a2', name: '示例歌手乙', coverId: null, createdAt: T0, updatedAt: T0 },
+    ],
+    album: {
+      guid: 'al3',
+      name: '示例专辑三',
+      coverId: null,
+      releaseDate: null,
+      barcode: null,
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    audioSpec: {
+      bitDepth: 16,
+      sampleRate: 44100,
+      channel: 2,
+      bitrate: 320000,
+      codec: 'mp3',
+      container: '',
+      duration: 203000,
+      format: 'mp3',
+      path: '/vol02/1000-0-music/sample/t6.mp3',
+      size: 8100000,
+    },
+    year: null,
+    trackNo: null,
+    discNo: null,
+    isrc: null,
+    isCue: false,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: false,
+  },
+  {
+    guid: 't7',
+    title: '示例曲目 7',
+    duration: 221000,
+    coverId: 'track_0f1e2d3c4b5a6978',
+    artists: [
+      { guid: 'a1', name: '示例歌手甲', coverId: 'artist_0123456789abcdef', createdAt: T0, updatedAt: T0 },
+    ],
+    album: {
+      guid: 'al1',
+      name: '示例专辑一',
+      coverId: 'album_0123456789abcdef',
+      releaseDate: '2003-07-31',
+      barcode: '6941234567890',
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    audioSpec: {
+      bitDepth: 16,
+      sampleRate: 44100,
+      channel: 2,
+      bitrate: 900000,
+      codec: 'flac',
+      container: '',
+      duration: 221000,
+      format: 'flac',
+      path: '/vol02/1000-0-music/sample/t7.flac',
+      size: 36000000,
+    },
+    year: 2003,
+    trackNo: 4,
+    discNo: 1,
+    isrc: 'CNA120300007',
+    isCue: false,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: false,
+  },
+  {
+    guid: 't8',
+    title: '示例曲目 8',
+    duration: 165000,
+    coverId: 'track_9988776655443322',
+    artists: [
+      { guid: 'a1', name: '示例歌手甲', coverId: 'artist_0123456789abcdef', createdAt: T0, updatedAt: T0 },
+    ],
+    album: {
+      guid: 'al1',
+      name: '示例专辑一',
+      coverId: 'album_0123456789abcdef',
+      releaseDate: '2003-07-31',
+      barcode: '6941234567890',
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    // 只缺 sampleRate。
+    audioSpec: {
+      bitDepth: 16,
+      channel: 2,
+      bitrate: 256000,
+      codec: 'mp3',
+      container: '',
+      duration: 165000,
+      format: 'mp3',
+      path: '/vol02/1000-0-music/sample/t8.mp3',
+      size: 5300000,
+    },
+    year: 2003,
+    trackNo: 1,
+    discNo: 1,
+    isrc: 'CNA120300008',
+    isCue: true,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: false,
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -464,6 +655,9 @@ export const TRACK_GENRES: Record<string, string[]> = {
 
 // ---------------------------------------------------------------------------
 // 歌单（2 个，p1–p2）
+//
+// ⚠️ 该账号的真实 `playlist/list` 返回**空列表**（实测），歌单字段形状仍未实测——
+//    这里保留占位形状，待创建歌单后补测校准。
 // ---------------------------------------------------------------------------
 
 /** 示例歌单集合（同时是 mock 初始 `state.playlists` 的元数据来源）。 */
@@ -474,8 +668,8 @@ export const PLAYLISTS: RawPlaylist[] = [
     coverId: null,
     trackCount: 2,
     description: null,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
+    createdAt: T0,
+    updatedAt: T0,
   },
   {
     guid: 'p2',
@@ -483,8 +677,8 @@ export const PLAYLISTS: RawPlaylist[] = [
     coverId: null,
     trackCount: 1,
     description: '演示用歌单',
-    createdAt: '2026-01-02T00:00:00.000Z',
-    updatedAt: '2026-01-02T00:00:00.000Z',
+    createdAt: T0 + 86400,
+    updatedAt: T0 + 86400,
   },
 ]
 
@@ -497,8 +691,9 @@ export const INITIAL_PLAYLIST_TRACKS: Record<string, string[]> = {
 // ---------------------------------------------------------------------------
 // 播放历史（4 条）
 //
-// ⚠️ **占位形状**：真实 NAS 的播放历史条目字段未实测（只确认了「端点存在、默认 50 条、total=414」），
-//    这里按「条目内嵌一首原始歌曲」推导，Task 16 需按真实响应校准。
+// ⚠️ **条目本身就是完整的歌曲对象**（实测 §15.7 第 6 条），**不是** `{ track: … }` 包装——
+//    mock 直接返回歌曲对象，客户端对条目调用 `mapSong`。
+//    这里给每条不同的 `updatedAt`（Unix 秒），便于下游验证「最近播放」的排序。
 // ---------------------------------------------------------------------------
 
 /** 按 guid 取原始歌曲（取不到直接抛错——fixtures 写错了要立刻暴露，不能静默产生空洞条目）。 */
@@ -508,12 +703,12 @@ function songByGuid(guid: string): RawSong {
   return song
 }
 
-/** 示例播放历史条目集合。 */
-export const PLAY_HISTORY: RawHistoryItem[] = [
-  { guid: 'h1', playTime: '2026-01-05T09:00:00.000Z', track: songByGuid('t1') },
-  { guid: 'h2', playTime: '2026-01-05T09:30:00.000Z', track: songByGuid('t3') },
-  { guid: 'h3', playTime: '2026-01-05T10:15:00.000Z', track: songByGuid('t5') },
-  { guid: 'h4', playTime: '2026-01-05T11:45:00.000Z', track: songByGuid('t7') },
+/** 示例播放历史条目集合（**条目即歌曲对象**）。 */
+export const PLAY_HISTORY: RawSong[] = [
+  { ...songByGuid('t1'), updatedAt: T0 + 3600 },
+  { ...songByGuid('t3'), updatedAt: T0 + 7200 },
+  { ...songByGuid('t5'), updatedAt: T0 + 10800 },
+  { ...songByGuid('t7'), updatedAt: T0 + 14400 },
 ]
 
 // ---------------------------------------------------------------------------
@@ -575,8 +770,8 @@ export const LYRICS: Map<string, RawLyric> = new Map<string, RawLyric>([
       guid: 'ly1',
       source: 'local',
       content: ENHANCED_LRC_T1,
-      createdAt: null,
-      updatedAt: null,
+      createdAt: T0,
+      updatedAt: T0,
       isLRC: true,
       offset: 0,
     },
@@ -587,8 +782,8 @@ export const LYRICS: Map<string, RawLyric> = new Map<string, RawLyric>([
       guid: 'ly3',
       source: 'local',
       content: plainLrc('示例曲目 3', '示例歌手乙', '示例专辑二'),
-      createdAt: null,
-      updatedAt: null,
+      createdAt: T0,
+      updatedAt: T0,
       isLRC: true,
       offset: 0,
     },
@@ -599,8 +794,8 @@ export const LYRICS: Map<string, RawLyric> = new Map<string, RawLyric>([
       guid: 'ly4',
       source: 'local',
       content: plainLrc('示例曲目 4', '示例歌手乙', '示例专辑二'),
-      createdAt: null,
-      updatedAt: null,
+      createdAt: T0,
+      updatedAt: T0,
       isLRC: true,
       offset: 0,
     },
@@ -611,8 +806,8 @@ export const LYRICS: Map<string, RawLyric> = new Map<string, RawLyric>([
       guid: 'ly5',
       source: 'local',
       content: plainLrc('示例曲目 5', '示例歌手甲', '示例专辑二'),
-      createdAt: null,
-      updatedAt: null,
+      createdAt: T0,
+      updatedAt: T0,
       isLRC: true,
       offset: 0,
     },
@@ -623,8 +818,8 @@ export const LYRICS: Map<string, RawLyric> = new Map<string, RawLyric>([
       guid: 'ly6',
       source: 'local',
       content: plainLrc('示例曲目 6', '示例歌手乙', '示例专辑三'),
-      createdAt: null,
-      updatedAt: null,
+      createdAt: T0,
+      updatedAt: T0,
       isLRC: true,
       offset: 0,
     },
@@ -635,8 +830,8 @@ export const LYRICS: Map<string, RawLyric> = new Map<string, RawLyric>([
       guid: 'ly7',
       source: 'local',
       content: plainLrc('示例曲目 7', '示例歌手甲', '示例专辑一'),
-      createdAt: null,
-      updatedAt: null,
+      createdAt: T0,
+      updatedAt: T0,
       isLRC: true,
       offset: 0,
     },
@@ -647,8 +842,8 @@ export const LYRICS: Map<string, RawLyric> = new Map<string, RawLyric>([
       guid: 'ly8',
       source: 'local',
       content: plainLrc('示例曲目 8', '示例歌手甲', '示例专辑一'),
-      createdAt: null,
-      updatedAt: null,
+      createdAt: T0,
+      updatedAt: T0,
       isLRC: true,
       offset: 0,
     },

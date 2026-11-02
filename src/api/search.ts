@@ -1,40 +1,58 @@
 // 搜索接口。
 //
 // 一次搜索并发打三个端点（歌曲 / 专辑 / 歌手），各自返回列表信封。
-// ⚠️ 搜索结果**不分页**：服务端按 `q` 命中并用自己的默认页长返回，
-//    命中过多时会被服务端截断（真实 NAS 的搜索页长未实测）——Task 14 若要「搜索结果分页」，
-//    需要先实测服务端搜索端点是否接受 `page` / `size`，再决定是否在此扩展签名。
+//
+// 分页：搜索端点是否支持 `page` / `size` **未实测**，但客户端**无条件透传**分页参数
+// （服务端忽略也不吃亏），并把 `{ list, total }` 一起带回——
+// 「所有列表型方法都返回 `{list,total}`」的契约才成立，结果页才能做增量加载与总数展示。
+// 真实行为见联调清单 **Step H**。
 
 import type { Album, Artist, Song } from '../../shared/types'
-import { apiCall, mapAlbum, mapArtist, mapSong, normalizePage } from './client'
-import type { RawAlbum, RawArtist, RawPage, RawSong } from './types'
+import {
+  apiCall,
+  DEFAULT_PAGE_SIZE,
+  mapAlbum,
+  mapArtist,
+  mapSong,
+  normalizePage,
+  normalizePageNumber,
+  normalizePageSize,
+} from './client'
+import type { Page, RawAlbum, RawArtist, RawPage, RawSong } from './types'
 
-/** 一次搜索的结果。 */
+/** 一次搜索的结果（三类都是分页信封）。 */
 export interface SearchResult {
   /** 命中的歌曲。 */
-  tracks: Song[]
+  tracks: Page<Song>
   /** 命中的专辑。 */
-  albums: Album[]
+  albums: Page<Album>
   /** 命中的歌手。 */
-  artists: Artist[]
+  artists: Page<Artist>
 }
 
 /** 搜索接口。 */
 export const searchApi = {
-  /** 并发搜索歌曲 / 专辑 / 歌手。 */
-  async query(q: string): Promise<SearchResult> {
+  /**
+   * 并发搜索歌曲 / 专辑 / 歌手。
+   *
+   * @param q 关键字
+   * @param opts 分页（`page` / `size` 会无条件透传给三个端点）
+   */
+  async query(q: string, opts: { page?: number; size?: number } = {}): Promise<SearchResult> {
+    const page = normalizePageNumber(opts.page ?? 1)
+    const size = normalizePageSize(opts.size ?? DEFAULT_PAGE_SIZE)
     const [trackData, albumData, artistData] = await Promise.all([
-      apiCall<RawPage<RawSong>>('/search/track', { query: { q } }),
-      apiCall<RawPage<RawAlbum>>('/search/album', { query: { q } }),
-      apiCall<RawPage<RawArtist>>('/search/artist', { query: { q } }),
+      apiCall<RawPage<RawSong>>('/search/track', { query: { q, page, size } }),
+      apiCall<RawPage<RawAlbum>>('/search/album', { query: { q, page, size } }),
+      apiCall<RawPage<RawArtist>>('/search/artist', { query: { q, page, size } }),
     ])
     const tracks = normalizePage<RawSong>(trackData)
     const albums = normalizePage<RawAlbum>(albumData)
     const artists = normalizePage<RawArtist>(artistData)
     return {
-      tracks: tracks.list.map((song) => mapSong(song)),
-      albums: albums.list.map((album) => mapAlbum(album)),
-      artists: artists.list.map((artist) => mapArtist(artist)),
+      tracks: { list: tracks.list.map((song) => mapSong(song)), total: tracks.total },
+      albums: { list: albums.list.map((album) => mapAlbum(album)), total: albums.total },
+      artists: { list: artists.list.map((artist) => mapArtist(artist)), total: artists.total },
     }
   },
 }

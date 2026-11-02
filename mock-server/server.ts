@@ -29,7 +29,7 @@
 // 但**条目字段形状未实测**——mock 返回的是占位形状（`guid` + `playTime` + 内嵌 `track`），
 // Task 16 需按真实响应校准。
 
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import {
   API_PREFIX,
@@ -97,6 +97,23 @@ export const FETCH_BLOCKED_PORTS: ReadonlySet<number> = new Set([
 /** 分配端口的最大尝试次数（落在禁用端口上就换一个）。 */
 const MAX_PORT_ATTEMPTS = 10
 
+/**
+ * 关闭一个 server 并等它真正关闭（'close' 事件）。
+ *
+ * `server.close()` 会**同步**关掉监听句柄（端口即刻释放、新连接被拒），
+ * 但 'close' 事件要等所有连接结束后才触发——这里等的就是这个「真正关闭」。
+ * 服务未监听时 `close()` 会抛 `ERR_SERVER_NOT_RUNNING`，当作已关闭处理。
+ */
+function closeServerAsync(server: Server): Promise<void> {
+  return new Promise<void>((resolve) => {
+    try {
+      server.close(() => resolve())
+    } catch {
+      resolve()
+    }
+  })
+}
+
 /** `/sys/config` 的返回内容。 */
 const SYS_CONFIG = {
   musicEnabled: true,
@@ -120,8 +137,13 @@ export interface MockState {
 export interface MockServer {
   /** 基址，形如 `http://127.0.0.1:<端口>`。 */
   url: string
-  /** 关闭服务并释放端口（可重复调用）。 */
-  close: () => void
+  /**
+   * 关闭服务并释放端口（可重复调用）。
+   *
+   * 返回的 Promise 在服务**真正关闭**（'close' 事件触发）后 resolve；
+   * 不 await 也能用——监听句柄在调用瞬间就已释放（新连接会被拒）。
+   */
+  close: () => Promise<void>
   /** 可直接读写的状态。 */
   state: MockState
 }
@@ -385,16 +407,17 @@ export function createMockServer(): MockServer {
   }
 
   /**
-   * 单调递增的 ISO 时间戳。
+   * 单调递增的 **Unix 秒**时间戳。
    *
-   * 同一毫秒内的两次写回要能被区分（`playlist/update` 必须刷新 `updatedAt`），
-   * 因此这里保证返回值**严格递增**（落在同一毫秒时人为 +1ms）。
+   * 服务端实测给的时间字段是 **Unix 秒**（不是 ISO 串），mock 与之一致。
+   * 同一秒内的两次写回要能被区分（`playlist/update` 必须刷新 `updatedAt`），
+   * 因此这里保证返回值**严格递增**（落在同一秒时人为 +1 秒）。
    */
-  let lastTimestampMs = 0
-  const nextTimestamp = (): string => {
-    const now = Date.now()
-    lastTimestampMs = now > lastTimestampMs ? now : lastTimestampMs + 1
-    return new Date(lastTimestampMs).toISOString()
+  let lastTimestampSec = 0
+  const nextTimestamp = (): number => {
+    const now = Math.floor(Date.now() / 1000)
+    lastTimestampSec = now > lastTimestampSec ? now : lastTimestampSec + 1
+    return lastTimestampSec
   }
 
   // ---- 工具（依赖上面的状态） ----
@@ -808,33 +831,37 @@ export function createMockServer(): MockServer {
     const address = server.address()
     port = typeof address === 'object' && address !== null ? address.port : 0
     if (!FETCH_BLOCKED_PORTS.has(port)) break
-    server.closeAllConnections?.()
-    server.closeIdleConnections?.()
-    try {
-      server.close()
-    } catch {
-      // 未监听时 close() 会抛 ERR_SERVER_NOT_RUNNING，忽略即可。
-    }
+    // 落在禁用端口上：这个 server 谁也连不上，直接弃用。
+    // `close()` 会**同步**关掉监听句柄（端口即刻释放），'close' 事件在下一个 tick 触发；
+    // 这里登记一下关闭收尾，避免留下未收尾的句柄。
+    void closeServerAsync(server)
     server = createServer(requestHandler)
+  }
+  if (FETCH_BLOCKED_PORTS.has(port)) {
+    // 重试耗尽还落在禁用端口上：直接抛错，别静默返回一个连不上的 server。
+    void closeServerAsync(server)
+    throw new Error(
+      `mock server 连续 ${MAX_PORT_ATTEMPTS} 次都分到 fetch 的禁用端口（最后是 ${port}），无法启动`,
+    )
   }
 
   let closed = false
+  /** 关闭完成的信号（'close' 事件真正触发后才 resolve）。 */
+  let closedPromise: Promise<void> | null = null
 
   return {
     url: `http://127.0.0.1:${port}`,
     state,
     close: () => {
-      if (closed) return
+      if (closed) return closedPromise ?? Promise.resolve()
       closed = true
       // Node 的全局 fetch（undici）会保持 keep-alive 连接，必须显式销毁，
       // 否则 vitest 进程会一直挂住不退出。
       server.closeAllConnections?.()
       server.closeIdleConnections?.()
-      try {
-        server.close()
-      } catch {
-        // 服务未监听时 close() 会抛 ERR_SERVER_NOT_RUNNING，忽略即可。
-      }
+      // 等到 'close' 事件才算真正关闭（监听句柄此刻已同步释放，新连接会被拒）。
+      closedPromise = closeServerAsync(server)
+      return closedPromise
     },
   }
 }

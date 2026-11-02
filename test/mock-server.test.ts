@@ -8,6 +8,7 @@ import {
   resolvePageSize,
   type MockServer,
 } from '../mock-server/server'
+import { ALBUMS, ARTISTS, PLAY_HISTORY, SONGS } from '../mock-server/fixtures'
 import { sha256 } from '../electron/sign'
 
 // ---------------------------------------------------------------------------
@@ -633,18 +634,19 @@ describe('mock server 搜索、歌词与音频流', () => {
 // ---------------------------------------------------------------------------
 
 describe('mock server 播放历史', () => {
-  it('播放历史端点返回 { list, total }，条目内嵌原始歌曲', async () => {
+  it('播放历史端点返回 { list, total }，条目本身就是歌曲对象', async () => {
     const s = createMockServer()
     const token = await login(s)
     const r = await getJson(s, `${API}/play-history/list`, token)
     expect(r.code).toBe(0)
     expect(Array.isArray(r.data.list)).toBe(true)
     expect(r.data.total).toBe(4)
-    expect(r.data.list[0].guid).toBe('h1')
-    // 条目内嵌的是服务端原始歌曲形状（guid / title / duration 毫秒），不是领域模型。
-    expect(r.data.list[0].track.guid).toBe('t1')
-    expect(r.data.list[0].track.title).toBe('示例曲目 1')
-    expect(r.data.list[0].track.duration).toBe(185000)
+    // ⚠️ 实测（§15.7 第 6 条）：条目**就是完整歌曲对象**，不是 { track: … } 包装。
+    expect(r.data.list[0].guid).toBe('t1')
+    expect(r.data.list[0].title).toBe('示例曲目 1')
+    expect(r.data.list[0].duration).toBe(185000)
+    expect(r.data.list[0].track).toBeUndefined()
+    expect(r.data.list[0].isFavorite).toBe(true)
     s.close()
   })
 
@@ -657,8 +659,8 @@ describe('mock server 播放历史', () => {
     expect(p2.data.list.length).toBe(2)
     expect(p1.data.total).toBe(4)
     expect(p2.data.total).toBe(4)
-    expect(p1.data.list[0].guid).toBe('h1')
-    expect(p2.data.list[0].guid).toBe('h3')
+    expect(p1.data.list[0].guid).toBe('t1')
+    expect(p2.data.list[0].guid).toBe('t5')
     s.close()
   })
 
@@ -667,6 +669,85 @@ describe('mock server 播放历史', () => {
     const r = await getJson(s, `${API}/play-history/list`)
     expect(r.code).toBe(99999)
     s.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// fixtures 对齐真实 NAS 字段形状（规格 §15.7）
+//
+// 这一段是**防漂移**用的：mock 与实现同构时，真实形状的偏差会一路传进客户端映射而无人察觉
+// （Task 6 首轮就栽在这上面：isFavorite / 专辑 year / 历史条目形状三处都错了）。
+// fixtures 必须按 §15.7 的实测形状写，这里逐条钉死。
+// ---------------------------------------------------------------------------
+
+describe('mock server fixtures 对齐真实 NAS 字段形状（§15.7）', () => {
+  it('歌曲带 isFavorite / isrc / isCue，且时间戳是 Unix 秒', () => {
+    for (const song of SONGS) {
+      expect(typeof song.isFavorite, `${song.guid} 缺 isFavorite`).toBe('boolean')
+      expect('isrc' in song, `${song.guid} 缺 isrc`).toBe(true)
+      expect(typeof song.isCue, `${song.guid} 缺 isCue`).toBe('boolean')
+      expect(typeof song.createdAt, `${song.guid} 的 createdAt 不是 Unix 秒`).toBe('number')
+      expect(typeof song.updatedAt, `${song.guid} 的 updatedAt 不是 Unix 秒`).toBe('number')
+    }
+    // 收藏态两种样本都有（实测真实歌曲里 true / false 都存在）。
+    expect(SONGS.some((song) => song.isFavorite)).toBe(true)
+    expect(SONGS.some((song) => !song.isFavorite)).toBe(true)
+  })
+
+  it('专辑没有 year 字段，只有 releaseDate', () => {
+    for (const album of ALBUMS) {
+      expect('year' in album, `${album.guid} 不该有 year 字段（实测专辑没有该字段）`).toBe(false)
+      expect(album.releaseDate === null || typeof album.releaseDate === 'string').toBe(true)
+      expect(typeof album.barcode === 'string' || album.barcode === null).toBe(true)
+      expect(typeof album.createdAt).toBe('number')
+      expect(typeof album.updatedAt).toBe('number')
+    }
+    // 至少一个 "YYYY-MM-DD" 形态、至少一个 null。
+    expect(ALBUMS.some((album) => /^\d{4}-\d{2}-\d{2}$/.test(album.releaseDate ?? ''))).toBe(true)
+    expect(ALBUMS.some((album) => album.releaseDate === null)).toBe(true)
+  })
+
+  it('歌手带 createdAt / updatedAt（Unix 秒）', () => {
+    for (const artist of ARTISTS) {
+      expect(typeof artist.createdAt).toBe('number')
+      expect(typeof artist.updatedAt).toBe('number')
+    }
+  })
+
+  it('coverId 前缀按场景是 track_ / album_ / artist_（或 null）', () => {
+    const pattern = /^(track|album|artist)_[0-9a-fA-F]+$/
+    for (const song of SONGS) {
+      if (song.coverId !== null) expect(song.coverId, `${song.guid} 的 coverId 前缀不对`).toMatch(pattern)
+    }
+    for (const album of ALBUMS) {
+      if (album.coverId !== null) {
+        expect(album.coverId, `${album.guid} 的 coverId 前缀不对`).toMatch(pattern)
+      }
+    }
+    for (const artist of ARTISTS) {
+      if (artist.coverId !== null) {
+        expect(artist.coverId, `${artist.guid} 的 coverId 前缀不对`).toMatch(pattern)
+      }
+    }
+    // 无封面的样本仍然保留（Song.coverId → 空串、其余实体 → null）。
+    expect(SONGS.some((song) => song.coverId === null)).toBe(true)
+  })
+
+  it('audioSpec.container 是空串、path 是 NAS 绝对路径', () => {
+    for (const song of SONGS) {
+      expect(song.audioSpec.container, `${song.guid} 的 container 应为空串`).toBe('')
+      expect(song.audioSpec.path ?? '').toMatch(/^\//)
+    }
+  })
+
+  it('播放历史条目本身就是歌曲对象（不是 { track: … } 包装）', () => {
+    expect(PLAY_HISTORY.length).toBeGreaterThan(0)
+    for (const entry of PLAY_HISTORY) {
+      expect('track' in entry, '历史条目不应有 track 包装').toBe(false)
+      expect(typeof entry.guid).toBe('string')
+      expect(typeof entry.title).toBe('string')
+      expect(typeof entry.duration).toBe('number')
+    }
   })
 })
 
@@ -821,5 +902,14 @@ describe('mock server 生命周期', () => {
     const s = createMockServer()
     s.close()
     expect(() => s.close()).not.toThrow()
+  })
+
+  it('close() 返回的 Promise 在服务真正关闭后 resolve', async () => {
+    const s = createMockServer()
+    const closing = s.close()
+    expect(closing).toBeInstanceOf(Promise)
+    await closing
+    // 真正关闭后端口不可达。
+    await expect(fetch(`${s.url}${API}/health`)).rejects.toThrow()
   })
 })
