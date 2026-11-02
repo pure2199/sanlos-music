@@ -320,6 +320,38 @@ describe('request()', () => {
     expect(headerOf(readCalls(fetchMock)[0]!, 'cookie')).toBe('music-token=TK; mode=relay')
   })
 
+  // Task 8 修复轮次 1 · M1：request() 支持**可选**的 isRelay 覆盖。
+  it('isRelay 覆盖生效：可把非中继会话按中继发（Task 8 代理用）', async () => {
+    const { m, fetchMock } = await loggedIn()
+    fetchMock.mockClear()
+
+    // 会话状态是直连（isRelay=false），调用方显式覆盖为中继。
+    await m.request('track/list', { isRelay: true })
+
+    expect(headerOf(readCalls(fetchMock)[0]!, 'cookie')).toBe('music-token=TK; mode=relay')
+  })
+
+  it('isRelay 覆盖生效：也可把中继会话按直连发', async () => {
+    const m = new SessionManager()
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ code: 0, data: { userToken: 'TK' } }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await m.passwordLogin('https://<FN-ID>.fnos.net/music', 'demo', 'pw', { isRelay: true })
+    fetchMock.mockClear()
+
+    await m.request('track/list', { isRelay: false })
+
+    expect(headerOf(readCalls(fetchMock)[0]!, 'cookie')).toBe('music-token=TK')
+  })
+
+  it('不传 isRelay 时沿用会话状态（向后兼容）', async () => {
+    const { m, fetchMock } = await loggedIn()
+    fetchMock.mockClear()
+
+    await m.request('track/list')
+
+    expect(headerOf(readCalls(fetchMock)[0]!, 'cookie')).toBe('music-token=TK')
+  })
+
   it('body 序列化为 JSON 并带 content-type', async () => {
     const { m, fetchMock } = await loggedIn()
     fetchMock.mockClear()

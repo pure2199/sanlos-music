@@ -107,6 +107,17 @@ export interface SessionRequestOptions {
   body?: unknown
   /** 查询参数；`undefined` / `null` 的键会被跳过。 */
   query?: Record<string, string | number | undefined>
+  /**
+   * 中继模式的**覆盖**（可选）。
+   *
+   * 缺省（不传）时用 `state.isRelay`——**行为与加这个字段之前完全一致**，
+   * 现有调用方无需改动。
+   *
+   * 用途（Task 8 的协议代理）：主进程在「已探测出当前链路是中继」时，
+   * 用它覆盖会话里按 host 推断出来的值，保证 JSON 路径与流式路径的链路模式一致
+   * （中继链路必须带 `Cookie: mode=relay`，否则中继返回 HTML 错误页）。
+   */
+  isRelay?: boolean
 }
 
 /**
@@ -711,8 +722,10 @@ export class SessionManager {
     const relative = path.replace(/^\/+/, '')
     const url = `${this.state.base}${API_PREFIX}/${relative}${buildQuery(opts.query)}`
     const bodyString = opts.body === undefined ? undefined : JSON.stringify(opts.body)
+    // 中继模式：调用方可以覆盖（缺省仍用会话状态）。
+    const isRelay = opts.isRelay ?? this.state.isRelay
 
-    const first = await this.send(url, method, bodyString)
+    const first = await this.send(url, method, bodyString, isRelay)
     const json = await readJson(first)
     if (!isTokenExpired(json)) {
       return { status: first.status, json }
@@ -720,15 +733,24 @@ export class SessionManager {
 
     // token 失效：静默续期一次，然后重试**一次**。
     await this.relogin()
-    const second = await this.send(url, method, bodyString)
+    const second = await this.send(url, method, bodyString, isRelay)
     return { status: second.status, json: await readJson(second) }
   }
 
-  /** 发一次请求（附加 authx 与凭证 Cookie）。 */
-  private async send(url: string, method: string, bodyString?: string): Promise<Response> {
+  /**
+   * 发一次请求（附加 authx 与凭证 Cookie）。
+   *
+   * `isRelay` 缺省用会话状态；`request()` 会把它算好后显式传进来。
+   */
+  private async send(
+    url: string,
+    method: string,
+    bodyString?: string,
+    isRelay: boolean = this.state.isRelay,
+  ): Promise<Response> {
     const headers: Record<string, string> = {
       authx: authx(method, url, bodyString),
-      cookie: buildCookie(this.state.token, this.state.isRelay),
+      cookie: buildCookie(this.state.token, isRelay),
     }
     if (bodyString !== undefined) headers['content-type'] = 'application/json'
     try {

@@ -6,7 +6,8 @@ import {
   registerProxy,
   type ProtocolLike,
 } from '../electron/proxy'
-import { SessionStateError, type SessionManager, type SessionState } from '../electron/session'
+import { authx } from '../electron/sign'
+import { SessionManager, SessionStateError, type SessionState } from '../electron/session'
 
 // ---------------------------------------------------------------------------
 // 测试替身
@@ -54,7 +55,7 @@ interface ProxyRequestOptions {
   query?: Record<string, string>
 }
 
-/** 假会话：状态可定制，`request` 是一个 spy。 */
+/** 假会话：状态可定制，`request` / `relogin` 都是 spy。 */
 function fakeSession(stateOverrides: Partial<SessionState> = {}): {
   session: SessionManager
   request: ReturnType<
@@ -62,6 +63,7 @@ function fakeSession(stateOverrides: Partial<SessionState> = {}): {
       (path: string, opts?: ProxyRequestOptions) => Promise<{ status: number; json: unknown }>
     >
   >
+  relogin: ReturnType<typeof vi.fn<() => Promise<boolean>>>
 } {
   const state: SessionState = {
     base: 'http://nas.local:5666/music',
@@ -77,8 +79,13 @@ function fakeSession(stateOverrides: Partial<SessionState> = {}): {
     status: 200,
     json: { code: 0, msg: 'ok', data: { list: [] } },
   }))
-  const session = { state, request } as unknown as SessionManager
-  return { session, request }
+  // 静默续期：默认成功并换一个新 token（与 Task 7 的真实行为一致）。
+  const relogin = vi.fn(async () => {
+    state.token = 'TK-RENEWED'
+    return true
+  })
+  const session = { state, request, relogin } as unknown as SessionManager
+  return { session, request, relogin }
 }
 
 /** 构造一条流式上游响应（用于验证代理是「流式转发」而不是整块读进内存）。 */
@@ -618,5 +625,320 @@ describe('registerProxy 的中继判定', () => {
     expect(firstFetchCall(fetchMock).headers.get('cookie')).toBe(
       'music-token=TK-SECRET-TOKEN; mode=relay',
     )
+  })
+
+  it('JSON 路径同样遵循 isRelay 覆盖钩子（两条路径的链路模式必须一致）', async () => {
+    const fake = fakeProtocol()
+    // 用**真的** SessionManager：JSON 路径的 Cookie 由会话层拼，覆盖钩子要能传下去。
+    const session = new SessionManager()
+    session.state = {
+      base: 'http://nas.local:5666/music',
+      mode: 'password',
+      token: 'TK',
+      deviceId: 'DEVICE',
+      username: 'user',
+      password: '',
+      isRelay: false,
+    }
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    registerProxy(session, { protocol: fake.proto, isRelay: () => true })
+
+    const res = await fake.call(new Request('fnm://srv/album/list'))
+
+    expect(res.status).toBe(200)
+    const init = fetchMock.mock.calls[0]![1] as RequestInit
+    const headers = init.headers as Record<string, string>
+    expect(headers['cookie']).toBe('music-token=TK; mode=relay')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1 · I1：content-length 与 content-encoding 同生共死
+// ---------------------------------------------------------------------------
+
+describe('修复轮次 1 · I1：压缩响应的长度语义', () => {
+  it('上游带 content-encoding 时一并删掉 content-length', async () => {
+    const fake = fakeProtocol()
+    const { session } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    // 实测：undici 解压 body 的同时**保留压缩态的 content-length**
+    // （gzip 响应 content-length: 24，而解压后 body 100 字节）。
+    const upstream = streamResponse(new Uint8Array(100), {
+      status: 200,
+      headers: {
+        'content-encoding': 'gzip',
+        'content-length': '24',
+        'content-type': 'audio/mpeg',
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => upstream))
+
+    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    // 只删 content-encoding 会让渲染进程拿到「声明 24 字节、实际 100 字节」的响应
+    // → Chromium ERR_CONTENT_LENGTH_MISMATCH / 截断。
+    expect(res.headers.get('content-encoding')).toBeNull()
+    expect(res.headers.get('content-length')).toBeNull()
+    expect(res.headers.get('content-type')).toBe('audio/mpeg')
+  })
+
+  it('上游不带 content-encoding 时照常透传 content-length', async () => {
+    const fake = fakeProtocol()
+    const { session } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    const upstream = streamResponse(new Uint8Array([1, 2, 3]), {
+      status: 200,
+      headers: { 'content-length': '3', 'content-type': 'audio/mpeg' },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => upstream))
+
+    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    expect(res.headers.get('content-length')).toBe('3')
+    expect(res.headers.get('content-encoding')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1 · I2：流式路径的 token 失效续期
+// ---------------------------------------------------------------------------
+
+describe('修复轮次 1 · I2：流式路径的静默续期', () => {
+  it('上游 401 时静默续期一次并重发一次（重发时带上新 token）', async () => {
+    const fake = fakeProtocol()
+    const { session, relogin } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('unauthorized', { status: 401 }))
+      .mockResolvedValueOnce(
+        streamResponse(new Uint8Array([1, 2]), {
+          status: 206,
+          headers: { 'content-range': 'bytes 0-1/2', 'accept-ranges': 'bytes' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    expect(relogin).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(res.status).toBe(206)
+    expect(res.headers.get('content-range')).toBe('bytes 0-1/2')
+    // 重发时必须用续期后的新 token。
+    const retried = fetchMock.mock.calls[1]![0] as Request
+    expect(retried.headers.get('cookie')).toBe('music-token=TK-RENEWED')
+  })
+
+  it('上游 403 同样触发续期', async () => {
+    const fake = fakeProtocol()
+    const { session, relogin } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('forbidden', { status: 403 }))
+      .mockResolvedValueOnce(streamResponse(new Uint8Array([1]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    expect(relogin).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(res.status).toBe(200)
+  })
+
+  it('续期失败时返回 502，不把上游的 401 原样透给渲染进程', async () => {
+    const fake = fakeProtocol()
+    const { session, relogin } = fakeSession()
+    relogin.mockResolvedValue(false)
+    registerProxy(session, { protocol: fake.proto })
+
+    const fetchMock = vi.fn(async () => new Response('unauthorized', { status: 401 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    expect(res.status).toBe(502)
+    const json = await readJson(res)
+    expect(json.code).toBe(-1)
+    expect(String(json.msg).length).toBeGreaterThan(0)
+    // 失败后不重发。
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('续期抛错时同样按上游异常处理（502）', async () => {
+    const fake = fakeProtocol()
+    const { session, relogin } = fakeSession()
+    relogin.mockRejectedValue(new Error('boom'))
+    registerProxy(session, { protocol: fake.proto })
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unauthorized', { status: 401 })))
+
+    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    expect(res.status).toBe(502)
+    expect((await readJson(res)).code).toBe(-1)
+  })
+
+  it('续期后仍是 401 时只重试一次（透传 401，不再续期）', async () => {
+    const fake = fakeProtocol()
+    const { session, relogin } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    const fetchMock = vi.fn(async () => new Response('unauthorized', { status: 401 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    expect(relogin).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(res.status).toBe(401)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1 · I3：%2e%2e 的真实行为
+// ---------------------------------------------------------------------------
+
+describe('修复轮次 1 · I3：%2e%2e 的真实行为', () => {
+  it('%2e%2e 被 URL 解析器规范化：落在 API 前缀内的普通路径（不是 502）', async () => {
+    const fake = fakeProtocol()
+    const { session, request } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    // 实测：new Request('fnm://srv/album/%2e%2e/user/list').url → 'fnm://srv/user/list'
+    // （WHATWG 解析器把 %2e%2e 解码成 .. 并弹栈，Chromium 同规范）。
+    const res = await fake.call(new Request('fnm://srv/album/%2e%2e/user/list'))
+
+    // 护栏看到的是**规范化后**的路径：它是一个普通相对路径，仍在 API 前缀内 → 不会逃逸。
+    expect(res.status).toBe(200)
+    expect(request.mock.calls[0]?.[0]).toBe('user/list')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1 · M2：查询参数表
+// ---------------------------------------------------------------------------
+
+describe('修复轮次 1 · M2：查询参数表', () => {
+  it('查询参数表无原型：constructor / toString / __proto__ 不会被吞掉', async () => {
+    const fake = fakeProtocol()
+    const { session, request } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    await fake.call(
+      new Request('fnm://srv/track/list?constructor=a&toString=b&__proto__=c'),
+    )
+
+    const query = request.mock.calls[0]?.[1]?.query as Record<string, string>
+    expect(query['constructor']).toBe('a')
+    expect(query['toString']).toBe('b')
+    expect(Object.prototype.hasOwnProperty.call(query, '__proto__')).toBe(true)
+    expect(Object.getPrototypeOf(query)).toBeNull()
+  })
+
+  it('重复键保留第一个（与 URLSearchParams.get() 一致）', async () => {
+    const fake = fakeProtocol()
+    const { session, request } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    await fake.call(new Request('fnm://srv/track/list?tag=a&tag=b'))
+
+    const query = request.mock.calls[0]?.[1]?.query as Record<string, string>
+    expect(query['tag']).toBe('a')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1 · M3：二进制路径的请求体
+// ---------------------------------------------------------------------------
+
+describe('修复轮次 1 · M3：二进制路径的请求体', () => {
+  it('二进制路径把渲染进程的请求体透传给上游', async () => {
+    const fake = fakeProtocol()
+    const { session } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    const fetchMock = vi.fn(async () => streamResponse(new Uint8Array([1]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const body = JSON.stringify({ trackGUID: 'g1' })
+    const res = await fake.call(
+      new Request('fnm://srv/track/stream', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    const sent = firstFetchCall(fetchMock)
+    expect(sent.method).toBe('POST')
+    expect(await sent.text()).toBe(body)
+    expect(sent.headers.get('content-type')).toBe('application/json')
+  })
+
+  it('authx 按请求体参与签名（不是按空体）', async () => {
+    const fake = fakeProtocol()
+    const { session } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    const fetchMock = vi.fn(async () => streamResponse(new Uint8Array([1]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const body = JSON.stringify({ trackGUID: 'g1' })
+    await fake.call(
+      new Request('fnm://srv/track/stream', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }),
+    )
+
+    const sent = firstFetchCall(fetchMock)
+    const header = sent.headers.get('authx') ?? ''
+    const nonce = /nonce=(\d+)/.exec(header)?.[1] ?? ''
+    const ts = /timestamp=(\d+)/.exec(header)?.[1] ?? ''
+    const url = 'http://nas.local:5666/music/api/v1/track/stream'
+
+    expect(header).toBe(authx('POST', url, body, { nonce, ts }))
+    // 与「按空体签名」的结果不同（否则签名与实际请求体不符）。
+    expect(header).not.toBe(authx('POST', url, undefined, { nonce, ts }))
+  })
+
+  it('GET 请求不携带请求体', async () => {
+    const fake = fakeProtocol()
+    const { session } = fakeSession()
+    registerProxy(session, { protocol: fake.proto })
+
+    const fetchMock = vi.fn(async () => streamResponse(new Uint8Array([1]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    const sent = firstFetchCall(fetchMock)
+    expect(sent.method).toBe('GET')
+    expect(await sent.text()).toBe('')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 修复轮次 1 · M4：拿不到 protocol 时的失败路径
+// ---------------------------------------------------------------------------
+
+describe('修复轮次 1 · M4：拿不到 protocol 时抛错', () => {
+  it('registerProxy 在没有 Electron 运行时且未注入 protocol 时抛错', () => {
+    const { session } = fakeSession()
+    expect(() => registerProxy(session)).toThrow(/protocol/)
+  })
+
+  it('registerFnmSchemePrivileges 在同样条件下抛错', () => {
+    expect(() => registerFnmSchemePrivileges()).toThrow(/protocol/)
   })
 })

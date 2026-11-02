@@ -100,8 +100,14 @@ const FORWARD_RESPONSE_HEADERS: readonly string[] = [
  */
 const SEGMENT_RE = /^[A-Za-z0-9_-]+$/
 
-/** 不允许携带响应体的状态码（`Response` 构造器会拒绝）。 */
-const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([101, 204, 205, 304])
+/**
+ * 不允许携带响应体的状态码（Fetch 规范里的 "null body status"）。
+ *
+ * 只含 204 / 205 / 304：**101 不在此列**——`Response` 构造器只接受
+ * `[200, 599]` 的状态码，`new Response(null, { status: 101 })` 会抛 RangeError
+ * （那种状态码根本构造不出来，交给外层兜底 catch 转成 502）。
+ */
+const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304])
 
 /** 跨源放行头：渲染进程页面来自 `file://` / dev server，与 `fnm://` 跨源。 */
 const CORS_HEADERS: Readonly<Record<string, string>> = {
@@ -208,25 +214,44 @@ function resolveElectronProtocol(): ProtocolLike | null {
 /**
  * 构造发往上游的请求：**只加头，不发请求**（请求由调用方 `fetch` 发出）。
  *
- * - 附加 `authx` 签名（签名路径取完整 URL 的 pathname，与 Task 3 语义一致）；
+ * - 附加 `authx` 签名（签名路径取完整 URL 的 pathname，与 Task 3 语义一致；
+ *   有请求体时**按请求体参与签名**，与 `SessionManager.request()` 的行为一致）；
  * - 附加凭证 Cookie（`music-token=<token>`，中继链路再追加 `mode=relay`）；
  * - 请求头**只透传白名单**（`range` / `content-type` / `accept` /
  *   `if-none-match` / `if-modified-since`），其余一律丢弃——
  *   渲染进程带来的 `cookie` / `authorization` 绝不会影响上游看到的身份。
+ *
+ * @param body 可选的请求体（**新增的第 4 个参数**，前 3 个参数保持不变，向后兼容）。
+ *   二进制路径用它把渲染进程的请求体带下去（否则 `POST /track/stream` 的体会被静默丢掉，
+ *   而 `authx` 却按空体签名——自洽但语义错）。
+ *   `GET` / `HEAD` 或空串一律按「无请求体」处理。
  */
 export function buildUpstreamRequest(
   input: UpstreamRequestInput,
   token: string,
   isRelay: boolean,
+  body?: string | null,
 ): Request {
+  const method = input.method.toUpperCase()
+  const hasBody =
+    typeof body === 'string' && body.length > 0 && method !== 'GET' && method !== 'HEAD'
+
   const headers = new Headers()
   for (const name of FORWARD_REQUEST_HEADERS) {
     const value = input.headers.get(name)
     if (value !== null) headers.set(name, value)
   }
-  headers.set('authx', authx(input.method, input.url))
+  if (hasBody && headers.get('content-type') === null) {
+    // 渲染进程没声明类型时按 JSON 处理（与 `src/api/client.ts` 的实际行为一致）。
+    headers.set('content-type', 'application/json')
+  }
+  headers.set('authx', authx(method, input.url, hasBody ? body : undefined))
   headers.set('cookie', buildCookie(token, isRelay))
-  return new Request(input.url, { method: input.method.toUpperCase(), headers })
+  return new Request(input.url, {
+    method,
+    headers,
+    ...(hasBody ? { body } : {}),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -246,8 +271,18 @@ interface ParsedTarget {
 /**
  * 校验路径：只允许「若干个普通 ASCII 段」，形如 `album/list`、`track/album-detail/list`。
  *
- * 拒绝清单：`..`（含 `.`）、空段（`album//list`）、反斜杠、百分号编码、
- * 任何非 ASCII 字符、前导斜杠缺失。
+ * 拒绝清单（作用在**原始路径**形态上）：含 `.` 的段（`..`）、空段（`album//list`）、
+ * 反斜杠、百分号编码、任何非 ASCII 字符、前导斜杠缺失。
+ *
+ * ⚠️ **关于 `..` 与 `%2e%2e`（如实说明，勿误读）**：
+ * WHATWG 的 URL 解析器在**构造 `Request` 时**就把它们规范化掉了
+ * （`fnm://srv/album/../user/list` 与 `fnm://srv/album/%2e%2e/user/list`
+ * **都**变成 `fnm://srv/user/list`），Chromium 同规范。
+ * 因此**运行期的 handler 收到的是规范化后的路径**，本护栏看到的是规范化之后的结果——
+ * 它**不能**在这里识别出「渲染进程原本想穿越」（也不需要：见下）。
+ * 兜底的安全保证是：规范化后的路径**仍然是一个普通的相对路径**，
+ * 上游 URL 恒为 `<base>/api/v1/<rest>`，**不可能逃出 API 前缀**。
+ * 只有**无法被规范化**的形态（例如 `%2f`）才会真正落到本护栏上并被拒绝。
  */
 function normalizeRest(rawPath: string): string | null {
   if (!rawPath.startsWith('/')) return null
@@ -262,9 +297,15 @@ function normalizeRest(rawPath: string): string | null {
 /**
  * 解析渲染进程发来的 `fnm://srv/<path>?<query>`。
  *
- * **刻意手工切分而不是用 `new URL()`**：`new URL()` 会把 `..` 规范化掉
- * （`fnm://srv/album/../user/list` → pathname `/user/list`），那样就看不出
- * 「渲染进程尝试穿越」了。这里取**原始**路径做护栏校验。
+ * **刻意手工切分而不是用 `new URL()`**：要拿到**未经 URL 规范化**的原始路径，
+ * 才知道渲染进程到底写了什么（`new URL()` 会把 `..` / `%2e%2e` 规范化掉）。
+ *
+ * ⚠️ **反斜杠分支的适用面**：`fnm` 注册为 `standard: true` 之后，
+ * Chromium 可能把 `\` 当作路径分隔符（Node / 单测里它是普通字符）。
+ * 所以「反斜杠被拒」这条分支主要在**原始路径形态**下生效；
+ * 即便生产环境把它当成分隔符，结果也只是多切一个段，**仍在 API 前缀内**，
+ * 不构成逃逸。这条分支**不是**主要防线——主要防线是「上游 URL 只由
+ * `session.state.base` + 受限路径段拼成」这件事本身。
  */
 function parseTarget(rawUrl: string): ParsedTarget | null {
   const schemeEnd = rawUrl.indexOf('://')
@@ -289,13 +330,19 @@ function parseTarget(rawUrl: string): ParsedTarget | null {
 /**
  * 原始查询串 → `session.request()` 需要的查询参数表。
  *
- * 重复键取**第一个**（与 `URLSearchParams.get()` 的语义一致）。
+ * - **无原型**（`Object.create(null)`）：避免 `key in record` 命中
+ *   `Object.prototype` 上的 `constructor` / `toString` / `__proto__`
+ *   ——那会让这些查询参数被静默丢弃，`__proto__` 赋值还会变成一次静默 no-op。
+ *   判重一律用 `Object.prototype.hasOwnProperty.call()`。
+ * - **重复键取第一个**（与 `URLSearchParams.get()` 的语义一致）：
+ *   `session.request()` 的 `query` 是单值 `Record<string, string>`，
+ *   表达不了同键多值（上游签名的多值语义由 `sign.ts` 自己按 `getAll` 处理）。
  */
 function queryToRecord(query: string): Record<string, string> {
-  const record: Record<string, string> = {}
+  const record = Object.create(null) as Record<string, string>
   if (query.length === 0) return record
   for (const [key, value] of new URLSearchParams(query)) {
-    if (!(key in record)) record[key] = value
+    if (!Object.prototype.hasOwnProperty.call(record, key)) record[key] = value
   }
   return record
 }
@@ -395,6 +442,7 @@ async function proxyJson(
   request: Request,
   rest: string,
   query: string,
+  isRelay: boolean,
 ): Promise<Response> {
   const method = request.method.toUpperCase()
 
@@ -410,6 +458,9 @@ async function proxyJson(
       method,
       body,
       query: queryToRecord(query),
+      // 中继覆盖钩子同样作用在 JSON 路径上：两条路径的链路模式必须一致
+      // （中继关卡 `Cookie: mode=relay` 是硬性要求）。
+      isRelay,
     })
     return jsonResponse(result.status, result.json)
   } catch (err) {
@@ -431,7 +482,8 @@ async function readJsonBody(request: Request, method: string): Promise<unknown> 
  * - 上游 URL **只**由 `session.state.base` + 受护栏约束的相对路径拼出；
  * - `Range` 等白名单请求头透传（拖动定位靠它）；
  * - 上游 body **直接作为响应 body**（流式，不整块读进内存）；
- * - 上游状态码原样保留（`206` 不能被改成 `200`）。
+ * - 上游状态码原样保留（`206` 不能被改成 `200`）；
+ * - 上游 401 / 403 时**静默续期一次并重发一次**（token 失效的全局约束同样适用）。
  */
 async function proxyBinary(
   session: SessionManager,
@@ -444,17 +496,51 @@ async function proxyBinary(
   if (stateError) return errorResponse(errorMessage(stateError))
 
   const url = `${session.state.base}${API_PREFIX}/${rest}${query.length > 0 ? `?${query}` : ''}`
-  const upstreamRequest = buildUpstreamRequest(
-    { method: request.method, url, headers: request.headers },
-    session.state.token,
-    isRelay,
-  )
+  const method = request.method.toUpperCase()
+
+  // 请求体：二进制路径也可能带体（实测端点里有 `POST /track/stream {trackGUID}`）。
+  // 读一次存成字符串，重试时复用（不重复消费渲染进程的 body，也不缓冲响应体）。
+  let requestBody: string | null = null
+  if (method !== 'GET' && method !== 'HEAD') {
+    try {
+      requestBody = await request.text()
+    } catch {
+      return errorResponse('无法读取请求体')
+    }
+  }
+
+  const send = (): Promise<Response> =>
+    fetch(
+      buildUpstreamRequest(
+        { method, url, headers: request.headers },
+        session.state.token,
+        isRelay,
+        requestBody,
+      ),
+    )
 
   let upstream: Response
   try {
-    upstream = await fetch(upstreamRequest)
+    upstream = await send()
   } catch {
     return errorResponse('无法连接音乐服务（网络不可达或服务未响应）')
+  }
+
+  // token 失效：流式路径拿不到「200 + JSON 信封里的 99999」（读 body 就破坏流式），
+  // 上游只会用 401 / 403 表达。这里**静默续期一次**再重发一次（只重试一次）。
+  if (upstream.status === 401 || upstream.status === 403) {
+    await discardBody(upstream)
+    const renewed = await renewSession(session)
+    if (!renewed) {
+      // 续期失败：按「上游异常」处理，**不把上游的 401 原样透给渲染进程**。
+      return errorResponse('身份凭据已失效，自动续期失败，请重新登录')
+    }
+    try {
+      // 重新构造请求：续期后 token 已变，必须带上新 token。
+      upstream = await send()
+    } catch {
+      return errorResponse('无法连接音乐服务（网络不可达或服务未响应）')
+    }
   }
 
   const headers = new Headers()
@@ -463,11 +549,44 @@ async function proxyBinary(
     if (value !== null) headers.set(name, value)
   }
   // Electron 会自动解压上游的 gzip：留着原始 content-encoding 会让渲染进程二次解压而报错。
+  //
+  // ⚠️ `content-length` 必须与 `content-encoding` **同生共死**：
+  // undici 会在解压 body 的同时**保留压缩态的 `content-length`**（实测：gzip 响应
+  // `content-length: 24` 而解压后 body 100 字节）。只删 `content-encoding` 而留着
+  // `content-length`，渲染进程会拿到「声明 24 字节、实际 100 字节」的响应 →
+  // Chromium `ERR_CONTENT_LENGTH_MISMATCH` / 截断，**封面与音频流直接加载失败**。
+  // 解压后长度未知，故上游带 `content-encoding` 时**一并删掉** `content-length`。
+  if (upstream.headers.get('content-encoding') !== null) {
+    headers.delete('content-length')
+  }
   headers.delete('content-encoding')
   for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value)
 
-  const body = NULL_BODY_STATUSES.has(upstream.status) ? null : upstream.body
-  return new Response(body, { status: upstream.status, headers })
+  const responseBody = NULL_BODY_STATUSES.has(upstream.status) ? null : upstream.body
+  return new Response(responseBody, { status: upstream.status, headers })
+}
+
+/** 丢弃一个响应的 body（释放连接），忽略失败。 */
+async function discardBody(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel()
+  } catch {
+    // 忽略：丢弃失败不影响主流程
+  }
+}
+
+/**
+ * 静默续期一次（Task 7 的 `SessionManager.relogin()`）。
+ *
+ * 返回 `false` 表示续期失败（会话没拿到新 token）——调用方据此转成 502，
+ * **不把上游的 401 原样透给渲染进程**。
+ */
+async function renewSession(session: SessionManager): Promise<boolean> {
+  try {
+    return await session.relogin()
+  } catch {
+    return false
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -512,7 +631,7 @@ async function dispatch(
   if (opts.binaryPaths.includes(target.rest)) {
     return await proxyBinary(session, request, target.rest, target.query, isRelay)
   }
-  return await proxyJson(session, request, target.rest, target.query)
+  return await proxyJson(session, request, target.rest, target.query, isRelay)
 }
 
 // ---------------------------------------------------------------------------
