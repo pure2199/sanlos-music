@@ -11,5 +11,5 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["src", "electron", "shared", "test", "e2e", "*.ts"]
+  "include": ["src", "electron", "shared", "mock-server", "test", "e2e", "*.ts"]
 }
