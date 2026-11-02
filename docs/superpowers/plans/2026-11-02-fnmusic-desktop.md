@@ -725,7 +725,7 @@ describe('TrustedHosts', () => {
 - [ ] **Step 2: 运行测试确认失败**
 - [ ] **Step 3: 实现 electron/cert.ts 与 electron/probe.ts**
 
-`probeCandidates` 对候选并行探测：已登录打 `/music/api/v1/track/list`（带 token），未登录打 `/music/api/v1/health`；直连超时 3s、中继超时 10s；HTTP 状态 ≥ 400 或业务码非 0 视为不可用；失败原因归类为「无法解析主机（DNS）」「连接被拒绝（端口不通或服务未启动）」「连接超时（端口无响应）」「网络不可达」「TLS 握手失败」。
+`probeCandidates` 对候选并行探测：已登录打 `/music/api/v1/track/list`（带 token），未登录打 `/music/api/v1/health`；直连超时 3s、中继超时 10s；**可达性只看 HTTP 状态码（≥ 400 视为不可用）**——业务码只补充 `error` 文案、**不影响** `ok`（实测：部分 fnOS 音乐端点会回 `code=100001 unknown error`，服务端明明有响应，不能因此判成不可达；`code=null` / 缺 `code` / 非 JSON 同样不判不可用）；失败原因归类为「无法解析主机（DNS）」「连接被拒绝（端口不通或服务未启动）」「连接超时（端口无响应）」「网络不可达」「TLS 握手失败」。
 
 - [ ] **Step 4: 运行测试确认通过**
 - [ ] **Step 5: 提交** — `git commit -m "feat: 证书信任策略与链路并行探测"`

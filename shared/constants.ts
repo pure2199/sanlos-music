@@ -52,6 +52,9 @@ export const MUSIC_TOKEN_COOKIE = 'music-token'
 /** 中继链路附加的 Cookie 键值（与 token 合并在同一个 Cookie 头）。 */
 export const RELAY_COOKIE_MODE = 'relay'
 
+/** 中继链路附加的 Cookie **键名**（与 `RELAY_COOKIE_MODE` 配对使用）。 */
+export const RELAY_COOKIE_KEY = 'mode'
+
 /** 中继域名后缀：回退地址为 `<fnId>.fnos.net`（实测；`5ddd.com` 只是 FN 连接接口自身的服务域名）。 */
 export const RELAY_DOMAIN_SUFFIX = '.fnos.net'
 
