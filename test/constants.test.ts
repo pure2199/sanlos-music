@@ -10,6 +10,8 @@ import {
   RELAY_COOKIE_MODE,
   RELAY_DOMAIN_SUFFIX,
   MUSIC_TOKEN_COOKIE,
+  DEFAULT_HTTP_PORT,
+  DEFAULT_HTTPS_PORT,
   CODE_OK,
   CODE_TOKEN_EXPIRED,
   EQ_BANDS_10,
@@ -59,6 +61,11 @@ describe('constants', () => {
     expect(RELAY_COOKIE_MODE).toBe('relay')
     expect(RELAY_DOMAIN_SUFFIX).toBe('.fnos.net')
     expect(MUSIC_TOKEN_COOKIE).toBe('music-token')
+  })
+
+  it('默认服务端口常量正确（实测修正 M6：端口集中到 shared/constants.ts）', () => {
+    expect(DEFAULT_HTTP_PORT).toBe(5666)
+    expect(DEFAULT_HTTPS_PORT).toBe(5667)
   })
 
   it('业务码常量正确', () => {

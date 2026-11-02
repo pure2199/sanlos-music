@@ -11,8 +11,13 @@
 // - M4：FN 连接接口参与签名的是**纯路径** `/api/v1/fn/con`，不是完整 URL。
 // - M8：服务端当前**不校验** authx 签名，但这里仍按上游语义显式传 `{ key: FN_SIGN_KEY }`
 //   （官方客户端会发这个头；将来网关若加强校验，行为不会突变）。
+//
+// 基址归一化规则（Task 4 修复轮次 I1 裁定）见 `normalizeBase` 的注释：
+// 保留路径前缀、丢弃 userinfo/query/hash、只接受 http/https。
 
 import {
+  DEFAULT_HTTP_PORT,
+  DEFAULT_HTTPS_PORT,
   FN_CON_API,
   FN_CON_PATH,
   FN_SIGN_KEY,
@@ -50,12 +55,6 @@ export interface Candidate {
   isRelay: boolean
 }
 
-/** 默认 HTTP 端口（实测与规格一致）。 */
-const DEFAULT_HTTP_PORT = 5666
-
-/** 默认 HTTPS 端口（实测与规格一致）。 */
-const DEFAULT_HTTPS_PORT = 5667
-
 /** 中继端口（回退地址用）。 */
 const RELAY_PORT = 443
 
@@ -84,12 +83,20 @@ function asPort(value: unknown, fallback: number): number {
 }
 
 /**
- * 归一化服务器基址为 `<scheme>://<host>[:port]/music`。
+ * 归一化服务器基址为 `<scheme>://<host>[:port]<path>/music`。
  *
+ * 规则（Task 4 修复轮次 I1 裁定）：
  * - 缺协议时补 `http://`（直连默认 HTTP 是为了避开自签证书校验）。
- * - 路径为空或不是 `/music` 结尾时归一为 `/music`；以 `/music` 结尾的路径原样保留
- *   （兼容反向代理挂在子路径下的部署）。
- * - 去掉尾部斜杠；无法解析时返回空串。
+ * - **保留用户输入的路径前缀**：路径为空 → `/music`；路径以 `/music` 结尾 → 原样保留；
+ *   其他路径 → 追加 `/music`（`https://host/nas` → `https://host/nas/music`）。
+ *   反向代理挂在子路径下的部署不会被改成错误路径而 404。
+ * - **丢弃 userinfo / query / hash**（`http://user:pw@nas.local:5666/music?a=1#f`
+ *   → `http://nas.local:5666/music`）：基址只用来拼 API 路径，凭证与查询参数由各自调用方负责，
+ *   留在基址里既会泄露口令也会污染后续 URL。
+ * - **只接受 `http:` / `https:`**，其他协议（如 `ftp:`、`ws:`）一律**拒绝并返回空串**。
+ *   理由：基址会被拼成 `<base>/api/v1/...` 去请求音乐服务，非 HTTP 协议不可能工作；
+ *   把 `ftp://` 悄悄按 http 处理会掩盖用户输入错误，返回空串让调用方提示「地址无效」。
+ * - 无法解析时返回空串。
  */
 export function normalizeBase(input: string): string {
   const trimmed = input.trim()
@@ -101,9 +108,11 @@ export function normalizeBase(input: string): string {
   } catch {
     return ''
   }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return ''
   const path = u.pathname.replace(/\/+$/, '')
   const basePath =
-    path === '' || !path.endsWith(MUSIC_PATH) ? MUSIC_PATH : path
+    path === '' ? MUSIC_PATH : path.endsWith(MUSIC_PATH) ? path : `${path}${MUSIC_PATH}`
+  // u.host 不含 userinfo；query / hash 直接不拼进结果。
   return `${u.protocol}//${u.host}${basePath}`
 }
 

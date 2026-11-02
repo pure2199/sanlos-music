@@ -90,9 +90,9 @@ describe('normalizeBase 边界', () => {
   it('缺协议且带路径时同样补 http', () => {
     expect(normalizeBase('192.168.1.10:5666/music')).toBe('http://192.168.1.10:5666/music')
   })
-  it('非 /music 路径归一为 /music（基址形状固定为 <scheme>://<host>[:port]/music）', () => {
+  it('非 /music 路径保留前缀并追加 /music（修复轮次 I1）', () => {
     expect(normalizeBase('http://nas.local:5666/')).toBe('http://nas.local:5666/music')
-    expect(normalizeBase('http://nas.local:5666/api')).toBe('http://nas.local:5666/music')
+    expect(normalizeBase('http://nas.local:5666/api')).toBe('http://nas.local:5666/api/music')
   })
   it('以 /music 结尾的路径原样保留', () => {
     expect(normalizeBase('http://nas.local:5666/nas/music')).toBe('http://nas.local:5666/nas/music')
@@ -102,6 +102,39 @@ describe('normalizeBase 边界', () => {
   })
   it('非法输入返回空串', () => {
     expect(normalizeBase('http://')).toBe('')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// normalizeBase 的 I1 裁定规则：保留路径前缀 / 丢弃 userinfo·query·hash / 只接受 http(s)
+// ---------------------------------------------------------------------------
+
+describe('normalizeBase 路径前缀与协议白名单（修复轮次 I1）', () => {
+  it('保留用户输入的路径前缀并追加 /music', () => {
+    expect(normalizeBase('https://example.com/nas')).toBe('https://example.com/nas/music')
+  })
+  it('路径已以 /music 结尾时原样保留', () => {
+    expect(normalizeBase('https://example.com/nas/music')).toBe('https://example.com/nas/music')
+  })
+  it('无路径时补 /music', () => {
+    expect(normalizeBase('192.168.1.10:5666')).toBe('http://192.168.1.10:5666/music')
+  })
+  it('丢弃 userinfo（口令不留在基址里）', () => {
+    expect(normalizeBase('http://user:pw@nas.local:5666/music')).toBe('http://nas.local:5666/music')
+  })
+  it('丢弃 query 与 hash', () => {
+    expect(normalizeBase('http://nas.local:5666/music?a=1&b=2#frag')).toBe(
+      'http://nas.local:5666/music',
+    )
+    expect(normalizeBase('https://example.com/nas?x=1')).toBe('https://example.com/nas/music')
+  })
+  it('非 http/https 协议一律拒绝并返回空串', () => {
+    expect(normalizeBase('ftp://nas.local')).toBe('')
+    expect(normalizeBase('ws://nas.local:5666')).toBe('')
+    expect(normalizeBase('file:///C:/music')).toBe('')
+  })
+  it('http/https 大小写不敏感', () => {
+    expect(normalizeBase('HTTPS://nas.local/music')).toBe('https://nas.local/music')
   })
 })
 
@@ -155,6 +188,49 @@ describe('parseConnectionParams 健壮性', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 畸形载荷的健壮行为（修复轮次 M1）
+//
+// 本实现对畸形载荷比上游探针**更严格**：上游对 `port.httpPort ?? 5666` 只判空，
+// 对 `ipv4` / `fn` 直接 `for..of` 迭代——字符串会被逐字符拆开、空串会生成 `https://` 这种空地址。
+// 这里把这些更严格的行为锁死，避免后续「对齐上游」时被改回去。
+// ---------------------------------------------------------------------------
+
+describe('parseConnectionParams 畸形载荷（比上游探针更严格）', () => {
+  it('端口为 0 / 负数 / 非法值时回落到默认端口', () => {
+    const p = parseConnectionParams({ port: { httpPort: 0, httpsPort: -1 } })
+    expect(p.httpPort).toBe(5666)
+    expect(p.httpsPort).toBe(5667)
+    const q = parseConnectionParams({ port: { httpPort: 'abc', httpsPort: null } })
+    expect(q.httpPort).toBe(5666)
+    expect(q.httpsPort).toBe(5667)
+    const r = parseConnectionParams({ port: { httpPort: '', httpsPort: {} } })
+    expect(r.httpPort).toBe(5666)
+    expect(r.httpsPort).toBe(5667)
+  })
+  it('端口为小数时截断为整数', () => {
+    const p = parseConnectionParams({ port: { httpPort: 5666.9, httpsPort: 5667.2 } })
+    expect(p.httpPort).toBe(5666)
+    expect(p.httpsPort).toBe(5667)
+  })
+  it('数组字段是字符串而非数组时判为空数组（上游会逐字符迭代）', () => {
+    const p = parseConnectionParams({ ipv4: '192.168.1.2', fn: 'abc.fnos.net:443' })
+    expect(p.internalIPv4s).toEqual([])
+    expect(p.relayAddresses).toEqual([])
+  })
+  it('过滤数组中的空串', () => {
+    const p = parseConnectionParams({ fn: ['', 'abc.fnos.net:443'], ipv4: ['', '192.168.1.2'] })
+    expect(p.relayAddresses).toEqual(['abc.fnos.net:443'])
+    expect(p.internalIPv4s).toEqual(['192.168.1.2'])
+  })
+  it('fn 里只有空串时回退到 fnId.fnos.net，不产生空地址', () => {
+    const c = buildCandidates('myfn', parseConnectionParams({ fn: [''] }))
+    const relay = c.filter((x) => x.kind === 'relay')
+    expect(relay).toHaveLength(1)
+    expect(relay[0]!.address).toBe('https://myfn.fnos.net')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // buildCandidates 的中继语义（M1）
 // ---------------------------------------------------------------------------
 
@@ -202,6 +278,10 @@ describe('buildCandidates 中继语义（实测修正 M1）', () => {
 //
 // 探针的 buildCandidates 已在真实 NAS 上跑通，是当前唯一经过实测的候选构造实现。
 // 这里直接加载该文件源码做交叉验证，保证客户端与探针工具产出逐字节相同的候选列表。
+//
+// 注意：逐字节一致的结论**只覆盖正常载荷**（下面 4 组）。畸形载荷上本实现比上游更严格
+// （端口非法回落默认值、数组字段非数组判空、过滤空串），刻意不与上游一致，
+// 理由见上面「畸形载荷的健壮行为」一段。
 // ---------------------------------------------------------------------------
 
 /** 探针候选的形状（探针是 JS，无类型声明）。 */
