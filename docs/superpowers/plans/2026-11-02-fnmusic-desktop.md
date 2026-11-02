@@ -697,7 +697,7 @@ describe('buildUpstreamRequest', () => {
 - Consumes: `buildCandidates`（Task 4）、`buildCookie`（Task 3）
 - Produces:
   - `class TrustedHosts { add(url: string): void; verify(hostname: string): number }`
-  - `probeCandidates(candidates: Candidate[], opts: { token?: string; timeoutMs?: number }): Promise<ProbeResult[]>`
+  - `probeCandidates(candidates: Candidate[], opts: { token?: string; timeoutMs?: number; signal?: AbortSignal }): Promise<ProbeResult[]>` —— `timeoutMs` 省略 / 为 0 / 负数 / 非有限数时回落到默认（直连 3s、中继 10s）；`signal` 供调用方取消（被取消时报「请求被取消」，不与超时混淆）
   - `type ProbeResult = { candidate: Candidate; ok: boolean; error?: string }`
 
 - [ ] **Step 1: 写失败测试**
