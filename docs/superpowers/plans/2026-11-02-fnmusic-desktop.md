@@ -32,6 +32,34 @@
 
 ---
 
+## 实测修正（2026-11-02，真实 NAS 联调后追加，优先级高于下文原描述）
+
+对真实 NAS（FN ID `<FN-ID>`，fnOS 音乐 1.0.10）实测后，以下修正**直接覆盖**对应任务的原有描述。
+
+| 修正 | 影响任务 | 具体改法 |
+| --- | --- | --- |
+| M1 中继域名是 `<fnId>.fnos.net`（非 `.5ddd.com`） | Task 4 | `buildCandidates` 的回退值改为 `${fnId}.fnos.net`；`fn` 数组非空时始终优先使用接口返回值 |
+| M2 中继链路下**登录请求也必须带 `Cookie: mode=relay`** | Task 7、Task 10 | `SessionManager.passwordLogin` 在 `isRelay` 时附加 `cookie: 'mode=relay'`；OAuth 授权窗口同样需要 |
+| M3 `authx` 的 nonce/timestamp **只生成一次**，同时用于头与签名 | Task 3 | `authx()` 内部先 `const n = nonce(); const t = ts()`，签名与返回值共用同一对值 |
+| M4 FN 连接接口签名用**纯路径**，音乐接口用完整 URL 的 pathname | Task 3、Task 4 | 新增 `pathnameOf(u)`：`try { new URL(u).pathname } catch { new URL(u, 'http://local').pathname }` |
+| M5 `/music/api/v1/health` **返回非 JSON** | Task 9 | 探测判定只看 HTTP 状态码（<400 即可达），不解析业务码 |
+| M6 曲库 17.3 万首，**严禁全量拉取** | Task 6、Task 14 | 删除 `fetchAll` 全量模式；歌曲列表改服务端分页（`size` 上限 2000，实测 500 稳定），前端增量加载 + 虚拟滚动；仅收藏（251）与歌单做全量 |
+| M7 服务端转码**不可用**（`code=100001 unknown error`） | Task 20 | 兜底链改为：直连 stream → 服务端转码（best-effort，不阻塞）→ **客户端 FFmpeg 转码 WAV/PCM → Web Audio**；系统无 ffmpeg 时给出安装指引 |
+
+**新增端点（实测确认）**：
+
+- `GET /music/api/v1/play-history/list?page=&size=` —— 播放历史，默认 50 条，实测 `total=414`。在 Task 6 增加 `historyApi.list(page, size)`，在 Task 16 增加「最近播放」页面与写回逻辑。
+- 歌词条目字段为 `guid, source, content, createdAt, updatedAt, isLRC, offset`；**实测无词级时间戳**。Task 12 增加 `pseudoWords(line)`：按该行字符比例把行段时间均分到各词，产出伪逐字 `LyricWord[]`，供 Task 19 在缺少真逐字数据时点亮；设置页标注「逐字为估算」。
+- 曲库字段实测：`year` / `trackNo` / `discNo` / `releaseDate` 可能为 `null`；歌曲 `genres` 恒为空数组。Task 6 的 `mapSong` 必须处理 `null`（不可用 `?? 0` 之外的隐式转换）。
+- 风格名存在大小写重复（`Pop` 与 `POP`）。Task 14 的风格页按小写归一化展示，但保留原始 `guid` 用于查询。
+- `GET /music/api/v1/track/stream?guid=` 实测支持 Range（HTTP 206、`accept-ranges: bytes`、`content-type: audio/flac`），Task 8 的代理必须透传 `range` 头（已列入原任务）。
+
+**新增任务**：原 Task 20 之后插入 **Task 20b: 客户端 FFmpeg 兜底解码**，详见文末该节。
+
+**联调工具**：仓库内 `tools/fn-probe.mjs`、`tools/fn-api-probe.mjs`、`tools/fn-transcode-probe.mjs`、`tools/fn-codec-census.mjs` 四个脚本已实测可用，凭据仅从环境变量 `FN_USER` / `FN_PASS` 读取，不落盘、不打印。
+
+---
+
 ## 文件结构
 
 ```
@@ -1189,6 +1217,53 @@ describe('resolvePlaySource', () => {
 
 - [ ] **Step 4: 运行测试确认通过**
 - [ ] **Step 5: 提交** — `git commit -m "feat: 服务端 HLS 转码兜底与 hls.js 接入"`
+
+---
+
+### Task 20b: 客户端 FFmpeg 兜底解码
+
+**Files:**
+- Create: `src/player/ffmpegFallback.ts`
+- Test: `test/ffmpeg-fallback.test.ts`
+
+**Interfaces:**
+- Consumes: `isChromiumDecodable`（Task 13）、`streamUrl`（Task 6）
+- Produces:
+  - `findFfmpeg(): Promise<string | null>` — 按 `ffmpeg` / `ffmpeg.exe` 在 PATH 与常见安装位置查找
+  - `type FfProbeResult = { ok: boolean; ffmpegPath?: string; reason?: string }`
+  - `async probeFfmpeg(): Promise<FfProbeResult>`
+  - `buildFfmpegArgs(input: string, codec: string): string[]` — 产出 `['-i', 'pipe:0', '-f', 'wav', '-ar', '44100', '-ac', '2', 'pipe:1']` 形式的参数数组
+
+**背景：** 实测曲库中约 1.1% 的曲目（ALAC 46 首、APE / MP2 / WMA 各 1 首）Chromium 无法解码，且服务端转码在本机 NAS 不可用（`code=100001`）。因此需要客户端兜底：把流经代理的原始音频喂给本机 `ffmpeg`，转成 PCM/WAV 后用 Web Audio 播放。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+import { describe, it, expect } from 'vitest'
+import { buildFfmpegArgs } from '../src/player/ffmpegFallback'
+
+describe('buildFfmpegArgs', () => {
+  it('输出 WAV 管道参数', () => {
+    const a = buildFfmpegArgs('pipe:0', 'alac')
+    expect(a[0]).toBe('-i')
+    expect(a[1]).toBe('pipe:0')
+    expect(a).toContain('pipe:1')
+    expect(a).toContain('wav')
+  })
+})
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 3: 实现 ffmpegFallback.ts**
+
+`findFfmpeg()` 依次检查 `ffmpeg`（PATH）、`C:\Program Files\ffmpeg\bin\ffmpeg.exe`、本机 winget 安装目录下的 `ffmpeg.exe`；找不到返回 `null`。
+
+播放链路：渲染进程把 stream 地址交给主进程，主进程用 `child_process.spawn(ffmpegPath, args)` 并把 `fnm://` 代理返回的字节流写入 `stdin`，`stdout` 交给渲染进程；渲染进程用 `AudioWorklet` 或 `MediaStream` 方式消费 PCM 流。
+
+**降级策略**：找不到 ffmpeg 时，播放该曲目直接报「该格式（{codec}）当前无法播放：系统未安装 FFmpeg」，并在界面给出安装指引链接，不做静默失败。
+
+- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 5: 提交** — `git commit -m "feat: 客户端 FFmpeg 兜底解码"`
 
 ---
 

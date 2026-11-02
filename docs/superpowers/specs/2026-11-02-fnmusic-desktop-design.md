@@ -411,3 +411,74 @@ Token 定义在 `src/ui/theme/tokens.ts`，每套主题一组变量；组件只�
 - `Raduap/FN-Music-Apple`（MIT）—— `src/api.js`、`electron/util.js`、`electron/main.js`
 - `XDORG-N1/FnMusic`（Apache-2.0）—— `lib/app/services/feiniu/fn_connection_probe_service.dart`、`fn_models.dart`、`transcode_service.dart`
 - 飞牛帮助中心「如何远程访问到飞牛 NAS」（FN Connect 模式说明）
+
+---
+
+## 15. 实测校验与规格修正（2026-11-02，真实 NAS）
+
+用 `tools/fn-probe.mjs`、`fn-api-probe.mjs`、`fn-transcode-probe.mjs`、`fn-codec-census.mjs` 对真实 NAS（FN ID `<FN-ID>`，fnOS 音乐 1.0.10）完成端到端实测。本节覆盖上文相应内容，以本节为准。
+
+### 15.1 实测链路
+
+FN 连接参数返回：
+
+| 项 | 实测值 |
+| --- | --- |
+| 内网 IPv4 | `192.168.100.xxx` |
+| 公网 IPv4 | `117.182.192.247` |
+| 公网 IPv6 | `2409:8a5c:...`（2 个） |
+| 中继域名 | `<FN-ID>.fnos.net:443` |
+| 端口 | `httpPort=5666`、`httpsPort=5667` ✅ 与规格假设一致 |
+
+9 条候选探测结果：内网 IPv4 超时（当前不在局域网）、公网 IPv6 `ECONNREFUSED`、公网 IPv4 超时、**中继 `https://<FN-ID>.fnos.net` HTTP 200 命中**。
+
+### 15.2 规格修正（7 条）
+
+1. **中继域名是 `<fnId>.fnos.net`**，不是 `.5ddd.com`（`5ddd.com` 只是 FN 连接接口自身的服务域名）。候选构造必须优先使用接口返回的 `fn` 数组；回退值改为 `<fnId>.fnos.net`。
+2. **中继链路下，登录请求同样必须携带 `Cookie: mode=relay`**，否则中继不识别该请求并返回 HTML 错误页（实测踩到）。所有走中继的请求——登录、接口、音频流——一律带此 Cookie。
+3. **`authx` 的 nonce 与 timestamp 必须只生成一次**，同时用于请求头与签名计算。重复调用会得到不一致的凭证，服务端拒绝（实测踩到，返回 HTML 而非 JSON）。
+4. **FN 连接接口的签名使用纯路径**（`/api/v1/fn/con`）而非完整 URL；音乐接口使用完整 URL 的 pathname。两者都取路径部分参与签名，路径相同即可。
+5. **`GET /music/api/v1/health` 返回非 JSON**（实测 `code=null`），探测判定必须以 HTTP 状态码为准，不能依赖业务码。
+6. **曲库规模要求服务端分页**：实测全库 **173,669 首 / 34,071 张专辑 / 14,872 位歌手 / 592 个风格 / 251 首收藏 / 414 条播放历史**。`size` 实测支持到 2000；`page=1000&size=500` 返回 0 条，说明偏移上限约在 50 万量级。**严禁全量拉取歌曲列表**，必须服务端分页 + 增量加载 + 虚拟滚动。
+7. **服务端转码不可用**：实测 `POST /music/api/v1/track/transcode` 端点存在（返回结构化 JSON），但对 FLAC / WAV 及 `{trackGUID}` / `{guid}` / `{trackGUID,format}` / `{trackGUID,codec}` / `{guid,path}` 等全部参数组合一律返回 `code=100001 unknown error`。该 NAS 未启用服务端转码能力。
+
+### 15.3 新增发现（原规格未知项已解决）
+
+- **播放历史端点确认**：`GET /music/api/v1/play-history/list`，支持 `page` / `size`（默认返回 50 条），实测 `total=414`。原规格 §9 与 §14 的「未知」项解除，Task 16 需补该方法。
+- **歌词只有行级 LRC，无逐字时间戳**。`GET /music/api/v1/lyric/list?trackGUID=` 返回 `data.list[]`，每项字段为 `guid, source, content, createdAt, updatedAt, isLRC, offset`；同一首歌返回两条内容近乎相同的记录（不同 `source`）。内容含酷狗来源的元信息标签 `[kuwo:014] [ver:] [ti:] [ar:] [al:] [by:] [offset:]`，解析时须忽略。**实测样本均不含 `<词级时间>` 标签**。
+  - 应对：悬浮歌词保持双行语义；逐字高亮在有词级时间戳时用真数据，无则**按该行字符比例把行段时间均分到各词**，做伪逐字点亮，并在设置中标注「逐字为估算」。
+- **音频流支持 Range**：`GET /music/api/v1/track/stream?guid=` 实测返回 HTTP 206、`content-type: audio/flac`、`accept-ranges: bytes`，正确返回 `fLaC` 文件头。中继链路下可正常流式播放与拖动定位。
+- **封面接口正常**：`GET /music/api/v1/static/cover?coverId=&size=` 实测 `image/jpeg`，`size=160` 约 7 KB，`size=600` 约 75 KB。
+- **曲库字段实测**：`year` / `trackNo` / `discNo` / `releaseDate` 可能是 `null`（不是 0）；歌曲对象的 `genres` 为空数组（风格须单独查）；`audioSpec` 含 `bitDepth, sampleRate, channel, bitrate, codec, container, duration, format, path, size`；`duration` 单位为毫秒。
+- **风格接口**：`GET /music/api/v1/genre/list` 返回 `guid, name, coverId(null), trackCount`，存在 `Pop` 与 `POP` 等大小写重复的风格名，展示时需做大小写归一化。
+- **歌单为空**：该账号 `GET /music/api/v1/playlist/list` 返回空列表，创建歌单是高频需求。
+- **搜索可用**：`search/track` / `search/album` / `search/artist` 均返回 `code=0`。
+
+### 15.4 格式普查与兜底策略修正
+
+抽样 4,500 首（全库 173,669）：
+
+| codec | 数量 | Chromium 可解 |
+| --- | --- | --- |
+| mp3 | 2389 | ✅ |
+| flac | 1982 | ✅ |
+| alac | 46 | ❌ |
+| aac | 36 | ✅ |
+| pcm_s16le / s24le / f32le | 44 | ✅ |
+| ape / mp2 / wmav2 | 3 | ❌ |
+
+需兜底比例约 **1.1%**，且**无 DSD / DTS**。鉴于服务端转码不可用（15.2.7），兜底链改为：
+
+1. 直连 stream → Chromium 原生解码（覆盖 98.9%）
+2. 服务端转码（best-effort，失败不阻塞）
+3. **客户端 FFmpeg 转码为 WAV/PCM → Web Audio**（使用系统已安装的 `ffmpeg`，不存在时提示该格式无法播放并给出安装指引）
+
+原规格 §6.3 的「服务端转码兜底」以此为准。
+
+### 15.5 凭据使用说明
+
+本次联调使用的 FN ID 与音乐账号仅用于验证，**不写入仓库、不写入日志、不提交**。仓库内的探测工具一律从环境变量 `FN_USER` / `FN_PASS` 读取凭据。
+
+<deliver-assets>
+<media type="file" src="C:\Users\<USER>\.minimax\sessions\<SESSION>\workspace\docs\superpowers\specs\2026-11-02-fnmusic-desktop-design.md" caption="设计规格（含真实 NAS 实测校验与 7 条规格修正）" />
+</deliver-assets>
