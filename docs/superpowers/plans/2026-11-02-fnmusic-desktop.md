@@ -519,6 +519,7 @@ fixtures 提供 8 首示例曲目（`guid` 为 `t1`–`t8`，含 title/artist/al
   - `playlistApi.list()`、`playlistApi.songs(id)`、`playlistApi.create(name)`、`playlistApi.rename(id, name)`、`playlistApi.remove(id)`、`playlistApi.addTracks(id, songIds)`、`playlistApi.removeTracks(id, songIds)`
   - `searchApi.query(q)`
   - `lyricApi.raw(songId)`
+  - `historyApi.list(page, size)` —— 实测确认的播放历史端点 `GET /music/api/v1/play-history/list`（`size` 上限 2000，实测 500 稳定）
 
 - [ ] **Step 1: 写失败测试**
 
@@ -561,6 +562,10 @@ describe('mapSong', () => {
 要点：基址常量 `const BASE = 'fnm://srv'`；查询串用 `URLSearchParams` 追加并跳过 `undefined`/`null`；响应非 JSON 时抛「服务器响应异常（HTTP n）」；`code !== 0` 抛 `ApiError(msg, code)`；`data` 为空对象时返回 `{}`。
 
 `mapSong` 规则（来自规格）：`coverId` 仅保留形如 `xxx_<hex>` 的值，否则空串；`duration` 毫秒转秒；`bitrate` 千比特转整数千比特；`artist` 多歌手用 ` / ` 连接；`audioSpec.path` 扩展名作为 codec 兜底。
+
+**分页规则（实测修正 M6，硬要求）**：服务端所有列表端点返回 `{ list, total }` 并接受 `page`（1 起）/ `size`（默认 50，`size` 上限 2000，实测 500 稳定）。客户端**不得提供任何一次性全量拉取的路径**——不实现 `fetchAll` / 不设默认 `size = 全库`；`libraryApi.songs()` 等列表方法必须带 `page`/`size` 参数并把 `total` 一并返回，供 Task 14 的增量加载 + 虚拟滚动使用。例外：收藏（实测 251 首）与歌单（实测 2 个）体量小，可全量。
+
+**播放历史（实测新增端点）**：`historyApi.list(page, size)` → `GET /play-history/list?page=&size=`，返回 `{ list, total }`（实测 `total=414`）。Task 5 的 mock server **没有**这个端点，本任务需在 `mock-server/` 里补上（返回固定的几条历史记录即可），并补对应测试。
 
 - [ ] **Step 4: 实现其余 api 模块**（每个端点一行映射到 Task 5 的 mock 端点）
 - [ ] **Step 5: 运行测试确认通过**
