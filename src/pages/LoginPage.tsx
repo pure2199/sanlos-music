@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactElement } from '
 
 import type { CandidateInfo, ServerInfo } from '../../shared/bridge'
 import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT } from '../../shared/constants'
-import { withDefaultPort } from '../lib/address'
+import { stripUserInfo, withDefaultPort } from '../lib/address'
 import { getBridge } from '../lib/bridge'
 import { KIND_LABELS } from '../lib/connection'
 import { useSessionStore } from '../state/sessionStore'
@@ -45,13 +45,20 @@ const DEFAULT_ADDRESS = `http://192.168.1.2:${DEFAULT_HTTP_PORT}`
  *
  * - 主进程的错误消息**已经脱敏**（`redactError` 改写过 message / stack / cause 链），
  *   这里直接展示，不自己再拼装；
+ * - 剥掉 Electron IPC 的技术前缀：`ipcRenderer.invoke` 拒绝时的 message 形如
+ *   `Error invoking remote method 'auth:server-info': Error: 服务器响应异常（HTTP 500）`
+ *   —— 直接展示整句观感很差，这里**只剥这一层前缀**（不剥正文）；
  * - NAS 分支的技术错误（尚未安装处理器）换成**可读的降级提示**，
  *   界面上**不出现**原始错误串（追加要求 C.2 / J）。
  */
 function describeError(err: unknown): string {
   const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
-  if (raw.includes(NAS_HANDLER_MISSING)) return NAS_UNAVAILABLE_HINT
-  return raw.length > 0 ? raw : '操作失败，请稍后重试'
+  const cleaned = raw
+    .replace(/^Error invoking remote method '[^']*':\s*/, '')
+    .replace(/^Error:\s*/, '')
+    .trim()
+  if (cleaned.includes(NAS_HANDLER_MISSING)) return NAS_UNAVAILABLE_HINT
+  return cleaned.length > 0 ? cleaned : '操作失败，请稍后重试'
 }
 
 /** 候选的展示状态：不可达 / 可达但有备注 / 可达。 */
@@ -60,19 +67,7 @@ function candidateStatus(candidate: CandidateInfo): 'unreachable' | 'note' | 'ok
   return candidate.error ? 'note' : 'ok'
 }
 
-/**
- * 去掉地址里的 userinfo（`http://user:pw@host` → `http://host`）。
- *
- * ⚠️ **只用于写进偏好存储的地址**：用户可能把 `user:口令@host` 粘进地址框，
- *    那串东西**绝不能**进 localStorage（追加要求 E：口令不落盘）。
- *    传给主进程的地址保持原样——主进程的 `normalizeBase` 自己会丢弃 userinfo。
- */
-function stripUserInfo(input: string): string {
-  return input.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/@]*@/, '$1')
-}
-
-export function LoginPage(): ReactElement {
-  const [target, setTarget] = useState<TargetMode>('address')
+export function LoginPage(): ReactElement {  const [target, setTarget] = useState<TargetMode>('address')
   const [method, setMethod] = useState<LoginMethod>('password')
   const [address, setAddress] = useState<string>(DEFAULT_ADDRESS)
   const [fnId, setFnId] = useState('')
@@ -151,6 +146,8 @@ export function LoginPage(): ReactElement {
     try {
       const info = await bridge.serverInfo(value)
       setServerInfo(info)
+      // ⚠️ 落盘前剥掉 userinfo：用户可能把 `user:口令@host` 粘进地址框，
+      //    口令绝不能进 localStorage（`stripUserInfo` 与有没有协议无关）。
       setLastServer(stripUserInfo(value))
     } catch (err) {
       setServerInfo(null)
@@ -220,6 +217,7 @@ export function LoginPage(): ReactElement {
       // 登录成功：立刻清空口令框，并同步脱敏的会话状态。
       setPassword('')
       setSession(info)
+      // ⚠️ 同上：落盘前剥掉 userinfo，口令不落盘。
       setLastServer(stripUserInfo(server))
       try {
         // 链路信息取不到**不影响**登录结果（不让它把一次成功的登录报成失败）。

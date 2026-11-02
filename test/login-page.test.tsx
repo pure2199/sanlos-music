@@ -22,6 +22,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { StrictMode } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
@@ -208,12 +209,21 @@ describe('LoginPage 地址模式', () => {
 
   it('serverInfo 失败时错误信息出现在界面上', async () => {
     const user = userEvent.setup()
-    bridge.serverInfo.mockRejectedValue(new Error('服务器响应异常（HTTP 500）'))
+    // ⚠️ 用**真实的 IPC 形状**：`ipcRenderer.invoke` 拒绝时的 message 形如
+    //    `Error invoking remote method 'auth:server-info': Error: 服务器响应异常（HTTP 500）`。
+    //    界面应该显示**剥掉技术前缀后**的可读文案。
+    bridge.serverInfo.mockRejectedValue(
+      new Error(
+        "Error invoking remote method 'auth:server-info': Error: 服务器响应异常（HTTP 500）",
+      ),
+    )
 
     render(<LoginPage />)
     await user.click(screen.getByRole('button', { name: '检测服务器' }))
 
     expect(await screen.findByText('服务器响应异常（HTTP 500）')).toBeTruthy()
+    // Electron 的技术前缀不该出现在界面上
+    expect(screen.queryByText(/Error invoking remote method/)).toBeNull()
   })
 })
 
@@ -525,12 +535,23 @@ describe('凭证边界', () => {
 
     const sessionDump = JSON.stringify(useSessionStore.getState())
     const settingsDump = JSON.stringify(useSettingsStore.getState())
-    const storageDump = JSON.stringify(window.localStorage)
 
     expect(sessionDump).not.toContain(secret)
     expect(settingsDump).not.toContain(secret)
-    expect(storageDump).not.toContain(secret)
     expect(window.location.href).not.toContain(secret)
+
+    // ⚠️ 断言必须打在**真实内容**上（复审 I-2）：
+    //    垫片与 jsdom 对齐后 `localStorage.getItem()` 拿到的是**真存进去的字符串**；
+    //    并且要先断言「偏好确实落盘了」——否则 `not.toContain` 是**空洞断言**
+    //    （旧版垫片是普通对象字面量，JSON.stringify 只得到 {"length":N}）。
+    const persisted = window.localStorage.getItem('fnmusic-settings')
+    expect(persisted).not.toBeNull()
+    expect(persisted).toContain('lastServer')
+    expect(persisted).not.toContain(secret)
+    // 整包序列化也必须看不到口令（垫片与 jsdom 一样暴露命名属性）
+    const storageDump = JSON.stringify(window.localStorage)
+    expect(storageDump).toContain('fnmusic-settings')
+    expect(storageDump).not.toContain(secret)
 
     // store 里**没有任何**凭证类字段名
     const sensitive = /pass|pwd|secret|token|credential|cookie/i
@@ -561,7 +582,37 @@ describe('凭证边界', () => {
     expect(bridge.serverInfo).toHaveBeenCalledWith('http://demo:pw@192.168.1.10:5666')
     // 但**落盘**的偏好里不能带 userinfo
     expect(useSettingsStore.getState().lastServer).toBe('http://192.168.1.10:5666')
-    expect(JSON.stringify(window.localStorage)).not.toContain('pw@')
+    const persisted = window.localStorage.getItem('fnmusic-settings')
+    expect(persisted).not.toBeNull()
+    expect(persisted).not.toContain('pw@')
+  })
+
+  it('「无协议 + 显式端口」的地址同样剥掉 userinfo（复审 I-1）', async () => {
+    const user = userEvent.setup()
+    render(<LoginPage />)
+
+    // ⚠️ 复审实测的漏点：userinfo 与**有没有协议无关**。
+    //    只锚定 `scheme://` 的剥除写法在这里会漏，口令会原样进 localStorage。
+    const input = screen.getByPlaceholderText(/NAS 地址/)
+    await user.clear(input)
+    await user.type(input, 'demo:pw@192.168.1.10:5666')
+    await user.click(screen.getByRole('button', { name: '检测服务器' }))
+    await waitFor(() => expect(bridge.serverInfo).toHaveBeenCalledTimes(1))
+
+    // 传给主进程的仍是用户原样填的地址
+    expect(bridge.serverInfo).toHaveBeenCalledWith('demo:pw@192.168.1.10:5666')
+    // 但**落盘**的偏好里绝不能带 userinfo
+    expect(useSettingsStore.getState().lastServer).toBe('192.168.1.10:5666')
+    const persisted = window.localStorage.getItem('fnmusic-settings')
+    expect(persisted).not.toBeNull()
+    expect(persisted).toContain('192.168.1.10:5666')
+    expect(persisted).not.toContain('pw')
+    expect(persisted).not.toContain('@')
+    // 整包序列化必须能看到**真实内容**（垫片与 jsdom 对齐）——
+    // 否则上面那些 not.toContain 就是空洞断言（复审 I-2 的老坑）。
+    const dump = JSON.stringify(window.localStorage)
+    expect(dump).toContain('fnmusic-settings')
+    expect(dump).not.toContain('pw@')
   })
 })
 
@@ -571,7 +622,16 @@ describe('凭证边界', () => {
 
 describe('会话恢复', () => {
   it('启动时只调用一次 restore()', async () => {
-    render(<LoginPage />)
+    // ⚠️ 必须带 StrictMode：真实应用走 `src/main.tsx` 的 `<StrictMode>`，
+    //    React 18 会把 effect 跑两遍 —— `restoreStarted` ref 守卫就是靠它承重的
+    //    （不守卫 → restore() 调 2 次 → 世代号 +2 → 作废在飞行的静默续期，
+    //    正是追加要求 F 要防的坑）。
+    //    不带 StrictMode 的话，删掉守卫这条用例仍然会绿 → 零鉴别力。
+    render(
+      <StrictMode>
+        <LoginPage />
+      </StrictMode>,
+    )
     await waitFor(() => expect(bridge.restore).toHaveBeenCalled())
     expect(bridge.restore).toHaveBeenCalledTimes(1)
   })
