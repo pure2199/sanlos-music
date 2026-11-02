@@ -732,20 +732,109 @@ describe('TrustedHosts', () => {
 
 ---
 
-### Task 10: 登录界面与状态管理
+### Task 10: 主进程认证 IPC 与 `window.fn` 桥
+
+> **计划顺序修正（控制器，2026-11-02）**：原 Task 10 只列渲染进程文件，却要求消费 `electron/ipc.ts` 的 `auth:*` 处理器并产出 `electron/preload.ts` 暴露的 `window.fn` —— 而 `electron/ipc.ts` 原计划在 Task 17 才创建。**登录界面没有主进程侧就是空壳**，故把主进程认证链路提前到本任务，Task 17 改为在已有 `electron/ipc.ts` 上追加托盘/SMTC 处理器。渲染进程的登录页与状态管理拆到 **Task 10b**。
+
+**Files:**
+- Create: `electron/ipc.ts`, `shared/bridge.ts`
+- Modify: `electron/preload.ts`（暴露 `window.fn`）, `electron/main.ts`（接线）, `mock-server/server.ts`（`sys/config` 路径与形状补正）
+- Test: `test/ipc-auth.test.ts`
+
+**Interfaces:**
+- Consumes: `SessionManager`（Task 7）、`registerProxy` / `registerFnmSchemePrivileges`（Task 8）、`TrustedHosts`（Task 9）、`buildCandidates` / `fetchConnectionParams`（Task 4）
+- Produces:
+  - `shared/bridge.ts`：`FnBridge` 接口、`AuthMode = 'password' | 'nas'`、`AuthSessionInfo`、`ServerInfo`、`CandidateInfo`（**纯类型，渲染与主进程共用**）
+  - `electron/ipc.ts`：`registerAuthIpc(session, opts?): void` —— 注册 `auth:*` 处理器
+  - `electron/preload.ts`：`contextBridge.exposeInMainWorld('fn', api)`，暴露 `serverInfo(server)`、`login({ server, username, password, mode })`、`restore()`、`logout()`、`relogin()`、`probe(fnId)`、`connectionInfo()`
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+import { describe, it, expect, vi } from 'vitest'
+import { registerAuthIpc } from '../electron/ipc'
+
+describe('auth IPC', () => {
+  it('restore 只回传脱敏状态，不含 token 与密码', async () => {
+    const handlers = new Map<string, (arg: unknown) => unknown>()
+    const ipcMain = { handle: (ch: string, fn: (arg: unknown) => unknown) => { handlers.set(ch, fn) } }
+    const session = { state: { base: 'https://n/music', mode: 'password', token: 'SECRET-TOKEN', deviceId: 'd', username: 'u', password: 'SECRET-PW', isRelay: false }, load: () => true, save: () => {}, clear: () => {}, request: vi.fn(), relogin: vi.fn(), passwordLogin: vi.fn(), nasLogin: vi.fn() }
+    registerAuthIpc(session as never, { ipcMain: ipcMain as never })
+    const r = await handlers.get('auth:restore')!(undefined)
+    expect(JSON.stringify(r)).not.toContain('SECRET-TOKEN')
+    expect(JSON.stringify(r)).not.toContain('SECRET-PW')
+  })
+})
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+- [ ] **Step 3: 实现 shared/bridge.ts 与 electron/ipc.ts**
+
+桥接口（`shared/bridge.ts`，纯类型）：
+
+```ts
+export type AuthMode = 'password' | 'nas'
+export interface AuthSessionInfo { connected: boolean; mode: AuthMode | null; username: string | null; serverLabel: string | null; isRelay: boolean }
+export interface ServerInfo { serverName: string | null; serverVersion: string | null; supportsNasLogin: boolean }
+export interface CandidateInfo { address: string; label: string; kind: ConnectionKind; isRelay: boolean; ok: boolean; error?: string }
+export interface FnBridge {
+  serverInfo(server: string): Promise<ServerInfo>
+  login(args: { server: string; username: string; password: string; mode: AuthMode }): Promise<AuthSessionInfo>
+  restore(): Promise<AuthSessionInfo>
+  logout(): Promise<AuthSessionInfo>
+  relogin(): Promise<boolean>
+  probe(fnId: string): Promise<CandidateInfo[]>
+  connectionInfo(): Promise<ConnectionInfo | null>
+}
+```
+
+IPC 通道：`auth:server-info`、`auth:login`、`auth:restore`、`auth:logout`、`auth:relogin`、`auth:probe`、`auth:connection-info`。
+
+各处理器要点：
+
+- **`serverInfo(server)`** —— `GET <server>/api/v1/sys/config`（免 token），返回 `{ serverName, serverVersion, supportsNasLogin }`；`supportsNasLogin` = `!!data.nasOAuth?.clientId`。**只透出这三个字段**，不要把整个 `sys/config` 返回给渲染进程。
+- **`login({ server, username, password, mode })`** —— `server` 是**直连基址**（如 `https://192.168.1.2:5667/music`；FN ID 走 `probe`）。`mode === 'password'` → `session.passwordLogin(base, username, password)` 后 `save()`；`mode === 'nas'` → 走**接缝**（Task 11 安装 OAuth handler；未安装时返回可读错误「尚未安装 NAS 账号登录处理器」）。成功后把该 host 登记进 `TrustedHosts`。
+- **`restore()`** —— `session.load()`；返回**脱敏**的 `AuthSessionInfo`（**绝不**含 token / password）。
+- **`logout()`** —— 尽力 `session.request('user/logout')`（失败不阻断）→ `session.clear()` → 返回脱敏状态。
+- **`relogin()`** —— `session.relogin()`。
+- **`probe(fnId)`** —— `fetchConnectionParams(fnId)` → `buildCandidates(params)` → `probeCandidates(candidates)`；返回 `CandidateInfo[]`（含 `ok` 与 `error`）。**只把 FN ID 发给 FN 连接接口，绝不发送账号密码**。
+- **`connectionInfo()`** —— 返回 `ConnectionInfo`（`kind` / `url` / `label` / `isRelay`），无会话时返回 `null`。
+
+**依赖注入**：`registerAuthIpc(session, opts?)` 的 `opts` 接受 `{ ipcMain?: IpcMainLike; fetchImpl?: typeof fetch; trusted?: TrustedHosts }`，缺省时惰性解析 Electron，**模块顶层不得 import Electron**（与 Task 7/8 同一约束）。
+
+- [ ] **Step 4: 接线 electron/preload.ts 与 electron/main.ts**
+
+`electron/preload.ts`：`contextBridge.exposeInMainWorld('fn', api)`，七个方法都用 `ipcRenderer.invoke('auth:xxx', …)`。**桥里不得出现任何能返回 token / 密码的接口。**
+
+`electron/main.ts`（按顺序，顺序本身就是正确性的一部分）：
+
+1. **在 `app.whenReady()` 之前**调用 `registerFnmSchemePrivileges()`（Task 8）——Electron 只允许在 ready 前注册 scheme 特权。
+2. ready 之后：创建 `SessionManager`、`TrustedHosts`，`registerProxy(session)`，`registerAuthIpc(session, { trusted })`。
+3. **证书放行**：`session.defaultSession.setCertificateVerifyProc((request, callback) => { callback(trusted.verify(request.hostname)) })` —— **绝不**无条件 `callback(0)`；未登记的 host 一律走 Chromium 默认校验（`verify` 返回 `-3`）。用户填写的服务器 host 与由 FN ID 推导出的 `<fnId>.fnos.net` 都要在 `login` / `probe` 时登记进 `trusted`。
+
+- [ ] **Step 5: mock 补正（实测 §15.8）**
+
+mock 的 `/sys/config` 现在挂在**错误路径**且形状不对：真实路径是 `/music/api/v1/sys/config`，真实 `data` 为 `{ nasOAuth: { clientId }, serverGUID, serverName, serverVersion, mediasrvVersion, capabilities: { folderView, libraryReconnect } }`。把 mock 改成该路径与该形状（保留旧字段亦可，但 `nasOAuth.clientId` 必须存在），并同步 mock 侧测试。
+
+- [ ] **Step 6: 运行测试确认通过**
+- [ ] **Step 7: 提交** — `git commit -m "feat: 主进程认证 IPC 与 window.fn 桥"`
+
+---
+
+### Task 10b: 登录界面与状态管理
 
 **Files:**
 - Create: `src/state/settingsStore.ts`, `src/state/sessionStore.ts`, `src/pages/LoginPage.tsx`, `src/components/ConnectionBadge.tsx`
 - Test: `test/login-page.test.tsx`
 
 **Interfaces:**
-- Consumes: `apiCall`（Task 6）；IPC 桥（Task 8/9，见 `electron/ipc.ts` 的 `auth:server-info` / `auth:login` / `auth:restore`）
-- Produces: `window.fn` 桥接口（由 `electron/preload.ts` 暴露）：`serverInfo(server)`、`login({ server, username, password, mode })`、`restore()`、`logout()`、`relogin()`、`probe(fnId)`、`connectionInfo()`
+- Consumes: `FnBridge`（`shared/bridge.ts`，Task 10）
+- Produces: `useSessionStore()`（Zustand）、`useSettingsStore()`（Zustand）、`<LoginPage />`、`<ConnectionBadge />`
 
 - [ ] **Step 1: 写失败测试**
 
 ```tsx
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { LoginPage } from '../src/pages/LoginPage'
 
@@ -780,7 +869,6 @@ describe('LoginPage', () => {
 **Files:**
 - Create: `electron/oauthWindow.ts`
 - Test: `test/oauth-window.test.ts`
-
 **Interfaces:**
 - Consumes: `SessionManager`（Task 7）
 - Produces: `runOAuthWindow(opts: { url: string; redirect: string; silent?: boolean; timeoutMs?: number }): Promise<string>` — 成功返回授权码，失败 reject
@@ -807,7 +895,7 @@ describe('extractCode', () => {
 
 `extractCode(url)` 解析 query：`error` 存在返回 `null`，否则返回 `code` 或 `null`。窗口监听 `will-redirect` / `will-navigate` / `did-navigate` / `did-redirect-navigation`，命中 redirect 前缀即拦截并解析；静默模式（token 续期）在 `did-finish-load` 后 6s 未跳转则放弃并抛「fnOS 登录已过期」。
 
-在 `session.ts` 中接入：`GET /api/v1/sys/config` 取 `nasOAuth.clientId` 与 `nasOAuth.url`，拼接 `redirect_uri = <base>/oauth/result`，授权后 `POST /api/v1/user/auth-login` `{ code, deviceId }` 换 `userToken`。
+在 `session.ts` 中接入：`GET /api/v1/sys/config` 取 `nasOAuth.clientId`（**实测：`nasOAuth` 里没有 `url` 字段**，见规格 §15.8），**自行拼装**授权地址 `<服务器根>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=飞牛音乐`（`<服务器根>` = 去掉 `/music` 后的服务器根），授权后 `POST /api/v1/user/auth-login` `{ code, deviceId }` 换 `userToken`。
 
 - [ ] **Step 4: 运行测试确认通过**
 - [ ] **Step 5: 提交** — `git commit -m "feat: NAS 账号 OAuth 授权登录"`
@@ -1083,8 +1171,8 @@ describe('收藏写回', () => {
 ### Task 17: 托盘、后台续播与 SMTC
 
 **Files:**
-- Create: `electron/tray.ts`, `electron/smtc.ts`, `electron/ipc.ts`
-- Modify: `electron/main.ts`
+- Create: `electron/tray.ts`, `electron/smtc.ts`
+- Modify: `electron/ipc.ts`（在 Task 10 已建的认证 IPC 上追加托盘/SMTC 处理器）, `electron/main.ts`
 - Test: `test/tray-tooltip.test.ts`
 
 **Interfaces:**

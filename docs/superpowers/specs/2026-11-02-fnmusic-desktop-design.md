@@ -67,7 +67,8 @@ POST /api/v1/user/password-login
 
 **NAS 账号 OAuth**
 
-1. `GET /api/v1/sys/config` → `data.nasOAuth.clientId`、`data.nasOAuth.url`、`data.serverName`、`data.serverVersion`
+1. `GET /api/v1/sys/config` → `data.nasOAuth.clientId`、`data.serverName`、`data.serverVersion`
+   （**实测修正见 §15.8：真实响应里 `nasOAuth` 只有 `clientId`，没有 `url`**）
 2. 在应用内打开独立浏览器窗口访问：
    `<signinBase>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=飞牛音乐`
 3. 拦截跳转到 `redirect_uri` 的请求，取 `code` 参数（`error` 参数代表授权失败）
@@ -543,6 +544,25 @@ FN 连接参数返回：
 **9. 该账号 `playlist/list` 仍返回空列表**（歌单字段形状仍未实测，保留占位并标注待校准）。
 
 **对 mock server 的影响**：fixtures 必须按上述形状重写（歌曲加 `isFavorite`/`isrc`/`isCue`/`createdAt`/`updatedAt`，专辑删掉不存在的 `year` 改为 `releaseDate`，`coverId` 前缀用 `track_`/`album_`/`artist_`，播放历史条目直接用歌曲对象），否则 mock 与真实 NAS 的偏差会传导进客户端映射。
+
+### 15.8 认证链路实测（Task 10 前补充，推翻 §2.2 的两处假设）
+
+1. **`sys/config` 的真实路径是 `/music/api/v1/sys/config`**（在音乐 API 前缀下）。实测 `/sys/config` → **HTTP 404 + HTML**。
+2. **真实 `sys/config` 响应**（实测）：
+
+   ```json
+   { "code": 0, "msg": "", "data": {
+     "nasOAuth": { "clientId": "EDDLUH2WLY" },
+     "serverGUID": "<SERVER-GUID>",
+     "serverName": "纯音乐",
+     "serverVersion": "1.0.10",
+     "mediasrvVersion": "0.8.43",
+     "capabilities": { "folderView": false, "libraryReconnect": true } } }
+   ```
+
+   → **§2.2 里写的 `data.nasOAuth.url` 并不存在**。OAuth 授权地址必须**自行拼装**：`<服务器根>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=飞牛音乐`（`<服务器根>` = 去掉 `/music` 后的服务器根，例如 `https://<FN-ID>.fnos.net`）。
+3. **`/music/api/v1/health` 实测返回的是 HTML（HTTP 200），不是 JSON** —— 说明该路径在 NAS 上并不存在，NAS 的 SPA 回退把首页 HTML 返回了。这进一步坐实实测修正 M5：**探测可达性只能看 HTTP 状态码**，任何「解析业务码」的写法在这里都会失效。
+4. **登录响应的 `data` 实测为 `{ userToken, user: { guid, name, role, lastAccessedAt, createdAt, updatedAt } }`** —— **不含 `deviceId`**。客户端必须保留自己生成的 deviceId（Task 7 已按 `data.deviceId ?? 请求时的 deviceId` 实现，正确）。
 
 <deliver-assets>
 <media type="file" src="C:\Users\<USER>\.minimax\sessions\<SESSION>\workspace\docs\superpowers\specs\2026-11-02-fnmusic-desktop-design.md" caption="设计规格（含真实 NAS 实测校验、7 条规格修正与字段形状实测 §15.7）" />
