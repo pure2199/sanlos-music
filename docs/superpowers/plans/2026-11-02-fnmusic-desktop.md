@@ -54,6 +54,13 @@
 - 风格名存在大小写重复（`Pop` 与 `POP`）。Task 14 的风格页按小写归一化展示，但保留原始 `guid` 用于查询。
 - `GET /music/api/v1/track/stream?guid=` 实测支持 Range（HTTP 206、`accept-ranges: bytes`、`content-type: audio/flac`），Task 8 的代理必须透传 `range` 头（已列入原任务）。
 
+**实测修正 M8 / M9（签名与中继关卡，2026-11-02 追加）**
+
+| 修正 | 影响任务 | 具体改法 |
+| --- | --- | --- |
+| **M8 服务端不校验 `authx`**：GET 与 POST 使用全零伪造签名均返回 `code=0`。**中继链路的硬性关卡是 Cookie 头里的 `mode=relay`**：不带该 Cookie 返回 HTML 错误页，带上则 `code=0`（其余 cookie 内容不敏感） | Task 3、Task 7、Task 8 | `sign.ts` 仍按上游语义实现并发送 `authx`（官方 Web 端会发，网关可能校验）；但**真正必须保证**的是：所有走中继的请求——包括登录、接口、音频流——都在 `Cookie` 头里带 `mode=relay`。Task 7 的密码登录、Task 8 的代理转发都要覆盖到 |
+| **M9 空值查询参数语义不影响服务端**（同一 URL 两种规范串都被接受，因 GET 签名不校验），但**实现仍须与上游一致**：只丢弃字面量 `'undefined'` / `'null'`，**保留空值参数** | Task 3 | 恢复上游语义；简报里那条自相矛盾的用例（断言 `?q=a&z=` ≡ `?q=a`）判为**用例写错**并改写为断言两者**不等**，同时保留 `?q=a&z=undefined` ≡ `?q=a` 的用例 |
+
 **新增任务**：原 Task 20 之后插入 **Task 20b: 客户端 FFmpeg 兜底解码**，详见文末该节。
 
 **联调工具**：仓库内 `tools/fn-probe.mjs`、`tools/fn-api-probe.mjs`、`tools/fn-transcode-probe.mjs`、`tools/fn-codec-census.mjs` 四个脚本已实测可用，凭据仅从环境变量 `FN_USER` / `FN_PASS` 读取，不落盘、不打印。
@@ -418,7 +425,9 @@ describe('buildCandidates', () => {
 
 `buildCandidates` 必须生成：每个 IP 先 `http`（httpPort）后 `https`（httpsPort）；中继域名去掉 `:443` 后缀，仅生成 `https://<domain>`。
 
-`fetchConnectionParams` 用 `authx('POST', '/api/v1/fn/con', JSON.stringify({ fnId }))` 签名后请求 `FN_CON_API`，解析 `{ code, msg, data }`，`code !== 0` 时抛错。
+`fetchConnectionParams` 用 `authx('POST', FN_CON_PATH, JSON.stringify({ fnId }), { key: FN_SIGN_KEY })` 签名后请求 `FN_CON_API`（**必须显式传 FN 专用密钥**，漏传会用音乐接口密钥导致请求被拒），解析 `{ code, msg, data }`，`code !== 0` 时抛错。
+
+**查询参数空值规则（重要）**：`signPayload` 的规范串只丢弃值为字面量 `'undefined'` / `'null'` 的参数，**空值参数（如 `k=`）必须保留**——这与已在真实 NAS 上验证通过的参考实现 `tools/fn-probe.mjs` 语义一致，服务端是否把空值计入规范串尚未实测，不得擅自改变。因此 **Task 6 的 API 封装不得发送空值查询参数**；确需传空值时须先与真实服务端核验。
 
 - [ ] **Step 4: 运行测试确认通过**
 - [ ] **Step 5: 提交** — `git commit -m "feat: 实现地址归一化与 FN Connect 候选构造"`

@@ -479,6 +479,25 @@ FN 连接参数返回：
 
 本次联调使用的 FN ID 与音乐账号仅用于验证，**不写入仓库、不写入日志、不提交**。仓库内的探测工具一律从环境变量 `FN_USER` / `FN_PASS` 读取凭据。
 
+### 15.6 签名校验与中继 Cookie（实测，重要）
+
+用 `tools/fn-empty-param-probe.mjs` 与一组 Cookie 对照实验，在真实 NAS 上得到以下事实：
+
+| 实验 | 结果 |
+| --- | --- |
+| GET 请求使用**全零伪造签名** | `code=0` —— 服务端**不校验** `authx` |
+| POST 密码登录使用**全零伪造签名** | `code=0` —— 同样不校验 |
+| 中继链路 + `Cookie: mode=relay` | `code=0` ✅ |
+| 中继链路 + **不带**该 Cookie | 返回 HTML 错误页（非 JSON）❌ |
+| 中继链路 + `Cookie: mode=relay; x=1` | `code=0` ✅（其余 cookie 内容不敏感） |
+| 同一 URL 按「保留空值」与「丢弃空值」两种规范串分别签名 | 服务端**均接受**（因 GET 签名根本不校验） |
+
+结论与影响：
+
+1. **中继链路的硬性关卡是 Cookie 头里的 `mode=relay`**，而非签名。客户端走中继时**必须**携带该 Cookie——这是实测确认的必做项。
+2. **`authx` 仍按上游语义实现并发送**：官方 Web 端会发送该头，某些网关或服务端将来可能加强校验。实现以**上游语义**为准（参数名升序、只丢弃字面量 `'undefined'` / `'null'`、**保留空值参数**、路径取完整 URL 的 pathname 而 FN 连接接口用纯路径），避免行为突变。
+3. 规范串的具体细节（空值参数、编码细节）**不影响当前服务端接受度**，因此 Task 6 的 API 封装仍建议不发送空值查询参数，但这是规范性建议而非正确性依赖。
+
 <deliver-assets>
 <media type="file" src="C:\Users\<USER>\.minimax\sessions\<SESSION>\workspace\docs\superpowers\specs\2026-11-02-fnmusic-desktop-design.md" caption="设计规格（含真实 NAS 实测校验与 7 条规格修正）" />
 </deliver-assets>
