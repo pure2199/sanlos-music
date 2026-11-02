@@ -96,7 +96,7 @@ function buildCandidates(params) {
   for (const ip of params.ipv4 ?? []) pushIp(ip, 'lan', `内网 ${ip}`)
   for (const ip of params.publicIpv6 ?? []) pushIp(`[${ip}]`, 'public', `公网v6 ${ip}`)
   for (const ip of params.publicIpv4 ?? []) pushIp(ip, 'public', `公网v4 ${ip}`)
-  const relays = params.fn?.length ? params.fn : [`${fnId}.5ddd.com:443`]
+  const relays = params.fn?.length ? params.fn : [`${fnId}.fnos.net:443`]
   for (const r of relays) {
     const domain = String(r).replace(/:\d+$/, '')
     out.push({ address: `https://${domain}`, label: `HTTPS 中继 ${domain}`, kind: 'relay', isRelay: true })
