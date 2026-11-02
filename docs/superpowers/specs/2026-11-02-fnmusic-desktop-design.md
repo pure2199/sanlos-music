@@ -239,7 +239,8 @@ HTTP stream → HTMLAudioElement → MediaElementAudioSourceNode
             → [10 或 15 个 BiquadFilter(peaking)] → GainNode → destination
 ```
 
-- 播放源为 `fnm://srv/api/v1/track/stream?guid=`，由主进程代理并附加凭证。
+- 播放源为 `fnm://srv/track/stream?guid=`，由主进程代理并附加凭证。
+  **路径口径（Task 8 实测固化）**：`fnm://srv/` 之后就是「**相对 API 基址**」的路径（不含 `/music/api/v1`）——代理会自己拼上 `<base>/api/v1/`。写成 `fnm://srv/api/v1/track/stream` 会多出一层 `/api/v1`。
 - `MediaElementSource` 每首歌只创建一次并复用于滤镜链，避免重复连接导致爆音。
 - 增益节点负责音量与「关音效直通」开关（EQ 旁路时增益链完全旁路）。
 

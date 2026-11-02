@@ -1390,7 +1390,7 @@ describe('resolveLocalPath', () => {
 - [ ] **Step 2: 运行测试确认失败**
 - [ ] **Step 3: 实现 download.ts 与本地库**
 
-下载由主进程发起：请求 `fnm://srv/api/v1/track/stream?guid=<id>`（走主进程代理，凭证由主进程附加），流式写入 `<用户音乐目录>\FnMusic\<歌手>\<专辑>\<曲名>.<ext>`；同名冲突追加 `(1)`；维护 `DownloadTask` 列表并通过 IPC 推送进度与速度。
+下载由主进程发起：请求 `fnm://srv/track/stream?guid=<id>`（走主进程代理，凭证由主进程附加；**`fnm://srv/` 之后是相对 API 基址的路径，不含 `/api/v1`**），流式写入 `<用户音乐目录>\FnMusic\<歌手>\<专辑>\<曲名>.<ext>`；同名冲突追加 `(1)`；维护 `DownloadTask` 列表并通过 IPC 推送进度与速度。
 
 本地库索引文件 `<userData>/local-library.json`：`{ entries: { [songId]: absolutePath } }`；播放前先查本地，命中则直接用 `file://` 本地源。
 
