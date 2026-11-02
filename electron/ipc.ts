@@ -35,7 +35,7 @@
 // - `nasLoginHandler`：NAS 账号（OAuth）登录的**接缝**，由 Task 11 注入；
 //   未注入时 `mode: 'nas'` 抛「尚未安装 NAS 账号登录处理器」。
 
-import { API_PREFIX, CODE_OK } from '../shared/constants'
+import { API_PREFIX, CODE_OK, RELAY_DOMAIN_SUFFIX } from '../shared/constants'
 import type { AuthSessionInfo, CandidateInfo, ServerInfo } from '../shared/bridge'
 import type { ConnectionInfo, ConnectionKind } from '../shared/types'
 import { buildCandidates, fetchConnectionParams, hostOf, normalizeBase } from './connection'
@@ -59,19 +59,44 @@ export interface IpcMainLike {
   handle(channel: string, listener: (event: unknown, arg: unknown) => unknown): void
 }
 
-/** NAS 账号（OAuth）登录处理器的入参。 */
+/**
+ * NAS 账号（OAuth）登录处理器的入参。
+ */
 export interface NasLoginArgs {
   /** 归一化后的服务器基址（音乐根，如 `https://nas.local:5666/music`）。 */
   server: string
-  /** 当前会话的设备 id（新会话时可能是空串）。 */
+  /**
+   * 当前会话的设备 id。
+   *
+   * ⚠️ **新会话上通常是空串**（没有可沿用的 device id）——
+   * 见 `NasLoginHandler` 的契约：设备 id 由 handler 侧最终确定。
+   */
   deviceId: string
 }
 
 /**
  * NAS 账号（OAuth）登录处理器（**接缝**，由 Task 11 注入）。
  *
- * 契约：处理器负责跑完整个授权流程，并让会话进入**已登录**状态
- * （拿到 token、写入 `session.state`）；返回后主进程只负责登记受信 host。
+ * ---------------------------------------------------------------------------
+ * 契约（Task 11 照此实现；审查 M8 的裁定：**只写清契约，本轮不改逻辑**）
+ * ---------------------------------------------------------------------------
+ * 处理器负责跑完整个授权流程，并让会话进入**已登录**状态，具体有三条：
+ *
+ * 1. **置 `state.mode = 'nas'`**：要么调 `session.nasLogin(server, deviceId)`
+ *    （Task 7 的语义：它会置好 `mode` / `base` / `deviceId`，
+ *    且 `deviceId` 传空串时**自动生成**一个新的随机 device id），
+ *    要么直接写 `session.state`。
+ * 2. **把拿到的 token 写进 `session.state.token`**（否则会话其实没登录，
+ *    `toSessionInfo()` 会把它报成未连接）。
+ * 3. **设备 id 由 handler 侧最终确定**：本模块传进来的 `deviceId` 只是
+ *    「当前会话已有的 device id」，**新会话上是空串**，不能当成最终值直接用；
+ *    沿用旧 id（同一台服务器）还是新生成，交给 handler 判断。
+ *
+ * ⚠️ **本模块刻意不自己调 `session.nasLogin()`**：Task 7 的 `nasLogin()` 会让世代号 +1
+ * （作废在飞行的续期），若在授权**之前**就调用，会把一个还没拿到 token 的半成品会话
+ * 提交进状态机。授权成功后再一次性提交（mode / base / deviceId / token）才是对的。
+ *
+ * 返回后本模块只负责登记受信 host 与落盘。
  */
 export type NasLoginHandler = (args: NasLoginArgs) => Promise<void>
 
@@ -119,6 +144,20 @@ function resolveIpcMain(): IpcMainLike | null {
 }
 
 // ---------------------------------------------------------------------------
+// 常量
+// ---------------------------------------------------------------------------
+
+/**
+ * 合法 FN ID 的形态：字母、数字、`-` 与 `_`（实测形如 `<FN-ID>`）。
+ *
+ * ⚠️ 为什么要卡形态（审查 I2）：FN ID 会被拼进**中继域名**（`<fnId>.fnos.net`）
+ * 并据此登记进证书信任集合。形态不受控就能拼出别的 host 来——
+ * 例如 `a/b` 经 `hostOf()` 解析出的主机名是 `a`（`/` 被当成路径分隔符），
+ * 等于让调用方往信任集合里塞任意 host。故这里只接受「不可能带分隔符」的形态。
+ */
+const FN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
+
+// ---------------------------------------------------------------------------
 // 小工具
 // ---------------------------------------------------------------------------
 
@@ -161,11 +200,36 @@ function redactSecret(text: string, secret: string): string {
  * 把口令从抛出的错误里抹掉（**就地改写**，保留错误类型与业务码）。
  *
  * 就地改而不是新建错误：`SessionApiError` 的 `code` 要留给上层判别。
+ *
+ * ⚠️ **必须连 `stack` 一起改**（审查 M4）：Electron 会把主进程错误的
+ * **message 与 stack 一起**序列化给渲染进程的 `ipcRenderer.invoke` 拒绝值——
+ * 只改 `message` 的话，旧口令仍然会出现在 stack 的首行里被送到渲染进程。
+ *
+ * `cause` 链也一并处理（最多 5 层，与 Task 9 的错误归类同深度）：
+ * `cause` 可能是服务端响应体或底层异常的原文，同样不该带出口令。
  */
 function redactError(err: unknown, secret: string): unknown {
   if (!secret) return err
-  if (err instanceof Error && err.message.includes(secret)) {
+  if (!(err instanceof Error)) return err
+
+  if (err.message.includes(secret)) {
     err.message = redactSecret(err.message, secret)
+  }
+  if (typeof err.stack === 'string' && err.stack.includes(secret)) {
+    err.stack = redactSecret(err.stack, secret)
+  }
+
+  // cause 链：逐层改写（不新建错误，保留原始类型与业务码）。
+  let cursor: unknown = (err as { cause?: unknown }).cause
+  for (let depth = 0; depth < 5; depth++) {
+    if (!(cursor instanceof Error)) break
+    if (cursor.message.includes(secret)) {
+      cursor.message = redactSecret(cursor.message, secret)
+    }
+    if (typeof cursor.stack === 'string' && cursor.stack.includes(secret)) {
+      cursor.stack = redactSecret(cursor.stack, secret)
+    }
+    cursor = (cursor as { cause?: unknown }).cause
   }
   return err
 }
@@ -182,19 +246,38 @@ function serverLabelOf(base: string): string | null {
 /**
  * 是否是**内网**地址段（用于区分「内网直连」与「公网直连」）。
  *
- * 判定规则（控制器裁定）：私有地址段（`10.x` / `172.16–31.x` / `192.168.x` / `127.x`）
- * 或 `.local` 结尾 → 内网；其余 → 公网。
+ * 判定规则（控制器裁定 + 审查 M5 补正）：
+ * - IPv4 私有段：`10.x` / `172.16–31.x` / `192.168.x` / `127.x`；
+ * - IPv6：`::1`（回环）与 `fc00::/7`（唯一本地地址，含 `fd00::/8`）；
+ * - 主机名：`localhost`（含 `*.localhost`）与 `.local` 结尾；
+ * - 其余 → 公网。
  *
  * 注意：这是**展示用的粗粒度判定**，不是安全判定——
  * 真正的安全性由「只有用户填写的 host 才放行证书」保证。
  */
 function isPrivateHost(host: string): boolean {
   if (!host) return false
-  if (host.startsWith('10.')) return true
-  if (host.startsWith('192.168.')) return true
-  if (host.startsWith('127.')) return true
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true
-  if (host.endsWith('.local')) return true
+  const h = host.toLowerCase()
+
+  // ---- IPv4 ----
+  if (h.startsWith('10.')) return true
+  if (h.startsWith('192.168.')) return true
+  if (h.startsWith('127.')) return true
+  // 172.16.0.0/12：172.16 – 172.31（172.15 与 172.32 都在范围外）
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true
+
+  // ---- 主机名 ----
+  if (h === 'localhost' || h.endsWith('.localhost')) return true
+  if (h.endsWith('.local')) return true
+
+  // ---- IPv6 ----
+  if (h === '::1') return true
+  // fc00::/7（唯一本地地址）：首组的高 7 位是 0b1111110，即 (first & 0xfe00) === 0xfc00
+  const first = h.split(':')[0] ?? ''
+  if (/^[0-9a-f]{1,4}$/.test(first)) {
+    const value = Number.parseInt(first, 16)
+    if ((value & 0xfe00) === 0xfc00) return true
+  }
   return false
 }
 
@@ -249,6 +332,13 @@ async function handleServerInfo(arg: unknown, fetchImpl: typeof fetch): Promise<
     res = await fetchImpl(url, { method: 'GET', headers: { authx: authx('GET', url) } })
   } catch (cause) {
     throw new Error('无法连接服务器（网络不可达或服务未响应）', { cause })
+  }
+
+  // ⚠️ **先判 HTTP 状态码**（审查 M6）：4xx/5xx 的响应体里也可能恰好带着
+  // `{"code":0,...}`（反向代理 / 网关的错误页偶尔长这样），
+  // 只看 body 会把失败当成功。状态码 >= 400 一律按「服务器响应异常」处理。
+  if (typeof res.status === 'number' && res.status >= 400) {
+    throw new Error(`服务器响应异常（HTTP ${res.status}）`)
   }
 
   const text = await res.text().catch(() => '')
@@ -311,6 +401,9 @@ async function handleLogin(
       throw new Error('尚未安装 NAS 账号登录处理器')
     }
     try {
+      // ⚠️ 契约见 `NasLoginHandler`：handler 负责把 `state.mode` 置成 `'nas'`、
+      // 把 token 写进 `state`，并确定最终 device id；本模块**不**代它调
+      // `session.nasLogin()`（那会在授权成功前就提交半成品会话）。
       await nasLoginHandler({ server: base, deviceId: session.state.deviceId })
     } catch (err) {
       throw redactError(err, password)
@@ -349,12 +442,24 @@ function persistSession(session: SessionManager): void {
 /**
  * `auth:restore`：恢复上次会话。
  *
- * `session.load()` 失败（文件不存在 / 损坏 / 解密失败）时返回**未登录**形态，
- * 且**不把错误细节里的原始异常透出**（解密失败的原因留在 `session.lastLoadError`）。
+ * ⚠️ **`load()` 失败不等于「没登录」**（审查 M3 修正）：
+ * `load()` 失败可能是「文件不存在」（真的没登录）、也可能是「文件损坏 / 解密失败」——
+ * 后者发生时**内存里的会话可能仍然有效**（例如 NAS 模式会话尚未落盘、
+ * 或上一次落盘失败但内存已生效）。此时若一律返回「未登录」，
+ * 界面会显示未登录，而 `fnm://` 代理其实仍带着有效 token 工作——两边对不上。
+ *
+ * 故：`load()` 失败**且**内存里没有 token 时才返回未登录形态；
+ * 内存里还有 token 时回落到 `toSessionInfo(session)`（按内存状态如实上报）。
+ *
+ * 另外**不把错误细节里的原始异常透出**（解密失败的原因留在 `session.lastLoadError`）。
+ *
+ * ⚠️ 附带说明（本轮不改）：`load()` 会让会话的世代号 +1（`electron/session.ts`），
+ * 于是**每次调 `restore()` 都会作废在飞行的续期**——这是 Task 7 的既有语义，
+ * 调用方（Task 10b 的登录页）应尽量少调 `restore()`。
  */
 function handleRestore(session: SessionManager): AuthSessionInfo {
   const loaded = session.load()
-  if (!loaded) return disconnectedInfo()
+  if (!loaded && !session.state.token) return disconnectedInfo()
   return toSessionInfo(session)
 }
 
@@ -387,11 +492,29 @@ async function handleRelogin(session: SessionManager): Promise<boolean> {
  * ⚠️ **只把 FN ID 发给 FN 连接接口**（`5ddd.com/api/v1/fn/con`），
  * **绝不**发送账号口令。探测请求本身也不带 token。
  *
- * 探测完成后把候选地址的 host 登记进 `trusted`（用户接下来要连的就是它们）。
+ * ---------------------------------------------------------------------------
+ * 证书信任登记范围（审查 I2 修正：**收紧**）
+ * ---------------------------------------------------------------------------
+ * 候选地址来自 `fn/con` 的响应（内网 IP、公网 IPv4/IPv6、中继域名），
+ * **不是用户填写过的地址**。早先的实现把**所有**候选批量登记进 `trusted`，
+ * 后果是：用户从未填过的 host 拿到了证书豁免，**探测失败**的候选也一样，
+ * 而能控制 `fn/con` 响应的一方就能把任意 host 塞进应用的证书信任集合。
+ *
+ * 现在只登记**由用户自己提供的 FN ID 推导出的**中继域名 `<fnId>.fnos.net`：
+ * - (a) 用户提交的 host → 由 `auth:login` 登记（登录成功后登记 `base` 的 host）；
+ * - (b) `<fnId>.fnos.net` → 由本函数登记（**用户自己的 FN ID**，不是候选地址）；
+ * - (c) 用户最终选中并登录成功的那个候选 → 同样由 `auth:login` 覆盖。
+ *
+ * 其余候选（内网 IP、公网 IP、接口返回的 `fn[]` 域名）**一个都不登记**。
  */
 async function handleProbe(arg: unknown, trusted: TrustedHosts): Promise<CandidateInfo[]> {
   const fnId = readString(arg).trim()
   if (!fnId) throw new Error('缺少 FN ID')
+  // FN ID 只能是字母数字与 `-` / `_`：它会被拼进域名（`<fnId>.fnos.net`），
+  // 形态不受控就可能拼出别的 host 来（例：`a/b` → 解析出的 host 是 `a`）。
+  if (!FN_ID_RE.test(fnId)) {
+    throw new Error('FN ID 格式无效：只允许字母、数字、- 与 _')
+  }
 
   let params: Awaited<ReturnType<typeof fetchConnectionParams>>
   try {
@@ -403,8 +526,14 @@ async function handleProbe(arg: unknown, trusted: TrustedHosts): Promise<Candida
 
   const candidates = buildCandidates(fnId, params)
   const results = await probeCandidates(candidates)
+
+  // (b) 只登记「用户自己的 FN ID 推导出的中继域名」。
+  const relayHost = `${fnId}${RELAY_DOMAIN_SUFFIX}`
+  if (hostOf(relayHost) === relayHost.toLowerCase()) {
+    trusted.add(relayHost)
+  }
+
   return results.map((result) => {
-    trusted.add(result.candidate.address)
     const info: CandidateInfo = {
       address: result.candidate.address,
       label: result.candidate.label,

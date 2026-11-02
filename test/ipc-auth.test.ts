@@ -190,8 +190,8 @@ describe('auth:restore', () => {
     expect(session.load).toHaveBeenCalled()
   })
 
-  it('load() 失败（解密失败 / 文件损坏）时返回未登录形态，且不泄露原始异常', async () => {
-    const session = fakeSession()
+  it('load() 失败且内存里也没有凭据时返回未登录形态，且不泄露原始异常', async () => {
+    const session = fakeSession({ token: '' })
     session.load.mockReturnValue(false)
     session.lastLoadError = new Error('会话解密失败：DPAPI 密钥不可用')
     const { handlers } = setup(session)
@@ -205,6 +205,20 @@ describe('auth:restore', () => {
       isRelay: false,
     })
     expect(JSON.stringify(info)).not.toContain('DPAPI')
+  })
+
+  it('load() 失败但内存里的会话仍有效时，仍返回已连接（审查 M3）', async () => {
+    // 落盘失败 / 文件损坏，但内存里的会话还带着有效 token：
+    // 界面报「未登录」会与仍在工作的 fnm:// 代理对不上，故按内存状态如实上报。
+    const session = fakeSession()
+    session.load.mockReturnValue(false)
+    session.lastLoadError = new Error('会话解密失败：DPAPI 密钥不可用')
+    const { handlers } = setup(session)
+
+    const info = await invoke(handlers, 'auth:restore')
+    expect(info.connected).toBe(true)
+    expect(info.username).toBe('user')
+    expect(JSON.stringify(info)).not.toContain('SECRET-TOKEN')
   })
 
   it('返回值里没有任何凭证字段', async () => {
@@ -320,6 +334,27 @@ describe('auth:login', () => {
     expect((err as Error).message).toMatch(/账号或密码错误/)
     expect((err as Error).message).not.toContain('sup3rsecret')
   })
+
+  it('登录失败时 stack 与 cause 里也不含口令（审查 M4）', async () => {
+    const session = fakeSession()
+    // 模拟「服务端把口令回显在消息里」的 worst case：message / stack / cause 都带口令。
+    const cause = new Error('底层异常：sup3rsecret')
+    const err = new Error('登录失败：口令 sup3rsecret 不对', { cause })
+    session.passwordLogin.mockRejectedValue(err)
+    const { handlers } = setup(session)
+
+    const caught = await invoke(handlers, 'auth:login', {
+      server: 'http://nas.local:5666',
+      username: 'demo',
+      password: 'sup3rsecret',
+      mode: 'password',
+    }).catch((e: unknown) => e)
+
+    expect((caught as Error).message).not.toContain('sup3rsecret')
+    // Electron 会把 message 与 stack 一起送到渲染进程，故 stack 也不能带口令。
+    expect((caught as Error).stack ?? '').not.toContain('sup3rsecret')
+    expect(((caught as Error).cause as Error | undefined)?.message ?? '').not.toContain('sup3rsecret')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -395,6 +430,19 @@ describe('auth:server-info', () => {
     await expect(
       invoke(handlers, 'auth:server-info', 'http://192.168.1.2:5666'),
     ).rejects.toThrow(/服务器响应异常（HTTP 404）/)
+  })
+
+  it('HTTP 5xx 即使 body 是合法信封也判为失败（审查 M6）', async () => {
+    // 反向代理 / 网关的错误页偶尔带着 `{"code":0}`，只看 body 会把失败当成功。
+    const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) =>
+      jsonResponse({ code: 0, msg: '', data: { serverName: '纯音乐' } }, 500),
+    )
+    const session = fakeSession()
+    const { handlers } = setup(session, { fetchImpl: fetchImpl as unknown as typeof fetch })
+
+    await expect(
+      invoke(handlers, 'auth:server-info', 'http://192.168.1.2:5666'),
+    ).rejects.toThrow(/服务器响应异常（HTTP 500）/)
   })
 
   it('地址非法时抛出可读错误', async () => {
@@ -588,6 +636,37 @@ describe('auth:connection-info', () => {
     expect((await invoke(handlers, 'auth:connection-info')).kind).toBe('lan')
   })
 
+  it('172.16 – 172.31 判为内网，172.15 / 172.32 判为公网（审查 M7）', async () => {
+    const cases: Array<[string, string]> = [
+      ['http://172.16.0.1:5666/music', 'lan'],
+      ['http://172.20.10.1:5666/music', 'lan'],
+      ['http://172.31.255.1:5666/music', 'lan'],
+      ['http://172.15.0.1:5666/music', 'public'],
+      ['http://172.32.0.1:5666/music', 'public'],
+    ]
+    for (const [base, kind] of cases) {
+      const session = fakeSession({ base, isRelay: false })
+      const { handlers } = setup(session)
+      expect((await invoke(handlers, 'auth:connection-info')).kind, base).toBe(kind)
+    }
+  })
+
+  it('localhost 与 IPv6 私有段判为内网（审查 M5）', async () => {
+    const cases: Array<[string, string]> = [
+      ['http://localhost:5666/music', 'lan'],
+      ['http://127.0.0.1:5666/music', 'lan'],
+      ['http://[::1]:5666/music', 'lan'],
+      ['http://[fd00::1]:5666/music', 'lan'],
+      ['http://[fc00::1]:5666/music', 'lan'],
+      ['http://[2001:db8::1]:5666/music', 'public'],
+    ]
+    for (const [base, kind] of cases) {
+      const session = fakeSession({ base, isRelay: false })
+      const { handlers } = setup(session)
+      expect((await invoke(handlers, 'auth:connection-info')).kind, base).toBe(kind)
+    }
+  })
+
   it('公网会话 → kind 为 public', async () => {
     const session = fakeSession({ base: 'http://203.0.113.9:5666/music', isRelay: false })
     const { handlers } = setup(session)
@@ -625,7 +704,7 @@ describe('受信 host 登记', () => {
     expect(trusted.verify('evil.com')).toBe(-3)
   })
 
-  it('probe 之后候选的 host（含中继域名）被登记', async () => {
+  it('probe 只登记 FN ID 推导出的中继域名，候选 host 一律不登记（审查 I2）', async () => {
     stubFetch({
       'https://5ddd.com/api/v1/fn/con': () =>
         jsonResponse({
@@ -650,10 +729,51 @@ describe('受信 host 登记', () => {
 
     await invoke(handlers, 'auth:probe', 'demo')
 
-    expect(trusted.verify('192.168.1.2')).toBe(0)
-    expect(trusted.verify('203.0.113.9')).toBe(0)
+    // (b) 用户自己的 FN ID 推导出的中继域名 → 登记
     expect(trusted.verify('demo.fnos.net')).toBe(0)
+    // 候选里的内网 IP / 公网 IP：**不**登记（用户从未填写过它们）
+    expect(trusted.verify('192.168.1.2')).toBe(-3)
+    expect(trusted.verify('203.0.113.9')).toBe(-3)
     expect(trusted.verify('evil.com')).toBe(-3)
+  })
+
+  it('探测失败的候选同样不会进 trusted（审查 I2 / M7）', async () => {
+    stubFetch({
+      'https://5ddd.com/api/v1/fn/con': () =>
+        jsonResponse({
+          code: 0,
+          msg: '',
+          data: {
+            ipv4: ['192.168.1.2'],
+            publicIpv4: [],
+            publicIpv6: [],
+            fn: [],
+            port: { httpPort: 5666, httpsPort: 5667 },
+          },
+        }),
+      // 内网候选探测失败（HTTP 500）→ 该候选不可达
+      'http://192.168.1.2:5666': () => new Response('boom', { status: 500 }),
+      'https://192.168.1.2:5667': () => new Response('boom', { status: 500 }),
+      'https://demo.fnos.net': () => jsonResponse({ code: 0, msg: '', data: {} }),
+    })
+    const session = fakeSession()
+    const { handlers, trusted } = setup(session)
+
+    const results = await invoke(handlers, 'auth:probe', 'demo')
+    const failed = results.filter((r: { ok: boolean }) => !r.ok)
+    expect(failed.length).toBeGreaterThan(0)
+    // 失败候选的 host 也没有被登记
+    expect(trusted.verify('192.168.1.2')).toBe(-3)
+    // 只有 FN ID 推导出的中继域名被登记
+    expect(trusted.verify('demo.fnos.net')).toBe(0)
+  })
+
+  it('FN ID 形态非法时直接拒绝（防止拼出别的主机名塞进信任集合）', async () => {
+    const session = fakeSession()
+    const { handlers, trusted } = setup(session)
+
+    await expect(invoke(handlers, 'auth:probe', 'a/b')).rejects.toThrow(/FN ID 格式无效/)
+    expect(trusted.verify('a')).toBe(-3)
   })
 })
 

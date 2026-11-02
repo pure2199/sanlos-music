@@ -218,6 +218,15 @@ describe('mock server 登录与 token', () => {
     s.close()
   })
 
+  it('旧路径 /sys/config 已不存在（真实路径在音乐 API 前缀下）', async () => {
+    const s = createMockServer()
+    // mock 的约定：未知路径回业务码 404（HTTP 状态码仍是 200）。
+    const r = await getJson(s, '/sys/config')
+    expect(r.code).toBe(404)
+    expect(r.msg).toBe('接口不存在')
+    s.close()
+  })
+
   it('全部业务端点都要求凭证（逐个端点核对）', async () => {
     const s = createMockServer()
     const paths = [
