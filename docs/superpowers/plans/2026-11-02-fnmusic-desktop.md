@@ -353,7 +353,7 @@ export const buildCookie = (token: string, isRelay: boolean) =>
 **Interfaces:**
 - Consumes: `FN_CON_API`（Task 2）、`authx`（Task 3）
 - Produces:
-  - `normalizeBase(input: string): string` — 归一化为 `<scheme>://<host>[:port]/music`
+  - `normalizeBase(input: string): string` — 归一化为 `<scheme>://<host>[:port]<path>/music`：缺协议补 `http://`；去尾部斜杠；**保留用户输入的路径前缀**（`https://host/nas` → `https://host/nas/music`；`https://host/nas/music` → 原样；无路径 → `<host>/music`），以支持反向代理挂在子路径的部署；丢弃 userinfo / query / hash；只接受 `http:` / `https:` 协议
   - `hostOf(url: string): string`
   - `type ConnectionParams = { internalIPv4s: string[]; publicIPv4s: string[]; publicIPv6s: string[]; httpsPort: number; httpPort: number; relayAddresses: string[] }`
   - `parseConnectionParams(json: unknown): ConnectionParams`

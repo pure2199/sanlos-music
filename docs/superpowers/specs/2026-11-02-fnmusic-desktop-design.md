@@ -102,7 +102,7 @@ POST /api/v1/user/password-login
 
 ```json
 { "ipv4": ["192.168.x.x"], "publicIpv4": [], "publicIpv6": [],
-  "fn": ["xxxxx.5ddd.com:443"], "port": { "httpPort": 5666, "httpsPort": 5667 } }
+  "fn": ["xxxxx.fnos.net:443"], "port": { "httpPort": 5666, "httpsPort": 5667 } }
 ```
 
 3. 按优先级构造候选并**并行探测**，取优先级最高的可达项：
@@ -112,7 +112,7 @@ POST /api/v1/user/password-login
 | 内网 IPv4 | HTTP 优先，HTTPS 兜底 | 5666 / 5667 | 直连速度最快 |
 | 公网 IPv6 | HTTP 优先，HTTPS 兜底 | 5666 / 5667 | 格式 `http://[ipv6]:port` |
 | 公网 IPv4 | HTTP 优先，HTTPS 兜底 | 5666 / 5667 | 直连速度最快 |
-| 中继 | 仅 HTTPS | 443 | 域名取 `fn[]`，回退 `<fnId>.5ddd.com` |
+| 中继 | 仅 HTTPS | 443 | 域名取 `fn[]`，回退 `<fnId>.fnos.net` |
 
 4. **中继链路必须携带 `mode=relay`**：与 `music-token` 合并在同一个 `Cookie` 头（拆成两个键会互相覆盖丢失该标志）。
 5. 探测：已登录时打 `/music/api/v1/track/list` 并带 token 校验（TCP 可达但 token 被拒视为不可用）；未登录时打 `/music/api/v1/health`。超时：直连 3s、中继 10s。
