@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { TrustedHosts, normalizeHost } from '../electron/cert'
 import { probeCandidates } from '../electron/probe'
 import type { Candidate } from '../electron/connection'
+import type { HttpStack, HttpStackInput } from '../electron/http'
 
 // ---------------------------------------------------------------------------
 // 计划 Task 9 的测试用例（逐字保留）
@@ -656,6 +657,120 @@ describe('probeCandidates 错误归类', () => {
     const results = await probeCandidates([bad], {})
     expect(results[0]!.ok).toBe(false)
     expect(results[0]!.error).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 9b：切到 Chromium 分区栈之后的探测行为（复审回归网）
+//
+// 钉住三件最易回归的事：
+// 1. `opts.http` 分支：注入出网通道时**走注入的通道**（不走全局 fetch）；
+// 2. Chromium 的错误归类：Chromium 把 net 错误码放在 **message** 里
+//    （`code` / `cause` 都是 undefined），证书类错误必须归为「TLS 握手失败」
+//    并给出「可在设置里放行该主机」的**可操作提示**；
+// 3. `fetchWithTimeout` 的兜底：底层 fetch **完全不理会 signal** 时，
+//    定时器到点把请求收回来（**绝不挂死**），并归类为「连接超时」。
+// ---------------------------------------------------------------------------
+
+describe('probeCandidates 的 Chromium 分区栈（Task 9b）', () => {
+  /** 构造一个出网通道替身（只实现探测用到的 `fetch`）。 */
+  function stubHttpStack(
+    impl: (url: string, init: RequestInit) => Response | Promise<Response>,
+  ): { http: HttpStack; calls: Array<{ url: string; init: RequestInit }> } {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const http: HttpStack = {
+      fetch: async (input: HttpStackInput, init?: RequestInit) => {
+        calls.push({ url: String(input), init: init ?? {} })
+        return impl(String(input), init ?? {})
+      },
+      bumpTrustEpoch: () => {},
+      partitionName: () => 'fn-nas-v0',
+    }
+    return { http, calls }
+  }
+
+  it('注入 http 时走注入的出网通道，不走全局 fetch', async () => {
+    const globalMock = vi.fn(async () => fakeResponse({ status: 200, text: 'ok' }))
+    globalThis.fetch = globalMock as unknown as typeof fetch
+    const { http, calls } = stubHttpStack(() => fakeResponse({ status: 200, text: 'ok' }))
+
+    const results = await probeCandidates([LAN], { http })
+
+    expect(results[0]!.ok).toBe(true)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.url).toBe('http://192.168.1.2:5666/music/api/v1/health')
+    // 请求头照旧带 authx（上游语义），signal 也照旧传下去。
+    expect(headerOf(calls[0]!.init, 'authx')).toMatch(/^nonce=/)
+    expect(calls[0]!.init.signal).toBeInstanceOf(AbortSignal)
+    expect(globalMock).not.toHaveBeenCalled()
+  })
+
+  it('注入的 http 通道抛 Chromium 的证书错误时归类为 TLS 握手失败（给出放行提示）', async () => {
+    const { http } = stubHttpStack(() => {
+      // Chromium 的真实形态：只有 message，`code` / `cause` 都是 undefined。
+      throw new Error('net::ERR_CERT_AUTHORITY_INVALID')
+    })
+
+    const results = await probeCandidates([LAN], { http })
+
+    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.error).toContain('证书不受信')
+    expect(results[0]!.error).toContain('放行')
+  })
+})
+
+describe('Chromium 的 net 错误码归类（错误码只在 message 里）', () => {
+  it('net::ERR_CERT_AUTHORITY_INVALID（自签 / 未知 CA）→ TLS 握手失败', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('net::ERR_CERT_AUTHORITY_INVALID')
+    }) as unknown as typeof fetch
+    const results = await probeCandidates([LAN], {})
+    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.error).toContain('证书不受信')
+    expect(results[0]!.error).toContain('放行')
+  })
+
+  it('net::ERR_CERT_COMMON_NAME_INVALID（域名不匹配）→ 也是证书类错误', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('net::ERR_CERT_COMMON_NAME_INVALID')
+    }) as unknown as typeof fetch
+    const results = await probeCandidates([LAN], {})
+    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.error).toContain('证书不受信')
+  })
+
+  it('Chromium 的错误形态（无 code / 无 cause）也能被识别', async () => {
+    // 实测形态：name='Error'、message='net::ERR_CERT_AUTHORITY_INVALID'、code/cause 均 undefined。
+    const err = new Error('net::ERR_CERT_AUTHORITY_INVALID')
+    expect((err as { code?: unknown }).code).toBeUndefined()
+    expect((err as { cause?: unknown }).cause).toBeUndefined()
+    globalThis.fetch = vi.fn(async () => {
+      throw err
+    }) as unknown as typeof fetch
+    const results = await probeCandidates([LAN], {})
+    expect(results[0]!.error).toContain('证书不受信')
+  })
+
+  it('非证书类的 net 错误**不**算 TLS（不放宽成「凡 ERR_ 都算 TLS」）', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('net::ERR_CONNECTION_REFUSED')
+    }) as unknown as typeof fetch
+    const results = await probeCandidates([LAN], {})
+    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.error).not.toContain('证书不受信')
+  })
+})
+
+describe('探测的超时兜底（底层 fetch 不理会 signal 也不返回）', () => {
+  it('定时器到点把请求收回来（不会挂死），并归类为连接超时', async () => {
+    // 这个 fetch **完全无视** `init.signal`：既不响应 abort，也**永远不返回**。
+    // 既有用例（mock 响应 abort）走的是 signal 路径，覆盖不到这条兜底路径。
+    globalThis.fetch = vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch
+
+    const results = await probeCandidates([LAN], { timeoutMs: 30 })
+
+    expect(results[0]!.ok).toBe(false)
+    expect(results[0]!.error).toContain('连接超时')
   })
 })
 

@@ -59,26 +59,26 @@ function pass(message) {
 }
 
 // ---------------------------------------------------------------------------
-// 加载本仓库的 `electron/http.ts`（真实实现，不是复刻）
+// 加载本仓库的 `electron/http.ts` / `electron/probe.ts`（真实实现，不是复刻）
 // ---------------------------------------------------------------------------
 
 /**
- * 加载 `electron/http.ts` 的编译产物。
+ * 加载某个模块的编译产物。
  *
- * 优先用已构建的 `dist-electron/http.js`；没有就地用 esbuild（既有 devDependency）
+ * 优先用已构建的 `dist-electron/<name>.js`；没有就地用 esbuild（既有 devDependency）
  * 打包一份到临时目录——**不新增任何运行时依赖**。
  */
-function loadHttpModule() {
-  const built = path.join(repoRoot, 'dist-electron', 'http.js')
+function loadModule(name) {
+  const built = path.join(repoRoot, 'dist-electron', `${name}.js`)
   if (existsSync(built)) {
     log(`[setup] 用已构建的产物：${built}`)
     return require(built)
   }
   const esbuild = require('esbuild')
   const outDir = mkdtempSync(path.join(tmpdir(), 'fnm-httpstack-'))
-  const outfile = path.join(outDir, 'http.cjs')
+  const outfile = path.join(outDir, `${name}.cjs`)
   esbuild.buildSync({
-    entryPoints: [path.join(repoRoot, 'electron', 'http.ts')],
+    entryPoints: [path.join(repoRoot, 'electron', `${name}.ts`)],
     bundle: true,
     platform: 'node',
     target: 'node20',
@@ -157,12 +157,22 @@ function makeSelfSigned(dir) {
 }
 
 // ---------------------------------------------------------------------------
-// 本地 HTTPS 服务器（回显收到的请求头 / 分片响应 / 慢响应）
+// 本地 HTTPS 服务器（回显收到的请求头 / 请求体 / 分片响应 / 慢响应）
 // ---------------------------------------------------------------------------
+
+/** 读完请求体并按 utf8 返回（用于回显 POST 的体）。 */
+function readBody(req) {
+  return new Promise((resolve) => {
+    const chunks = []
+    req.on('data', (chunk) => chunks.push(chunk))
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', () => resolve(''))
+  })
+}
 
 /** 启动本地 HTTPS 服务器，返回 `{ port, close() }`。 */
 function startServer(tls) {
-  const server = https.createServer({ key: tls.key, cert: tls.cert }, (req, res) => {
+  const server = https.createServer({ key: tls.key, cert: tls.cert }, async (req, res) => {
     const url = req.url ?? '/'
     if (url.startsWith('/slow')) {
       // 5 秒后才响应：用来测「信号能不能真的中止请求」。
@@ -181,7 +191,7 @@ function startServer(tls) {
       }, 50)
       return
     }
-    const body = JSON.stringify({ url, headers: req.headers })
+    const body = JSON.stringify({ url, headers: req.headers, body: await readBody(req) })
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(body)
   })
@@ -209,7 +219,8 @@ async function main() {
   log(`Electron ${process.versions.electron} / Chromium ${process.versions.chrome} / Node ${process.versions.node}`)
   log('')
 
-  const { createHttpStack, TrustedHosts } = loadHttpModule()
+  const { createHttpStack, TrustedHosts } = loadModule('http')
+  const { classifyProbeError, PROBE_ERROR_TLS } = loadModule('probe')
   const workDir = mkdtempSync(path.join(tmpdir(), 'fnm-httstack-'))
   let server = null
 
@@ -240,10 +251,30 @@ async function main() {
           : undefined
       log(`    预期中的失败：${message}`)
       log(`    cause：${cause}${causeCode ? `（code=${String(causeCode)}）` : ''}`)
+      // 打印 Chromium 错误的**形态**：实测 `code` / `cause` 都是 undefined，
+      // 错误码只在 message 里——这是「必须从 message 抽 net::ERR_*」的依据。
+      const ownKeys = err instanceof Error ? Object.getOwnPropertyNames(err) : []
+      log(
+        `    错误形态：name=${JSON.stringify(err instanceof Error ? err.name : '')}` +
+          ` code=${JSON.stringify(err instanceof Error ? err.code : undefined)}` +
+          ` cause=${JSON.stringify(err instanceof Error ? err.cause : undefined)}` +
+          ` 自有属性=${JSON.stringify(ownKeys)}`,
+      )
       const looksLikeCertError =
         /CERT|certificate|self[- ]signed/i.test(`${message} ${cause} ${String(causeCode ?? '')}`)
       if (looksLikeCertError) pass('未受信 host 的证书被 Chromium 拒绝（符合预期）')
       else fail(`失败原因不像证书错误：${message} ${cause}`)
+
+      // 把**真实**的 Chromium 错误喂给**真实**的归类函数：
+      // 探针必须给出「TLS 握手失败：证书不受信，可在设置里放行该主机后重试」，
+      // 而不是笼统的「连接失败（网络异常或服务未响应）」。
+      const classified = classifyProbeError(err)
+      log(`    classifyProbeError(真实 Chromium 错误) → ${classified}`)
+      if (classified === PROBE_ERROR_TLS) {
+        pass('真实 Chromium 证书错误被归类为 TLS 握手失败（放行提示保留）')
+      } else {
+        fail(`真实 Chromium 证书错误被归类成「${classified}」（丢掉了放行提示）`)
+      }
     }
 
     // ---- 登记 + 换分区 --------------------------------------------------
@@ -333,6 +364,53 @@ async function main() {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       fail(`流式读取失败：${message}`)
+    }
+
+    // ---- 追加要求 D.4：ses.fetch 接受 Request 对象（代理实际走的就是它）----
+    //
+    // `electron/proxy.ts` 的二进制流式路径传的是 `buildUpstreamRequest()` 产出的
+    // **Request 对象**（带体的 POST + authx + cookie），不是字符串 URL。
+    // 将来改 `buildUpstreamRequest` 或 `http.fetch` 可能悄悄破坏 `POST /track/stream`，
+    // 故这里把它钉住。
+    log('')
+    log('[D.4] ses.fetch 接受 Request 对象（带体 POST + authx + cookie）')
+    try {
+      const requestBody = JSON.stringify({ trackGUID: 'GUID-1' })
+      const request = new Request(`${base}/music/api/v1/track/stream`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: 'music-token=FAKE-TOKEN-NOT-REAL; mode=relay',
+          authx: 'nonce=1&timestamp=2&sign=deadbeef',
+        },
+        body: requestBody,
+      })
+      const res = await stack.fetch(request)
+      const echoed = JSON.parse(await res.text())
+      const gotBody = echoed.body
+      const gotCookie = echoed.headers?.cookie
+      const gotAuthx = echoed.headers?.authx
+      log(`    服务器收到的请求体：${JSON.stringify(gotBody ?? null)}`)
+      log(`    服务器收到的 cookie 头：${JSON.stringify(gotCookie ?? null)}`)
+      log(`    服务器收到的 authx 头：${JSON.stringify(gotAuthx ?? null)}`)
+      if (gotBody === requestBody) pass('Request 的请求体逐字到达上游')
+      else fail(`Request 的请求体没有逐字到达（收到 ${JSON.stringify(gotBody ?? null)}）`)
+      if (typeof gotCookie === 'string' && gotCookie.includes('mode=relay')) {
+        pass('Request 的 cookie 头原样到达上游')
+      } else {
+        fail(`Request 的 cookie 头没有原样到达（收到 ${JSON.stringify(gotCookie ?? null)}）`)
+      }
+      if (gotAuthx === 'nonce=1&timestamp=2&sign=deadbeef') pass('Request 的 authx 头原样到达上游')
+      else fail(`Request 的 authx 头没有原样到达（收到 ${JSON.stringify(gotAuthx ?? null)}）`)
+      const resBody = res.body
+      if (resBody && typeof resBody.getReader === 'function') {
+        pass('Request 路径的响应体仍是 ReadableStream')
+      } else {
+        fail(`Request 路径的响应体不是 ReadableStream（${Object.prototype.toString.call(resBody)}）`)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      fail(`ses.fetch(Request) 失败：${message}`)
     }
 
     log('')

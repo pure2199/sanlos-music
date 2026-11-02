@@ -181,6 +181,43 @@ const TLS_CODE_PREFIXES = ['CERT_', 'ERR_CERT', 'UNABLE_TO_VERIFY', 'DEPTH_ZERO'
 const TLS_MESSAGE_RE = /certificate|self-signed|altname/i
 
 /**
+ * Chromium 网络栈的 net 错误码：**只出现在 message 里**，形如
+ * `net::ERR_CERT_AUTHORITY_INVALID`。
+ *
+ * ⚠️ **实测（Electron 32.3.3 主进程，`ses.fetch` 打自签 HTTPS）**：Chromium 抛出的错误形态是
+ * - `name = 'Error'`
+ * - `message = 'net::ERR_CERT_AUTHORITY_INVALID'`
+ * - **`code = undefined`**
+ * - **`cause = undefined`**
+ * - 自有属性只有 `['stack', 'message']`
+ *
+ * 也就是说 Chromium **不填 `code`**——只靠 `collectCauses` 收 `code` 是**收不到**它的。
+ * 若不单独处理，证书类错误会被误报成「连接失败（网络异常或服务未响应）」，
+ * 丢掉「可在设置里放行该主机后重试」这个**可操作提示**（用户会误判成 NAS 宕机），
+ * 而这恰恰是 Task 9b 要解决的场景。
+ *
+ * ⚠️ **只认证书类错误码**：`ERR_CERT_*` 家族（权威未知 / 域名不匹配 / 过期 / 已吊销 …）。
+ * **绝不**放宽成「凡带 `ERR_` 都算 TLS」——那会把协议错误、连接错误一并误报成证书问题。
+ */
+const CHROMIUM_NET_CODE_RE = /net::(ERR_[A-Z0-9_]+)/g
+
+/**
+ * 从异常链的 message 里抽出 Chromium 的 net 错误码（`net::ERR_XXX` → `ERR_XXX`）。
+ *
+ * 只做**抽取**，不做判定——判定由调用方按错误码族决定。
+ */
+function extractChromiumNetCodes(messages: string[]): string[] {
+  const codes: string[] = []
+  for (const message of messages) {
+    for (const match of message.matchAll(CHROMIUM_NET_CODE_RE)) {
+      const code = match[1]
+      if (code) codes.push(code)
+    }
+  }
+  return codes
+}
+
+/**
  * 从异常链上收集错误码 / 消息 / 异常名。
  *
  * Node 的 `fetch` 失败时抛的是 `TypeError: fetch failed`，真正的错误在 `cause` 上，
@@ -208,6 +245,11 @@ function collectCauses(err: unknown): { codes: string[]; messages: string[]; nam
  * 归类依据是 `cause.code`（以及 TLS 场景下的 `cause.message`），
  * **不靠匹配 `err.message` 的中文或英文片段**——底层文案随 Node / undici 版本变化。
  *
+ * ⚠️ **例外：Chromium 的 net 错误码**。切到 Chromium 栈后（Task 9b），
+ * 证书错误变成 `Error('net::ERR_CERT_AUTHORITY_INVALID')`——`code` 与 `cause` 都是 undefined，
+ * 错误码**只在 message 里**。故这里额外从 message 里抽出 `net::ERR_*` 再判定
+ * （**只认证书类**错误码，见 `CHROMIUM_NET_CODE_RE` 的说明）。
+ *
  * `ctx` 用来区分**谁**中止了请求（M7）：
  * - `timedOut`：是**我们自己的**超时信号中止的 → 归类为「连接超时（端口无响应）」。
  * - `cancelled`：是**调用方传入的外部信号**中止的 → 归类为「请求被取消」
@@ -224,6 +266,16 @@ export function classifyProbeError(
   if (codes.some((c) => TIMEOUT_CODES.has(c))) return PROBE_ERROR_TIMEOUT
   if (has('ENETUNREACH') || has('EHOSTUNREACH')) return PROBE_ERROR_UNREACHABLE
   if (codes.some((c) => TLS_CODE_PREFIXES.some((p) => c.startsWith(p)))) return PROBE_ERROR_TLS
+  // Chromium 的 net 错误码只出现在 message 里（`code` / `cause` 都是 undefined），
+  // 必须单独抽出来判定，否则证书错误会被误报成「连接失败（网络异常或服务未响应）」，
+  // 丢掉「可在设置里放行该主机后重试」这个可操作提示。
+  if (
+    extractChromiumNetCodes(messages).some((c) =>
+      TLS_CODE_PREFIXES.some((p) => c.startsWith(p)),
+    )
+  ) {
+    return PROBE_ERROR_TLS
+  }
   if (messages.some((m) => TLS_MESSAGE_RE.test(m))) return PROBE_ERROR_TLS
   // 我们自己的超时信号已经触发 → 连接超时。
   if (ctx.timedOut) return PROBE_ERROR_TIMEOUT
