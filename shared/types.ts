@@ -16,8 +16,13 @@ export interface EqPreset {
   label: string
   /** 10 段预置增益（dB），与 `EQ_BANDS_10` 一一对应。 */
   gains: number[]
-  /** 15 段预置增益（dB），与 `EQ_BANDS_15` 一一对应。 */
-  gains15?: number[]
+  /**
+   * 15 段预置增益（dB），与 `EQ_BANDS_15` 一一对应。
+   *
+   * 取用规则（Task 21）：段数为 10 时取 `gains`，段数为 15 时取 `gains15`；
+   * 两套频点不同（`EQ_BANDS_10` / `EQ_BANDS_15`），不可互相切片。
+   */
+  gains15: number[]
 }
 
 /** 音频规格（服务端 `audioSpec` 原始字段，稀疏且可能缺项）。 */
@@ -34,7 +39,7 @@ export interface AudioSpec {
   codec: string | null
   /** 容器格式，如 `flac` / `mp3`。 */
   container: string | null
-  /** 时长（毫秒）。 */
+  /** 时长（毫秒，服务端原始值；注意与 `Song.duration` 的「秒」不同）。 */
   duration: number | null
   /** 容器/扩展名，如 `flac`。 */
   format: string | null
@@ -50,7 +55,7 @@ export interface Genre {
   guid: string
   /** 风格原始名称（保留服务端大小写）。 */
   name: string
-  /** 封面 id（实测可能为 null）。 */
+  /** 封面 id（实测 `genre/list` 返回 coverId 为 null；无封面为 `null`，与 `Song.coverId` 用空串 `''` 的约定不同）。 */
   coverId: string | null
   /** 该风格下的歌曲数。 */
   trackCount: number
@@ -70,9 +75,14 @@ export interface Song {
   album: string
   /** 专辑 guid。 */
   albumId: string
-  /** 封面 id。 */
+  /** 封面 id；无封面时置空串 `''`（领域模型统一用空串，不用 null）。 */
   coverId: string
-  /** 时长，单位毫秒（实测）。 */
+  /**
+   * 时长，单位**秒**。
+   *
+   * 服务端原始值为毫秒（实测），由 Task 6 的 `mapSong` 做毫秒 → 秒转换后写入本字段；
+   * `PlayerState.duration` / `position` 同为秒。本字段不是原始毫秒值，切勿直接当毫秒使用。
+   */
   duration: number
   /** 是否已收藏。 */
   favorite: boolean
@@ -98,7 +108,12 @@ export interface Song {
   audioSpec?: AudioSpec
 }
 
-/** 专辑。 */
+/**
+ * 专辑。
+ *
+ * 注意：专辑实体**尚未实测**（实测结论只覆盖 `Song` 与 `Genre`），以下字段集按规格语义推导，
+ * 待 Task 6 拿到真实字段后校准。
+ */
 export interface Album {
   /** 专辑 guid。 */
   id: string
@@ -108,23 +123,28 @@ export interface Album {
   artist: string
   /** 歌手 guid。 */
   artistId: string
-  /** 封面 id（实测可能为 null）。 */
+  /** 封面 id；无封面为 `null`（与 `Song.coverId` 用空串 `''` 的约定不同）。 */
   coverId: string | null
-  /** 发行年份（实测可能为 null）。 */
+  /** 发行年份（待 Task 6 实测校准；`Song.year` 已实测可能为 null）。 */
   year: number | null
   /** 歌曲数。 */
   trackCount: number
-  /** 发行日期（实测可能为 null）。 */
+  /** 发行日期（待 Task 6 实测校准）。 */
   releaseDate?: string | null
 }
 
-/** 歌手。 */
+/**
+ * 歌手。
+ *
+ * 注意：歌手实体**尚未实测**（实测结论只覆盖 `Song` 与 `Genre`），以下字段集按规格语义推导，
+ * 待 Task 6 拿到真实字段后校准。
+ */
 export interface Artist {
   /** 歌手 guid。 */
   id: string
   /** 歌手名。 */
   name: string
-  /** 头像/封面 id（实测可能为 null）。 */
+  /** 头像/封面 id；无封面为 `null`（与 `Song.coverId` 用空串 `''` 的约定不同）。 */
   coverId: string | null
   /** 专辑数。 */
   albumCount: number
@@ -132,21 +152,28 @@ export interface Artist {
   trackCount: number
 }
 
-/** 歌单。 */
+/**
+ * 歌单。
+ *
+ * 注意：歌单实体**尚未实测**（实测结论只覆盖 `Song` 与 `Genre`），以下字段集按规格语义推导，
+ * 待 Task 6 拿到真实字段后校准。
+ *
+ * 服务端使用 `guid` / `name` 字段，`guid → id`、`name → name` 的映射由 Task 6 负责。
+ */
 export interface Playlist {
-  /** 歌单 guid。 */
+  /** 歌单 guid（服务端字段为 `guid`，映射由 Task 6 负责）。 */
   id: string
-  /** 歌单名。 */
+  /** 歌单名（服务端字段为 `name`）。 */
   name: string
-  /** 封面 id（实测可能为 null）。 */
+  /** 封面 id；无封面为 `null`（与 `Song.coverId` 用空串 `''` 的约定不同）。 */
   coverId: string | null
   /** 歌曲数。 */
   trackCount: number
-  /** 描述（实测可能为 null）。 */
+  /** 描述（待 Task 6 实测校准）。 */
   description?: string | null
-  /** 创建时间。 */
+  /** 创建时间（待 Task 6 实测校准）。 */
   createdAt?: string | null
-  /** 更新时间。 */
+  /** 更新时间（待 Task 6 实测校准）。 */
   updatedAt?: string | null
 }
 
@@ -172,9 +199,9 @@ export interface PlayerState {
   queue: Song[]
   /** 是否正在播放。 */
   isPlaying: boolean
-  /** 播放进度（秒）。 */
+  /** 播放进度（秒，与 `Song.duration` 同单位）。 */
   position: number
-  /** 当前曲目总时长（秒）。 */
+  /** 当前曲目总时长（秒，与 `Song.duration` 同单位）。 */
   duration: number
   /** 音量（0~1）。 */
   volume: number

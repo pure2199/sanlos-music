@@ -73,7 +73,12 @@ export const EQ_Q = 1.41
 /** 单段增益上限（dB）。 */
 export const EQ_GAIN_LIMIT = 12
 
-/** 10 条预置 EQ 曲线，key 为稳定标识，gains 为 10 段基准增益。 */
+/**
+ * 10 条预置 EQ 曲线，key 为稳定标识。
+ *
+ * 取用规则（Task 21）：段数 10 取 `gains`（对应 `EQ_BANDS_10`），段数 15 取 `gains15`（对应 `EQ_BANDS_15`）；
+ * 两套频点不同，不可互相切片。`gains` 与 `gains15` 均为必填，避免双份真相源漂移。
+ */
 export const EQ_PRESETS: Record<string, EqPreset> = {
   flat: {
     label: '平直',

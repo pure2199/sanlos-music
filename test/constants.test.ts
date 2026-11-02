@@ -67,17 +67,35 @@ describe('constants', () => {
   })
 
   it('预置曲线共 10 条且每条增益长度匹配段数', () => {
-    const keys = Object.keys(EQ_PRESETS)
-    expect(keys).toHaveLength(10)
-    expect(keys).toContain('flat')
-    expect(keys).toContain('bass-boost')
-    for (const key of keys) {
+    expect(Object.keys(EQ_PRESETS)).toEqual([
+      'flat',
+      'pop',
+      'rock',
+      'jazz',
+      'classical',
+      'electronic',
+      'acoustic',
+      'loudness',
+      'vocal',
+      'bass-boost',
+    ])
+    for (const key of Object.keys(EQ_PRESETS)) {
       const preset = EQ_PRESETS[key]
       expect(preset).toBeDefined()
       expect(preset?.label.length).toBeGreaterThan(0)
       expect(preset?.gains).toHaveLength(10)
       expect(preset?.gains15).toHaveLength(15)
+    }
+  })
+
+  it('预置曲线的 10 段与 15 段增益均在 ±12 dB 内', () => {
+    for (const key of Object.keys(EQ_PRESETS)) {
+      const preset = EQ_PRESETS[key]
       for (const gain of preset?.gains ?? []) {
+        expect(gain).toBeGreaterThanOrEqual(-EQ_GAIN_LIMIT)
+        expect(gain).toBeLessThanOrEqual(EQ_GAIN_LIMIT)
+      }
+      for (const gain of preset?.gains15 ?? []) {
         expect(gain).toBeGreaterThanOrEqual(-EQ_GAIN_LIMIT)
         expect(gain).toBeLessThanOrEqual(EQ_GAIN_LIMIT)
       }
