@@ -266,8 +266,13 @@ describe('authx', () => {
       signPayload('GET', 'http://n/music/api/v1/album/list?page=1&size=10'),
     )
   })
-  it('GET 签名忽略 undefined/null 参数值', () => {
+  it('GET 签名只丢弃字面量 undefined/null，保留空值参数（上游语义，实测修正 M9）', () => {
     const a = signPayload('GET', 'http://n/music/api/v1/x?q=a&z=')
+    const b = signPayload('GET', 'http://n/music/api/v1/x?q=a')
+    expect(a).not.toBe(b)
+  })
+  it('GET 签名丢弃字面量 undefined/null 参数值', () => {
+    const a = signPayload('GET', 'http://n/music/api/v1/x?q=a&z=undefined')
     const b = signPayload('GET', 'http://n/music/api/v1/x?q=a')
     expect(a).toBe(b)
   })
