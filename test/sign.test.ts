@@ -12,10 +12,20 @@ describe('authx', () => {
       signPayload('GET', 'http://n/music/api/v1/album/list?page=1&size=10'),
     )
   })
-  it('GET 签名忽略 undefined/null 参数值', () => {
+  it('GET 签名保留空值参数（上游语义，实测修正 M9）', () => {
+    // 简报原文此处断言 `?q=a&z=` ≡ `?q=a`，与上游参考实现（tools/fn-probe.mjs:43 保留空值）
+    // 矛盾，判为**用例写错**：上游只丢弃字面量 'undefined' / 'null'，空值参数必须保留。
     const a = signPayload('GET', 'http://n/music/api/v1/x?q=a&z=')
     const b = signPayload('GET', 'http://n/music/api/v1/x?q=a')
-    expect(a).toBe(b)
+    expect(a).not.toBe(b)
+  })
+  it('GET 签名忽略 undefined/null 参数值', () => {
+    expect(signPayload('GET', 'http://n/music/api/v1/x?q=a&z=undefined')).toBe(
+      signPayload('GET', 'http://n/music/api/v1/x?q=a'),
+    )
+    expect(signPayload('GET', 'http://n/music/api/v1/x?q=a&z=null')).toBe(
+      signPayload('GET', 'http://n/music/api/v1/x?q=a'),
+    )
   })
   it('非 GET 对请求体签名', () => {
     expect(signPayload('POST', 'http://n/music/api/v1/playlist/create', '{"name":"x"}')).toBe(
@@ -89,45 +99,58 @@ function loadProbeApi(): ProbeApi {
   return factory(createHash)
 }
 
+/** 交叉验证与 golden 向量共用的输入表。 */
+const CROSS_CASES: Array<{
+  name: string
+  method: string
+  url: string
+  body?: string
+  key: string
+}> = [
+  {
+    name: '音乐接口 GET（带查询串）',
+    method: 'GET',
+    url: 'https://nas.example.com/music/api/v1/track/list?page=1&size=5',
+    key: SIGN_KEY,
+  },
+  {
+    name: '音乐接口 GET（无查询串）',
+    method: 'GET',
+    url: 'https://nas.example.com/music/api/v1/user/me',
+    key: SIGN_KEY,
+  },
+  {
+    name: '音乐接口 POST（带 body）',
+    method: 'POST',
+    url: 'https://nas.example.com/music/api/v1/user/password-login',
+    body: JSON.stringify({ username: 'u', password: 'h', deviceId: 'd' }),
+    key: SIGN_KEY,
+  },
+  {
+    name: 'FN 连接接口 POST（纯路径）',
+    method: 'POST',
+    url: FN_CON_PATH,
+    body: JSON.stringify({ fnId: 'fn123456' }),
+    key: FN_SIGN_KEY,
+  },
+  {
+    name: 'GET 含空值参数（上游语义）',
+    method: 'GET',
+    url: 'https://nas.example.com/music/api/v1/search/track?q=&page=1&size=5',
+    key: SIGN_KEY,
+  },
+  {
+    name: 'GET 值含空格 / 加号 / 非 ASCII',
+    method: 'GET',
+    url: 'https://nas.example.com/music/api/v1/search/track?q=a b&page=1',
+    key: SIGN_KEY,
+  },
+]
+
 describe('与实测探针 tools/fn-probe.mjs 交叉验证', () => {
   const probe = loadProbeApi()
 
-  const cases: Array<{
-    name: string
-    method: string
-    url: string
-    body?: string
-    key: string
-  }> = [
-    {
-      name: '音乐接口 GET（带查询串）',
-      method: 'GET',
-      url: 'https://nas.example.com/music/api/v1/track/list?page=1&size=5',
-      key: SIGN_KEY,
-    },
-    {
-      name: '音乐接口 GET（无查询串）',
-      method: 'GET',
-      url: 'https://nas.example.com/music/api/v1/user/me',
-      key: SIGN_KEY,
-    },
-    {
-      name: '音乐接口 POST（带 body）',
-      method: 'POST',
-      url: 'https://nas.example.com/music/api/v1/user/password-login',
-      body: JSON.stringify({ username: 'u', password: 'h', deviceId: 'd' }),
-      key: SIGN_KEY,
-    },
-    {
-      name: 'FN 连接接口 POST（纯路径）',
-      method: 'POST',
-      url: FN_CON_PATH,
-      body: JSON.stringify({ fnId: 'fn123456' }),
-      key: FN_SIGN_KEY,
-    },
-  ]
-
-  for (const c of cases) {
+  for (const c of CROSS_CASES) {
     it(`authx 与探针逐字节一致：${c.name}`, () => {
       const nonce = '123456'
       const ts = '1700000000000'
@@ -147,6 +170,86 @@ describe('与实测探针 tools/fn-probe.mjs 交叉验证', () => {
   it('FN 连接接口用纯路径签名（实测修正 M4）', () => {
     expect(pathnameOf(FN_CON_PATH)).toBe('/api/v1/fn/con')
     expect(pathnameOf('https://5ddd.com/api/v1/fn/con')).toBe('/api/v1/fn/con')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// golden 向量
+//
+// 期望值取自上游参考实现 tools/fn-probe.mjs 的实测跑通输出（nonce=123456、ts=1700000000000），
+// 写死成字面量。这样即使 sign.ts 与探针被同时改坏，用例依然会红。
+// ---------------------------------------------------------------------------
+
+describe('golden 向量（钉死期望值）', () => {
+  const opts = { nonce: '123456', ts: '1700000000000' }
+
+  it('音乐接口 GET（带查询串）', () => {
+    expect(
+      authx('GET', 'https://nas.example.com/music/api/v1/track/list?page=1&size=5', undefined, {
+        ...opts,
+        key: SIGN_KEY,
+      }),
+    ).toBe('nonce=123456&timestamp=1700000000000&sign=bb6c7e51141a3bdd7ede31d9baaa7dda')
+  })
+
+  it('音乐接口 GET（无查询串）', () => {
+    expect(
+      authx('GET', 'https://nas.example.com/music/api/v1/user/me', undefined, {
+        ...opts,
+        key: SIGN_KEY,
+      }),
+    ).toBe('nonce=123456&timestamp=1700000000000&sign=b673b1e99a5f195908597579b284eb16')
+  })
+
+  it('音乐接口 POST（带 body）', () => {
+    expect(
+      authx(
+        'POST',
+        'https://nas.example.com/music/api/v1/user/password-login',
+        JSON.stringify({ username: 'u', password: 'h', deviceId: 'd' }),
+        { ...opts, key: SIGN_KEY },
+      ),
+    ).toBe('nonce=123456&timestamp=1700000000000&sign=2c64cdd31c6c30d82e504b8101d4cca5')
+  })
+
+  it('FN 连接接口 POST（纯路径）', () => {
+    expect(
+      authx('POST', FN_CON_PATH, JSON.stringify({ fnId: 'fn123456' }), {
+        ...opts,
+        key: FN_SIGN_KEY,
+      }),
+    ).toBe('nonce=123456&timestamp=1700000000000&sign=c9010004cd652621ab90055f30aec2b3')
+  })
+
+  it('GET 含空值参数（空值参与签名）', () => {
+    expect(
+      authx('GET', 'https://nas.example.com/music/api/v1/search/track?q=&page=1&size=5', undefined, {
+        ...opts,
+        key: SIGN_KEY,
+      }),
+    ).toBe('nonce=123456&timestamp=1700000000000&sign=8f07f0f2af2e6e4396eb962cce1cc20b')
+  })
+
+  it('GET 值含空格 / 加号 / 非 ASCII', () => {
+    // 空格与 '+' 解析后同义，规范串都是 'page=1&q=a b'；非 ASCII 解码后进规范串。
+    expect(
+      authx('GET', 'https://nas.example.com/music/api/v1/search/track?q=a b&page=1', undefined, {
+        ...opts,
+        key: SIGN_KEY,
+      }),
+    ).toBe('nonce=123456&timestamp=1700000000000&sign=86e6493ebada36be2195917ae0c8ea0a')
+    expect(
+      authx('GET', 'https://nas.example.com/music/api/v1/search/track?q=a+b&page=1', undefined, {
+        ...opts,
+        key: SIGN_KEY,
+      }),
+    ).toBe('nonce=123456&timestamp=1700000000000&sign=86e6493ebada36be2195917ae0c8ea0a')
+    expect(
+      authx('GET', 'https://nas.example.com/music/api/v1/search/track?q=中文&page=1', undefined, {
+        ...opts,
+        key: SIGN_KEY,
+      }),
+    ).toBe('nonce=123456&timestamp=1700000000000&sign=3ae386fc86224207dbc4134a1956a12e')
   })
 })
 
@@ -197,7 +300,7 @@ describe('实测修正 M3：nonce 与 timestamp 只生成一次', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 其余签名细节
+// 规范串细节与边界
 // ---------------------------------------------------------------------------
 
 describe('sign 细节', () => {
@@ -206,12 +309,22 @@ describe('sign 细节', () => {
     expect(sha256('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
   })
 
-  it('GET 忽略字面量 undefined / null 的参数值', () => {
-    expect(signPayload('GET', 'http://n/music/api/v1/x?q=a&z=undefined')).toBe(
-      signPayload('GET', 'http://n/music/api/v1/x?q=a'),
+  it('GET 规范串：参数名升序、空值保留', () => {
+    expect(signPayload('GET', 'http://n/music/api/v1/x?b=2&a=1&c=')).toBe(md5('a=1&b=2&c='))
+  })
+
+  it('GET 规范串：空格与加号都归一为空格（+ → %20 → 解码）', () => {
+    expect(signPayload('GET', 'http://n/music/api/v1/x?q=a b&page=1')).toBe(
+      md5('page=1&q=a b'),
     )
-    expect(signPayload('GET', 'http://n/music/api/v1/x?q=a&z=null')).toBe(
-      signPayload('GET', 'http://n/music/api/v1/x?q=a'),
+    expect(signPayload('GET', 'http://n/music/api/v1/x?q=a+b&page=1')).toBe(
+      md5('page=1&q=a b'),
+    )
+  })
+
+  it('GET 规范串：非 ASCII 解码后进规范串', () => {
+    expect(signPayload('GET', 'http://n/music/api/v1/x?q=中文&page=1')).toBe(
+      md5('page=1&q=中文'),
     )
   })
 
@@ -221,6 +334,10 @@ describe('sign 细节', () => {
 
   it('非 GET 无 body 时对空串签名', () => {
     expect(signPayload('POST', 'http://n/music/api/v1/x')).toBe(md5(''))
+  })
+
+  it('非 GET 的 body 为 null 时按空串签名', () => {
+    expect(signPayload('POST', 'http://n/music/api/v1/x', null as unknown as string)).toBe(md5(''))
   })
 
   it('Uint8Array 请求体与同内容字符串结果一致', () => {
@@ -239,6 +356,13 @@ describe('sign 细节', () => {
   it('默认使用音乐接口密钥 SIGN_KEY', () => {
     const opts = { nonce: '123456', ts: '1700000000000' }
     expect(authx('GET', 'http://n/music/api/v1/x', undefined, opts)).toBe(
+      authx('GET', 'http://n/music/api/v1/x', undefined, { ...opts, key: SIGN_KEY }),
+    )
+  })
+
+  it('空串密钥回退到 SIGN_KEY', () => {
+    const opts = { nonce: '123456', ts: '1700000000000' }
+    expect(authx('GET', 'http://n/music/api/v1/x', undefined, { ...opts, key: '' })).toBe(
       authx('GET', 'http://n/music/api/v1/x', undefined, { ...opts, key: SIGN_KEY }),
     )
   })
