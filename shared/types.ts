@@ -33,7 +33,7 @@ export interface AudioSpec {
   sampleRate: number | null
   /** 声道数。 */
   channel: number | null
-  /** 比特率（kbps）。 */
+  /** 比特率（**比特/秒 bps**，实测）。 */
   bitrate: number | null
   /** 编码格式，如 `flac` / `mp3` / `alac`。 */
   codec: string | null
@@ -61,7 +61,13 @@ export interface Genre {
   trackCount: number
 }
 
-/** 歌曲。 */
+/**
+ * 歌曲。
+ *
+ * **实测（2026-11-02，真实 NAS）**：服务端歌曲对象为
+ * `{ guid, title, coverId, year, discNo, trackNo, isrc, duration, isCue, createdAt, updatedAt, album: { guid, name, coverId, releaseDate, barcode, createdAt, updatedAt }, artists: [{ guid, name, coverId, createdAt, updatedAt }], genres: [], audioSpec: {...}, isFavorite }`。
+ * 关键点：`duration` 毫秒；`coverId` 形如 `track_<hex>` / `album_<hex>` / `artist_<hex>`（或 `null`）；`createdAt` / `updatedAt` 是 **Unix 秒**；`isFavorite` 是服务端给出的收藏态。
+ */
 export interface Song {
   /** 歌曲 guid。 */
   id: string
@@ -84,7 +90,7 @@ export interface Song {
    * `PlayerState.duration` / `position` 同为秒。本字段不是原始毫秒值，切勿直接当毫秒使用。
    */
   duration: number
-  /** 是否已收藏。 */
+  /** 是否已收藏（来自服务端 `isFavorite` 字段，实测存在）。 */
   favorite: boolean
   /** 编码格式，如 `FLAC`。 */
   codec: string
@@ -111,8 +117,11 @@ export interface Song {
 /**
  * 专辑。
  *
- * 注意：专辑实体**尚未实测**（实测结论只覆盖 `Song` 与 `Genre`），以下字段集按规格语义推导，
- * 待 Task 6 拿到真实字段后校准。
+ * **实测（2026-11-02，真实 NAS）**：服务端专辑对象为
+ * `{ guid, name, coverId, releaseDate, barcode, createdAt, updatedAt, artists: [{ guid, name, coverId, createdAt, updatedAt }], trackCount }`。
+ * 注意两点：
+ * 1. **没有 `year` 字段** —— 只有 `releaseDate`（形如 `"2005-04-01"`，或 `null`）。本字段由 Task 6 的 `mapAlbum` 从 `releaseDate` 的前 4 位派生，缺失时为 `null`。
+ * 2. `createdAt` / `updatedAt` 是 **Unix 秒**（如 `1792563278`），不是 ISO 字符串。
  */
 export interface Album {
   /** 专辑 guid。 */
@@ -125,19 +134,20 @@ export interface Album {
   artistId: string
   /** 封面 id；无封面为 `null`（与 `Song.coverId` 用空串 `''` 的约定不同）。 */
   coverId: string | null
-  /** 发行年份（待 Task 6 实测校准；`Song.year` 已实测可能为 null）。 */
+  /** 发行年份；由 `releaseDate` 派生，缺失时为 `null`。 */
   year: number | null
   /** 歌曲数。 */
   trackCount: number
-  /** 发行日期（待 Task 6 实测校准）。 */
+  /** 发行日期（实测原始字段，可能是 `null`）。 */
   releaseDate?: string | null
 }
 
 /**
  * 歌手。
  *
- * 注意：歌手实体**尚未实测**（实测结论只覆盖 `Song` 与 `Genre`），以下字段集按规格语义推导，
- * 待 Task 6 拿到真实字段后校准。
+ * **实测（2026-11-02，真实 NAS）**：服务端歌手对象为
+ * `{ guid, name, coverId, createdAt, updatedAt, trackCount, albumCount }`。
+ * `coverId` 实测多为 `artist_<hex>` 或 `track_<hex>`（也可能是 `null`）；`createdAt` / `updatedAt` 是 **Unix 秒**。
  */
 export interface Artist {
   /** 歌手 guid。 */
@@ -155,8 +165,8 @@ export interface Artist {
 /**
  * 歌单。
  *
- * 注意：歌单实体**尚未实测**（实测结论只覆盖 `Song` 与 `Genre`），以下字段集按规格语义推导，
- * 待 Task 6 拿到真实字段后校准。
+ * **实测（2026-11-02，真实 NAS）**：该账号的 `GET /playlist/list` 返回**空列表**，
+ * 因此歌单的字段形状**仍未实测**，以下字段集按规格语义推导，待创建歌单后补测校准。
  *
  * 服务端使用 `guid` / `name` 字段，`guid → id`、`name → name` 的映射由 Task 6 负责。
  */
@@ -169,11 +179,11 @@ export interface Playlist {
   coverId: string | null
   /** 歌曲数。 */
   trackCount: number
-  /** 描述（待 Task 6 实测校准）。 */
+  /** 描述（未实测，待创建歌单后校准）。 */
   description?: string | null
-  /** 创建时间（待 Task 6 实测校准）。 */
+  /** 创建时间（未实测，待创建歌单后校准）。 */
   createdAt?: string | null
-  /** 更新时间（待 Task 6 实测校准）。 */
+  /** 更新时间（未实测，待创建歌单后校准）。 */
   updatedAt?: string | null
 }
 

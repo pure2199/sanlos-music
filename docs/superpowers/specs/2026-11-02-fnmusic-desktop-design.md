@@ -498,6 +498,51 @@ FN 连接参数返回：
 2. **`authx` 仍按上游语义实现并发送**：官方 Web 端会发送该头，某些网关或服务端将来可能加强校验。实现以**上游语义**为准（参数名升序、只丢弃字面量 `'undefined'` / `'null'`、**保留空值参数**、路径取完整 URL 的 pathname 而 FN 连接接口用纯路径），避免行为突变。
 3. 规范串的具体细节（空值参数、编码细节）**不影响当前服务端接受度**，因此 Task 6 的 API 封装仍建议不发送空值查询参数，但这是规范性建议而非正确性依赖。
 
+### 15.7 字段形状实测（2026-11-02 二次联调，Task 6 期间补充）
+
+为校准 `mapSong` / `mapAlbum` / `mapArtist` 与 mock server 的保真度，对真实 NAS 又做了一轮形状取证（20 首曲库样本 + 专辑/歌手/收藏/播放历史各端点）。
+
+**1. `audioSpec.bitrate` 的单位是 **比特/秒（bps）**，不是 kbps。** 证据（20 首样本，`bitrate` 与 `size×8/秒` 逐条吻合）：
+
+| 曲目 | codec | bitrate | size(B) | duration(ms) | 实算 bps | 实算 kbps |
+| --- | --- | --- | --- | --- | --- | --- |
+| 占位曲目二 (变体一) | flac | 870398 | 34628341 | 318280 | 870387 | 870 |
+| 占位曲目三 (变体二) | flac | 1885693 | 54804140 | 232509 | 1885661 | 1886 |
+| 占位曲目四 | mp3 | 320000 | 26518765 | 662831 | 320067 | 320 |
+
+→ 映射规则：`Song.bitrate`（kbps）= `round(audioSpec.bitrate / 1000)`。实施计划 Task 6 的测试断言 `bitrate: 900000 → 900` **正确**；`shared/types.ts` 里 `AudioSpec.bitrate` 原注释「kbps」**错误**，已更正为 bps。
+
+**2. 真实曲库每首歌带 `isFavorite` 布尔字段** → 应直接映射到 `Song.favorite`，而不是在客户端猜。实测样本中同时存在 `true` 与 `false`。
+
+**3. 真实 `coverId` 形如 `<类型>_<32位小写hex>`**，类型前缀实测有 `track_` / `album_` / `artist_` 三种，另有 `null`（无封面）。10/10 样本匹配 `/^[^_]+_[0-9a-fA-F]+$/` → §「`coverId` 仅保留形如 `xxx_<hex>`」的规则**成立**，不会误清空真实封面。
+
+**4. 服务端专辑对象没有 `year` 字段**，只有 `releaseDate`（如 `"2005-04-01"`，或 `null`）。`Album.year` 需由 `releaseDate` 前 4 位派生，缺失时为 `null`。
+
+**5. `createdAt` / `updatedAt` 是 Unix 秒**（如 `1792563278`），**不是 ISO 字符串**。涉及专辑、歌手、歌曲、歌词条目。
+
+**6. 播放历史条目本身就是完整的歌曲对象**（`guid,title,coverId,year,discNo,trackNo,isrc,duration,isCue,createdAt,updatedAt,album,artists,genres,audioSpec`），**不是** `{ track: <歌曲> }` 包装。`historyApi` 应直接对条目调用 `mapSong`。此前按「条目内嵌 track」推导的占位形状作废。
+
+**7. 各端点条目形状汇总（服务端原始 JSON）**
+
+```
+歌曲    { guid, title, coverId, year, discNo, trackNo, isrc, duration, isCue,
+          createdAt, updatedAt, album{...}, artists[{...}], genres:[],
+          audioSpec{bitDepth,sampleRate,channel,bitrate,codec,container,duration,format,path,size},
+          isFavorite }
+专辑    { guid, name, coverId, releaseDate, barcode, createdAt, updatedAt, artists[{...}], trackCount }
+歌手    { guid, name, coverId, createdAt, updatedAt, trackCount, albumCount }
+歌手条目{ guid, name, coverId, createdAt, updatedAt }（出现在 album.artists / song.artists 里）
+收藏条目= 完整歌曲对象（同「歌曲」）
+历史条目= 完整歌曲对象（同「歌曲」）
+风格    { guid, name, coverId(null), trackCount }
+```
+
+**8. `container` 实测为空串 `""`**（而非 `null`），`audioSpec.path` 是 NAS 上的绝对路径（如 `/vol02/1000-0-.../xxx.flac`）。
+
+**9. 该账号 `playlist/list` 仍返回空列表**（歌单字段形状仍未实测，保留占位并标注待校准）。
+
+**对 mock server 的影响**：fixtures 必须按上述形状重写（歌曲加 `isFavorite`/`isrc`/`isCue`/`createdAt`/`updatedAt`，专辑删掉不存在的 `year` 改为 `releaseDate`，`coverId` 前缀用 `track_`/`album_`/`artist_`，播放历史条目直接用歌曲对象），否则 mock 与真实 NAS 的偏差会传导进客户端映射。
+
 <deliver-assets>
-<media type="file" src="C:\Users\<USER>\.minimax\sessions\<SESSION>\workspace\docs\superpowers\specs\2026-11-02-fnmusic-desktop-design.md" caption="设计规格（含真实 NAS 实测校验与 7 条规格修正）" />
+<media type="file" src="C:\Users\<USER>\.minimax\sessions\<SESSION>\workspace\docs\superpowers\specs\2026-11-02-fnmusic-desktop-design.md" caption="设计规格（含真实 NAS 实测校验、7 条规格修正与字段形状实测 §15.7）" />
 </deliver-assets>

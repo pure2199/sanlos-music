@@ -565,7 +565,16 @@ describe('mapSong', () => {
 
 **分页规则（实测修正 M6，硬要求）**：服务端所有列表端点返回 `{ list, total }` 并接受 `page`（1 起）/ `size`（默认 50，`size` 上限 2000，实测 500 稳定）。客户端**不得提供任何一次性全量拉取的路径**——不实现 `fetchAll` / 不设默认 `size = 全库`；`libraryApi.songs()` 等列表方法必须带 `page`/`size` 参数并把 `total` 一并返回，供 Task 14 的增量加载 + 虚拟滚动使用。例外：收藏（实测 251 首）与歌单（实测 2 个）体量小，可全量。
 
-**播放历史（实测新增端点）**：`historyApi.list(page, size)` → `GET /play-history/list?page=&size=`，返回 `{ list, total }`（实测 `total=414`）。Task 5 的 mock server **没有**这个端点，本任务需在 `mock-server/` 里补上（返回固定的几条历史记录即可），并补对应测试。
+**播放历史（实测新增端点）**：`historyApi.list(page, size)` → `GET /play-history/list?page=&size=`，返回 `{ list, total }`（实测 `total=414`）。**实测条目本身就是完整的歌曲对象**（含 `guid,title,coverId,duration,album,artists,audioSpec,isFavorite` 等），**不是** `{ track: <歌曲> }` 包装——`historyApi` 直接对条目调用 `mapSong`。Task 5 的 mock server **没有**这个端点，本任务需在 `mock-server/` 里补上并补测试。
+
+**字段形状实测校正（规格 §15.7，优先级高于上文推导）**：
+
+- `audioSpec.bitrate` 单位是 **bps**；`Song.bitrate` = `round(bitrate / 1000)`（kbps）。
+- 真实歌曲带 `isFavorite` 字段 → `Song.favorite` 直接取它，**不要**在客户端猜。
+- 真实专辑对象**没有 `year`**，只有 `releaseDate`；`Album.year` 由 `releaseDate` 前 4 位派生，缺失为 `null`。
+- `createdAt` / `updatedAt` 是 **Unix 秒**（不是 ISO 字符串）。
+- 真实 `coverId` 形如 `track_<hex>` / `album_<hex>` / `artist_<hex>`（或 `null`），`xxx_<hex>` 规则成立。
+- mock server 的 fixtures 必须按上述真实形状重写，否则偏差会传导进客户端映射。
 
 - [ ] **Step 4: 实现其余 api 模块**（每个端点一行映射到 Task 5 的 mock 端点）
 - [ ] **Step 5: 运行测试确认通过**
