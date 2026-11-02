@@ -514,12 +514,12 @@ fixtures 提供 8 首示例曲目（`guid` 为 `t1`–`t8`，含 title/artist/al
 - Produces:
   - `apiCall<T>(path: string, opts?: { method?: string; body?: unknown; query?: Record<string, string | number | undefined> }): Promise<T>`
   - `mapSong(json: any): Song`、`mapAlbum`、`mapArtist`、`mapPlaylist`
-  - `libraryApi.albums(sort?)`、`libraryApi.album(id)`、`libraryApi.albumSongs(id)`、`libraryApi.artistAlbums(id)`、`libraryApi.songs()`、`libraryApi.artistSongs(id)`、`libraryApi.genreSongs(id, name)`、`libraryApi.artists()`、`libraryApi.genres()`
+  - `libraryApi.albums(sort?)`、`libraryApi.album(id)`、`libraryApi.albumSongs(id)`、`libraryApi.artistAlbums(id)`、`libraryApi.songs()`、`libraryApi.artistSongs(id)`、`libraryApi.genreSongs(id)`、`libraryApi.artists()`、`libraryApi.genres()`
   - `favoriteApi.list()`、`favoriteApi.set(id, on)`
   - `playlistApi.list()`、`playlistApi.songs(id)`、`playlistApi.create(name)`、`playlistApi.rename(id, name)`、`playlistApi.remove(id)`、`playlistApi.addTracks(id, songIds)`、`playlistApi.removeTracks(id, songIds)`
-  - `searchApi.query(q)`
-  - `lyricApi.raw(songId)`
-  - `historyApi.list(page, size)` —— 实测确认的播放历史端点 `GET /music/api/v1/play-history/list`（`size` 上限 2000，实测 500 稳定）
+  - `searchApi.query(q, opts?)` → `{ tracks: Page<Song>; albums: Page<Album>; artists: Page<Artist> }`
+  - `lyricApi.raw(songId)` → 字符串；`lyricApi.list(songId)` → `LyricEntry[]`（时间字段已归一为 ISO 串）
+  - `historyApi.list(page, size)` —— 实测确认的播放历史端点 `GET /music/api/v1/play-history/list`（`size` 上限 2000，实测 500 稳定）；**条目本身就是完整歌曲对象**，直接走 `mapSong`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -572,9 +572,14 @@ describe('mapSong', () => {
 - `audioSpec.bitrate` 单位是 **bps**；`Song.bitrate` = `round(bitrate / 1000)`（kbps）。
 - 真实歌曲带 `isFavorite` 字段 → `Song.favorite` 直接取它，**不要**在客户端猜。
 - 真实专辑对象**没有 `year`**，只有 `releaseDate`；`Album.year` 由 `releaseDate` 前 4 位派生，缺失为 `null`。
-- `createdAt` / `updatedAt` 是 **Unix 秒**（不是 ISO 字符串）。
+- `createdAt` / `updatedAt` 是 **Unix 秒**（不是 ISO 字符串）。**领域层统一归一为 ISO 8601 字符串**（`new Date(sec * 1000).toISOString()`），缺失为 `null`；原始类型写成 `number | string | null` 以兼容两种来源。
 - 真实 `coverId` 形如 `track_<hex>` / `album_<hex>` / `artist_<hex>`（或 `null`），`xxx_<hex>` 规则成立。
+- **播放历史条目本身就是完整的歌曲对象**（含 `guid,title,coverId,duration,album,artists,audioSpec,isFavorite` 等），**不是** `{ track: <歌曲> }` 包装——`historyApi` 直接对条目调用 `mapSong`。
 - mock server 的 fixtures 必须按上述真实形状重写，否则偏差会传导进客户端映射。
+
+**搜索分页**：搜索端点是否支持 `page`/`size` **未实测**，但客户端**无条件透传**分页参数并带回 `total`（服务端忽略也不亏），结果页才能做增量加载与总数展示。真实行为列入联调清单 Step H。
+
+**收藏/歌单全量**：实测收藏 251 首 > 服务端默认页长 200，且 `size` 上限 2000 只在 `track/list` 上验过。客户端对 `favoriteApi.list()` / `playlistApi.list()` 采用**分页循环取全**（`size=200`，按 `total` 终止，带安全上限），不依赖「一次 size=2000 就能拿全」的假设。真实上限列入联调清单 Step I。
 
 - [ ] **Step 4: 实现其余 api 模块**（每个端点一行映射到 Task 5 的 mock 端点）
 - [ ] **Step 5: 运行测试确认通过**
@@ -1484,13 +1489,18 @@ nsis:
 
 需用户提供 FN ID 与飞牛音乐独立账号（仅用于联调，不写入仓库、不写入日志）。
 
-- [ ] **Step A: FN ID 探测** — 验证候选构造与并行探测命中预期链路
-- [ ] **Step B: 中继链路** — 验证 `mode=relay` Cookie 生效、播放可用、界面显示限速提示
+标注 **[已实测]** 的步骤在开发期已用探针工具确认，只需要在最终验收时复核一次。
+
+- [ ] **Step A: FN ID 探测** — 验证候选构造与并行探测命中预期链路 **[已实测：中继 `https://<fnId>.fnos.net` 命中；内网/公网 v4/v6 在当前网络下不可达]**
+- [ ] **Step B: 中继链路** — 验证 `mode=relay` Cookie 生效、播放可用、界面显示限速提示 **[已实测：`mode=relay` 是硬性关卡，不带则返回 HTML 错误页]**
 - [ ] **Step C: token 续期** — 等待/触发 token 失效，确认静默续期路径生效
-- [ ] **Step D: 转码兜底** — 播放一个 APE / DSD 曲，确认走 `/track/transcode`
-- [ ] **Step E: 端口核对** — 确认 `port.httpPort` / `port.httpsPort` 与实际一致（规格中的 5666 / 5667 为假设值）
-- [ ] **Step F: 播放历史端点探测** — 打开官方 Web 端 DevTools 抓包，确认是否存在历史记录端点（`/history/*`、`/recently-played/*` 等），确认后在 `src/api/` 增加对应方法并补 Task 9 的同步逻辑
+- [ ] **Step D: 转码兜底** — **[已实测：服务端转码不可用（`code=100001`），兜底改为客户端 FFmpeg]**；联调时用一首 APE/ALAC 确认客户端 FFmpeg 兜底链路可用，并确认系统 ffmpeg 缺失时的提示
+- [ ] **Step E: 端口核对** — **[已实测：`port.httpPort=5666` / `port.httpsPort=5667`]**
+- [ ] **Step F: 播放历史端点** — **[已实测：`GET /music/api/v1/play-history/list`，`total=414`，条目为完整歌曲对象]**；联调时确认条目形状与规格 §15.7 一致，并确认「最近播放」的排序依据（条目 `updatedAt`？）
 - [ ] **Step G: 收藏/歌单跨端同步验证** — PC 端收藏后，用手机 App 确认可见
+- [ ] **Step H: 搜索端点分页行为** — 确认 `search/track` / `search/album` / `search/artist` 是否接受 `page`/`size`，返回的 `total` 是否准确（客户端无条件透传分页参数，服务端若忽略也不亏，但结果页的总数需要真实值）
+- [ ] **Step I: 收藏/歌单全量取回** — 确认 `favorite-track/list` 与 `playlist/list` 的 `size` 上限（实测收藏 251 首 > 服务端默认页长 200；客户端按分页循环取全，需确认循环终止条件与 `total` 一致）
+- [ ] **Step J: 专辑详情与歌单创建返回形状** — 确认 `/album/detail` 是否用列表信封返回、`/playlist/create` 是否回显 `guid`（客户端当前按「列表信封 + 取 `list[0]`」与「回显缺失则兜底」处理，需真实响应校准）
 
 ---
 
