@@ -624,7 +624,7 @@ describe('SessionManager', () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ code: 0, data: { userToken: 'TK' } }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
-    const body = JSON.parse(String(fetchMock.mock.calls[0][1]!.body))
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))
     expect(body.password).toMatch(/^[0-9a-f]{64}$/)
     expect(body.password).not.toBe('pw')
   })
