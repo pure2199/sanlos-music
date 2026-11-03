@@ -49,6 +49,26 @@
   gap: 6px;
 }
 
+/*
+ * 顶栏导航容器（Task 2 · 新版清单）
+ *
+ * 顶栏分成两组导航：「主导航」（连接 / 搜索）与「曲库导航」（歌曲 / 收藏 / 歌单，
+ * Task 3 还会追加专辑 / 歌手 / 风格）。分开是为了**视觉分组**，
+ * 不是两个独立路由 —— 主区仍然只有一个视图，由 `App.tsx` 的 `view` 状态决定。
+ */
+.app-shell__navs {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* 曲库导航组：与主导航之间加一条细分隔线。 */
+.fnm-app__nav--library {
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+
 /* 入口按钮 */
 .fnm-app__nav-button {
   padding: 4px 12px;

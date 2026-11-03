@@ -21,8 +21,16 @@ export interface SongsPageProps {
   api?: LibraryApi
   /** 注入的 store。 */
   store?: LibraryStoreApi
-  /** 双击歌曲时回调（真正的播放是 Task 15 的事）。 */
-  onPlay?: (song: Song, index: number) => void
+  /**
+   * 双击歌曲时回调。
+   *
+   * ⚠️ **第三个参数 `list` 是「整队口径」**：当前页**已加载**的全部歌曲。
+   *    消费方（`src/App.tsx`）用它调 `playerStore.playTrack(song, list)`
+   *    → 整队入队并定位到点的那首。
+   *
+   * 两参回调（`(song, index) => void`）在类型上仍可赋值 → **纯增量**，既有调用方行为不变。
+   */
+  onPlay?: (song: Song, index: number, list: Song[]) => void
   /** 选中项变化时回调。 */
   onSelect?: (ids: string[]) => void
 }

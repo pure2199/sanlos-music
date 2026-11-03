@@ -175,7 +175,9 @@ describe('SongList 交互语义', () => {
     fireEvent.doubleClick(screen.getByText('歌二'))
 
     expect(onPlay).toHaveBeenCalledTimes(1)
-    expect(onPlay).toHaveBeenCalledWith(SONGS[1], 1)
+    // ⚠️ 第三个参数是**当前整队**（Task 2 · 新版清单的统一口径）：
+    //    消费方据此调 `playerStore.playTrack(song, list)` → 整队入队并定位到点的那首。
+    expect(onPlay).toHaveBeenCalledWith(SONGS[1], 1, SONGS)
   })
 
   it('单击行选中该行并回调 onSelect', () => {

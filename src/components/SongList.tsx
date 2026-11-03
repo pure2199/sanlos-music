@@ -70,8 +70,20 @@ function formatDuration(seconds: number): string {
 export interface SongListProps {
   /** 已加载的歌曲（**只渲染可视区附近的一部分**）。 */
   songs: Song[]
-  /** 双击行时回调（`index` 是真实下标）。 */
-  onPlay: (song: Song, index: number) => void
+  /**
+   * 双击行时回调。
+   *
+   * - `index` 是该歌在 `songs` 里的**真实下标**；
+   * - `list` 是**当前已加载的整队**（就是 `songs` 本身）。
+   *
+   * 消费方（`src/App.tsx`）据此调 `playerStore.playTrack(song, list)`
+   * → **整队入队并定位到点的那首**（队列语义见 `playerStore.ts` 的 `playTrack`）。
+   *
+   * ⚠️ **第三个参数是纯增量**：两参回调（`(song, index) => void`）在类型上仍可赋值，
+   *    行为也**一字不变** —— `SearchPanel` 自己的 `handlePlay` 忽略第三个参数、
+   *    仍用 `effectiveTracks`。
+   */
+  onPlay: (song: Song, index: number, list: Song[]) => void
   /** 选中项变化时回调（id 数组，按 `songs` 原始顺序）。 */
   onSelect?: (ids: string[]) => void
   /** 总量（已知时用于展示「已加载 N / 总计 M」）。 */
@@ -230,7 +242,7 @@ export function SongList(props: SongListProps): ReactElement {
     (index: number): void => {
       const song = songs[index]
       if (!song) return
-      onPlay(song, index)
+      onPlay(song, index, songs)
     },
     [onPlay, songs],
   )
