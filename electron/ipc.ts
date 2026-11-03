@@ -41,6 +41,8 @@
 // | `prefs:get`           | 渲染进程 → 主进程 | `ipcRenderer.invoke` | 无 → `AppPrefs`                  |
 // | `prefs:set`           | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `Partial<AppPrefs>` → `AppPrefs` |
 // | `theme:set`           | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `ThemeName` → `AppPrefs`         |
+// | `ffmpeg:status`       | 渲染进程 → 主进程 | `ipcRenderer.invoke` | 无 → `FfmpegStatus`              |
+// | `ffmpeg:fallback`     | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `songId` → `FfmpegFallbackResult`|
 //
 // ⚠️ **主进程是唯一的命令路由**：渲染进程发来的 `player:command`（媒体会话的
 //    action handler）会被**转发**回渲染进程执行——渲染进程**只执行**从主进程
@@ -63,6 +65,7 @@ import { dirname, join } from 'node:path'
 import { API_PREFIX, CODE_OK, RELAY_DOMAIN_SUFFIX } from '../shared/constants'
 import type { AuthSessionInfo, CandidateInfo, ServerInfo } from '../shared/bridge'
 import { sanitizeEqPrefsPayload } from '../shared/eqPrefs'
+import type { FfmpegFallbackResult, FfmpegStatus } from '../shared/ffmpeg'
 import type {
   AppPrefs,
   CloseBehavior,
@@ -1009,6 +1012,25 @@ export interface PlayerIpcOptions {
    *    渲染进程只能发「我要下这首歌」，**不能指定写到哪**。
    */
   downloads?: DownloadControllerLike
+  /**
+   * FFmpeg 兜底解码器（Task 12）。
+   *
+   * ⚠️ **未注入时两个通道都返回「不可用」**，不抛异常——
+   *    界面据此显示「未检测到 FFmpeg」。
+   */
+  ffmpeg?: FfmpegControllerLike
+}
+
+/**
+ * FFmpeg 兜底解码器的最小接口（Task 12）。
+ *
+ * ⚠️ 由 `electron/fallbackTranscoder.ts` 的 `FallbackTranscoder` 实现。
+ */
+export interface FfmpegControllerLike {
+  /** 探测结果（**带缓存**）。 */
+  status(): Promise<FfmpegStatus>
+  /** 为一首歌准备兜底产物。 */
+  prepare(songId: string): Promise<FfmpegFallbackResult>
 }
 
 /**
@@ -1108,6 +1130,31 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
   // 渲染进程 → 主进程：清空本地下载。
   ipcMain.handle('download:clear', async () => {
     await opts.downloads?.clear()
+  })
+
+  // --- FFmpeg 兜底解码（Task 12）-------------------------------------------
+  //
+  // ⚠️ 渲染进程**只说「给这首歌兜底一下」**，**不能指定路径**：
+  //    本地文件的定位、转码、临时产物的存放**全在主进程**。
+
+  // 渲染进程 → 主进程：本机有没有可用的 FFmpeg。
+  ipcMain.handle('ffmpeg:status', async () => {
+    const ffmpeg = opts.ffmpeg
+    if (!ffmpeg) return { available: false, path: '', version: '' }
+    return ffmpeg.status()
+  })
+
+  // 渲染进程 → 主进程：为一首歌做兜底转码。
+  ipcMain.handle('ffmpeg:fallback', async (_event, arg) => {
+    const songId = readString(asRecord(arg)?.['songId'] ?? arg)
+    if (songId.length === 0) {
+      return { url: '', reason: 'failed', detail: '歌曲标识无效' }
+    }
+    const ffmpeg = opts.ffmpeg
+    if (!ffmpeg) {
+      return { url: '', reason: 'no-ffmpeg', detail: null }
+    }
+    return ffmpeg.prepare(songId)
   })
 
   // 窗口控制。

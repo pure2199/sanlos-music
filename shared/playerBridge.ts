@@ -49,6 +49,7 @@
 //    **不是**会话——偏好文件里绝不允许出现凭证。
 
 import type { EqPrefsPayload } from './eqPrefs'
+import type { FfmpegFallbackResult, FfmpegStatus } from './ffmpeg'
 import type { PlayMode, ThemeName } from './types'
 
 // ---------------------------------------------------------------------------
@@ -394,4 +395,20 @@ export interface PlayerBridge {
   clearDownloads(): Promise<void>
   /** 订阅下载任务变化（`download:changed`，主进程推送）。 */
   onDownloadChange(handler: (tasks: DownloadTask[]) => void): () => void
+  // -------------------------------------------------------------------------
+  // FFmpeg 兜底解码（Task 12）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 渲染进程**只说「给这首歌兜底一下」**，**不能指定路径**：
+  //    本地文件的定位、转码、临时产物的存放**全在主进程**。
+  /** 读 FFmpeg 探测结果（`ffmpeg:status`）：本机有没有可用的 FFmpeg。 */
+  ffmpegStatus(): Promise<FfmpegStatus>
+  /**
+   * 请求兜底解码（`ffmpeg:fallback`）：把这首歌的**本地副本**转码成
+   * Chromium 能解的格式。
+   *
+   * @param songId 歌曲 guid（**只当索引键**）。
+   * @returns 成功时带可播放的**本地地址**；失败时带**可判别**的 `reason`。
+   */
+  ffmpegFallback(songId: string): Promise<FfmpegFallbackResult>
 }

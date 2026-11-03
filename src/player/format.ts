@@ -119,6 +119,49 @@ export function formatUnsupportedMessage(label: string): string {
   return `该格式（${label}）当前无法播放`
 }
 
+// ---------------------------------------------------------------------------
+// 兜底解码的友好提示（Task 12）
+// ---------------------------------------------------------------------------
+
+/**
+ * 兜底解码失败的原因（**可判别**，不要靠文案匹配）。
+ *
+ * - `no-ffmpeg`：本机没装 FFmpeg；
+ * - `no-local`：这首歌没有本地副本（兜底只支持本地文件）；
+ * - `failed`：转码失败（`detail` 里有具体原因）。
+ */
+export type FallbackFailure = 'no-ffmpeg' | 'no-local' | 'failed'
+
+/**
+ * 兜底解码的**友好提示**。
+ *
+ * ⚠️ **给用户看的是「怎么办」，不是「报错」**——
+ *    说清楚缺什么、下一步做什么，别只丢一句「无法播放」。
+ */
+export function fallbackUnavailableMessage(
+  label: string,
+  reason: FallbackFailure,
+  detail?: string | null,
+): string {
+  if (reason === 'no-ffmpeg') {
+    // ⚠️ **不能说「先下载到本地」**——没装 FFmpeg 时本地文件同样解不了，
+    //    那条建议会把用户引到一条走不通的路上。
+    return `该格式（${label}）当前无法播放：未检测到 FFmpeg。安装 FFmpeg 后即可通过转码播放。`
+  }
+  if (reason === 'no-local') {
+    // ⚠️ 兜底转码只吃**本地文件**（服务端转码不可用，没有别的来源）。
+    return `该格式（${label}）当前无法播放：还没有下载到本地。兜底转码需要本地文件，请先下载这首歌。`
+  }
+  const suffix = detail && detail.length > 0 ? `：${detail}` : ''
+  return `该格式（${label}）解码失败${suffix}`
+}
+
+/** 兜底转码进行中的提示（界面显示「正在转换…」）。 */
+export const FALLBACK_PREPARING_MESSAGE = '正在转换音频（首次播放需要几秒）…'
+
+/** 兜底转码是**有损**的实话（界面要如实注明）。 */
+export const FALLBACK_LOSSY_NOTE = '兜底播放使用 Opus 转码（音质有损，原始文件不变）'
+
 /**
  * 从歌曲里取扩展名 / 容器名。
  *

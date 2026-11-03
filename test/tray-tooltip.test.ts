@@ -593,13 +593,15 @@ describe('registerPlayerIpc', () => {
     return { ipcMain, handlers, listeners }
   }
 
-  it('注册了全部通道（含 Task 10 的悬浮歌词通道与 Task 11 的下载通道）', () => {
-    // ⚠️ T10（桌面悬浮歌词）新增了两个通道，T11（本地下载）又新增了四个：
+  it('注册了全部通道（含 Task 10 的悬浮歌词通道、Task 11 的下载通道与 Task 12 的 FFmpeg 通道）', () => {
+    // ⚠️ T10（桌面悬浮歌词）新增了两个通道，T11（本地下载）又新增了四个，
+    //    T12（FFmpeg 兜底解码）再新增两个：
     //    - `lyric:set-visible`（调用式）：开关悬浮窗；
     //    - `lyric:state`（推送式）：主进程只转发歌词消息；
     //    - `download:list` / `download:start` / `download:cancel` / `download:clear`
     //      （调用式）：本地下载的索引、启动、取消、清空。
-    //    → 原来的「全部八个通道」前提被这两个任务推翻，这里改写为**新的完整集合**。
+    //    - `ffmpeg:status` / `ffmpeg:fallback`（调用式）：探测 FFmpeg、请求兜底转码。
+    //    → 原来的「全部八个通道」前提被这三个任务推翻，这里改写为**新的完整集合**。
     const { ipcMain, handlers, listeners } = fakeIpcMain()
     registerPlayerIpc({ ipcMain, prefs: new PrefsStore({ filePath: tempFile() }) })
     expect([...handlers.keys()].sort()).toEqual([
@@ -607,6 +609,8 @@ describe('registerPlayerIpc', () => {
       'download:clear',
       'download:list',
       'download:start',
+      'ffmpeg:fallback',
+      'ffmpeg:status',
       'lyric:set-visible',
       'prefs:get',
       'prefs:set',

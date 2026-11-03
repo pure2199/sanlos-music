@@ -127,6 +127,14 @@ const fnPlayer: PlayerBridge = {
       ipcRenderer.removeListener('download:changed', listener)
     }
   },
+  // -------------------------------------------------------------------------
+  // FFmpeg 兜底解码（Task 12）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 渲染进程**只发请求**：本地文件的定位、转码、临时产物的存放
+  //    **全在主进程**——这里既不能指定路径，也拿不到任何凭证。
+  ffmpegStatus: () => ipcRenderer.invoke('ffmpeg:status'),
+  ffmpegFallback: (songId) => ipcRenderer.invoke('ffmpeg:fallback', { songId }),
 }
 
 contextBridge.exposeInMainWorld('fnPlayer', fnPlayer)

@@ -221,4 +221,16 @@ export interface PlayerState {
   muted?: boolean
   /** 播放错误信息。 */
   error?: string | null
+  /**
+   * 是否正在做**兜底转码**（Task 12）。
+   *
+   * ⚠️ **可选**：没走兜底时是 `false` / `undefined`。
+   */
+  preparing?: boolean
+  /**
+   * 当前这一曲是不是**兜底转码产物**在播（Task 12）。
+   *
+   * ⚠️ 界面据此如实注明「音质有损」——**不许**让用户以为在听原始无损文件。
+   */
+  fallbackActive?: boolean
 }

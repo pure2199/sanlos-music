@@ -43,6 +43,7 @@ import {
 } from '../player/eq'
 import { Queue } from '../player/queue'
 import { eqPrefsPort } from '../player/eqPrefsBridge'
+import { prepareFallbackSource } from '../player/fallback'
 import { resolvePlaybackSource } from './downloadStore'
 
 // 引擎接口从 `engine.ts` 定义（它是引擎的对外契约），这里**再导出**一份，
@@ -69,6 +70,10 @@ export interface PlayerStore {
   muted?: boolean
   /** 播放错误信息。 */
   error?: string | null
+  /** 是否正在做兜底转码（Task 12）。 */
+  preparing?: boolean
+  /** 当前这一曲是不是兜底产物在播（Task 12；界面据此注明「音质有损」）。 */
+  fallbackActive?: boolean
 
   /**
    * 播放一首曲目。
@@ -464,6 +469,8 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       volume: state.volume,
       muted: state.muted ?? false,
       error: state.error ?? null,
+      preparing: state.preparing ?? false,
+      fallbackActive: state.fallbackActive ?? false,
     })
   })
 
@@ -489,7 +496,13 @@ export const usePlayerStore = createPlayerStore(
   // ⚠️ **本地优先播放**（Task 11）：解析器在「本地有副本且开关打开」时
   //    返回 `fnml://local/track/<id>`，否则照旧返回 `fnm://srv/track/stream?guid=…`
   //    （**既有行为与既有断言一字不变**）。
-  new PlayerEngine({ resolveSource: resolvePlaybackSource }),
+  new PlayerEngine({
+    resolveSource: resolvePlaybackSource,
+    // ⚠️ **兜底解码**（Task 12）：格式 Chromium 解不了时，请主进程把本地副本
+    //    转码成 Opus 再播。接缝**在这里接上**——不接的话引擎走的是既有的
+    //    「写可读错误、不播放」路径（既有行为与既有断言一字不变）。
+    prepareSource: prepareFallbackSource,
+  }),
   {
     eqPrefs: eqPrefsPort,
   },

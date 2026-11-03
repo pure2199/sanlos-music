@@ -44,6 +44,7 @@ import {
 
 import type { Song } from '../../shared/types'
 import { usePlayerStore, type PlayerStore } from '../state/playerStore'
+import { FALLBACK_LOSSY_NOTE, FALLBACK_PREPARING_MESSAGE } from '../player/format'
 import { CoverImage } from './Cards'
 import { EqPanel } from './EqPanel'
 import './player-bar.css'
@@ -216,6 +217,26 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
 
   const state = usePlayerState(store)
   const { current, isPlaying, position, duration, volume, muted, queue } = state
+  /** 正在做兜底转码（Task 12）。 */
+  const preparing = state.preparing === true
+  /** 当前这一曲是兜底产物在播（Task 12）。 */
+  const fallbackActive = state.fallbackActive === true
+  /** 播放错误（可为空串）。 */
+  const errorText = typeof state.error === 'string' ? state.error : ''
+  /**
+   * 提示行（歌名 / 歌手下面的第三行，Task 12）。
+   *
+   * ⚠️ **优先级**：错误 > 正在转码 > 兜底有损说明。
+   *    错误用 `role="alert"`（立刻播报），其余用 `role="status"`（不打扰）。
+   */
+  const noticeText =
+    errorText.length > 0
+      ? errorText
+      : preparing
+        ? FALLBACK_PREPARING_MESSAGE
+        : fallbackActive
+          ? FALLBACK_LOSSY_NOTE
+          : ''
 
   /** 拖动进度条时的预览值（`null` = 没在拖动）。 */
   const [dragValue, setDragValue] = useState<number | null>(null)
@@ -344,6 +365,15 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         <span className="fnm-playerbar__meta">
           <span className="fnm-playerbar__title">{current?.title ?? '未在播放'}</span>
           <span className="fnm-playerbar__artist">{current?.artist ?? ''}</span>
+          {noticeText.length > 0 ? (
+            <span
+              className="fnm-playerbar__notice"
+              data-testid="player-notice"
+              role={errorText.length > 0 ? 'alert' : 'status'}
+            >
+              {noticeText}
+            </span>
+          ) : null}
         </span>
         {quality && (
           <span

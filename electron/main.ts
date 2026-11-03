@@ -17,6 +17,7 @@ import {
 } from './downloadManager'
 import { createHttpStack } from './http'
 import { registerLocalMedia, registerLocalMediaSchemePrivileges } from './localMedia'
+import { FallbackTranscoder } from './fallbackTranscoder'
 import { createNasOAuthHandlers } from './oauthWindow'
 import { buildUpstreamRequest, registerFnmSchemePrivileges, registerProxy } from './proxy'
 import { SessionManager } from './session'
@@ -356,8 +357,22 @@ if (!isPrimaryInstance) {
 
       // `fnml://` 协议：把已下载的文件交给渲染进程的 `<audio>` 播放。
       // ⚠️ 路径**只**来自下载索引（已落盘的记录），渲染进程碰不到文件系统。
+      //
+      // 11c. FFmpeg 兜底解码（Task 12）。
+      //
+      //     不可解格式（APE / ALAC / DSF …）→ 用本机的 FFmpeg 把**本地副本**
+      //     转码成 Opus，再交给渲染进程播。
+      //     ⚠️ 产物走**同一个** `fnml://local/track/<id>` 路由（**不新增路由种类**）：
+      //        lookup 改成「**临时产物优先 → 下载索引**」。
+      //     ⚠️ 产物在**临时目录**里、**单槽**、**不进**下载索引、**不污染**下载目录；
+      //        退出应用时清掉整个临时目录。
+      const fallback = new FallbackTranscoder({
+        lookupLocal: (songId) => downloads.localPath(songId),
+        tempDir: path.join(app.getPath('userData'), 'fallback'),
+      })
+
       registerLocalMedia({
-        lookup: (songId) => downloads.localPath(songId),
+        lookup: (songId) => fallback.lookup(songId) ?? downloads.localPath(songId),
       })
 
       // 12. 托盘（Task 17）。
@@ -501,12 +516,19 @@ if (!isPrimaryInstance) {
         setLyricVisible,
         // 本地下载（Task 11）：落盘 / 断点续传 / 索引全在主进程。
         downloads,
+        // FFmpeg 兜底解码（Task 12）：探测与转码全在主进程。
+        ffmpeg: fallback,
       })
 
       // 13b. 启动时按偏好恢复悬浮窗（上次是开着的就接着开）。
       if (prefs.read().lyricOverlay?.visible === true) {
         setLyricVisible(true)
       }
+
+      // 13c. 退出时清掉兜底转码的临时目录（**只删自己建的那个目录**）。
+      app.on('before-quit', () => {
+        void fallback.dispose()
+      })
     })
     .catch((err: unknown) => {
       console.error('[fnmusic] 应用启动失败:', err)

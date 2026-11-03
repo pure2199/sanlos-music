@@ -44,10 +44,12 @@
 import type { PlayMode, PlayerState, Song } from '../../shared/types'
 import {
   describeMediaError,
+  fallbackUnavailableMessage,
   formatUnsupportedMessage,
   songFormatExtension,
   streamUrl,
   undecodableFormat,
+  type FallbackFailure,
 } from './format'
 
 // ---------------------------------------------------------------------------
@@ -334,6 +336,21 @@ export function applyEqChain(
 // 引擎
 // ---------------------------------------------------------------------------
 
+/**
+ * 兜底解码的**准备结果**（Task 12）。
+ *
+ * - 成功 → `{ url }`（转码产物的本地地址，Chromium 能解）；
+ * - 失败 → `{ url: null, reason, detail }`（引擎据此写**友好提示**）。
+ */
+export interface FallbackPreparation {
+  /** 转码产物地址；失败时是 `null`。 */
+  url: string | null
+  /** 失败原因（**可判别**）；成功时是 `null`。 */
+  reason?: FallbackFailure | null
+  /** 失败细节（可读文案，**不含凭证**）；成功时是 `null`。 */
+  detail?: string | null
+}
+
 /** 引擎的构造参数（全部可注入）。 */
 export interface PlayerEngineOptions {
   /** 音频元素；缺省时在**真正播放**时创建 `<audio>`。 */
@@ -356,6 +373,18 @@ export interface PlayerEngineOptions {
    * ⚠️ 解析器**抛异常或返回空串**时一律**退回流式地址**（不崩、不黑屏）。
    */
   resolveSource?: (song: Song) => string
+  /**
+   * 兜底解码的**准备接缝**（Task 12）。
+   *
+   * 格式 Chromium 解不了时（比如 APE / ALAC / DSF）→ 引擎会调用它，
+   * 由它把本地文件转码成 Chromium 能解的格式，再把产物地址交回引擎播放。
+   *
+   * ⚠️ **不给就不做兜底**：不可解格式仍然走「写可读错误、不播放」的既有路径
+   *    （既有行为与既有断言**一字不变**）。
+   * ⚠️ 第二个参数是命中的**格式名**（大写，如 `APE`），只用于拼提示文案。
+   * ⚠️ 返回值里**不许**带凭证；失败原因用**可判别的码**（`reason`）。
+   */
+  prepareSource?: (song: Song, format: string) => Promise<FallbackPreparation>
 }
 
 /** 引擎的对外接口（store 依赖它；也是单测替身的形状）。 */
@@ -461,6 +490,17 @@ export class PlayerEngine implements PlayerEngineLike {
   private volumeValue = 1
   private modeValue: PlayMode = 'sequence'
   private errorMessage: string | null = null
+  /** 兜底转码进行中（界面显示「正在转换…」）。 */
+  private preparing = false
+  /** 当前这一曲是不是**兜底产物**在播（界面据此注明「音质有损」）。 */
+  private fallbackActive = false
+  /**
+   * 兜底准备的**轮次号**（**只增不减**）。
+   *
+   * 用途：丢弃**过时的异步结果**——用户点了 A 歌（正在转码）又点了 B 歌，
+   * A 的转码结果随后才回来，此时**绝不能**把 A 的地址塞给 B。
+   */
+  private fallbackGeneration = 0
 
   // --- 进度推进 -----------------------------------------------------------
   private frameHandle: number | null = null
@@ -495,6 +535,8 @@ export class PlayerEngine implements PlayerEngineLike {
       mode: this.modeValue,
       muted: false,
       error: this.errorMessage,
+      preparing: this.preparing,
+      fallbackActive: this.fallbackActive,
     }
   }
 
@@ -538,14 +580,24 @@ export class PlayerEngine implements PlayerEngineLike {
    * 播放一首歌。
    *
    * 顺序：
-   * 1. **先判格式**：Chromium 不可解 → 写可读错误、**不播放**（不静默失败）；
+   * 1. **先判格式**：Chromium 不可解 →
+   *    - **有兜底接缝**（Task 12）→ 走 `playViaFallback`（转码后再播）；
+   *    - 没有 → 写可读错误、**不播放**（不静默失败）；
    * 2. 懒创建音频元素与 `AudioContext`（第一次真正播放时才建）；
    * 3. 把 `audio.src` 指到 `fnm://srv/track/stream?guid=…`；
    * 4. 起播并推进进度。
    */
   play(song: Song): void {
+    // ⚠️ **作废在飞的兜底准备**：切歌后旧结果回来**不得**改状态。
+    this.fallbackGeneration += 1
+    const generation = this.fallbackGeneration
+
     const undecodable = undecodableFormat(song.codec, songFormatExtension(song))
     if (undecodable !== null) {
+      if (this.options.prepareSource) {
+        this.playViaFallback(song, undecodable, generation)
+        return
+      }
       // 不可解格式：**不静默失败**——停下当前播放并把可读错误写进状态。
       this.stopTicking()
       this.playing = false
@@ -558,16 +610,78 @@ export class PlayerEngine implements PlayerEngineLike {
       return
     }
 
+    this.startPlayback(song, this.resolveSource(song), false)
+  }
+
+  /**
+   * 兜底解码（Task 12）：格式 Chromium 解不了 → 转码成 Opus 再播。
+   *
+   * ⚠️ **只在 `prepareSource` 接缝存在时才会被调用**（见 `play`）。
+   * ⚠️ 转码是**异步**的：期间界面显示「正在转换…」；
+   *    转码成功 → 用产物地址起播；失败 → 写**友好提示**（说清楚缺什么、下一步做什么）。
+   * ⚠️ **过时结果一律丢弃**：`generation` 变了（用户已经切歌 / 取消）→ 不改状态。
+   */
+  private playViaFallback(song: Song, label: string, generation: number): void {
+    const prepare = this.options.prepareSource
+    if (!prepare) return
+
+    this.stopTicking()
+    this.playing = false
+    this.preparing = true
+    this.fallbackActive = false
+    this.currentSong = song
+    this.positionSec = 0
+    this.durationSec = song.duration
+    this.errorMessage = null
+    this.element?.pause()
+    this.emit()
+
+    void Promise.resolve()
+      .then(() => prepare(song, label))
+      .then((result) => {
+        if (generation !== this.fallbackGeneration) return
+        this.preparing = false
+        const url = typeof result?.url === 'string' ? result.url : ''
+        if (url.length > 0) {
+          this.startPlayback(song, url, true)
+          return
+        }
+        this.errorMessage = fallbackUnavailableMessage(
+          label,
+          result?.reason ?? 'failed',
+          result?.detail ?? null,
+        )
+        this.playing = false
+        this.emit()
+      })
+      .catch(() => {
+        if (generation !== this.fallbackGeneration) return
+        this.preparing = false
+        this.errorMessage = fallbackUnavailableMessage(label, 'failed')
+        this.playing = false
+        this.emit()
+      })
+  }
+
+  /**
+   * 真正起播（**地址已经定下来**之后走这里）。
+   *
+   * @param song         要播的曲目。
+   * @param url          播放地址（普通路径 = `fnm://` / `fnml://`；兜底路径 = 转码产物地址）。
+   * @param viaFallback  是不是兜底产物（决定界面要不要注明「音质有损」）。
+   */
+  private startPlayback(song: Song, url: string, viaFallback: boolean): void {
     const element = this.ensureAudioElement()
     if (!element) return
     if (!this.ensureAudioGraph(element)) return
 
     this.errorMessage = null
+    this.preparing = false
+    this.fallbackActive = viaFallback
     this.currentSong = song
     this.positionSec = 0
     this.durationSec = song.duration
 
-    const url = this.resolveSource(song)
     if (this.currentSrc() === url) {
       // 同一首重播：回到开头，**不要**重设 src（重设 src 会让媒体元素重新加载）。
       element.currentTime = 0
@@ -591,6 +705,16 @@ export class PlayerEngine implements PlayerEngineLike {
 
   /** 暂停。 */
   pause(): void {
+    // ⚠️ **正在兜底转码时按暂停 = 取消这次转码**：
+    //    不作废的话，转码完成后仍会自己起播——用户明明按了暂停却在放歌。
+    if (this.preparing) {
+      this.fallbackGeneration += 1
+      this.preparing = false
+      this.playing = false
+      this.stopTicking()
+      this.emit()
+      return
+    }
     this.element?.pause()
     this.playing = false
     this.stopTicking()
@@ -599,6 +723,9 @@ export class PlayerEngine implements PlayerEngineLike {
 
   /** 继续播放。 */
   resume(): void {
+    // ⚠️ **正在兜底转码时不能「继续」**：还没有可播的地址，
+    //    转码完成后会自动起播（用户没必要再点一次）。
+    if (this.preparing) return
     const element = this.element
     if (!element) return
     this.playing = true
@@ -714,6 +841,10 @@ export class PlayerEngine implements PlayerEngineLike {
     //    轮次号已变 → 判定为「被丢弃的自主动作」→ 不写错误。
     this.loadGeneration += 1
     this.playing = false
+    // ⚠️ 在飞的兜底准备一并**作废**（`dispose()` 之后不该再有转码结果回来起播）。
+    this.fallbackGeneration += 1
+    this.preparing = false
+    this.fallbackActive = false
   }
 
   // --- 内部：音频元素与音频图 ---------------------------------------------

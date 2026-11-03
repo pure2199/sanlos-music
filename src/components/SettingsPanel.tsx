@@ -20,8 +20,10 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 
 import type { CloseBehavior } from '../../shared/playerBridge'
+import type { FfmpegStatus } from '../../shared/ffmpeg'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import { totalDownloadedBytes, useDownloadStore } from '../state/downloadStore'
+import { detectFfmpegStatus, hasFfmpegSupport } from '../player/fallback'
 import { formatBytes } from './DownloadButton'
 import './settings-panel.css'
 
@@ -86,6 +88,33 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
 
   const downloadedCount = Object.keys(entries).length
   const downloadedBytes = totalDownloadedBytes(entries)
+
+  // --- FFmpeg 兜底解码（Task 12）-------------------------------------------
+  //
+  // ⚠️ **只做检测与展示**：设置里**改不了** FFmpeg 的安装（客户端**绝不**
+  //    自动下载 / 安装外部程序），只告诉用户装没装、怎么装。
+  const [ffmpeg, setFfmpeg] = useState<FfmpegStatus>({
+    available: false,
+    path: '',
+    version: '',
+  })
+  const [ffmpegChecking, setFfmpegChecking] = useState(false)
+
+  const refreshFfmpeg = useCallback((): void => {
+    if (!hasFfmpegSupport()) {
+      // 没有桥 → 同步置为「未检测到」，**不发起异步请求**。
+      setFfmpeg({ available: false, path: '', version: '' })
+      return
+    }
+    setFfmpegChecking(true)
+    void detectFfmpegStatus()
+      .then((next) => setFfmpeg(next))
+      .finally(() => setFfmpegChecking(false))
+  }, [])
+
+  useEffect(() => {
+    refreshFfmpeg()
+  }, [refreshFfmpeg])
 
   const rootClass = className ? `fnm-settings ${className}` : 'fnm-settings'
 
@@ -178,6 +207,34 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             {downloadError}
           </p>
         )}
+      </fieldset>
+
+      <fieldset className="fnm-settings__group">
+        <legend className="fnm-settings__legend">FFmpeg 兜底解码</legend>
+        <p className="fnm-settings__hint" data-testid="ffmpeg-status">
+          {ffmpeg.available
+            ? `已检测到 FFmpeg：${ffmpeg.version || ffmpeg.path}`
+            : '未检测到 FFmpeg。'}
+        </p>
+        <p className="fnm-settings__hint">
+          APE / ALAC / DSF 等格式 Chromium 解不了：把歌曲下载到本地后，客户端会用 FFmpeg
+          转码成 Opus 播放（音质有损，原始文件不变）。
+        </p>
+        {!ffmpeg.available && (
+          <p className="fnm-settings__hint">
+            安装方式：<code>winget install Gyan.FFmpeg</code>，装完后点「重新检测」。
+          </p>
+        )}
+        <div className="fnm-settings__row">
+          <button
+            type="button"
+            className="fnm-settings__button"
+            onClick={refreshFfmpeg}
+            disabled={ffmpegChecking}
+          >
+            {ffmpegChecking ? '检测中…' : '重新检测'}
+          </button>
+        </div>
       </fieldset>
 
       <p className="fnm-settings__hint">窗口位置与尺寸会自动记住，下次启动时恢复。</p>
