@@ -36,7 +36,14 @@ import { open, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 
 import { LOCAL_MEDIA_HOST, LOCAL_MEDIA_SCHEME, localMediaUrl } from '../shared/localMedia'
-import type { ProtocolLike } from './proxy'
+import {
+  APP_SCHEME_PRIVILEGES,
+  FNML_SCHEME,
+  registerAppSchemes,
+  registerSchemePrivileges,
+  resolveElectronProtocol,
+  type ProtocolLike,
+} from './schemes'
 
 // ⚠️ 协议名 / 主机名 / URL 构造在 `shared/localMedia.ts`（渲染进程也要用同一份）。
 
@@ -176,20 +183,22 @@ export function parseRangeHeader(header: string | null, size: number): ParsedRan
 // Electron 惰性解析
 // ---------------------------------------------------------------------------
 
-declare const require: ((id: string) => unknown) | undefined
+// ⚠️ `resolveElectronProtocol` 住在 `electron/schemes.ts`——
+//    `fnm` 与 `fnml` **共用**同一个「惰性取 protocol」的实现（见该文件的说明：
+//    两个 scheme 必须**一次**注册，第二个会把第一个覆盖掉）。
 
-/** 惰性取 Electron 的 `protocol` 模块（**不在模块顶层调用**）。 */
-function resolveElectronProtocol(): ProtocolLike | null {
-  try {
-    if (typeof require !== 'function') return null
-    const mod = require('electron') as { protocol?: unknown } | string
-    if (typeof mod !== 'object' || mod === null) return null
-    const protocol = (mod as { protocol?: unknown }).protocol
-    if (typeof protocol !== 'object' || protocol === null) return null
-    return protocol as ProtocolLike
-  } catch {
-    return null
-  }
+/**
+ * 跨源放行头。
+ *
+ * ⚠️ **必须带**：`fnml` 注册时开了 `corsEnabled`（见 `electron/schemes.ts`），
+ *    Chromium 会对该 scheme 施加 CORS 校验 → 响应不带
+ *    `Access-Control-Allow-Origin` 就会被**浏览器直接拒掉**。
+ */
+const CORS_HEADERS: Readonly<Record<string, string>> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+  'access-control-allow-headers': 'range, accept, if-none-match, if-modified-since',
+  'access-control-max-age': '600',
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +248,10 @@ export function mimeTypeForPath(path: string): string {
 function errorResponse(status: number, message: string): Response {
   return new Response(JSON.stringify({ code: -1, msg: message }), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      ...CORS_HEADERS,
+    },
   })
 }
 
@@ -271,6 +283,8 @@ export async function handleLocalMediaRequest(
     'accept-ranges': 'bytes',
     'cache-control': 'no-cache',
   })
+  // ⚠️ `fnml` 开了 `corsEnabled` → 响应**必须**带跨源放行头，否则浏览器直接拒收。
+  for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value)
 
   const range = parseRangeHeader(request.headers.get('range'), size)
   if (!range) {
@@ -291,27 +305,21 @@ export async function handleLocalMediaRequest(
 // ---------------------------------------------------------------------------
 
 /**
- * 注册 `fnml` scheme 的特权。
+ * 注册 `fnml` scheme 的特权（**单个** scheme）。
+ *
+ * ⚠️⚠️ **应用启动时不要用本函数**——Electron 的
+ *    `registerSchemesAsPrivileged()` **整个进程只能调用一次**，
+ *    第二次会**静默覆盖**第一次的注册结果（本项目正是踩了这个坑：
+ *    `fnm` 被 `fnml` 覆盖掉 → 渲染进程里 `fnm://` 完全不可用）。
+ *    应用启动的正确入口是 `electron/schemes.ts` 的 `registerAppSchemes()`。
  *
  * ⚠️ **主进程必须在 `app.whenReady()` 之前调用它**（Electron 硬性约束）。
  */
 export function registerLocalMediaSchemePrivileges(protocol?: ProtocolLike): void {
-  const target = protocol ?? resolveElectronProtocol()
-  if (!target) {
-    throw new Error('fnml:// scheme 特权注册失败：当前进程没有可用的 Electron protocol 模块')
-  }
-  target.registerSchemesAsPrivileged([
-    {
-      scheme: LOCAL_MEDIA_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        stream: true,
-        corsEnabled: true,
-      },
-    },
-  ])
+  registerSchemePrivileges(
+    [{ scheme: FNML_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } }],
+    protocol,
+  )
 }
 
 /**
@@ -327,7 +335,11 @@ export function registerLocalMedia(deps: LocalMediaDeps, opts: LocalMediaOptions
   }
 
   try {
-    registerLocalMediaSchemePrivileges(protocol)
+    // ⚠️ **防御性调用**：ready 之后调 `registerSchemesAsPrivileged()` 会抛错，
+    //    包在 try/catch 里忽略（正常流程由主进程入口在 ready 前调一次）。
+    // ⚠️ 必须是 `registerAppSchemes()`（**两个 scheme 一起**）——
+    //    `registerSchemesAsPrivileged()` 整个进程**只能调用一次**。
+    registerAppSchemes(protocol)
   } catch {
     // 忽略：ready 之后调 registerSchemesAsPrivileged 会抛错（正常流程由主进程提前调过）。
   }

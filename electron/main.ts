@@ -16,7 +16,8 @@ import {
   type DownloadIndex,
 } from './downloadManager'
 import { createHttpStack } from './http'
-import { registerLocalMedia, registerLocalMediaSchemePrivileges } from './localMedia'
+import { registerLocalMedia } from './localMedia'
+import { registerAppSchemes } from './schemes'
 import { FallbackTranscoder } from './fallbackTranscoder'
 import { createNasOAuthHandlers } from './oauthWindow'
 import { buildUpstreamRequest, registerFnmSchemePrivileges, registerProxy } from './proxy'
@@ -88,14 +89,11 @@ function showMainWindow(): void {
 // 接线顺序（**顺序本身就是正确性的一部分**）
 // ---------------------------------------------------------------------------
 //
-// 1. **在 `app.whenReady()` 之前**注册 `fnm://` 的 scheme 特权——
-//    Electron 只允许在 ready 之前调用 `registerSchemesAsPrivileged()`，
-//    放到 ready 之后会抛错。
-registerFnmSchemePrivileges()
-
-// 1b. `fnml://`（本地媒体，Task 11）同样**必须在 ready 之前**注册特权。
-//     它只读本地磁盘、不出网，但 Chromium 对 scheme 的处理规则与 `fnm://` 一致。
-registerLocalMediaSchemePrivileges()
+// 1. **在 `app.whenReady()` 之前**注册**全部**自定义 scheme 的特权——
+//    Electron 的 `registerSchemesAsPrivileged()` **整个进程只能调用一次**，
+//    第二次会**静默覆盖**第一次的注册结果 → 所以 `fnm` 与 `fnml`
+//    **必须合并成一次**注册（见 `electron/schemes.ts` 的详细说明）。
+registerAppSchemes()
 
 // 2. **单实例锁**（**尽早调用**，`app.whenReady()` 之前即可）。
 //

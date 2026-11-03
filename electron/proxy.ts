@@ -55,13 +55,21 @@ import { API_PREFIX } from '../shared/constants'
 import { authx, buildCookie } from './sign'
 import { SessionStateError, type SessionManager } from './session'
 import { createHttpStack, type HttpStack } from './http'
+import {
+  APP_SCHEME_PRIVILEGES,
+  FNM_SCHEME,
+  registerAppSchemes,
+  registerSchemePrivileges,
+  resolveElectronProtocol,
+  type ProtocolLike,
+} from './schemes'
 
 // ---------------------------------------------------------------------------
 // 常量
 // ---------------------------------------------------------------------------
 
 /** 协议 scheme 名（与渲染进程 `src/api/client.ts` 的 `fnm://srv` 前缀一致）。 */
-const SCHEME = 'fnm'
+const SCHEME = FNM_SCHEME
 
 /** 唯一允许的虚拟主机名：渲染进程只能用 `srv`（**不接受任何真实主机名**）。 */
 const ALLOWED_HOST = 'srv'
@@ -127,39 +135,24 @@ const CORS_HEADERS: Readonly<Record<string, string>> = {
 }
 
 // ---------------------------------------------------------------------------
-// 类型
+// 类型（**搬到 `electron/schemes.ts`**——「scheme 注册」是那儿的职责）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 这里**重新导出**是为了不破坏既有 import（`electron/proxy` 是公开入口）。
+
+export type {
+  ProtocolLike,
+  ProtocolPrivileges,
+  ProtocolSchemeRegistration,
+} from './schemes'
+
+// ---------------------------------------------------------------------------
+// Electron 惰性解析
 // ---------------------------------------------------------------------------
 
-/** scheme 特权（与 Electron 的 `Privileges` 同形）。 */
-export interface ProtocolPrivileges {
-  standard?: boolean
-  secure?: boolean
-  bypassCSP?: boolean
-  supportFetchAPI?: boolean
-  corsEnabled?: boolean
-  stream?: boolean
-  allowServiceWorkers?: boolean
-  spellcheck?: boolean
-}
-
-/** 一条 scheme 注册项。 */
-export interface ProtocolSchemeRegistration {
-  scheme: string
-  privileges: ProtocolPrivileges
-}
-
-/**
- * Electron `protocol` 模块的最小接口（**依赖注入的接缝**）。
- *
- * 只要求 `handle` 与 `registerSchemesAsPrivileged` 两个方法，便于单测注入替身，
- * 也避免本模块依赖 Electron 的完整类型。
- */
-export interface ProtocolLike {
-  /** 注册协议处理器（必须在 app ready 之后调用）。 */
-  handle(scheme: string, handler: (request: Request) => Response | Promise<Response>): void
-  /** 注册 scheme 特权（**只能在 app ready 之前调用**）。 */
-  registerSchemesAsPrivileged(schemes: ProtocolSchemeRegistration[]): void
-}
+// ⚠️ `resolveElectronProtocol` 住在 `electron/schemes.ts`——
+//    `fnm` 与 `fnml` **共用**同一个「惰性取 protocol」的实现（见该文件的说明：
+//    两个 scheme 必须**一次**注册，第二个会把第一个覆盖掉）。
 
 /** `registerProxy` 的可选参数。 */
 export interface ProxyOptions {
@@ -197,32 +190,9 @@ export interface UpstreamRequestInput {
 // Electron 惰性解析
 // ---------------------------------------------------------------------------
 
-/**
- * `require` 的最小声明。
- *
- * Electron 主进程的打包产物是 CommonJS（esbuild `--format=cjs`），运行时存在模块作用域的 `require`；
- * 单元测试跑在 Vitest（ESM）里没有它，所以**所有使用点都必须先用 `typeof` 守卫**。
- */
-declare const require: ((id: string) => unknown) | undefined
-
-/**
- * 惰性取 Electron 的 `protocol` 模块（**不在模块顶层调用**）。
- *
- * 非 Electron 进程（Vitest / 普通 Node）里 `require('electron')` 返回的是可执行文件路径字符串，
- * 取不到任何 API；此时返回 `null`，由调用方退回注入的替身。
- */
-function resolveElectronProtocol(): ProtocolLike | null {
-  try {
-    if (typeof require !== 'function') return null
-    const mod = require('electron') as { protocol?: unknown } | string
-    if (typeof mod !== 'object' || mod === null) return null
-    const protocol = (mod as { protocol?: unknown }).protocol
-    if (typeof protocol !== 'object' || protocol === null) return null
-    return protocol as ProtocolLike
-  } catch {
-    return null
-  }
-}
+// ⚠️ `resolveElectronProtocol` 住在 `electron/schemes.ts`——
+//    `fnm` 与 `fnml` **共用**同一个「惰性取 protocol」的实现（见该文件的说明：
+//    两个 scheme 必须**一次**注册，第二个会把第一个覆盖掉）。
 
 // ---------------------------------------------------------------------------
 // 上游请求构造
@@ -657,29 +627,20 @@ async function dispatch(
 // ---------------------------------------------------------------------------
 
 /**
- * 注册 `fnm` scheme 的特权。
+ * 注册 `fnm` scheme 的特权（**单个** scheme）。
  *
- * ⚠️ **主进程必须在 `app.whenReady()` 之前调用它**（Electron 的硬性约束：
- * `registerSchemesAsPrivileged()` 只在 ready 之前可用）。
- * Task 9 的主进程入口会这么做；`registerProxy()` 内部另有一次防御性调用。
+ * ⚠️⚠️ **应用启动时不要用本函数**——Electron 的
+ *    `registerSchemesAsPrivileged()` **整个进程只能调用一次**，
+ *    第二次会**静默覆盖**第一次的注册结果。
+ *    应用启动的正确入口是 `electron/schemes.ts` 的 `registerAppSchemes()`
+ *    （把 `fnm` 与 `fnml` **合并成一次**注册）。
+ *    本函数保留下来是为了**单测**（钉住 `fnm` 的特权形状）与按需单注册。
  */
 export function registerFnmSchemePrivileges(protocol?: ProtocolLike): void {
-  const target = protocol ?? resolveElectronProtocol()
-  if (!target) {
-    throw new Error('fnm:// scheme 特权注册失败：当前进程没有可用的 Electron protocol 模块')
-  }
-  target.registerSchemesAsPrivileged([
-    {
-      scheme: SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        stream: true,
-        corsEnabled: true,
-      },
-    },
-  ])
+  registerSchemePrivileges(
+    [{ scheme: FNM_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } }],
+    protocol,
+  )
 }
 
 /**
@@ -698,10 +659,16 @@ export function registerProxy(session: SessionManager, opts: ProxyOptions = {}):
   }
 
   try {
-    registerFnmSchemePrivileges(protocol)
+    // ⚠️ **防御性调用**：ready 之后调 `registerSchemesAsPrivileged()` 会抛错，
+    //    包在 try/catch 里忽略（正常流程由主进程入口在 ready 前调一次）。
+    // ⚠️ 这里必须调 `registerAppSchemes()`（**两个 scheme 一起**），
+    //    **不能**只调 `registerFnmSchemePrivileges()`——
+    //    `registerSchemesAsPrivileged()` 整个进程**只能调用一次**，
+    //    单个注册会**覆盖掉**另一个 scheme 的特权（见 `electron/schemes.ts`）。
+    registerAppSchemes(protocol)
   } catch {
     // 忽略：ready 之后调用 registerSchemesAsPrivileged 会抛错；
-    // 正常流程由主进程入口在 app.whenReady() 之前先调一次 registerFnmSchemePrivileges()。
+    // 正常流程由主进程入口在 app.whenReady() 之前先调一次 registerAppSchemes()。
   }
 
   const binaryPaths = opts.binaryPaths ?? DEFAULT_BINARY_PATHS
