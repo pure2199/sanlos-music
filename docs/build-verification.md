@@ -17,8 +17,8 @@
 | 单元测试 | `npm test`（vitest） | **1216 passed / 42 files** |
 | E2E 冒烟 | `npm run e2e`（Playwright 驱动真实 Electron） | **4 passed** |
 | 渲染层构建 | `vite build` | exit 0，产物 6 assets + 2 html |
-| 主进程构建 | `node scripts/build-electron.cjs` | exit 0，产物 `main.js` / `preload.js` |
-| 打包 | `npm run pack:probe` | exit 0（NSIS + portable 双目标） |
+| 主进程构建 | `node scripts/build-electron.cjs` | exit 0，产物 `main.js` / `preload.js`（**陈旧产物已清**） |
+| 打包 | `npm run pack` | exit **0**（NSIS + portable 双目标） |
 
 ---
 
@@ -26,10 +26,10 @@
 
 | 项 | 实测 |
 |---|---|
-| 安装包 | `FN-Music-Setup-0.1.0.exe` — **82.05 MB** |
-| 便携版 | `FN-Music-Portable-0.1.0.exe` — **75.15 MB** |
-| 差分映射 | `FN-Music-Setup-0.1.0.exe.blockmap` — 0.09 MB |
-| 解包目录 | `win-unpacked/飞牛音乐.exe`（`productName` 已生效） |
+| 安装包 | `release/FN-Music-Setup-0.1.0.exe` — **82.05 MB** |
+| 便携版 | `release/FN-Music-Portable-0.1.0.exe` — **75.15 MB** |
+| 差分映射 | `release/FN-Music-Setup-0.1.0.exe.blockmap` — 0.09 MB |
+| 解包目录 | `release/win-unpacked/飞牛音乐.exe`（`productName` 已生效） |
 | electron 版本 | **32.3.3**（锁定） |
 
 ### app.asar 内容清单（实测）
@@ -55,13 +55,12 @@
 - ✅ **不含陈旧产物** —— 只有 `main.js` / `preload.js`；
   历史残留的 `dist-electron/session.js`（无人引用的旧入口产物）已被「构建前清空输出目录」消除。
 - ✅ **不含 `.map`** —— 包体不带源码映射。
-- ✅ **不含 `.exe` / 资源以外的多余文件**。
 
 ---
 
 ## 三、打包产物**真机启动**冒烟
 
-> 验证的是**打包后的 exe**，不是开发目录。
+> 验证的是**打包后的 exe**（`release/win-unpacked/飞牛音乐.exe`），不是开发目录。
 
 | 检查 | 实测 |
 |---|---|
@@ -76,7 +75,51 @@
 
 ---
 
-## 四、已知限制（不是缺陷，是当前明确的口径）
+## 四、本轮发现并解决的一个「产物污染」问题
+
+### 现象
+
+`release/win-unpacked.tmp/` 与 `release/win-unpacked/` 里的 `resources/*.asar`
+被某个进程以「允许读写、但**不允许删除共享**」的方式持有 →
+Windows 拒绝删除/改名它们（`SHARING_VIOLATION` / `EPERM`）
+→ `electron-builder` 在解包阶段 `unlink` 旧暂存文件时 **EBUSY 失败**，
+**`npm run pack` 直接跑不起来**。
+
+### 定位
+
+用 **Windows Restart Manager API**（`rstrtmgr.dll`）精确查询持锁进程：
+
+```
+PID=20864  app='MiniMax Code'  type=RmUnknownApp  restartable=False
+```
+
+→ 持锁的是 **本应用自己的 Node 工具进程**（`--utility-sub-type=node.mojom.NodeService`），
+不是外部软件。（同期另有 `awesun_guard.exe`（向日葵远控）以该目录为工作目录，
+但它不是 `.asar` 句柄的持有者。）
+
+### 解决
+
+1. **打包不再受输出目录旧状态影响** —— `scripts/pack.cjs` 改为
+   **在全新暂存目录 `.pack-staging/` 里构建**，构建成功后再把**成品**发布到 `release/`。
+   ⇒ 旧 `win-unpacked.tmp` 残留不再让打包失败；安装包照常落到 `release/`。
+2. **旧的 `app.asar` 被就地覆盖** —— 该文件**不能删、不能改名**，但**可以写**
+   （独占 `r+` 打开成功）→ 用新构建的 `app.asar`（463 221 字节）覆盖旧的
+   （38 034 019 字节，且**还带着 T1 已删除的 `hls.js` 与旧渲染层包**）。
+   留着旧包是个坑：跑起来会得到**带 `fnm://` 缺陷的旧版应用**。
+3. **`release/win-unpacked/` 补齐为完整可运行构建** —— 把新构建**就地合并**
+   （truncate + write，不走 unlink）写进去，73 个文件齐备，
+   `飞牛音乐.exe` 可直接运行（见第三节冒烟证据）。
+
+### 仍然残留（**不影响使用**）
+
+- `release/win-unpacked.tmp/resources/default_app.asar`（0.1 MB）
+  —— 上一次构建的暂存残留，仍被上述句柄锁住，**删不掉**。
+  它只是 Electron 的默认 asar，**不在打包路径上**，也不影响 `npm run pack`。
+- 释放句柄的方式：关闭 MiniMax Code 后再删，或重启机器。
+
+---
+
+## 五、已知限制（不是缺陷，是当前明确的口径）
 
 | 限制 | 说明 |
 |---|---|
@@ -84,11 +127,11 @@
 | **默认 Electron 图标** | 日志：`default Electron icon is used` → `build/icon.ico` 尚未提供。 |
 | **不承诺字节级一致** | NSIS 安装器内嵌构建时间戳 → 两次构建的 exe 哈希必然不同。可复现 = 同输入可重建/可安装/可运行。 |
 | **仅 Windows x64** | 未配置其它平台与架构。 |
-| **未做真机联调** | 打包产物连的是 **mock NAS**，不是真实 fnOS；真实 NAS 的联调校准见 T17。 |
+| **未做真机联调** | 打包产物连的是 **mock NAS**，不是真实 fnOS；真实 NAS 的联调校准见 [`calibration.md`](./calibration.md)。 |
 
 ---
 
-## 五、复现步骤
+## 六、复现步骤
 
 ```bash
 npm install          # postinstall 会兜底安装 electron 二进制
@@ -101,6 +144,7 @@ npm run pack         # 正式产物 → release/
 验证打包产物能启动：
 
 ```bash
-npm run pack:probe
-# 然后启动 release-probe/win-unpacked/<exe>，或用隔离的 --user-data-dir 跑
+npm run pack
+# 启动 release\win-unpacked\飞牛音乐.exe
+# 或用隔离的 --user-data-dir 跑，观察它是否写出自己的 prefs.json
 ```

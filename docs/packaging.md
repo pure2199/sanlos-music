@@ -14,12 +14,13 @@
 
 | 措施 | 位置 | 作用 |
 |---|---|---|
-| 锁死 electron 版本 | `electron-builder.yml` 的 `electronVersion: 32.3.3` | builder 不再自己解析版本 → 不会拉到别的 electron |
-| 复用本地 electron 二进制 | `scripts/pack.cjs` 的 `ELECTRON_OVERRIDE_DIST_PATH` | **不联网下载** electron；离线/内网机器也能出包 |
-| 运行时依赖为空 | `package.json`（react / react-dom / zustand 都在 **devDependencies**） | asar 里不含 npm 依赖；builder 不必做依赖收集 / npmRebuild |
-| 输出目录先清空 | `scripts/build-electron.cjs` 的 `fs.rmSync` | **陈旧产物不会混进 asar**（历史上 `dist-electron/session.js` 就是这么混进去的） |
-| 白名单式 `files` | `electron-builder.yml` | 包内文件清单**由配置决定**，不由构建历史决定 |
-| 不产出源码映射 | `scripts/build-electron.cjs`（`sourcemap: false`）+ `files` 里的 `!*.map` | 包体不带 `.map` |
+| **构建在干净暂存目录里进行** | `scripts/pack.cjs` | electron-builder 的输出指向**每次全新**的 `.pack-staging/`，构建成功后再把**成品**发布到 `release/` → **输出目录里残留了什么，不再影响构建结果** |
+| **锁死 electron 版本** | `electron-builder.yml` 的 `electronVersion: 32.3.3` | builder 不再自己解析版本 → 不会拉到别的 electron |
+| **复用本地 electron 二进制** | `scripts/pack.cjs` 的 `ELECTRON_OVERRIDE_DIST_PATH` | **不联网下载** electron；离线/内网机器也能出包 |
+| **运行时依赖为空** | `package.json`（react / react-dom / zustand 都在 **devDependencies**） | asar 里不含 npm 依赖；builder 不必做依赖收集 / npmRebuild |
+| **输出目录先清空** | `scripts/build-electron.cjs` 的 `fs.rmSync` | **陈旧产物不会混进 asar**（历史上 `dist-electron/session.js` 就是这么混进去的） |
+| **白名单式 `files`** | `electron-builder.yml` | 包内文件清单**由配置决定**，不由构建历史决定 |
+| **不产出源码映射** | `scripts/build-electron.cjs`（`sourcemap: false`）+ `files` 里的 `!*.map` | 包体不带 `.map` |
 
 ### ❌ 本项目**不**承诺的
 
@@ -41,6 +42,18 @@ npm run pack
 # 等价于：npm run build && node scripts/pack.cjs
 # 产物 → release/
 ```
+
+流程：
+
+```
+build/  ──►  .pack-staging/（每次全新，保证干净）  ──►  release/（发布成品）
+```
+
+> **为什么要暂存**：electron-builder 会在 `<output>/win-unpacked.tmp` 里暂存解包结果。
+> 若上一次构建被中断，那个目录会残留 → 下一次构建直接 EBUSY 失败。
+> 而且 `<output>` 里任何**陈旧产物**都可能被当成这次的输入
+> （同一类问题：历史上 `dist-electron/session.js` 就这么混进过 app.asar）。
+> ⇒ 暂存目录**每次全新**，「输出目录的旧状态」不再影响构建结果。
 
 ### 验证用产物（不碰 `release/`）
 
@@ -85,13 +98,18 @@ npm run pack:probe
 | `FN-Music-Setup-<version>.exe` | NSIS 安装包（`oneClick: false`，可改安装目录） |
 | `FN-Music-Portable-<version>.exe` | 便携版（免安装） |
 | `FN-Music-Setup-<version>.exe.blockmap` | 安装包差分更新用 |
-| `win-unpacked/` | 解包后的目录（`electron.exe` + `resources/app.asar`） |
+| `win-unpacked/` | 解包后的目录（`飞牛音乐.exe` + `resources/app.asar`） |
 
 **app.asar 内应只有**：`package.json`、`dist/**`、`dist-electron/**` —— **不含 `node_modules`**。
 
 > ⚠️ `win-unpacked.tmp/` 是 builder 打包过程中的**临时暂存目录**。
 > 若上一次构建**被中断**，它会残留下来，并让下一次打包失败（目录已存在 / 文件被占用）。
 > 遇到这种情况**删掉 `win-unpacked.tmp/` 再重打**即可。
+>
+> ⚠️ 若 `release/win-unpacked/` 里的文件**被别的进程占用**（Windows 会拒绝删除/改名它们），
+> 发布步骤会**跳过**它，并把新构建留在 `.pack-staging/win-unpacked/`，
+> 同时在日志里明确提示路径与原因。此时**安装包（exe）不受影响**，
+> `release/` 里的 `.exe` 照常是本次的新构建。
 
 ---
 
