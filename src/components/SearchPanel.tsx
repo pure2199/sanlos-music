@@ -52,11 +52,17 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react'
+import { useStore } from 'zustand'
 
 import type { Album, Artist, Song } from '../../shared/types'
 import { favoriteApi } from '../api/favorite'
 import { searchApi, type SearchResult } from '../api/search'
 import type { Page } from '../api/types'
+import {
+  resolveFavoriteState,
+  useResolvedLibraryStore,
+  type LibraryStoreApi,
+} from '../state/libraryStore'
 import { AlbumCard, ArtistCard, CardGrid, formatCount } from './Cards'
 import { SongList } from './SongList'
 import './search-panel.css'
@@ -364,8 +370,26 @@ export interface SearchPanelProps {
   api?: SearchPanelApi
   /** 双击歌曲时回调（`list` 是当前搜索结果，便于整队入队）。 */
   onPlay?: (song: Song, index: number, list: Song[]) => void
-  /** 选中歌曲变化时回调（id 数组，按搜索结果顺序）。 */
+  /**
+   * 选中歌曲变化时回调（id 数组，按搜索结果顺序）。
+   *
+   * ⚠️ 与 `selectedIds` 是一对：**同时**给 → 本组件进入**受控**模式
+   *    （选中态由调用方持有）；只给 `onSelect` → 仍是内部自管（向后兼容）。
+   */
   onSelect?: (ids: string[]) => void
+  /**
+   * 受控模式下的选中项（id 数组）。
+   *
+   * ⚠️ **可选**：不传 → 选中态由 `SongList` 内部自管（既有行为，一字不变）。
+   */
+  selectedIds?: string[]
+  /**
+   * 注入的曲库 store（收藏态的**单一真相源**）。
+   *
+   * ⚠️ 不传则用默认单例 —— 与曲库页共用同一份收藏态，
+   *    搜索页收藏的歌会**立刻**出现在收藏页里（审计 P-LIB-3 / P1-6）。
+   */
+  store?: LibraryStoreApi
   /**
    * 防抖时长（毫秒；缺省 `SEARCH_DEBOUNCE_MS`）。
    *
@@ -382,11 +406,22 @@ export interface SearchPanelProps {
  * - 歌曲段复用 `SongList`（双击播放 / 单选 / 多选），收藏按钮作为**行内操作**渲染。
  */
 export function SearchPanel(props: SearchPanelProps): ReactElement {
-  const { api = defaultSearchPanelApi, onPlay, onSelect, debounceMs = SEARCH_DEBOUNCE_MS } = props
+  const {
+    api = defaultSearchPanelApi,
+    onPlay,
+    onSelect,
+    selectedIds,
+    store,
+    debounceMs = SEARCH_DEBOUNCE_MS,
+  } = props
 
   const [text, setText] = useState('')
   const [query, setQuery] = useState('')
   const [state, setState] = useState<SearchState>(emptyState)
+
+  // 收藏态的**单一真相源**在 store 里（`favoriteStates`）。
+  const resolved = useResolvedLibraryStore(undefined, store)
+  const favoriteStates = useStore(resolved, (s) => s.favoriteStates)
 
   /** 搜索代次：换关键字就 +1；**过期响应一律丢弃**（避免旧结果盖掉新结果）。 */
   const generationRef = useRef(0)
@@ -394,16 +429,24 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
   const writebackRef = useRef<FavoriteWriteback | null>(null)
   /** 最新的写回实现（`api` 变了也要用上最新的）。 */
   const setFavoriteRef = useRef(api.setFavorite)
+  /** 最新的 store（`store` prop 变了也要用上最新的）。 */
+  const resolvedRef = useRef(resolved)
 
   useEffect(() => {
     setFavoriteRef.current = api.setFavorite
   }, [api.setFavorite])
 
+  useEffect(() => {
+    resolvedRef.current = resolved
+  }, [resolved])
+
   if (!writebackRef.current) {
-    writebackRef.current = createFavoriteWriteback((songId, on) => {
+    writebackRef.current = createFavoriteWriteback(async (songId, on) => {
       const fn = setFavoriteRef.current
       if (!fn) return Promise.reject(new Error('当前环境不支持收藏写回'))
-      return fn(songId, on)
+      // ⚠️ 写回**成功**后由 store 登记「已确认态」→ 收藏页与搜索页共用一份
+      //    （审计 P-LIB-3 / P1-6：之前这份状态只存在本组件的 writeback Map 里）。
+      await resolvedRef.current.getState().setFavorite(songId, on, fn)
     })
   }
   const writeback = writebackRef.current
@@ -507,11 +550,14 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
   const effectiveTracks = useMemo(
     () =>
       state.tracks.items.map((song) => {
-        const entry = writeback.get(song.id, song.favorite)
+        // 基准值 = store 里的**已确认态**（未登记时用搜索结果自带的字段）。
+        const base = resolveFavoriteState(favoriteStates, song.id, song.favorite)
+        const entry = writeback.get(song.id, base)
         return entry.target === song.favorite ? song : { ...song, favorite: entry.target }
       }),
-    // `writebackVersion` 变化说明收藏态变了 → 必须重算。
-    [state.tracks.items, writeback, writebackVersion],
+    // `writebackVersion` 变化说明收藏态变了 → 必须重算；
+    // `favoriteStates` 变化说明 store 里的确认态变了 → 同样要重算。
+    [favoriteStates, state.tracks.items, writeback, writebackVersion],
   )
 
   const tracksCount = Math.max(state.tracks.total, state.tracks.items.length)
@@ -541,7 +587,9 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
   /** 行内操作：收藏按钮（乐观更新 + 串行化写回）。 */
   const renderRowActions = useCallback(
     (song: Song): ReactNode => {
-      const entry = writeback.get(song.id, song.favorite)
+      // 基准值 = store 里的**已确认态**（未登记时用搜索结果自带的字段）。
+      const base = resolveFavoriteState(favoriteStates, song.id, song.favorite)
+      const entry = writeback.get(song.id, base)
       const canWrite = Boolean(api.setFavorite) && song.id.length > 0
       return (
         <button
@@ -557,7 +605,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
           onClick={(event) => {
             // ⚠️ 别让收藏点击冒泡到行上（行单击是「选中」）。
             event.stopPropagation()
-            writeback.toggle(song.id, song.favorite)
+            writeback.toggle(song.id, base)
           }}
           onDoubleClick={(event) => event.stopPropagation()}
         >
@@ -565,7 +613,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
         </button>
       )
     },
-    [api.setFavorite, writeback],
+    [api.setFavorite, favoriteStates, writeback],
   )
 
   /** 「加载更多」：只补目标那一段。 */
@@ -635,6 +683,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
           songs={effectiveTracks}
           onPlay={handlePlay}
           onSelect={onSelect}
+          selectedIds={selectedIds}
           total={state.tracks.total}
           emptyLabel="没有找到歌曲"
           ariaLabel="搜索结果歌曲列表"

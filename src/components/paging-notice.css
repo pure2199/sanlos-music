@@ -1,0 +1,61 @@
+/*
+ * 分页「继续加载」提示样式（T9）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值
+ *    （`#hex` / `rgb()` / `hsl()` 一律不行）。
+ *
+ * ⚠️ 交互态（`:hover` / `:active` / `:focus-visible` / `:disabled`）**只能**靠样式表表达——
+ *    React 的 `style` prop 只会落 CSS **声明**，表达不了伪类与伪元素。
+ */
+
+/* 提示条根容器 */
+.fnm-pagingnotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+/* 提示文案 */
+.fnm-pagingnotice__text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 「继续加载」按钮 */
+.fnm-pagingnotice__button {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fnm-pagingnotice__button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-pagingnotice__button:active {
+  background: var(--surface-sunken);
+}
+
+.fnm-pagingnotice__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-pagingnotice__button:disabled {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--disabled);
+  cursor: not-allowed;
+}

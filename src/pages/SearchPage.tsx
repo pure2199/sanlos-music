@@ -100,6 +100,7 @@ export function SearchPage(props: SearchPageProps): ReactElement {
 
   const resolved = useResolvedLibraryStore(undefined, store)
   const refreshPlaylistSongs = useStore(resolved, (s) => s.refreshPlaylistSongs)
+  const refreshPlaylists = useStore(resolved, (s) => s.refreshPlaylists)
 
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [playlistsLoading, setPlaylistsLoading] = useState(false)
@@ -138,6 +139,20 @@ export function SearchPage(props: SearchPageProps): ReactElement {
 
   /** 当前选中的歌单。 */
   const selectedPlaylist = playlists.find((item) => item.id === selectedPlaylistId) ?? null
+
+  /**
+   * 选中项变化：**内部计数与外部回调都**更新。
+   *
+   * ⚠️ 之前是 `onSelect ?? setSelectedIds`——外部回调一旦存在，页内的计数就**再也不更新**
+   *    （「已选中 N 首歌曲」恒为 0，加入 / 移除按钮恒为禁用）。
+   */
+  const handleSelect = useCallback(
+    (ids: string[]): void => {
+      setSelectedIds(ids)
+      onSelect?.(ids)
+    },
+    [onSelect],
+  )
 
   /** 新建歌单。 */
   const handleCreate = useCallback(async (): Promise<void> => {
@@ -192,6 +207,12 @@ export function SearchPage(props: SearchPageProps): ReactElement {
       await playlistWriteback.addTracks(selectedPlaylistId, selectedIds)
       // 增删成功后**刷新歌单详情缓存**（`playlistApi.songs` 的结果）。
       await refreshPlaylistSongs(selectedPlaylistId)
+      // 写回成功后**清空选中**（审计 P-LIB-5 / P1-6）：
+      // 不清的话，用户会不小心把同一批歌**再加一遍**。
+      setSelectedIds([])
+      // 刷新歌单列表 → `trackCount` 跟上（页内那份 + store 里那份，歌单页也看得到）。
+      await loadPlaylists()
+      await refreshPlaylists()
       const name = selectedPlaylist?.name ?? '歌单'
       setMessage(`已把 ${selectedIds.length} 首加入歌单「${name}」`)
     } catch (err) {
@@ -199,7 +220,15 @@ export function SearchPage(props: SearchPageProps): ReactElement {
     } finally {
       setBusy(false)
     }
-  }, [playlistWriteback, refreshPlaylistSongs, selectedIds, selectedPlaylist, selectedPlaylistId])
+  }, [
+    loadPlaylists,
+    playlistWriteback,
+    refreshPlaylistSongs,
+    refreshPlaylists,
+    selectedIds,
+    selectedPlaylist,
+    selectedPlaylistId,
+  ])
 
   /** 把选中的歌曲移出歌单。 */
   const handleRemove = useCallback(async (): Promise<void> => {
@@ -217,6 +246,10 @@ export function SearchPage(props: SearchPageProps): ReactElement {
     try {
       await playlistWriteback.removeTracks(selectedPlaylistId, selectedIds)
       await refreshPlaylistSongs(selectedPlaylistId)
+      // 同样清空选中 + 刷新歌单列表（`trackCount` 跟上）。
+      setSelectedIds([])
+      await loadPlaylists()
+      await refreshPlaylists()
       const name = selectedPlaylist?.name ?? '歌单'
       setMessage(`已把 ${selectedIds.length} 首移出歌单「${name}」`)
     } catch (err) {
@@ -224,7 +257,15 @@ export function SearchPage(props: SearchPageProps): ReactElement {
     } finally {
       setBusy(false)
     }
-  }, [playlistWriteback, refreshPlaylistSongs, selectedIds, selectedPlaylist, selectedPlaylistId])
+  }, [
+    loadPlaylists,
+    playlistWriteback,
+    refreshPlaylistSongs,
+    refreshPlaylists,
+    selectedIds,
+    selectedPlaylist,
+    selectedPlaylistId,
+  ])
 
   const canWritePlaylist = Boolean(selectedPlaylistId) && selectedIds.length > 0 && !busy
 
@@ -236,7 +277,13 @@ export function SearchPage(props: SearchPageProps): ReactElement {
       loadingText="正在加载歌单…"
     >
       <div className="fnm-searchpage">
-        <SearchPanel api={api} onPlay={onPlay} onSelect={onSelect ?? setSelectedIds} />
+        <SearchPanel
+          api={api}
+          onPlay={onPlay}
+          onSelect={handleSelect}
+          selectedIds={selectedIds}
+          store={resolved}
+        />
 
         {/* --- 歌单写回 --- */}
         <section className="fnm-searchpage__playlists" aria-label="歌单写回">

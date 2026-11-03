@@ -15,6 +15,7 @@ import { useStore } from 'zustand'
 import type { Album } from '../../shared/types'
 import { AlbumCard, CardGrid, formatCount } from '../components/Cards'
 import { LibraryPageShell } from '../components/LibraryPageShell'
+import { PagingNotice } from '../components/PagingNotice'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
 /** `AlbumsPage` 的属性。 */
@@ -66,6 +67,8 @@ export function AlbumsPage({ api, store, onOpenAlbum }: AlbumsPageProps): ReactE
         emptyLabel="暂无专辑"
         ariaLabel="专辑列表"
       />
+      {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
+      <PagingNotice kind="albums" store={resolved} />
     </LibraryPageShell>
   )
 }

@@ -32,6 +32,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -86,6 +87,16 @@ export interface SongListProps {
   onPlay: (song: Song, index: number, list: Song[]) => void
   /** 选中项变化时回调（id 数组，按 `songs` 原始顺序）。 */
   onSelect?: (ids: string[]) => void
+  /**
+   * **受控模式**下的选中项（id 数组）。
+   *
+   * ⚠️ **可选**：不传 → 选中态由组件**自管**（既有行为，一字不变）；
+   *    传了 → 选中态由调用方持有，本组件只负责把变更**抛**给 `onSelect`。
+   *
+   * 为什么需要它（审计 P-LIB-5 / P1-6）：歌单写回成功后要**清空选中**，
+   *   而选中态原先只存在组件内部 → 父组件清不掉（页内计数与行高亮会各说各话）。
+   */
+  selectedIds?: string[]
   /** 总量（已知时用于展示「已加载 N / 总计 M」）。 */
   total?: number
   /** 滚到底部时回调（增量加载一页）。 */
@@ -126,6 +137,7 @@ export function SongList(props: SongListProps): ReactElement {
     songs,
     onPlay,
     onSelect,
+    selectedIds,
     total,
     onLoadMore,
     hasMore = false,
@@ -143,8 +155,35 @@ export function SongList(props: SongListProps): ReactElement {
   const rowRefs = useRef(new Map<number, HTMLDivElement>())
   const [scrollTop, setScrollTop] = useState(0)
   const [measuredHeight, setMeasuredHeight] = useState(0)
-  /** 选中的行下标（升序）。 */
-  const [selected, setSelected] = useState<number[]>([])
+  /** 选中的行下标（升序）——**非受控**模式下由组件自管。 */
+  const [selectedInternal, setSelectedInternal] = useState<number[]>([])
+  /** 是否进入**受控**模式（选中态由调用方持有）。 */
+  const controlled = selectedIds !== undefined
+  /**
+   * id → 下标（受控模式下把 id 还原成下标）。
+   *
+   * ⚠️ 只在受控模式下建表（非受控模式零开销，行为一字不变）。
+   */
+  const indexById = useMemo(() => {
+    if (!controlled) return null
+    const map = new Map<string, number>()
+    for (let index = 0; index < songs.length; index += 1) {
+      const song = songs[index]
+      if (song && !map.has(song.id)) map.set(song.id, index)
+    }
+    return map
+  }, [controlled, songs])
+  /** 当前选中的行下标（升序）。 */
+  const selected = useMemo(() => {
+    if (!controlled || !indexById) return selectedInternal
+    const indices: number[] = []
+    for (const id of selectedIds ?? []) {
+      const index = indexById.get(id)
+      if (index !== undefined) indices.push(index)
+    }
+    // 顺序按 `songs` 的原始顺序（与 `onSelect` 传出的一致）。
+    return indices.sort((a, b) => a - b)
+  }, [controlled, indexById, selectedIds, selectedInternal])
   /** 当前行（键盘导航的落点）。 */
   const [currentIndex, setCurrentIndex] = useState(-1)
   /** 连选锚点（Shift 连选的起点）。 */
@@ -188,6 +227,20 @@ export function SongList(props: SongListProps): ReactElement {
     [onSelect, songs],
   )
 
+  /**
+   * 更新选中态。
+   *
+   * ⚠️ 受控模式下**不改**内部状态（由调用方回填 `selectedIds`），
+   *    只把新的 id 数组抛给 `onSelect`。
+   */
+  const applySelection = useCallback(
+    (next: number[]): void => {
+      if (!controlled) setSelectedInternal(next)
+      emitSelect(next)
+    },
+    [controlled, emitSelect],
+  )
+
   /** 把某一行滚进可视区。 */
   const scrollRowIntoView = useCallback(
     (index: number): void => {
@@ -212,10 +265,9 @@ export function SongList(props: SongListProps): ReactElement {
         const next = selected.includes(index)
           ? selected.filter((item) => item !== index)
           : [...selected, index].sort((a, b) => a - b)
-        setSelected(next)
+        applySelection(next)
         setCurrentIndex(index)
         setAnchorIndex(index)
-        emitSelect(next)
         return
       }
       if (event.shiftKey) {
@@ -224,17 +276,16 @@ export function SongList(props: SongListProps): ReactElement {
         const to = base >= 0 ? Math.max(base, index) : index
         const next: number[] = []
         for (let i = from; i <= to; i += 1) next.push(i)
-        setSelected(next)
+        applySelection(next)
         setCurrentIndex(index)
         emitSelect(next)
         return
       }
-      setSelected([index])
+      applySelection([index])
       setCurrentIndex(index)
       setAnchorIndex(index)
-      emitSelect([index])
     },
-    [anchorIndex, currentIndex, emitSelect, selected],
+    [anchorIndex, applySelection, currentIndex, selected],
   )
 
   /** 双击行：播放。 */
@@ -260,11 +311,10 @@ export function SongList(props: SongListProps): ReactElement {
       if (next === currentIndex) return
       setCurrentIndex(next)
       setAnchorIndex(next)
-      setSelected([next])
-      emitSelect([next])
+      applySelection([next])
       scrollRowIntoView(next)
     },
-    [currentIndex, emitSelect, scrollRowIntoView, songs.length],
+    [applySelection, currentIndex, scrollRowIntoView, songs.length],
   )
 
   /** 滚动：更新窗口位置；接近底部时触发增量加载。 */

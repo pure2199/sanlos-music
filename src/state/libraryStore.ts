@@ -60,6 +60,13 @@ export interface LibraryApi {
   songs(page: number, size: number): Promise<Page<Song>>
   /** 收藏列表（**全量**接口）。 */
   favorites(): Promise<Song[]>
+  /**
+   * 收藏写回（收藏 / 取消收藏）。
+   *
+   * ⚠️ **可选**：不提供时 `setFavorite` 会拒绝（界面提示「当前环境不支持收藏写回」）。
+   *    做成可选是为了让「只读环境」的假实现不必硬造一个写回口。
+   */
+  setFavorite?: (songId: string, on: boolean) => Promise<void>
   /** 歌单列表（**全量**接口）。 */
   playlists(): Promise<Playlist[]>
   /** 某歌单里的歌曲（**分页**）。 */
@@ -103,6 +110,74 @@ export interface LibraryApi {
 export type DetailKind = 'album' | 'artist' | 'genre'
 
 /**
+ * **可以「继续加载」的分页集合**（分页护栏停下后，用户可以手动重新武装一次）。
+ *
+ * ⚠️ 每一项都对应 store 里的**一个** `LibraryCollection`；
+ *    `resumePaging` 按这个键找回「集合 + 加载器」。
+ */
+export type PagedKind =
+  | 'albums'
+  | 'artists'
+  | 'genres'
+  | 'songs'
+  | 'playlistSongs'
+  | 'albumSongs'
+  | 'artistAlbums'
+  | 'artistSongs'
+  | 'genreSongs'
+  | 'history'
+
+/**
+ * 按 `PagedKind` 取对应的集合（给界面读「是不是停下了」用）。
+ *
+ * ⚠️ 返回的是 store 里**同一个对象引用**（zustand 的选择器要靠引用稳定才不会每次重渲染）。
+ */
+export function selectPagedCollection(
+  state: LibraryStore,
+  kind: PagedKind,
+): LibraryCollection<unknown> {
+  switch (kind) {
+    case 'albums':
+      return state.albums
+    case 'artists':
+      return state.artists
+    case 'genres':
+      return state.genres
+    case 'songs':
+      return state.songs
+    case 'playlistSongs':
+      return state.playlistSongs
+    case 'albumSongs':
+      return state.albumSongs
+    case 'artistAlbums':
+      return state.artistAlbums
+    case 'artistSongs':
+      return state.artistSongs
+    case 'genreSongs':
+      return state.genreSongs
+    case 'history':
+      return state.history
+  }
+}
+
+/**
+ * 从收藏态表里解析某首歌的收藏态。
+ *
+ * - **登记过**（表里有这个 id）→ 以表为准（那是客户端的**已确认态**）；
+ * - **没登记过** → 用调用方给的兜底值（搜索结果自带的 `song.favorite`）。
+ *
+ * ⚠️ 「登记过但值为 false」是有意义的：用户**取消收藏**后必须记住这件事，
+ *    否则兜底值（服务端的 `favorite` 字段）会把它又变回「已收藏」。
+ */
+export function resolveFavoriteState(
+  states: Record<string, boolean>,
+  songId: string,
+  fallback: boolean,
+): boolean {
+  return Object.prototype.hasOwnProperty.call(states, songId) ? states[songId] === true : fallback
+}
+
+/**
  * 连续「**本页无新增**」的页数上限（分页护栏的阈值）。
  *
  * ⚠️ 「本页无新增」= 服务端给了条数，但**全是已经加载过的 id**（重复 id）。
@@ -132,6 +207,7 @@ export const defaultLibraryApi: LibraryApi = {
   genres: (page, size) => libraryApi.genres(page, size),
   songs: (page, size) => libraryApi.songs(page, size),
   favorites: () => favoriteApi.list(),
+  setFavorite: (songId, on) => favoriteApi.set(songId, on),
   playlists: () => playlistApi.list(),
   playlistSongs: (playlistId, page, size) => playlistApi.songs(playlistId, page, size),
   // ---- 详情下钻（Task 4）------------------------------------------------
@@ -288,6 +364,63 @@ export interface LibraryStore {
   refreshPlaylists: () => Promise<void>
   /** 显式刷新收藏列表（清空后重取）。 */
   refreshFavorites: () => Promise<void>
+
+  // ---- 分页护栏的「继续加载」（T9）----------------------------------------
+  //
+  // ⚠️ 护栏停下后 `hasMore = false` / `nextPage` 不前进，界面**没有任何**继续加载的入口
+  //    → 大列表可能被提前截断（审计 P-LIB-4 / P1-5）。
+  //    → 这里补一个**用户显式触发**的入口：护栏复位 + 请求下一个页码。
+
+  /**
+   * 「继续加载」：把分页护栏复位，并请求**下一个没请求过的页码**。
+   *
+   * ⚠️ 只在被护栏拦下（`stalled = true`）时有效；否则是**空操作**（不发请求）。
+   * ⚠️ 请求的页码是 `nextPage + 1`：停下时 `nextPage` 停在「最后请求过的那一页」
+   *    （见 `loadPage` 的 `nextPage` 计算），下一个**没请求过**的页码就是它 + 1。
+   */
+  resumePaging: (kind: PagedKind) => Promise<void>
+
+  // ---- 收藏态（单一真相源 · T9）------------------------------------------
+  //
+  // ⚠️ 之前 `SearchPanel` 的收藏乐观态存在**它自己的** writeback Map 里，
+  //    与 `libraryStore.favorites` 不互通 → 搜索页与收藏页各说各话（审计 P-LIB-3 / P1-6）。
+  //    → 收藏态统一收敛到本 store：写回成功后写进 `favoriteStates`，
+  //      搜索页 / 收藏页都从这里读。
+
+  /**
+   * 收藏态（**已确认态**）：songId → 是否收藏。
+   *
+   * - 服务端收藏列表载入后，每首歌登记为 `true`；
+   * - 写回成功后登记为该次写入的值（取消收藏登记为 `false`）。
+   */
+  favoriteStates: Record<string, boolean>
+  /**
+   * 服务端收藏列表是否已过期。
+   *
+   * ⚠️ 本地写回改过收藏态 → 服务端那份列表**不再完整**（新的收藏不在里面，
+   *    取消掉的还在里面）→ 下次 `loadFavorites()` 必须**重新拉**，
+   *    不能沿用 `loadAll` 的「已载入就跳过」语义。
+   */
+  favoritesDirty: boolean
+  /**
+   * 收藏写回。
+   *
+   * - `transport` = 真正的写回实现；不传则用 `LibraryApi.setFavorite`；
+   * - **成功**后更新 `favoriteStates` 并把服务端列表标记为过期；
+   * - **失败**时**原样抛出**（由调用方的写回器负责回滚乐观态）。
+   */
+  setFavorite: (
+    songId: string,
+    on: boolean,
+    transport?: (songId: string, on: boolean) => Promise<void>,
+  ) => Promise<void>
+  /**
+   * 某首歌当前**是否已收藏**。
+   *
+   * @param fallback 收藏态表里**没登记**这首歌时用的兜底值
+   *   （通常是搜索结果自带的 `song.favorite` 字段）。
+   */
+  isFavorite: (songId: string, fallback: boolean) => boolean
 
   // ---- 详情下钻（Task 4）------------------------------------------------
   //
@@ -539,6 +672,9 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
       playlistSongsById: {},
       playlistId: null,
       pageSize,
+      // 收藏态（已确认态）——收藏页与搜索页都从这里读（T9）。
+      favoriteStates: {},
+      favoritesDirty: false,
       detailKind: null,
       detailId: null,
       albumDetail: null,
@@ -613,16 +749,41 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
           true,
         ),
 
-      loadFavorites: () =>
-        loadAll<Song>(
-          {
-            read: () => get().favorites,
-            write: (next) => set({ favorites: next }),
-            fetcher: () => api.favorites(),
-            idOf: (song) => song.id,
-          },
-          true,
-        ),
+      loadFavorites: async () => {
+        const state = get()
+        // ⚠️ 本地写回改过收藏态 → 服务端那份列表**不再完整** →
+        //    必须**清空后重取**，不能沿用「已载入就跳过」的语义
+        //    （否则新收藏的那首永远不出现在收藏页里）。
+        if (state.favoritesDirty) {
+          set({ favorites: emptyCollection<Song>(), favoritesDirty: false })
+          await loadAll<Song>(
+            {
+              read: () => get().favorites,
+              write: (next) => set({ favorites: next }),
+              fetcher: () => api.favorites(),
+              idOf: (song) => song.id,
+            },
+            false,
+          )
+        } else {
+          await loadAll<Song>(
+            {
+              read: () => get().favorites,
+              write: (next) => set({ favorites: next }),
+              fetcher: () => api.favorites(),
+              idOf: (song) => song.id,
+            },
+            true,
+          )
+        }
+        // 把服务端确认的收藏态登记进 `favoriteStates`（单一真相源）。
+        const items = get().favorites.items
+        set((s) => {
+          const next: Record<string, boolean> = { ...s.favoriteStates }
+          for (const song of items) next[song.id] = true
+          return { favoriteStates: next }
+        })
+      },
 
       loadPlaylistSongs: (playlistId, page = 1) => {
         // 换歌单 = 换上下文：清空并重置页码簿记（**这是「不清空」的例外**）。
@@ -710,6 +871,97 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
         set({ favorites: emptyCollection<Song>() })
         await get().loadFavorites()
       },
+
+      // ---- 分页护栏的「继续加载」（T9）--------------------------------------
+      resumePaging: async (kind) => {
+        const state = get()
+
+        /**
+         * 「继续加载」的通用实现。
+         *
+         * - 只在 `stalled` 时生效（否则是**空操作**：不发明请求）；
+         * - 护栏复位（`noProgressPages = 0` / `stalled = false`），
+         *   但**不动** `items` / `hasMore`（`hasMore` 由响应重新算）；
+         * - 请求 `nextPage + 1`：停下时 `nextPage` 停在「最后请求过的那一页」，
+         *   下一个**没请求过**的页码就是它 + 1。
+         */
+        const resume = async <T>(
+          collection: LibraryCollection<T>,
+          write: (next: LibraryCollection<T>) => void,
+          load: (page: number) => Promise<void>,
+        ): Promise<void> => {
+          if (!collection.stalled) return
+          write({ ...collection, noProgressPages: 0, stalled: false })
+          await load(collection.nextPage + 1)
+        }
+
+        switch (kind) {
+          case 'albums':
+            return resume(state.albums, (next) => set({ albums: next }), (p) =>
+              get().loadAlbums(p),
+            )
+          case 'artists':
+            return resume(state.artists, (next) => set({ artists: next }), (p) =>
+              get().loadArtists(p),
+            )
+          case 'genres':
+            return resume(state.genres, (next) => set({ genres: next }), (p) =>
+              get().loadGenres(p),
+            )
+          case 'songs':
+            return resume(state.songs, (next) => set({ songs: next }), (p) =>
+              get().loadSongs(p),
+            )
+          case 'playlistSongs': {
+            const playlistId = state.playlistId
+            if (!playlistId) return
+            return resume(
+              state.playlistSongs,
+              (next) =>
+                set((s) => ({
+                  playlistSongs: next,
+                  playlistSongsById: { ...s.playlistSongsById, [playlistId]: next },
+                })),
+              (p) => get().loadPlaylistSongs(playlistId, p),
+            )
+          }
+          case 'albumSongs':
+            return resume(state.albumSongs, (next) => set({ albumSongs: next }), (p) =>
+              get().loadAlbumSongs(p),
+            )
+          case 'artistAlbums':
+            return resume(state.artistAlbums, (next) => set({ artistAlbums: next }), (p) =>
+              get().loadArtistAlbums(p),
+            )
+          case 'artistSongs':
+            return resume(state.artistSongs, (next) => set({ artistSongs: next }), (p) =>
+              get().loadArtistSongs(p),
+            )
+          case 'genreSongs':
+            return resume(state.genreSongs, (next) => set({ genreSongs: next }), (p) =>
+              get().loadGenreSongs(p),
+            )
+          case 'history':
+            return resume(state.history, (next) => set({ history: next }), (p) =>
+              get().loadHistory(p),
+            )
+        }
+      },
+
+      // ---- 收藏态（单一真相源 · T9）-----------------------------------------
+      setFavorite: async (songId, on, transport) => {
+        const fn = transport ?? api.setFavorite
+        if (!fn) throw new Error('当前环境不支持收藏写回')
+        await fn(songId, on)
+        // 写回成功 → 更新**已确认态**；服务端那份列表随之过期（要重新拉）。
+        set((state) => ({
+          favoriteStates: { ...state.favoriteStates, [songId]: on },
+          favoritesDirty: true,
+        }))
+      },
+
+      isFavorite: (songId, fallback) =>
+        resolveFavoriteState(get().favoriteStates, songId, fallback),
 
       // ---- 详情下钻（Task 4）--------------------------------------------
       openAlbum: async (albumId) => {

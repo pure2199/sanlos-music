@@ -14,6 +14,7 @@ import { useStore } from 'zustand'
 import type { Playlist, Song } from '../../shared/types'
 import { CardGrid, PlaylistCard } from '../components/Cards'
 import { LibraryPageShell } from '../components/LibraryPageShell'
+import { PagingNotice } from '../components/PagingNotice'
 import { SongList } from '../components/SongList'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 import './library-pages.css'
@@ -112,6 +113,8 @@ export function PlaylistsPage({
           ) : (
             <p className="fnm-playlists__hint">请选择一个歌单</p>
           )}
+          {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
+          <PagingNotice kind="playlistSongs" store={resolved} />
         </div>
       </div>
     </LibraryPageShell>

@@ -13,6 +13,7 @@ import { useStore } from 'zustand'
 import type { Song } from '../../shared/types'
 import { SongList } from '../components/SongList'
 import { LibraryPageShell } from '../components/LibraryPageShell'
+import { PagingNotice } from '../components/PagingNotice'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
 /** `SongsPage` 的属性。 */
@@ -70,6 +71,8 @@ export function SongsPage({ api, store, onPlay, onSelect }: SongsPageProps): Rea
         emptyLabel="暂无歌曲"
         ariaLabel="歌曲列表"
       />
+      {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
+      <PagingNotice kind="songs" store={resolved} />
     </LibraryPageShell>
   )
 }

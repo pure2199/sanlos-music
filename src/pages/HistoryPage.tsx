@@ -25,6 +25,7 @@ import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
 import { LibraryPageShell } from '../components/LibraryPageShell'
+import { PagingNotice } from '../components/PagingNotice'
 import { SongList } from '../components/SongList'
 import { useLocalHistory } from '../state/historyStore'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
@@ -99,6 +100,8 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
             emptyLabel="暂无播放历史"
             ariaLabel="NAS 播放历史"
           />
+          {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
+          <PagingNotice kind="history" store={resolved} />
         </section>
       </div>
     </LibraryPageShell>

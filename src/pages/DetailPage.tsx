@@ -34,12 +34,14 @@ import { useStore } from 'zustand'
 import type { Album, Song } from '../../shared/types'
 import { AlbumCard, CardGrid, CoverImage, formatCount } from '../components/Cards'
 import { LibraryPageShell } from '../components/LibraryPageShell'
+import { PagingNotice } from '../components/PagingNotice'
 import { SongList } from '../components/SongList'
 import {
   useResolvedLibraryStore,
   type DetailKind,
   type LibraryApi,
   type LibraryStoreApi,
+  type PagedKind,
 } from '../state/libraryStore'
 import './detail-page.css'
 
@@ -114,6 +116,9 @@ export function DetailPage(props: DetailPageProps): ReactElement {
 
   // ---- 状态行 / 错误 / 加载中 ---------------------------------------------
   const songs = kind === 'album' ? albumSongs : kind === 'artist' ? artistSongs : genreSongs
+  /** 曲目集合对应的分页键（给「继续加载」提示用）。 */
+  const songsPagedKind: PagedKind =
+    kind === 'album' ? 'albumSongs' : kind === 'artist' ? 'artistSongs' : 'genreSongs'
   const error =
     kind === 'album' ? albumSongs.error ?? albumDetailError : songs.error
   const loading = songs.loading
@@ -161,6 +166,8 @@ export function DetailPage(props: DetailPageProps): ReactElement {
               emptyLabel="暂无专辑"
               ariaLabel="歌手的专辑列表"
             />
+            {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
+            <PagingNotice kind="artistAlbums" store={resolved} />
           </section>
         )}
 
@@ -176,6 +183,8 @@ export function DetailPage(props: DetailPageProps): ReactElement {
             emptyLabel="暂无曲目"
             ariaLabel="详情曲目列表"
           />
+          {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
+          <PagingNotice kind={songsPagedKind} store={resolved} />
         </section>
       </div>
     </LibraryPageShell>

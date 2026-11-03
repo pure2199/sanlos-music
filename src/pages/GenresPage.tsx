@@ -12,6 +12,7 @@ import { useStore } from 'zustand'
 import type { Genre } from '../../shared/types'
 import { CardGrid, GenreCard, formatCount } from '../components/Cards'
 import { LibraryPageShell } from '../components/LibraryPageShell'
+import { PagingNotice } from '../components/PagingNotice'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
 /** `GenresPage` 的属性。 */
@@ -59,6 +60,8 @@ export function GenresPage({ api, store, onOpenGenre }: GenresPageProps): ReactE
         emptyLabel="暂无风格"
         ariaLabel="风格列表"
       />
+      {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
+      <PagingNotice kind="genres" store={resolved} />
     </LibraryPageShell>
   )
 }

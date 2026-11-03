@@ -373,7 +373,11 @@ describe('搜索面板：收藏按钮（要求 C / E）', () => {
       })),
       setFavorite,
     })
-    render(createElement(SearchPanel, { api, debounceMs: 0 }))
+    // ⚠️ 注入**独立**的 store：收藏态是单一真相源（T9），
+    //    用默认的全局 store 会与同文件的其它用例**串味**
+    //    （上一个用例写回成功过 → 收藏态已经是「已收藏」）。
+    const store = createLibraryStore(makeLibraryApi())
+    render(createElement(SearchPanel, { api, store, debounceMs: 0 }))
     await typeKeyword('甲')
 
     const button = await screen.findByTestId('fnm-favorite-toggle')
@@ -397,7 +401,9 @@ describe('搜索面板：收藏按钮（要求 C / E）', () => {
         throw new Error('服务端拒绝')
       }),
     })
-    render(createElement(SearchPanel, { api, debounceMs: 0 }))
+    // ⚠️ 同样注入**独立**的 store（原值 = 「未收藏」必须由本用例自己决定）。
+    const store = createLibraryStore(makeLibraryApi())
+    render(createElement(SearchPanel, { api, store, debounceMs: 0 }))
     await typeKeyword('甲')
 
     fireEvent.click(await screen.findByTestId('fnm-favorite-toggle'))
@@ -419,7 +425,8 @@ describe('搜索面板：收藏按钮（要求 C / E）', () => {
         artists: { list: [], total: 0 },
       })),
     })
-    const { container } = render(createElement(SearchPanel, { api, debounceMs: 0 }))
+    const store = createLibraryStore(makeLibraryApi())
+    const { container } = render(createElement(SearchPanel, { api, store, debounceMs: 0 }))
     await typeKeyword('甲')
 
     const button = await screen.findByTestId('fnm-favorite-toggle')

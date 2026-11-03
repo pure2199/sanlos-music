@@ -12,6 +12,7 @@ import { useStore } from 'zustand'
 import type { Artist } from '../../shared/types'
 import { ArtistCard, CardGrid, formatCount } from '../components/Cards'
 import { LibraryPageShell } from '../components/LibraryPageShell'
+import { PagingNotice } from '../components/PagingNotice'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
 /** `ArtistsPage` 的属性。 */
@@ -59,6 +60,8 @@ export function ArtistsPage({ api, store, onOpenArtist }: ArtistsPageProps): Rea
         emptyLabel="暂无歌手"
         ariaLabel="歌手列表"
       />
+      {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
+      <PagingNotice kind="artists" store={resolved} />
     </LibraryPageShell>
   )
 }
