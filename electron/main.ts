@@ -11,6 +11,7 @@ import { createNasOAuthHandlers } from './oauthWindow'
 import { registerFnmSchemePrivileges, registerProxy } from './proxy'
 import { SessionManager } from './session'
 import { createCoverFetcher, createTray } from './tray'
+import { createBoundsSaver, resolveWindowBounds } from './windowBounds'
 
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
 // 生产模式（npm start / 打包后的应用）加载随包发布的 dist/index.html。
@@ -131,9 +132,24 @@ if (!isPrimaryInstance) {
       //     凭证在 `session.bin` 里，两者**不许混**。
       const prefs = new PrefsStore()
 
-      const win = new BrowserWindow({
+      // 10b. 主题（Task 6）与窗口位置尺寸记忆（Task 8）。
+      //
+      //     ⚠️ 主题：渲染进程的 CSS 会接管窗口内容，但**窗口本身**在页面加载完成前
+      //        是一块默认底色 → 这里先按主题铺上，避免「白闪」。
+      //        真相源是 `prefs.json`（`prefs.read().theme`），这里只是**应用**它。
+      //     ⚠️ 窗口尺寸：审计报表 G-1——`AppPrefs.windowBounds` 早就有，
+      //        主进程却**从不消费** → 尺寸记忆形同虚设。
+      //        逻辑放在 `electron/windowBounds.ts`（可单测），这里只做接线。
+      const boundsOptions = resolveWindowBounds(prefs.read().windowBounds, {
         width: 1200,
         height: 800,
+      })
+
+      const win = new BrowserWindow({
+        width: boundsOptions.width,
+        height: boundsOptions.height,
+        x: boundsOptions.x,
+        y: boundsOptions.y,
         show: false,
         webPreferences: {
           preload: path.join(__dirname, 'preload.js'),
@@ -144,17 +160,22 @@ if (!isPrimaryInstance) {
       })
       mainWindow = win
 
-      // 10b. 主题（Task 6）：按**已保存**的主题设置窗口底色。
-      //
-      //     ⚠️ 渲染进程的 CSS 会接管窗口内容，但**窗口本身**在页面加载完成前
-      //        是一块默认底色 → 这里先按主题铺上，避免「白闪」。
-      //     ⚠️ 主题的真相源是 `prefs.json`（`prefs.read().theme`），
-      //        不是这里的常量——这里只是**应用**它。
+      /** 按主题设置窗口底色（避免启动 / 切主题瞬间的白闪）。 */
       const applyWindowTheme = (theme: ThemeName): void => {
         if (win.isDestroyed()) return
         win.setBackgroundColor(themeSpec(theme).windowBackground)
       }
       applyWindowTheme(resolveThemeName(prefs.read().theme))
+
+      // 位置尺寸记忆：移动 / 缩放后去抖写回偏好（写盘是同步的，不去抖会每帧写盘）。
+      const boundsSaver = createBoundsSaver({
+        getBounds: () => (win.isDestroyed() ? null : win.getBounds()),
+        save: (bounds) => {
+          prefs.write({ windowBounds: bounds })
+        },
+      })
+      win.on('resize', () => boundsSaver.schedule())
+      win.on('move', () => boundsSaver.schedule())
 
       win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
         console.error(`[fnmusic] 页面加载失败: ${errorCode} ${errorDescription} (${validatedURL})`)
@@ -164,6 +185,8 @@ if (!isPrimaryInstance) {
       //
       //     默认 `preventDefault()` + `hide()`；偏好里选了「直接退出」才真退出。
       win.on('close', (event) => {
+        // 关闭前先把位置尺寸落盘（用户可能刚拖动过窗口）。
+        boundsSaver.saveNow()
         if (isQuitting) return
         if (prefs.read().closeBehavior === 'quit') {
           isQuitting = true

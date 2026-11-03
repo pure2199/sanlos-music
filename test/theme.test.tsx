@@ -19,7 +19,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DEFAULT_THEME, THEMES, resolveThemeName, themeSpec } from '../shared/themes'
 import type { AppPrefs, PlayerBridge } from '../shared/playerBridge'
 import { applyTheme, readAppliedTheme } from '../src/theme'
-import { useThemeStore } from '../src/state/themeStore'
+import { useAppPrefsStore } from '../src/state/appPrefsStore'
 import { ThemeSwitcher } from '../src/components/ThemeSwitcher'
 import { PrefsStore, registerPlayerIpc, type IpcMainEventsLike } from '../electron/ipc'
 
@@ -51,7 +51,7 @@ function installBridge(overrides: Partial<PlayerBridge> = {}): {
 }
 
 beforeEach(() => {
-  useThemeStore.setState({ theme: DEFAULT_THEME, error: null })
+  useAppPrefsStore.setState({ theme: DEFAULT_THEME, error: null })
   delete document.documentElement.dataset['theme']
 })
 
@@ -111,44 +111,44 @@ describe('主题 store（真相源在主进程）', () => {
   it('启动时从主进程读回主题并应用', async () => {
     installBridge({ getPrefs: vi.fn(async (): Promise<AppPrefs> => ({ theme: 'fluent' })) })
 
-    await useThemeStore.getState().load()
+    await useAppPrefsStore.getState().load()
 
-    expect(useThemeStore.getState().theme).toBe('fluent')
+    expect(useAppPrefsStore.getState().theme).toBe('fluent')
     expect(document.documentElement.dataset['theme']).toBe('fluent')
   })
 
   it('主进程没存主题时用默认主题', async () => {
     installBridge({ getPrefs: vi.fn(async () => ({})) })
 
-    await useThemeStore.getState().load()
+    await useAppPrefsStore.getState().load()
 
-    expect(useThemeStore.getState().theme).toBe(DEFAULT_THEME)
+    expect(useAppPrefsStore.getState().theme).toBe(DEFAULT_THEME)
   })
 
   it('切换主题：立即应用并写回主进程', async () => {
     const { setTheme } = installBridge()
 
-    await useThemeStore.getState().setTheme('fluent')
+    await useAppPrefsStore.getState().setTheme('fluent')
 
     expect(document.documentElement.dataset['theme']).toBe('fluent')
-    expect(useThemeStore.getState().theme).toBe('fluent')
+    expect(useAppPrefsStore.getState().theme).toBe('fluent')
     expect(setTheme).toHaveBeenCalledWith('fluent')
   })
 
   it('写回失败 → 回滚到原主题并给出提示', async () => {
     installBridge({ setTheme: vi.fn(async () => Promise.reject(new Error('写盘失败'))) })
-    await useThemeStore.getState().setTheme('fluent')
+    await useAppPrefsStore.getState().setTheme('fluent')
 
-    await useThemeStore.getState().setTheme('apple')
+    await useAppPrefsStore.getState().setTheme('apple')
 
-    expect(useThemeStore.getState().theme).toBe('apple')
+    expect(useAppPrefsStore.getState().theme).toBe('apple')
     expect(document.documentElement.dataset['theme']).toBe('apple')
-    expect(useThemeStore.getState().error).toContain('主题保存失败')
+    expect(useAppPrefsStore.getState().error).toContain('主题保存失败')
   })
 
   it('没有桥时不崩：只在本地生效', async () => {
-    await expect(useThemeStore.getState().load()).resolves.toBeUndefined()
-    await expect(useThemeStore.getState().setTheme('fluent')).resolves.toBeUndefined()
+    await expect(useAppPrefsStore.getState().load()).resolves.toBeUndefined()
+    await expect(useAppPrefsStore.getState().setTheme('fluent')).resolves.toBeUndefined()
     expect(document.documentElement.dataset['theme']).toBe('fluent')
   })
 })

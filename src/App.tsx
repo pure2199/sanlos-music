@@ -4,6 +4,7 @@ import type { Album, Artist, Genre, Song } from '../shared/types'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { formatCount } from './components/Cards'
 import { PlayerBar } from './components/PlayerBar'
+import { SettingsPanel } from './components/SettingsPanel'
 import { ThemeSwitcher } from './components/ThemeSwitcher'
 import { AlbumsPage } from './pages/AlbumsPage'
 import { ArtistsPage } from './pages/ArtistsPage'
@@ -17,8 +18,8 @@ import { PlaylistsPage } from './pages/PlaylistsPage'
 import { SearchPage } from './pages/SearchPage'
 import { SongsPage } from './pages/SongsPage'
 import type { DetailKind } from './state/libraryStore'
+import { useAppPrefsStore } from './state/appPrefsStore'
 import { usePlayerStore } from './state/playerStore'
-import { useThemeStore } from './state/themeStore'
 import './styles/app-shell.css'
 import './styles/tokens.css'
 
@@ -139,11 +140,13 @@ export default function App() {
   const [view, setView] = useState<MainView>('connect')
   /** 当前下钻目标（`null` = 没在下钻）。 */
   const [detail, setDetail] = useState<DetailTarget | null>(null)
+  /** 设置面板是否展开（Task 8）。 */
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
-  // 启动时读一次主进程的主题偏好并应用（Task 6）。
-  // ⚠️ 主题的**单一真相源在主进程**（`prefs.json`），这里只是把它读回来。
+  // 启动时读一次主进程的偏好（主题 / 关闭窗口的行为）并应用（Task 6 / Task 8）。
+  // ⚠️ 偏好的**单一真相源在主进程**（`prefs.json`），这里只是把它读回来。
   useEffect(() => {
-    void useThemeStore.getState().load()
+    void useAppPrefsStore.getState().load()
   }, [])
 
   /**
@@ -308,6 +311,18 @@ export default function App() {
           </nav>
         </div>
         <ThemeSwitcher />
+        <div className="app-shell__settings">
+          <button
+            type="button"
+            className="fnm-app__nav-button"
+            onClick={() => setSettingsOpen((open) => !open)}
+            aria-expanded={settingsOpen}
+            aria-label="设置"
+          >
+            设置
+          </button>
+          {settingsOpen && <SettingsPanel />}
+        </div>
         <ConnectionBadge />
       </header>
       <main className="app-shell__main">

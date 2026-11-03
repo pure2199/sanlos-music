@@ -71,6 +71,18 @@
   border-left: 1px solid var(--border);
 }
 
+/*
+ * 设置入口（Task 8）
+ *
+ * ⚠️ `position: relative` 是**锚点**：设置面板（`SettingsPanel`）用
+ *    `position: absolute` 挂在按钮正下方（样式在 `settings-panel.css`）。
+ */
+.app-shell__settings {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 /* 入口按钮 */
 .fnm-app__nav-button {
   padding: 4px 12px;

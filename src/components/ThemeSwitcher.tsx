@@ -14,7 +14,7 @@
 import { useCallback, type ReactElement } from 'react'
 
 import { THEMES, themeSpec } from '../../shared/themes'
-import { useThemeStore } from '../state/themeStore'
+import { useAppPrefsStore } from '../state/appPrefsStore'
 import './theme-switcher.css'
 
 /** `ThemeSwitcher` 的属性。 */
@@ -32,9 +32,9 @@ export interface ThemeSwitcherProps {
  */
 export function ThemeSwitcher(props: ThemeSwitcherProps): ReactElement {
   const { className } = props
-  const theme = useThemeStore((state) => state.theme)
-  const setTheme = useThemeStore((state) => state.setTheme)
-  const error = useThemeStore((state) => state.error)
+  const theme = useAppPrefsStore((state) => state.theme)
+  const setTheme = useAppPrefsStore((state) => state.setTheme)
+  const error = useAppPrefsStore((state) => state.error)
 
   const current = themeSpec(theme)
   // 下一套 = 清单里的下一项（到头就绕回第一项）。
