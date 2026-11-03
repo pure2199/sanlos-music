@@ -3,8 +3,11 @@ import { useCallback, useState, type ReactElement } from 'react'
 import type { Song } from '../shared/types'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { PlayerBar } from './components/PlayerBar'
+import { AlbumsPage } from './pages/AlbumsPage'
+import { ArtistsPage } from './pages/ArtistsPage'
 import { FavoritesPage } from './pages/FavoritesPage'
 import { FullPlayerPage } from './pages/FullPlayerPage'
+import { GenresPage } from './pages/GenresPage'
 import { LoginPage } from './pages/LoginPage'
 import { PlaylistsPage } from './pages/PlaylistsPage'
 import { SearchPage } from './pages/SearchPage'
@@ -44,7 +47,8 @@ import './styles/tokens.css'
 // ---------------------------------------------------------------------------
 // 顶栏分成两组导航：
 // - **主导航**：「连接」/「搜索」；
-// - **曲库导航**：「歌曲」/「收藏」/「歌单」。
+// - **曲库导航**：「歌曲」/「收藏」/「歌单」/「专辑」/「歌手」/「风格」
+//   （后三颗是 Task 3 追加的）。
 //
 // ⚠️ **四页共用同一个 `libraryStore` 单例**（`useResolvedLibraryStore` 在没有注入
 //    `api` 时返回模块级单例）→ 收藏 / 歌单的状态**只有一份**，不新增重复状态源。
@@ -53,8 +57,28 @@ import './styles/tokens.css'
 //    `(song, index, list)`，`list` = 当前已加载的整队 → 全部走同一个 `handlePlay`。
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Task 3（新版清单）：专辑 / 歌手 / 风格三页可达
+// ---------------------------------------------------------------------------
+// 曲库导航组追加三颗按钮（专辑 / 歌手 / 风格），主区渲染对应的三个页面。
+//
+// ⚠️ 这三页的**卡片点击出口**（`onOpenAlbum` / `onOpenArtist` / `onOpenGenre`）
+//    **本任务不接** —— 下钻到「某专辑的曲目 / 某歌手的曲目 / 某风格的曲目」
+//    属于 **Task 4（曲库详情下钻）**：那里才把 `libraryApi.albumSongs` 等
+//    详情接口接进 `LibraryApi` 并做详情视图。
+//    当前阶段点卡片**没有反应**是**已知且短暂的**状态，不是回归。
+// ---------------------------------------------------------------------------
+
 /** 主区的视图。 */
-type MainView = 'connect' | 'search' | 'songs' | 'favorites' | 'playlists'
+type MainView =
+  | 'connect'
+  | 'search'
+  | 'songs'
+  | 'favorites'
+  | 'playlists'
+  | 'albums'
+  | 'artists'
+  | 'genres'
 
 /** 顶栏导航按钮。 */
 interface NavButtonProps {
@@ -95,6 +119,34 @@ export default function App() {
     usePlayerStore.getState().playTrack(song, list)
   }, [])
 
+  /**
+   * 主区内容：**任一时刻只渲染一个视图**（不是把页面堆在一起）。
+   *
+   * ⚠️ 用 `switch` 而不是嵌套三元：视图已经有 8 个分支，
+   *    嵌套三元在这个规模下已经读不动了（而且加分支极易漏改一处）。
+   */
+  const renderMainView = (): ReactElement => {
+    switch (view) {
+      case 'search':
+        return <SearchPage onPlay={handlePlay} />
+      case 'songs':
+        return <SongsPage onPlay={handlePlay} />
+      case 'favorites':
+        return <FavoritesPage onPlay={handlePlay} />
+      case 'playlists':
+        return <PlaylistsPage onPlay={handlePlay} />
+      case 'albums':
+        // ⚠️ 不传 `onOpenAlbum`：详情下钻是 Task 4 的范围（见文件头的说明）。
+        return <AlbumsPage />
+      case 'artists':
+        return <ArtistsPage />
+      case 'genres':
+        return <GenresPage />
+      default:
+        return <LoginPage />
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="app-shell__topbar">
@@ -128,22 +180,27 @@ export default function App() {
               active={view === 'playlists'}
               onSelect={() => setView('playlists')}
             />
+            <NavButton
+              label="专辑"
+              active={view === 'albums'}
+              onSelect={() => setView('albums')}
+            />
+            <NavButton
+              label="歌手"
+              active={view === 'artists'}
+              onSelect={() => setView('artists')}
+            />
+            <NavButton
+              label="风格"
+              active={view === 'genres'}
+              onSelect={() => setView('genres')}
+            />
           </nav>
         </div>
         <ConnectionBadge />
       </header>
       <main className="app-shell__main">
-        {view === 'search' ? (
-          <SearchPage onPlay={handlePlay} />
-        ) : view === 'songs' ? (
-          <SongsPage onPlay={handlePlay} />
-        ) : view === 'favorites' ? (
-          <FavoritesPage onPlay={handlePlay} />
-        ) : view === 'playlists' ? (
-          <PlaylistsPage onPlay={handlePlay} />
-        ) : (
-          <LoginPage />
-        )}
+        {renderMainView()}
         {fullPlayerOpen && <FullPlayerPage onClose={() => setFullPlayerOpen(false)} />}
       </main>
       <PlayerBar onOpenFullPlayer={() => setFullPlayerOpen(true)} />
