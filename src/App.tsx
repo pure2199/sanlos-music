@@ -1,10 +1,12 @@
 import { useCallback, useState, type ReactElement } from 'react'
 
-import type { Song } from '../shared/types'
+import type { Album, Artist, Genre, Song } from '../shared/types'
 import { ConnectionBadge } from './components/ConnectionBadge'
+import { formatCount } from './components/Cards'
 import { PlayerBar } from './components/PlayerBar'
 import { AlbumsPage } from './pages/AlbumsPage'
 import { ArtistsPage } from './pages/ArtistsPage'
+import { DetailPage } from './pages/DetailPage'
 import { FavoritesPage } from './pages/FavoritesPage'
 import { FullPlayerPage } from './pages/FullPlayerPage'
 import { GenresPage } from './pages/GenresPage'
@@ -12,6 +14,7 @@ import { LoginPage } from './pages/LoginPage'
 import { PlaylistsPage } from './pages/PlaylistsPage'
 import { SearchPage } from './pages/SearchPage'
 import { SongsPage } from './pages/SongsPage'
+import type { DetailKind } from './state/libraryStore'
 import { usePlayerStore } from './state/playerStore'
 import './styles/app-shell.css'
 import './styles/tokens.css'
@@ -62,12 +65,34 @@ import './styles/tokens.css'
 // ---------------------------------------------------------------------------
 // 曲库导航组追加三颗按钮（专辑 / 歌手 / 风格），主区渲染对应的三个页面。
 //
-// ⚠️ 这三页的**卡片点击出口**（`onOpenAlbum` / `onOpenArtist` / `onOpenGenre`）
-//    **本任务不接** —— 下钻到「某专辑的曲目 / 某歌手的曲目 / 某风格的曲目」
-//    属于 **Task 4（曲库详情下钻）**：那里才把 `libraryApi.albumSongs` 等
-//    详情接口接进 `LibraryApi` 并做详情视图。
-//    当前阶段点卡片**没有反应**是**已知且短暂的**状态，不是回归。
 // ---------------------------------------------------------------------------
+// Task 4（新版清单）：曲库详情下钻
+// ---------------------------------------------------------------------------
+// 三页的卡片点击出口（`onOpenAlbum` / `onOpenArtist` / `onOpenGenre`）接到
+// 同一个**详情视图**（`DetailPage`）：
+// - 点卡片 → 记下「下钻目标」（类型 / id / 标题 / 副标题 / 封面）→ 切到 `detail` 视图；
+// - 详情视图挂载后由**它自己**去 store 里取数据（`openAlbum` / `openArtist` / `openGenre`）
+//   ——外壳不碰 store，页面职责边界不变；
+// - 「返回」回到对应的列表页（专辑 → 专辑页，歌手 → 歌手页，风格 → 风格页）。
+//
+// ⚠️ 详情页内部再点歌手的专辑卡片会**再往下钻一层**（覆盖当前下钻目标）；
+//    「返回」此时回到专辑页而不是歌手页——这是有意为之的**单层历史**，
+//    不是栈式回退（曲库下钻最多两层，单层够用）。
+// ---------------------------------------------------------------------------
+
+/** 下钻目标（点卡片进入详情时携带的信息）。 */
+interface DetailTarget {
+  /** 实体类型。 */
+  kind: DetailKind
+  /** 实体 id。 */
+  id: string
+  /** 实体标题（来自卡片的原始对象）。 */
+  title: string
+  /** 实体副标题。 */
+  subtitle: string
+  /** 封面 id。 */
+  coverId: string | null
+}
 
 /** 主区的视图。 */
 type MainView =
@@ -79,6 +104,7 @@ type MainView =
   | 'albums'
   | 'artists'
   | 'genres'
+  | 'detail'
 
 /** 顶栏导航按钮。 */
 interface NavButtonProps {
@@ -107,6 +133,8 @@ function NavButton({ label, active, onSelect }: NavButtonProps): ReactElement {
 export default function App() {
   const [fullPlayerOpen, setFullPlayerOpen] = useState(false)
   const [view, setView] = useState<MainView>('connect')
+  /** 当前下钻目标（`null` = 没在下钻）。 */
+  const [detail, setDetail] = useState<DetailTarget | null>(null)
 
   /**
    * 整队播放：**四页共用这一个入口**。
@@ -118,6 +146,55 @@ export default function App() {
   const handlePlay = useCallback((song: Song, _index: number, list: Song[]): void => {
     usePlayerStore.getState().playTrack(song, list)
   }, [])
+
+  // ---- 下钻（Task 4）-----------------------------------------------------
+  //
+  // ⚠️ 外壳**只记目标、切视图**，不去 store 取数据 ——
+  //    数据的加载由 `DetailPage` 自己在挂载时触发（`openAlbum` 等），
+  //    这样「谁负责取数」的边界仍然在页面层。
+
+  /** 点专辑卡片 → 下钻到该专辑。 */
+  const handleOpenAlbum = useCallback((album: Album): void => {
+    setDetail({
+      kind: 'album',
+      id: album.id,
+      title: album.title,
+      subtitle: album.artist,
+      coverId: album.coverId,
+    })
+    setView('detail')
+  }, [])
+
+  /** 点歌手卡片 → 下钻到该歌手。 */
+  const handleOpenArtist = useCallback((artist: Artist): void => {
+    setDetail({
+      kind: 'artist',
+      id: artist.id,
+      title: artist.name,
+      subtitle: `${formatCount(artist.albumCount)} 张专辑 · ${formatCount(artist.trackCount)} 首`,
+      coverId: artist.coverId,
+    })
+    setView('detail')
+  }, [])
+
+  /** 点风格卡片 → 下钻到该风格。 */
+  const handleOpenGenre = useCallback((genre: Genre): void => {
+    setDetail({
+      kind: 'genre',
+      id: genre.guid,
+      title: genre.name,
+      subtitle: `${formatCount(genre.trackCount)} 首`,
+      coverId: genre.coverId,
+    })
+    setView('detail')
+  }, [])
+
+  /** 从详情返回 → 回到对应的列表页。 */
+  const handleBackFromDetail = useCallback((): void => {
+    if (!detail) return
+    setView(detail.kind === 'album' ? 'albums' : detail.kind === 'artist' ? 'artists' : 'genres')
+    setDetail(null)
+  }, [detail])
 
   /**
    * 主区内容：**任一时刻只渲染一个视图**（不是把页面堆在一起）。
@@ -136,12 +213,26 @@ export default function App() {
       case 'playlists':
         return <PlaylistsPage onPlay={handlePlay} />
       case 'albums':
-        // ⚠️ 不传 `onOpenAlbum`：详情下钻是 Task 4 的范围（见文件头的说明）。
-        return <AlbumsPage />
+        return <AlbumsPage onOpenAlbum={handleOpenAlbum} />
       case 'artists':
-        return <ArtistsPage />
+        return <ArtistsPage onOpenArtist={handleOpenArtist} />
       case 'genres':
-        return <GenresPage />
+        return <GenresPage onOpenGenre={handleOpenGenre} />
+      case 'detail':
+        return detail ? (
+          <DetailPage
+            kind={detail.kind}
+            entityId={detail.id}
+            title={detail.title}
+            subtitle={detail.subtitle}
+            coverId={detail.coverId}
+            onBack={handleBackFromDetail}
+            onPlay={handlePlay}
+            onOpenAlbum={handleOpenAlbum}
+          />
+        ) : (
+          <LoginPage />
+        )
       default:
         return <LoginPage />
     }

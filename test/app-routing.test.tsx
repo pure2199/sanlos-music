@@ -32,13 +32,61 @@ vi.mock('../src/pages/PlaylistsPage', () => ({
   PlaylistsPage: () => <div data-testid="view-playlists">歌单页</div>,
 }))
 vi.mock('../src/pages/AlbumsPage', () => ({
-  AlbumsPage: () => <div data-testid="view-albums">专辑页</div>,
+  AlbumsPage: ({
+    onOpenAlbum,
+  }: {
+    onOpenAlbum?: (album: {
+      id: string
+      title: string
+      artist: string
+      artistId: string
+      coverId: string | null
+      year: number | null
+      trackCount: number
+    }) => void
+  }) => (
+    <button
+      type="button"
+      data-testid="view-albums"
+      onClick={() =>
+        onOpenAlbum?.({
+          id: 'alb-1',
+          title: '示例专辑',
+          artist: '甲',
+          artistId: '',
+          coverId: null,
+          year: 2000,
+          trackCount: 1,
+        })
+      }
+    >
+      专辑页
+    </button>
+  ),
 }))
 vi.mock('../src/pages/ArtistsPage', () => ({
   ArtistsPage: () => <div data-testid="view-artists">歌手页</div>,
 }))
 vi.mock('../src/pages/GenresPage', () => ({
   GenresPage: () => <div data-testid="view-genres">风格页</div>,
+}))
+vi.mock('../src/pages/DetailPage', () => ({
+  DetailPage: ({
+    kind,
+    title,
+    onBack,
+  }: {
+    kind: string
+    title: string
+    onBack: () => void
+  }) => (
+    <div data-testid="view-detail">
+      <span>{`详情页:${kind}:${title}`}</span>
+      <button type="button" onClick={onBack}>
+        返回
+      </button>
+    </div>
+  ),
 }))
 vi.mock('../src/pages/FullPlayerPage', () => ({
   FullPlayerPage: () => <div data-testid="view-fullplayer">全屏页</div>,
@@ -115,5 +163,25 @@ describe('应用外壳的曲库路由', () => {
     render(<App />)
     expect(screen.getByRole('navigation', { name: '主导航' })).toBeTruthy()
     expect(screen.getByRole('navigation', { name: '曲库导航' })).toBeTruthy()
+  })
+
+  it('点专辑卡片进入详情视图，「返回」后回到专辑页', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '专辑' }))
+    expect(screen.getByTestId('view-albums')).toBeTruthy()
+
+    // 点专辑卡片 → 下钻到详情视图（Task 4）。
+    fireEvent.click(screen.getByTestId('view-albums'))
+    const detail = screen.getByTestId('view-detail')
+    expect(detail.textContent).toContain('album')
+    expect(detail.textContent).toContain('示例专辑')
+    // 主区仍然**只渲染一个视图**。
+    expect(screen.getAllByTestId(/^view-/).length).toBe(1)
+
+    // 「返回」→ 回到专辑页。
+    fireEvent.click(screen.getByRole('button', { name: '返回' }))
+    expect(screen.getByTestId('view-albums')).toBeTruthy()
+    expect(screen.queryByTestId('view-detail')).toBeNull()
   })
 })

@@ -1,0 +1,67 @@
+/*
+ * 曲库详情页样式（Task 4 · 新版清单）。
+ *
+ * 只放**详情页自己**的布局——通用外壳（标题 / 状态 / 错误）在
+ * `src/components/library-page-shell.css` 里（外壳是组件，样式跟组件同目录）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
+ */
+
+/* 详情页整体：纵向排列各区块 */
+.fnm-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px 20px 24px;
+}
+
+/* 头部：返回按钮 + 封面 + 副标题 */
+.fnm-detail__head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* 返回上一级 */
+.fnm-detail__back {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fnm-detail__back:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-detail__back:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 副标题（歌手名 / 曲目数等） */
+.fnm-detail__subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 区块（如「专辑」「曲目」） */
+.fnm-detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+/* 区块标题 */
+.fnm-detail__section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}

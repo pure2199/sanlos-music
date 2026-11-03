@@ -73,6 +73,12 @@ function createFakeApi(overrides: Partial<LibraryApi> = {}): LibraryApi {
     favorites: vi.fn(async () => SONGS),
     playlists: vi.fn(async () => [PLAYLIST]),
     playlistSongs: vi.fn(async () => ({ list: SONGS, total: SONGS.length })),
+    // ---- 详情下钻（Task 4）------------------------------------------------
+    album: vi.fn(async () => null),
+    albumSongs: vi.fn(async () => ({ list: SONGS, total: SONGS.length })),
+    artistAlbums: vi.fn(async () => ({ list: [] as Album[], total: 0 })),
+    artistSongs: vi.fn(async () => ({ list: SONGS, total: SONGS.length })),
+    genreSongs: vi.fn(async () => ({ list: SONGS, total: SONGS.length })),
   }
   return { ...base, ...overrides }
 }

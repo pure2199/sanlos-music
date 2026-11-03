@@ -63,7 +63,35 @@ export interface LibraryApi {
   playlists(): Promise<Playlist[]>
   /** 某歌单里的歌曲（**分页**）。 */
   playlistSongs(playlistId: string, page: number, size: number): Promise<Page<Song>>
+
+  // ---- 详情下钻（Task 4）------------------------------------------------
+  //
+  // ⚠️ 这五个接口在 `src/api/library.ts` 里**早就写好了但一直没人调用**
+  //    （审计报表 P0-1「详情 API 死代码」）——Task 4 把它们接进来，
+  //    由「专辑 / 歌手 / 风格」三个详情视图消费。
+  //
+  // ⚠️ `album()` 的**返回形状未实测**（服务端用列表信封返回，客户端取 `list[0]`），
+  //    校准项见联调清单 **Step J**；查不到返回 `null`（不是抛异常）。
+
+  /** 专辑详情（列表信封取第一条；查不到返回 `null`）。 */
+  album(id: string): Promise<Album | null>
+  /** 某专辑下的歌曲（分页）。 */
+  albumSongs(id: string, page: number, size: number): Promise<Page<Song>>
+  /** 某歌手的专辑（分页）。 */
+  artistAlbums(id: string, page: number, size: number): Promise<Page<Album>>
+  /** 某歌手的歌曲（分页）。 */
+  artistSongs(id: string, page: number, size: number): Promise<Page<Song>>
+  /** 某风格的歌曲（分页）。 */
+  genreSongs(id: string, page: number, size: number): Promise<Page<Song>>
 }
+
+/**
+ * 下钻实体的类型（专辑 / 歌手 / 风格）。
+ *
+ * ⚠️ 三者共用**同一个**详情视图（`src/pages/DetailPage.tsx`）——
+ *    差别只在「取哪一份曲目」以及「有没有专辑网格」。
+ */
+export type DetailKind = 'album' | 'artist' | 'genre'
 
 /**
  * 连续「**本页无新增**」的页数上限（分页护栏的阈值）。
@@ -97,6 +125,12 @@ export const defaultLibraryApi: LibraryApi = {
   favorites: () => favoriteApi.list(),
   playlists: () => playlistApi.list(),
   playlistSongs: (playlistId, page, size) => playlistApi.songs(playlistId, page, size),
+  // ---- 详情下钻（Task 4）------------------------------------------------
+  album: (id) => libraryApi.album(id),
+  albumSongs: (id, page, size) => libraryApi.albumSongs(id, page, size),
+  artistAlbums: (id, page, size) => libraryApi.artistAlbums(id, page, size),
+  artistSongs: (id, page, size) => libraryApi.artistSongs(id, page, size),
+  genreSongs: (id, page, size) => libraryApi.genreSongs(id, page, size),
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +278,49 @@ export interface LibraryStore {
   refreshPlaylists: () => Promise<void>
   /** 显式刷新收藏列表（清空后重取）。 */
   refreshFavorites: () => Promise<void>
+
+  // ---- 详情下钻（Task 4）------------------------------------------------
+  //
+  // ⚠️ **下钻 = 换上下文**：和 `selectPlaylist` 一个语义 ——
+  //    切到另一个实体时，旧实体的曲目**必须清空**，
+  //    否则用户会看到「A 专辑的最后一首 + B 专辑的第一首」拼在一起。
+  //
+  // ⚠️ **幂等**：重复下钻**同一个**实体是空操作
+  //    （React StrictMode 会把 effect 跑两遍；不加守卫会重复请求 + 重复重置）。
+
+  /** 当前下钻实体的类型（`null` = 未下钻）。 */
+  detailKind: DetailKind | null
+  /** 当前下钻实体的 id。 */
+  detailId: string | null
+  /** 专辑详情（`openAlbum` 拉取；查不到 / 出错为 `null`）。 */
+  albumDetail: Album | null
+  /** 专辑详情是否正在加载。 */
+  albumDetailLoading: boolean
+  /** 专辑详情的错误。 */
+  albumDetailError: string | null
+  /** 专辑的曲目（分页）。 */
+  albumSongs: LibraryCollection<Song>
+  /** 歌手的专辑（分页）。 */
+  artistAlbums: LibraryCollection<Album>
+  /** 歌手的曲目（分页）。 */
+  artistSongs: LibraryCollection<Song>
+  /** 风格的曲目（分页）。 */
+  genreSongs: LibraryCollection<Song>
+
+  /** 下钻到某个专辑（载入详情 + 曲目第一页）。 */
+  openAlbum: (albumId: string) => Promise<void>
+  /** 加载专辑曲目的一页（追加语义；同一页幂等）。 */
+  loadAlbumSongs: (page?: number) => Promise<void>
+  /** 下钻到某个歌手（载入其专辑 + 曲目第一页）。 */
+  openArtist: (artistId: string) => Promise<void>
+  /** 加载歌手专辑的一页（追加语义；同一页幂等）。 */
+  loadArtistAlbums: (page?: number) => Promise<void>
+  /** 加载歌手曲目的一页（追加语义；同一页幂等）。 */
+  loadArtistSongs: (page?: number) => Promise<void>
+  /** 下钻到某个风格（载入曲目第一页）。 */
+  openGenre: (genreId: string) => Promise<void>
+  /** 加载风格曲目的一页（追加语义；同一页幂等）。 */
+  loadGenreSongs: (page?: number) => Promise<void>
 }
 
 /** store 的（vanilla）接口类型：页面注入时用这个类型。 */
@@ -278,6 +355,32 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
     genres: new Set<number>(),
     songs: new Set<number>(),
     playlistSongs: new Set<number>(),
+  }
+
+  /**
+   * 详情列表的页码簿记：**按实体 id 分开存**（Task 4）。
+   *
+   * ⚠️ 为什么不能像上面的 `pages` 那样用**一份**簿记：
+   *    切到另一个实体时，旧实体的请求**可能还在飞**。
+   *    若共用一份簿记，旧实体的响应回来后会往这份簿记里写「第 1 页已加载」，
+   *    而新实体恰好也要第 1 页 → 被幂等守卫吞掉 → **新实体的列表永远空白**。
+   *
+   * → 每个实体一份簿记：旧实体的响应只污染它自己那份。
+   */
+  const detailPages = {
+    albumSongs: new Map<string, Set<number>>(),
+    artistAlbums: new Map<string, Set<number>>(),
+    artistSongs: new Map<string, Set<number>>(),
+    genreSongs: new Map<string, Set<number>>(),
+  }
+
+  /** 取（必要时新建）某个实体的页码簿记。 */
+  function detailPageSet(map: Map<string, Set<number>>, entityId: string): Set<number> {
+    const existing = map.get(entityId)
+    if (existing) return existing
+    const created = new Set<number>()
+    map.set(entityId, created)
+    return created
   }
 
   /** 分页加载的真正实现（带 pageSize）。 */
@@ -390,6 +493,26 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
 
   const creator: StateCreator<LibraryStore> = (set, get) => {
     const pageSize = DEFAULT_PAGE_SIZE
+
+    /**
+     * 载入专辑详情（服务端用列表信封返回，客户端取第一条）。
+     *
+     * ⚠️ **竞态守卫**：下钻已经切到别的实体时，这次结果**直接丢弃**
+     *    （否则会把 A 专辑的详情写进 B 专辑的视图）。
+     */
+    async function loadAlbumDetail(albumId: string): Promise<void> {
+      try {
+        const album = await api.album(albumId)
+        const state = get()
+        if (state.detailKind !== 'album' || state.detailId !== albumId) return
+        set({ albumDetail: album, albumDetailLoading: false, albumDetailError: null })
+      } catch (err) {
+        const state = get()
+        if (state.detailKind !== 'album' || state.detailId !== albumId) return
+        set({ albumDetailLoading: false, albumDetailError: describeError(err) })
+      }
+    }
+
     return {
       albums: emptyCollection<Album>(),
       artists: emptyCollection<Artist>(),
@@ -401,6 +524,15 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
       playlistSongsById: {},
       playlistId: null,
       pageSize,
+      detailKind: null,
+      detailId: null,
+      albumDetail: null,
+      albumDetailLoading: false,
+      albumDetailError: null,
+      albumSongs: emptyCollection<Song>(),
+      artistAlbums: emptyCollection<Album>(),
+      artistSongs: emptyCollection<Song>(),
+      genreSongs: emptyCollection<Song>(),
 
       loadAlbums: (page = 1) =>
         loadPage<Album>(
@@ -561,6 +693,132 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
       refreshFavorites: async () => {
         set({ favorites: emptyCollection<Song>() })
         await get().loadFavorites()
+      },
+
+      // ---- 详情下钻（Task 4）--------------------------------------------
+      openAlbum: async (albumId) => {
+        // ⚠️ 幂等：重复下钻同一个专辑是空操作（StrictMode 会把 effect 跑两遍）。
+        const state = get()
+        if (state.detailKind === 'album' && state.detailId === albumId) return
+        // 换上下文 = 重置该实体的页码簿记与集合。
+        detailPageSet(detailPages.albumSongs, albumId).clear()
+        set({
+          detailKind: 'album',
+          detailId: albumId,
+          albumDetail: null,
+          albumDetailLoading: true,
+          albumDetailError: null,
+          albumSongs: emptyCollection<Song>(),
+        })
+        // 详情与曲目**并行**拉（互不依赖，串行会把首屏时间翻倍）。
+        await Promise.all([loadAlbumDetail(albumId), get().loadAlbumSongs(1)])
+      },
+
+      loadAlbumSongs: (page = 1) => {
+        const state = get()
+        if (state.detailKind !== 'album' || !state.detailId) return Promise.resolve()
+        const albumId = state.detailId
+        return loadPage<Song>(
+          {
+            read: () => get().albumSongs,
+            write: (next) => {
+              // ⚠️ 竞态守卫：下钻已切走 → 丢弃这次结果，别把旧专辑的曲目写进来。
+              const now = get()
+              if (now.detailKind !== 'album' || now.detailId !== albumId) return
+              set({ albumSongs: next })
+            },
+            pages: detailPageSet(detailPages.albumSongs, albumId),
+            fetcher: (p, size) => api.albumSongs(albumId, p, size),
+            idOf: (song) => song.id,
+            page,
+          },
+          pageSize,
+        )
+      },
+
+      openArtist: async (artistId) => {
+        const state = get()
+        if (state.detailKind === 'artist' && state.detailId === artistId) return
+        detailPageSet(detailPages.artistAlbums, artistId).clear()
+        detailPageSet(detailPages.artistSongs, artistId).clear()
+        set({
+          detailKind: 'artist',
+          detailId: artistId,
+          artistAlbums: emptyCollection<Album>(),
+          artistSongs: emptyCollection<Song>(),
+        })
+        await Promise.all([get().loadArtistAlbums(1), get().loadArtistSongs(1)])
+      },
+
+      loadArtistAlbums: (page = 1) => {
+        const state = get()
+        if (state.detailKind !== 'artist' || !state.detailId) return Promise.resolve()
+        const artistId = state.detailId
+        return loadPage<Album>(
+          {
+            read: () => get().artistAlbums,
+            write: (next) => {
+              const now = get()
+              if (now.detailKind !== 'artist' || now.detailId !== artistId) return
+              set({ artistAlbums: next })
+            },
+            pages: detailPageSet(detailPages.artistAlbums, artistId),
+            fetcher: (p, size) => api.artistAlbums(artistId, p, size),
+            idOf: (album) => album.id,
+            page,
+          },
+          pageSize,
+        )
+      },
+
+      loadArtistSongs: (page = 1) => {
+        const state = get()
+        if (state.detailKind !== 'artist' || !state.detailId) return Promise.resolve()
+        const artistId = state.detailId
+        return loadPage<Song>(
+          {
+            read: () => get().artistSongs,
+            write: (next) => {
+              const now = get()
+              if (now.detailKind !== 'artist' || now.detailId !== artistId) return
+              set({ artistSongs: next })
+            },
+            pages: detailPageSet(detailPages.artistSongs, artistId),
+            fetcher: (p, size) => api.artistSongs(artistId, p, size),
+            idOf: (song) => song.id,
+            page,
+          },
+          pageSize,
+        )
+      },
+
+      openGenre: async (genreId) => {
+        const state = get()
+        if (state.detailKind === 'genre' && state.detailId === genreId) return
+        detailPageSet(detailPages.genreSongs, genreId).clear()
+        set({ detailKind: 'genre', detailId: genreId, genreSongs: emptyCollection<Song>() })
+        await get().loadGenreSongs(1)
+      },
+
+      loadGenreSongs: (page = 1) => {
+        const state = get()
+        if (state.detailKind !== 'genre' || !state.detailId) return Promise.resolve()
+        const genreId = state.detailId
+        return loadPage<Song>(
+          {
+            read: () => get().genreSongs,
+            write: (next) => {
+              const now = get()
+              if (now.detailKind !== 'genre' || now.detailId !== genreId) return
+              set({ genreSongs: next })
+            },
+            pages: detailPageSet(detailPages.genreSongs, genreId),
+            fetcher: (p, size) => api.genreSongs(genreId, p, size),
+            idOf: (song) => song.id,
+            page,
+          },
+          pageSize,
+        )
       },
     }
   }
