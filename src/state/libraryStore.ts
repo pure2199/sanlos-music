@@ -34,6 +34,7 @@ import { createStore, type StateCreator, type StoreApi } from 'zustand/vanilla'
 import type { Album, Artist, Genre, Playlist, Song } from '../../shared/types'
 import { DEFAULT_PAGE_SIZE } from '../api/client'
 import { favoriteApi } from '../api/favorite'
+import { historyApi } from '../api/history'
 import { libraryApi } from '../api/library'
 import { playlistApi } from '../api/playlist'
 import type { Page } from '../api/types'
@@ -83,6 +84,14 @@ export interface LibraryApi {
   artistSongs(id: string, page: number, size: number): Promise<Page<Song>>
   /** 某风格的歌曲（分页）。 */
   genreSongs(id: string, page: number, size: number): Promise<Page<Song>>
+  /**
+   * NAS 侧的播放历史（分页，**只读**）。
+   *
+   * ⚠️ 服务端**没有**可用的「上报播放」端点（实测，见 `src/api/history.ts` 的说明），
+   *    所以这个接口**只能读**；客户端自己的播放记录走本地 store。
+   * ⚠️ **顺序按服务端返回的来**——实测其排序依据不暴露给客户端，不要自行按时间戳排序。
+   */
+  history(page: number, size: number): Promise<Page<Song>>
 }
 
 /**
@@ -131,6 +140,7 @@ export const defaultLibraryApi: LibraryApi = {
   artistAlbums: (id, page, size) => libraryApi.artistAlbums(id, page, size),
   artistSongs: (id, page, size) => libraryApi.artistSongs(id, page, size),
   genreSongs: (id, page, size) => libraryApi.genreSongs(id, page, size),
+  history: (page, size) => historyApi.list(page, size),
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +316,8 @@ export interface LibraryStore {
   artistSongs: LibraryCollection<Song>
   /** 风格的曲目（分页）。 */
   genreSongs: LibraryCollection<Song>
+  /** NAS 侧的播放历史（分页，**只读**；顺序按服务端返回的来）。 */
+  history: LibraryCollection<Song>
 
   /** 下钻到某个专辑（载入详情 + 曲目第一页）。 */
   openAlbum: (albumId: string) => Promise<void>
@@ -321,6 +333,8 @@ export interface LibraryStore {
   openGenre: (genreId: string) => Promise<void>
   /** 加载风格曲目的一页（追加语义；同一页幂等）。 */
   loadGenreSongs: (page?: number) => Promise<void>
+  /** 加载 NAS 播放历史的一页（追加语义；同一页幂等）。 */
+  loadHistory: (page?: number) => Promise<void>
 }
 
 /** store 的（vanilla）接口类型：页面注入时用这个类型。 */
@@ -355,6 +369,7 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
     genres: new Set<number>(),
     songs: new Set<number>(),
     playlistSongs: new Set<number>(),
+    history: new Set<number>(),
   }
 
   /**
@@ -533,6 +548,7 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
       artistAlbums: emptyCollection<Album>(),
       artistSongs: emptyCollection<Song>(),
       genreSongs: emptyCollection<Song>(),
+      history: emptyCollection<Song>(),
 
       loadAlbums: (page = 1) =>
         loadPage<Album>(
@@ -820,6 +836,19 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
           pageSize,
         )
       },
+
+      loadHistory: (page = 1) =>
+        loadPage<Song>(
+          {
+            read: () => get().history,
+            write: (next) => set({ history: next }),
+            pages: pages.history,
+            fetcher: (p, size) => api.history(p, size),
+            idOf: (song) => song.id,
+            page,
+          },
+          pageSize,
+        ),
     }
   }
 

@@ -1,0 +1,35 @@
+/*
+ * 最近播放页样式（Task 7）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
+ */
+
+.fnm-history {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 16px 20px 24px;
+}
+
+/* 一段（如「本机播放记录」「NAS 播放历史」） */
+.fnm-history__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+/* 段标题 */
+.fnm-history__section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 说明文案（数据来源与限制） */
+.fnm-history__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}

@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import { installLocalHistory } from './state/historyStore'
 import { installMediaSession } from './player/mediaSession'
 
 const container = document.getElementById('root')
@@ -13,6 +14,11 @@ if (!container) {
 // ⚠️ 装在 `main.tsx` 而不是 `App.tsx`：后者由并行的修复轮次占用，
 //    两个任务碰同一个文件会互相覆盖提交。
 installMediaSession()
+
+// 本机播放记录（Task 7）：订阅播放器的 `current` 变化，换歌就记一笔。
+// ⚠️ 服务端**不会**随 stream 自动写播放历史，也没有可用的上报端点（实测），
+//    所以本机记录只能留在本地——见 `src/state/historyStore.ts`。
+installLocalHistory()
 
 createRoot(container).render(
   <StrictMode>

@@ -79,6 +79,7 @@ function createFakeApi(overrides: Partial<LibraryApi> = {}): LibraryApi {
     artistAlbums: vi.fn(async () => ({ list: [] as Album[], total: 0 })),
     artistSongs: vi.fn(async () => ({ list: SONGS, total: SONGS.length })),
     genreSongs: vi.fn(async () => ({ list: SONGS, total: SONGS.length })),
+    history: vi.fn(async () => ({ list: [] as Song[], total: 0 })),
   }
   return { ...base, ...overrides }
 }

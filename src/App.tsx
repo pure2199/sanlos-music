@@ -11,6 +11,7 @@ import { DetailPage } from './pages/DetailPage'
 import { FavoritesPage } from './pages/FavoritesPage'
 import { FullPlayerPage } from './pages/FullPlayerPage'
 import { GenresPage } from './pages/GenresPage'
+import { HistoryPage } from './pages/HistoryPage'
 import { LoginPage } from './pages/LoginPage'
 import { PlaylistsPage } from './pages/PlaylistsPage'
 import { SearchPage } from './pages/SearchPage'
@@ -106,6 +107,7 @@ type MainView =
   | 'albums'
   | 'artists'
   | 'genres'
+  | 'history'
   | 'detail'
 
 /** 顶栏导航按钮。 */
@@ -226,6 +228,10 @@ export default function App() {
         return <ArtistsPage onOpenArtist={handleOpenArtist} />
       case 'genres':
         return <GenresPage onOpenGenre={handleOpenGenre} />
+      case 'history':
+        // ⚠️ 最近播放分两段：**本机记录**（本地）+ **NAS 历史**（只读）——
+        //    服务端没有可用的上报端点（实测），详见 `src/pages/HistoryPage.tsx`。
+        return <HistoryPage onPlay={handlePlay} />
       case 'detail':
         return detail ? (
           <DetailPage
@@ -293,6 +299,11 @@ export default function App() {
               label="风格"
               active={view === 'genres'}
               onSelect={() => setView('genres')}
+            />
+            <NavButton
+              label="最近"
+              active={view === 'history'}
+              onSelect={() => setView('history')}
             />
           </nav>
         </div>
