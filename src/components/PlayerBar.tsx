@@ -270,6 +270,12 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
   /**
    * 松手（或键盘操作结束）时才真正 seek。
    *
+   * ⚠️ **口径（控制器裁定）**：松手**一律**提交预览位置，**含在滑块外松手**。
+   *    这是主流播放器的行为（HTML5 `range` / YouTube / Spotify 都是「拖到哪松到哪」）；
+   *    用户拖进度条的意图就是跳到该位置 → 在滑块外松手却不跳会让人困惑。
+   *    本条要修的是**原始缺陷**：「松手后进度条停在预览值、实际播放位置却没变」
+   *    （UI 与播放位置不一致）→ 提交后两者一致。
+   *
    * ⚠️ **幂等**（F15-05）：同一次松手可能既触发滑块上的 `mouseup`、又触发
    *    window 上的 `mouseup` → 用 `pendingSeekRef` 保证**只提交一次**。
    */
@@ -286,6 +292,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
    *
    * ⚠️ 只监听滑块自己的 `mouseup` 是不够的：用户把鼠标拖出滑块再松开时，
    *    松手事件落在滑块外 → 不会 seek、`dragValue` 卡住 → 预览态不复位、本次拖动不生效。
+   *    监听到了之后，按上面的口径：**松手一律提交预览位置**（含滑块外）。
    */
   useEffect(() => {
     if (dragValue === null) return

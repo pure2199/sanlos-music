@@ -14,6 +14,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import type { ReactElement } from 'react'
 
 import { LyricView, LYRIC_WINDOW_RADIUS } from '../src/ui/lyrics/LyricView'
 import { attachTranslations, parseLrc } from '../src/ui/lyrics/parse'
@@ -64,20 +68,110 @@ function withoutSlot(className: string): string {
   return className.replace(/\bfnm-lyricview__line--(previous|next)\b/g, '').trim()
 }
 
+/** 仓库根目录（源码断言用）。 */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+/** 歌词视图的源码路径（F15-04 的「key 写在元素上」护栏用）。 */
+const LYRIC_VIEW_SOURCE = resolve(REPO_ROOT, 'src/ui/lyrics/LyricView.tsx')
+
 // ---------------------------------------------------------------------------
-// F15-04：单行模式的每一行都要有**稳定的 key**
+// F15-04：每一个「数组子节点」都要有**稳定的 key**
 // ---------------------------------------------------------------------------
 
+/**
+ * 取 DOM 节点对应的 React fiber 的 `key`（`null` = 没有 key）。
+ *
+ * ⚠️ **为什么不用「捕获 React 告警」当唯一护栏**：
+ *    React 18.3 的 key 告警是**按「声明处」去重**的
+ *    （`ownerHasKeyUseWarning[声明错误信息]`，见 `react-jsx-dev-runtime` 的
+ *    `getDeclarationErrorAddendum` —— 键里含**组件名 + 源码位置**）
+ *    → 同一份模块实例里**只报一次** → 排在后面的用例会被「去重成 0 条告警」→ **空过**。
+ *    `vi.resetModules()` 也救不了：react / react-dom 是 **externalized** 依赖，
+ *    Node 的模块缓存不会被动（实测：resetModules 之后第二次渲染仍然 0 条告警）；
+ *    而且去重键含**源码位置**，就算换了模块实例，键也还是同一个。
+ *    → fiber 上的 `key` 是**结构性事实**：与告警去重、与用例顺序都**无关**。
+ */
+function reactKeyOf(element: Element | null): unknown {
+  if (!element) return undefined
+  const propName = Object.keys(element).find((name) => name.startsWith('__reactFiber$'))
+  if (!propName) return undefined
+  const fiber = (element as unknown as Record<string, { key: unknown }>)[propName]
+  return fiber?.key
+}
+
+/**
+ * 探针组件：**故意**渲染一个缺 `key` 的数组。
+ *
+ * 用途只是**自证「React 的 key 告警机制在本进程里确实在工作」**（否则「没有告警」
+ * 也可能是因为告警被整体关掉了）。
+ *
+ * ⚠️ 它**不能**证明「被测组件的那一格去重表是干净的」：React 18.3 的去重键是
+ *    **声明处的错误信息**（组件名 + 源码位置，见 `react-jsx-dev-runtime` 的
+ *    `getDeclarationErrorAddendum`）→ 探针与被测组件的键**必然不同**。
+ *    → 下面真正**确定性**的护栏是**结构断言**（fiber 上的 key）与**源码断言**。
+ */
+function MissingKeyProbe(): ReactElement {
+  return (
+    <div>
+      {[<span key="probe-ok">ok</span>, <span>缺 key</span>]}
+    </div>
+  )
+}
+
 describe('LyricView：渲染 key（F15-04）', () => {
-  it('单行模式渲染不刷 React 的 key 警告（每一行都有 key）', () => {
+  it('单行模式：每一行都有 key（结构性断言，与 React 告警去重无关）', () => {
+    const { container } = render(<LyricView lines={LINES} currentTime={12} mode="single" />)
+
+    const lines = Array.from(container.querySelectorAll('[data-index]'))
+    expect(lines.length).toBeGreaterThan(0)
+    for (const line of lines) {
+      // key = 歌词行的**绝对下标**（窗口滚动时行进出数组也不会错位）
+      expect(reactKeyOf(line)).toBe(line.getAttribute('data-index'))
+    }
+  })
+
+  it('带翻译：翻译副行节点也有 key（翻译也是「行」的数组子节点）', () => {
+    const { container } = render(
+      <LyricView lines={LINES_WITH_TRANSLATION} currentTime={12} mode="single" />,
+    )
+
+    const translation = container.querySelector('[data-testid="lyric-translation"]')
+    expect(translation).not.toBeNull()
+    // ⚠️ **鉴别力**：把翻译节点的 key 去掉 → 这里就是 null → 变红
+    expect(reactKeyOf(translation)).not.toBeNull()
+  })
+
+  it('onSeek 按钮路径：key 直接写在元素上（不是塞进被展开的 props 对象）', () => {
+    const { container } = render(
+      <LyricView lines={LINES} currentTime={12} mode="single" onSeek={() => {}} />,
+    )
+
+    const button = container.querySelector('[data-index="0"]')
+    expect(button?.tagName).toBe('BUTTON')
+    expect(reactKeyOf(button)).not.toBeNull()
+
+    // ⚠️ **顺序无关**的护栏：key 必须**直接写在元素上**，不能作为字段放进被 `{...}`
+    //    展开的 props 对象（React 18.3 会对后者告警，但那条告警按「类型 + props 形状」
+    //    去重 → 与用例顺序耦合 → 不能当唯一护栏）。
+    const source = readFileSync(LYRIC_VIEW_SOURCE, 'utf8')
+    expect(source).toMatch(/<div[^>]*\bkey=\{/)
+    expect(source).toMatch(/<button[^>]*\bkey=\{/)
+    expect(source).not.toMatch(/[{,]\s*key\s*:/)
+  })
+
+  it('渲染不刷 React 的 key 告警（烟幕断言：确定性护栏是上面的结构断言与源码断言）', () => {
     const errors: string[] = []
     const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       errors.push(args.map((arg) => String(arg)).join(' '))
     })
     try {
-      render(<LyricView lines={LINES} currentTime={12} mode="single" />)
-      const keyWarnings = errors.filter((message) => message.includes('unique "key"'))
-      expect(keyWarnings).toHaveLength(0)
+      // 探针先跑：证明「React 的 key 告警机制在本进程里确实在工作」
+      render(<MissingKeyProbe />)
+      expect(errors.filter((message) => message.includes('unique "key"')).length).toBeGreaterThan(0)
+
+      errors.length = 0
+      render(<LyricView lines={LINES_WITH_TRANSLATION} currentTime={12} mode="single" />)
+      expect(errors.filter((message) => message.includes('unique "key"'))).toEqual([])
+      expect(errors.filter((message) => message.includes('is being spread into JSX'))).toEqual([])
     } finally {
       spy.mockRestore()
     }
@@ -442,7 +536,12 @@ describe('PlayerBar：进度条与音量（要求 G）', () => {
     expect(engine.seeks).toEqual([42])
   })
 
-  it('在滑块**外**松手也会 seek（拖动不会卡住、预览态会复位）', () => {
+  it('松手一律提交预览位置（**含在滑块外松手**）→ 滑块外松手仍然 seek 到该位置', () => {
+    // ⚠️ **口径（控制器裁定）**：松手**一律**提交预览位置，**含在滑块外松手**。
+    //    这是主流播放器的行为（HTML5 range / YouTube / Spotify 都是「拖到哪松到哪」）；
+    //    原始缺陷是「松手后 UI 停在预览值、实际播放位置却没变」→ 本用例钉住的是
+    //    「**松手之后 UI 与播放位置一致**」，不是「滑块外松手不跳转」。
+    //    ⚠️ **鉴别力**：去掉 window 级的松手监听 → `seeks` 为空 → 变红。
     const engine = new FakeEngine()
     const store = createPlayerStore(engine)
     store.getState().playTrack(makeSong(1))
@@ -451,7 +550,7 @@ describe('PlayerBar：进度条与音量（要求 G）', () => {
     const slider = screen.getByLabelText('播放进度') as HTMLInputElement
     fireEvent.change(slider, { target: { value: '42' } })
 
-    // 松手发生在滑块之外（例如用户把鼠标移出滑块再松开）→ 仍然要提交 seek
+    // 松手发生在滑块之外（例如用户把鼠标移出滑块再松开）→ 仍然提交 seek
     fireEvent.mouseUp(window)
 
     expect(engine.seeks).toEqual([42])

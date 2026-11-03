@@ -402,17 +402,18 @@ function renderLine(options: RenderLineOptions): ReactElement {
   // 翻译：有才渲染（**不渲染空的第二行**）。
   const translation = typeof line.translation === 'string' ? line.translation.trim() : ''
   const translationNode = translation ? (
-    <span className="fnm-lyricview__translation" data-testid="lyric-translation">
+    // ⚠️ **必须有 `key`**（F15-04）：翻译节点是「行元素」的**数组子节点**，
+    //    没有 key → React 报 "Each child in a list should have a unique key prop"。
+    <span key="translation" className="fnm-lyricview__translation" data-testid="lyric-translation">
       {translation}
     </span>
   ) : null
 
-  const shared = {
-    // ⚠️ **必须有 `key`**（F15-04）：单行模式把若干行放进一个数组渲染，
-    //    没有 key 会每次渲染都刷 React 的 key 警告、并且按下标 reconcile。
-    //    这里用**歌词行的绝对下标**做 key —— 窗口滚动时行会进出数组，
-    //    绝对下标是稳定的（不会因为窗口移动而错位）。
-    key: index,
+  // ⚠️ **key 不放进这个对象**（F15-04）：它会被 `{...rest}` **展开**进 JSX，
+  //    React 18.3 对「props 对象里带 key 再展开」会告警
+  //    （"A props object containing a 'key' prop is being spread into JSX"），
+  //    并且要求 key **直接写在元素上**（见下面两处 `<div key={index}>` / `<button key={index}>`）。
+  const rest = {
     className: classNames.join(' '),
     'data-index': index,
     style,
@@ -431,14 +432,16 @@ function renderLine(options: RenderLineOptions): ReactElement {
 
   if (!onSeek) {
     return (
-      <div {...shared} role="listitem">
+      // ⚠️ **key 直接写在元素上**（F15-04）：用**歌词行的绝对下标**——
+      //    窗口滚动时行会进出数组，绝对下标是稳定的（不会因为窗口移动而错位）。
+      <div key={index} {...rest} role="listitem">
         {body}
       </div>
     )
   }
 
   return (
-    <button type="button" {...shared} onClick={() => onSeek(line.time)}>
+    <button type="button" key={index} {...rest} onClick={() => onSeek(line.time)}>
       {body}
     </button>
   )

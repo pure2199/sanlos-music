@@ -207,6 +207,17 @@
   color: var(--danger);
 }
 
+/* 队列只剩一首歌时移除按钮被禁用（给它可读的「不可用」样式，别看起来还能点）。 */
+.fnm-fullplayer__queue-remove:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.fnm-fullplayer__queue-remove:disabled:hover {
+  background: transparent;
+  color: var(--disabled);
+}
+
 .fnm-fullplayer__queue-remove:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;

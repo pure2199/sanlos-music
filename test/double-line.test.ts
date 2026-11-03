@@ -225,11 +225,21 @@ describe('整页换行信号（页面切换）：phase 不是换行信号', () =
     expect(after.previousIndex).toBe(1)
     expect(after.previous?.completed).toBe(true)
 
-    // 真信号：swappedAt（= 本页成为当前页的时刻）在跨越点**变化**
-    //   跨越前还在第 0 页（还没换过页）→ null；跨越后是第 1 页 → 甲行走满的那一刻（20s）
+    // 真信号：swappedAt（= **本页成为当前页的时刻**）在跨越点**变化**
+    //   跨越前还在第 0 页（还没换过页）→ null；
+    //   跨越后是第 1 页（上一行 = 乙行）→ **乙行走满**的那一刻（30s）——
+    //   正是这一页成为当前页的时刻（⚠️ 不是甲行走满的 20s：那早了一行）。
     expect(before.swappedAt).toBeNull()
-    expect(after.swappedAt).toBe(20)
+    expect(after.swappedAt).toBe(30)
     expect(after.swappedAt).not.toBe(before.swappedAt)
+  })
+
+  it('swappedAt = 本页成为当前页的时刻（end(lines[previousIndex])，不是 end(lines[previousIndex - 1])）', () => {
+    // 第 1 页（上一行 = 乙行，20~30s）：本页在**乙行走满**的那一刻成为当前页 → 30s
+    expect(computeDoubleLineState(LINES, 30).swappedAt).toBe(30)
+    // 第 2 页（上一行 = 丙行，30~30.5s）：本页在**丙行走满**的那一刻成为当前页 → 30.5s
+    expect(computeDoubleLineState(LINES, 30.5).swappedAt).toBe(30.5)
+    // ⚠️ **鉴别力**：改回 `end(lines[previousIndex - 1])` → 这里会变成 20 / 30 → 变红
   })
 
   it('phase 在跨越点上**完全相同**（所以不能用 phase 判换行）', () => {

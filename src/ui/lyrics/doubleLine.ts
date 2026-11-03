@@ -80,8 +80,15 @@
 // **确切判据（Task 19 的悬浮歌词照抄）**：
 //
 //     整页换行 ⇔ 换行**之后**的 `previousIndex` 与换行**之前**不同
-//              （等价：换行后的 `previous` 就是**刚刚走满**的那一行 —— `previous.completed === true`；
-//                也等价：`swappedAt` 变了 —— 它是**本页成为当前页的时刻**）
+//              （消费方直接用 `isPageSwapped(上一帧, 这一帧)` 判定）
+//
+// ⚠️ **只能这么判**：本页的「上一行」一旦走满，它在**整页时长内**都是
+//    `completed === true`（t=20~30 恒为 true）→ **绝不能**用 `previous.completed`
+//    逐帧判断换行（那会在换行之后连续约 10 秒反复触发换行动画）。
+//
+// ⚠️ **也不能用 `next.completed`**：本模块的 `next` 永远是「**还没走满**的那一行」
+//    （`nextIndex = done`，而 `done` 正是已走满的行数）→ `next.completed` **恒为 false**。
+//    真正「刚刚走满」的那一行，在换行**之后**是 `previous`（换行**之前**才是 `next`）。
 //
 // 消费方（`LyricView` / Task 19 的 `LyricOverlay`）用法：
 //
@@ -91,9 +98,8 @@
 //     }
 //     prevRef.current = state
 //
-// ⚠️ **不能用 `next.completed` 判换行**：本模块的 `next` 永远是「**还没走满**的那一行」
-//    （`nextIndex = done`，而 `done` 正是已走满的行数）→ `next.completed` **恒为 false**。
-//    真正「刚刚走满」的那一行，在换行**之后**是 `previous`（换行**之前**才是 `next`）。
+// `swappedAt`（本页成为当前页的时刻）**不是**判据，是**时间戳**：
+// 消费方可以用它算「本页已经显示了多久」、给换行动画排时间轴。
 // ---------------------------------------------------------------------------
 
 import { findActiveWord } from './parse'
@@ -163,10 +169,12 @@ export interface DoubleLineState {
    * **本页成为当前页的时刻**（秒）。
    *
    * - `null` = 还在**第 0 页**（还没发生过整页换行）；
-   * - 否则 = 上一页的「上一行」走满的那一刻（也就是整页换行发生的时刻）。
+   * - 否则 = 本页的「上一行」走满的那一刻（= `end(lines[previousIndex])`）
+   *   —— 正是这一页被换上来、成为当前页的那一刻。
    *
-   * ⭐ **这是整页换行的真信号**：整页换行时它**必然变化**，
-   *    同一页内它**保持不变**（消费方用 `isPageSwapped(上一帧, 这一帧)` 判定）。
+   * ⚠️ **它不是「换行判据」**（判据只有 `previousIndex` 变化 / `isPageSwapped`）：
+   *    它是**时间戳** —— 消费方可以用它算「本页已经显示了多久」、给换行动画排时间轴。
+   *    整页换行时它**必然变化**，同一页内**保持不变**。
    */
   swappedAt: number | null
 }
@@ -274,8 +282,10 @@ export function computeDoubleLineState(lines: LyricLine[], t: number): DoubleLin
 
   // 本页成为当前页的时刻：
   // - 第 0 页（`previousIndex === 0`）→ 还没换过页 → `null`；
-  // - 第 p 页（`p >= 1`）→ 第 p-1 页的「上一行」走满的那一刻 = `end(lines[p-1])`。
-  const swappedAt = previousIndex >= 1 ? lineEndTime(lines[previousIndex - 1]!) : null
+  // - 第 p 页（`p >= 1`）→ **本页的「上一行」走满的那一刻** = `end(lines[p])`
+  //   （这一页正是在那一刻成为当前页的：旧的一页（上一行 = lines[p-1]）被换掉，
+  //    lines[p] 变成新的「上一行」，而 lines[p] 走满就是换页的那一刻）。
+  const swappedAt = previousIndex >= 1 ? lineEndTime(lines[previousIndex]!) : null
 
   return {
     previousIndex,
@@ -300,10 +310,10 @@ export function computeDoubleLineState(lines: LyricLine[], t: number): DoubleLin
  *     }
  *     prevRef.current = state
  *
- * 判据（文件头有完整说明）：换行**之后**的 `previousIndex` 与换行**之前**不同
- * —— 等价于「换行后的 `previous` 是刚刚走满的那一行」。
+ * 判据（文件头有完整说明）：换行**之后**的 `previousIndex` 与换行**之前**不同。
  *
  * ⚠️ **不要用 `phase`**：`phase` 在**上一行走满**时翻转，与整页换行不是同一个事件。
+ * ⚠️ **也不要逐帧读 `previous.completed`**：它在整页时长内恒为 true → 会反复触发。
  *
  * @param previous 上一帧的状态（没有上一帧时传 `null` → 返回 `false`，首帧不播动画）。
  * @param current  当前帧的状态。
