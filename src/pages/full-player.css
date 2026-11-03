@@ -1,0 +1,276 @@
+/*
+ * 全屏播放页样式（Task 15）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值
+ *    （`#hex` / `rgb()` / `hsl()`）。
+ *
+ * 封面取色：取到的颜色由组件写进 `--fnm-fullplayer__tint`（CSS 自定义属性），
+ * 取不到色时**不写这个变量** → 背景回落到语义变量（`var(--surface-sunken)` / `var(--surface)`）。
+ */
+
+/* --------------------------------------------------------------------------
+ * 整页
+ * -------------------------------------------------------------------------- */
+
+.fnm-fullplayer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 24px 24px;
+  box-sizing: border-box;
+  background: linear-gradient(
+    180deg,
+    var(--fnm-fullplayer__tint, var(--surface-sunken)),
+    var(--surface)
+  );
+  color: var(--text-primary);
+}
+
+.fnm-fullplayer__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.fnm-fullplayer__body {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* --------------------------------------------------------------------------
+ * 封面与信息
+ * -------------------------------------------------------------------------- */
+
+.fnm-fullplayer__cover {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fnm-fullplayer__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.fnm-fullplayer__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fnm-fullplayer__artist {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.fnm-fullplayer__status {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.fnm-fullplayer__error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger-surface);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* --------------------------------------------------------------------------
+ * 标签页（歌词 / 队列）
+ * -------------------------------------------------------------------------- */
+
+.fnm-fullplayer__tabs {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.fnm-fullplayer__tab {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-fullplayer__tab:hover {
+  color: var(--text-primary);
+  background: var(--surface-sunken);
+}
+
+.fnm-fullplayer__tab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-fullplayer__tab--active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* --------------------------------------------------------------------------
+ * 队列
+ * -------------------------------------------------------------------------- */
+
+.fnm-fullplayer__queue {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fnm-fullplayer__queue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fnm-fullplayer__queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fnm-fullplayer__queue-item:hover {
+  background: var(--surface-sunken);
+}
+
+.fnm-fullplayer__queue-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.fnm-fullplayer__queue-item--current {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.fnm-fullplayer__queue-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fnm-fullplayer__queue-remove {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fnm-fullplayer__queue-remove:hover {
+  background: var(--danger-surface);
+  color: var(--danger);
+}
+
+.fnm-fullplayer__queue-remove:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* --------------------------------------------------------------------------
+ * 底部控制条
+ * -------------------------------------------------------------------------- */
+
+.fnm-fullplayer__controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.fnm-fullplayer__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-fullplayer__button:hover:not(:disabled) {
+  background: var(--surface-sunken);
+  color: var(--accent);
+}
+
+.fnm-fullplayer__button:active:not(:disabled) {
+  color: var(--accent-hover);
+}
+
+.fnm-fullplayer__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-fullplayer__button:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.fnm-fullplayer__button--primary {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 16px;
+}
+
+.fnm-fullplayer__button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--accent-text);
+}

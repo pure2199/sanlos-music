@@ -1,0 +1,315 @@
+/*
+ * 播放条样式（Task 15）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值
+ *    （`#hex` / `rgb()` / `hsl()`）——这样 Task 18/19 换主题时只换变量、不重写组件。
+ *
+ * 组件上发出稳定的 BEM 类名（`fnm-playerbar__*`），供样式表命中，
+ * 也方便后续任务做主题覆写。
+ */
+
+/* --------------------------------------------------------------------------
+ * 整条
+ * -------------------------------------------------------------------------- */
+
+.fnm-playerbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-sizing: border-box;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  flex: 0 0 auto;
+}
+
+.fnm-playerbar__info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.fnm-playerbar__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fnm-playerbar__title,
+.fnm-playerbar__artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fnm-playerbar__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fnm-playerbar__artist {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+ * 音质标识（无损 / Hi-Res）
+ * -------------------------------------------------------------------------- */
+
+.fnm-playerbar__quality {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+.fnm-playerbar__quality--lossless {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-playerbar__quality--hires {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* --------------------------------------------------------------------------
+ * 按钮
+ * -------------------------------------------------------------------------- */
+
+.fnm-playerbar__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.fnm-playerbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.fnm-playerbar__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.fnm-playerbar__button:hover:not(:disabled) {
+  background: var(--surface-sunken);
+  color: var(--accent);
+}
+
+.fnm-playerbar__button:active:not(:disabled) {
+  background: var(--surface-sunken);
+  color: var(--accent-hover);
+}
+
+.fnm-playerbar__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-playerbar__button:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+/* 播放 / 暂停：主按钮。 */
+.fnm-playerbar__button--primary {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 15px;
+}
+
+.fnm-playerbar__button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--accent-text);
+}
+
+.fnm-playerbar__button--primary:active:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--accent-text);
+}
+
+.fnm-playerbar__button--primary:disabled {
+  background: var(--surface-sunken);
+  color: var(--disabled);
+}
+
+/* --------------------------------------------------------------------------
+ * 进度条与音量
+ * -------------------------------------------------------------------------- */
+
+.fnm-playerbar__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 2 1 0;
+  min-width: 160px;
+}
+
+.fnm-playerbar__volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 160px;
+  min-width: 110px;
+}
+
+.fnm-playerbar__time {
+  flex: 0 0 auto;
+  min-width: 40px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* 拖动时显示的预览时间。 */
+.fnm-playerbar__time--preview {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.fnm-playerbar__slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.fnm-playerbar__slider:hover:not(:disabled) {
+  accent-color: var(--accent-hover);
+}
+
+.fnm-playerbar__slider:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.fnm-playerbar__slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* --------------------------------------------------------------------------
+ * 队列面板
+ * -------------------------------------------------------------------------- */
+
+.fnm-playerbar__queue {
+  position: absolute;
+  right: 16px;
+  bottom: 100%;
+  z-index: 20;
+  width: 320px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+
+.fnm-playerbar__queue-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fnm-playerbar__queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fnm-playerbar__queue-item:hover {
+  background: var(--surface-sunken);
+}
+
+.fnm-playerbar__queue-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.fnm-playerbar__queue-item--current {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.fnm-playerbar__queue-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fnm-playerbar__queue-remove {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fnm-playerbar__queue-remove:hover {
+  background: var(--danger-surface);
+  color: var(--danger);
+}
+
+.fnm-playerbar__queue-remove:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* EQ 入口占位（Task 21 才实现）。 */
+.fnm-playerbar__hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+}

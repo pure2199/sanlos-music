@@ -12,11 +12,22 @@
 //    `getComputedStyle` 也不可靠）→ 断言一律用**类名**做钩子，不碰内联 style。
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 import { LyricView, LYRIC_WINDOW_RADIUS } from '../src/ui/lyrics/LyricView'
 import { attachTranslations, parseLrc } from '../src/ui/lyrics/parse'
+import { PlayerBar, resolveQuality, LOSSLESS_CODECS } from '../src/components/PlayerBar'
+import {
+  FullPlayerPage,
+  clearCoverColorCache,
+  extractCoverColor,
+  getCachedCoverColor,
+} from '../src/pages/FullPlayerPage'
+import { createPlayerStore } from '../src/state/playerStore'
+import type { PlayerEngineLike } from '../src/player/engine'
+import type { PlayerState, PlayMode, Song } from '../shared/types'
+import type { LyricEntry } from '../src/api/types'
 
 // ---------------------------------------------------------------------------
 // 测试数据（占位）
@@ -215,5 +226,434 @@ describe('LyricView：点击定位', () => {
   it('没给 onSeek 时不渲染可点按钮（点击不抛异常）', () => {
     const { container } = render(<LyricView lines={LINES} currentTime={12} mode="single" />)
     expect(container.querySelectorAll('button')).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 播放条（要求 E / G / L / O）
+// ---------------------------------------------------------------------------
+
+/** 造一首占位歌曲。 */
+function makeSong(index: number, overrides: Partial<Song> = {}): Song {
+  return {
+    id: `song-${index}`,
+    title: `歌${index}`,
+    artist: '甲',
+    artistId: '',
+    album: '示例专辑',
+    albumId: '',
+    coverId: '',
+    duration: 200,
+    favorite: false,
+    codec: 'FLAC',
+    bitrate: 900,
+    sampleRate: 44100,
+    bitDepth: 16,
+    year: 0,
+    trackNo: index,
+    discNo: 1,
+    ...overrides,
+  }
+}
+
+/** 假引擎（只记录调用，不碰媒体栈）。 */
+class FakeEngine implements PlayerEngineLike {
+  state: PlayerState = {
+    current: null,
+    queue: [],
+    isPlaying: false,
+    position: 0,
+    duration: 0,
+    volume: 1,
+    mode: 'sequence',
+    error: null,
+  }
+  played: Song[] = []
+  seeks: number[] = []
+  volumes: number[] = []
+  pauseCalls = 0
+  resumeCalls = 0
+  private stateListeners: ((state: PlayerState) => void)[] = []
+  private endedListeners: ((song: Song | null) => void)[] = []
+
+  play(song: Song): void {
+    this.played.push(song)
+    this.state = {
+      ...this.state,
+      current: song,
+      isPlaying: true,
+      position: 0,
+      duration: song.duration,
+      error: null,
+    }
+    this.emit()
+  }
+
+  pause(): void {
+    this.pauseCalls += 1
+    this.state = { ...this.state, isPlaying: false }
+    this.emit()
+  }
+
+  resume(): void {
+    this.resumeCalls += 1
+    this.state = { ...this.state, isPlaying: true }
+    this.emit()
+  }
+
+  seek(sec: number): void {
+    this.seeks.push(sec)
+    this.state = { ...this.state, position: sec }
+    this.emit()
+  }
+
+  setVolume(v: number): void {
+    this.volumes.push(v)
+    this.state = { ...this.state, volume: v }
+    this.emit()
+  }
+
+  setQueue(items: Song[]): void {
+    this.state = { ...this.state, queue: [...items] }
+  }
+
+  setMode(mode: PlayMode): void {
+    this.state = { ...this.state, mode }
+  }
+
+  onStateChange(cb: (state: PlayerState) => void): void {
+    this.stateListeners.push(cb)
+  }
+
+  onEnded(cb: (song: Song | null) => void): void {
+    this.endedListeners.push(cb)
+  }
+
+  emit(): void {
+    for (const cb of this.stateListeners) cb(this.state)
+  }
+}
+
+describe('PlayerBar：播放控制（要求 G / L）', () => {
+  it('播放 / 暂停按钮反映 isPlaying，点击触发对应 action', () => {
+    const engine = new FakeEngine()
+    const store = createPlayerStore(engine)
+    store.getState().playTrack(makeSong(1))
+    render(<PlayerBar store={store} />)
+
+    fireEvent.click(screen.getByLabelText('暂停'))
+    expect(engine.pauseCalls).toBe(1)
+
+    fireEvent.click(screen.getByLabelText('播放'))
+    expect(engine.resumeCalls).toBe(1)
+  })
+
+  it('下一首走 store 的 next()', () => {
+    const store = createPlayerStore(new FakeEngine())
+    const songs = [makeSong(1), makeSong(2)]
+    store.getState().playTrack(songs[0]!, songs)
+    render(<PlayerBar store={store} />)
+
+    fireEvent.click(screen.getByLabelText('下一首'))
+    expect(store.getState().current?.title).toBe('歌2')
+  })
+
+  it('上一首走 playerStore.prev()：进度 > 3 秒 → 回到本曲开头（不是上一首）', () => {
+    const engine = new FakeEngine()
+    const store = createPlayerStore(engine)
+    const songs = [makeSong(1), makeSong(2)]
+    store.getState().playTrack(songs[0]!, songs)
+    engine.seek(5) // 进度 > 3 秒
+    render(<PlayerBar store={store} />)
+
+    fireEvent.click(screen.getByLabelText('上一首'))
+
+    // 仍然是本曲（重播 = 回到本曲开头），引擎被要求重播了一次
+    expect(store.getState().current?.title).toBe('歌1')
+    expect(engine.played).toHaveLength(2)
+  })
+
+  it('上一首：进度 ≤ 3 秒时才真的切到上一首', () => {
+    const engine = new FakeEngine()
+    const store = createPlayerStore(engine)
+    const songs = [makeSong(1), makeSong(2)]
+    store.getState().playTrack(songs[1]!, songs)
+    engine.seek(1)
+    render(<PlayerBar store={store} />)
+
+    fireEvent.click(screen.getByLabelText('上一首'))
+
+    expect(store.getState().current?.title).toBe('歌1')
+  })
+})
+
+describe('PlayerBar：进度条与音量（要求 G）', () => {
+  it('拖动进度条：拖动中不 seek，松手才 seek（参数正确）', () => {
+    const engine = new FakeEngine()
+    const store = createPlayerStore(engine)
+    store.getState().playTrack(makeSong(1))
+    render(<PlayerBar store={store} />)
+
+    const slider = screen.getByLabelText('播放进度') as HTMLInputElement
+    fireEvent.change(slider, { target: { value: '42' } })
+
+    // 拖动中：只显示预览时间，**不**发 seek
+    expect(engine.seeks).toHaveLength(0)
+    expect(screen.getByTestId('player-position').textContent).toBe('0:42')
+
+    fireEvent.mouseUp(slider)
+
+    expect(engine.seeks).toEqual([42])
+  })
+
+  it('音量变化触发 setVolume 且被钳制在 [0,1]', () => {
+    const engine = new FakeEngine()
+    const store = createPlayerStore(engine)
+    render(<PlayerBar store={store} />)
+
+    const slider = screen.getByLabelText('音量') as HTMLInputElement
+    fireEvent.change(slider, { target: { value: '0.4' } })
+    expect(engine.volumes).toContain(0.4)
+    expect(store.getState().volume).toBe(0.4)
+
+    fireEvent.change(slider, { target: { value: '9' } })
+    expect(store.getState().volume).toBeLessThanOrEqual(1)
+    expect(store.getState().volume).toBeGreaterThanOrEqual(0)
+  })
+
+  it('EQ 入口只留位置（禁用 + 提示「即将支持」，不实现 EQ 逻辑）', () => {
+    const store = createPlayerStore(new FakeEngine())
+    render(<PlayerBar store={store} />)
+
+    const eq = screen.getByRole('button', { name: 'EQ' })
+    expect(eq.hasAttribute('disabled')).toBe(true)
+    expect(eq.getAttribute('title')).toContain('即将支持')
+  })
+})
+
+describe('PlayerBar：音质标识（要求 E）', () => {
+  it('FLAC + 44.1kHz/16bit → 无损（非 Hi-Res）', () => {
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1, { codec: 'FLAC', sampleRate: 44100, bitDepth: 16 }))
+    render(<PlayerBar store={store} />)
+
+    expect(screen.getByTestId('player-quality').textContent).toBe('无损')
+  })
+
+  it('FLAC + 96kHz/24bit → Hi-Res', () => {
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1, { codec: 'FLAC', sampleRate: 96000, bitDepth: 24 }))
+    render(<PlayerBar store={store} />)
+
+    expect(screen.getByTestId('player-quality').textContent).toBe('Hi-Res')
+  })
+
+  it('MP3 → 无标识', () => {
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1, { codec: 'MP3', sampleRate: 44100, bitDepth: 16 }))
+    render(<PlayerBar store={store} />)
+
+    expect(screen.queryByTestId('player-quality')).toBeNull()
+  })
+
+  it('判定是纯函数（不依赖 DOM）：无损集合 + Hi-Res 规则', () => {
+    expect(resolveQuality(null)).toBeNull()
+    expect(resolveQuality(makeSong(1, { codec: 'MP3' }))).toBeNull()
+    expect(resolveQuality(makeSong(1, { codec: 'flac' }))).toBe('lossless') // 大小写不敏感
+    expect(resolveQuality(makeSong(1, { codec: 'FLAC', sampleRate: 48000 }))).toBe('hires')
+    expect(resolveQuality(makeSong(1, { codec: 'FLAC', bitDepth: 24 }))).toBe('hires')
+    expect(LOSSLESS_CODECS.has('FLAC')).toBe(true)
+    expect(LOSSLESS_CODECS.has('MP3')).toBe(false)
+  })
+})
+
+describe('PlayerBar：队列面板（要求 G）', () => {
+  it('打开队列面板，显示当前队列，可切换曲目', () => {
+    const store = createPlayerStore(new FakeEngine())
+    const songs = [makeSong(1), makeSong(2)]
+    store.getState().playTrack(songs[0]!, songs)
+    render(<PlayerBar store={store} />)
+
+    fireEvent.click(screen.getByLabelText('播放队列'))
+
+    expect(screen.getByText('歌1 · 甲')).toBeTruthy()
+    fireEvent.click(screen.getByText('歌2 · 甲'))
+    expect(store.getState().current?.title).toBe('歌2')
+  })
+
+  it('可以从队列里移除一首', () => {
+    const store = createPlayerStore(new FakeEngine())
+    const songs = [makeSong(1), makeSong(2)]
+    store.getState().playTrack(songs[0]!, songs)
+    render(<PlayerBar store={store} />)
+
+    fireEvent.click(screen.getByLabelText('播放队列'))
+    fireEvent.click(screen.getByLabelText('从队列移除 歌1'))
+
+    expect(store.getState().queue.map((song) => song.title)).toEqual(['歌2'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 全屏播放页（要求 C / F）
+// ---------------------------------------------------------------------------
+
+/** 造一条占位歌词条目。 */
+function makeEntry(content: string, guid: string): LyricEntry {
+  return {
+    guid,
+    source: 'local',
+    content,
+    createdAt: null,
+    updatedAt: null,
+    isLRC: true,
+    offset: 0,
+  }
+}
+
+describe('FullPlayerPage：歌词（要求 C / K）', () => {
+  it('没有歌词时显示「暂无歌词」（不白屏、不崩）', async () => {
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1))
+    const api = { list: vi.fn(async () => [] as LyricEntry[]) }
+
+    render(<FullPlayerPage store={store} lyricApi={api} />)
+
+    expect(await screen.findByText('暂无歌词')).toBeTruthy()
+  })
+
+  it('有歌词时用 Task 12 的 parseLyricEntries 解析并渲染（双行模式）', async () => {
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1))
+    const api = {
+      list: vi.fn(async () => [
+        makeEntry('[00:10.00]甲行甲', 'g1'),
+        makeEntry('[00:10.00]甲译甲', 'g2'),
+      ]),
+    }
+
+    render(<FullPlayerPage store={store} lyricApi={api} />)
+
+    expect(await screen.findByText('甲行甲')).toBeTruthy()
+    // 翻译挂在同一行下（Task 12 的合并结果）
+    expect(screen.getByTestId('lyric-translation').textContent).toBe('甲译甲')
+  })
+
+  it('歌词接口失败时给出可读的错误提示（不崩）', async () => {
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1))
+    const api = {
+      list: vi.fn(async () => {
+        throw new Error('服务器响应异常（HTTP 500）')
+      }),
+    }
+
+    render(<FullPlayerPage store={store} lyricApi={api} />)
+
+    expect(await screen.findByRole('alert')).toBeTruthy()
+  })
+})
+
+describe('FullPlayerPage：封面取色（要求 F / N）', () => {
+  /** 记录被创建过的图片地址。 */
+  let imageSources: string[] = []
+  let originalImage: typeof Image
+  let originalGetContext: typeof HTMLCanvasElement.prototype.getContext
+
+  /** 装上图片 / canvas 的替身。 */
+  function stubImage(fail: boolean): void {
+    class StubImage {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      set src(value: string) {
+        imageSources.push(value)
+        setTimeout(() => {
+          if (fail) this.onerror?.()
+          else this.onload?.()
+        }, 0)
+      }
+      get src(): string {
+        return ''
+      }
+    }
+    window.Image = StubImage as unknown as typeof Image
+    HTMLCanvasElement.prototype.getContext = (() => ({
+      drawImage: () => undefined,
+      getImageData: () => ({ data: new Uint8ClampedArray([10, 20, 30, 255]) }),
+    })) as unknown as typeof HTMLCanvasElement.prototype.getContext
+  }
+
+  beforeEach(() => {
+    imageSources = []
+    originalImage = window.Image
+    originalGetContext = HTMLCanvasElement.prototype.getContext
+    clearCoverColorCache()
+  })
+
+  afterEach(() => {
+    window.Image = originalImage
+    HTMLCanvasElement.prototype.getContext = originalGetContext
+    clearCoverColorCache()
+  })
+
+  it('取到色时把颜色写进 CSS 变量（背景由 CSS 变量驱动）', async () => {
+    stubImage(false)
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1, { coverId: 'track_abc' }))
+    const api = { list: vi.fn(async () => [] as LyricEntry[]) }
+
+    render(<FullPlayerPage store={store} lyricApi={api} />)
+
+    await waitFor(() => {
+      const style =
+        document.querySelector('[data-testid="full-player"]')?.getAttribute('style') ?? ''
+      expect(style).toContain('--fnm-fullplayer__tint')
+    })
+    expect(getCachedCoverColor('track_abc')).toBe('#0a141e')
+  })
+
+  it('取色结果按 coverId 缓存（换歌不重算）', async () => {
+    stubImage(false)
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1, { coverId: 'track_abc' }))
+    const api = { list: vi.fn(async () => [] as LyricEntry[]) }
+
+    render(<FullPlayerPage store={store} lyricApi={api} />)
+    await waitFor(() => {
+      expect(getCachedCoverColor('track_abc')).not.toBeUndefined()
+    })
+
+    // 换一首歌，但封面 id 不变 → 不再取色
+    store.getState().playTrack(makeSong(2, { coverId: 'track_abc' }))
+    await waitFor(() => {
+      expect(store.getState().current?.title).toBe('歌2')
+    })
+    expect(imageSources).toHaveLength(1)
+  })
+
+  it('取不到色时回退到默认背景（不写 tint 变量，CSS 走语义变量）', async () => {
+    stubImage(true)
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1, { coverId: 'track_abc' }))
+    const api = { list: vi.fn(async () => [] as LyricEntry[]) }
+
+    render(<FullPlayerPage store={store} lyricApi={api} />)
+
+    await waitFor(() => {
+      expect(getCachedCoverColor('track_abc')).toBeNull()
+    })
+    const style =
+      document.querySelector('[data-testid="full-player"]')?.getAttribute('style') ?? ''
+    expect(style).not.toContain('--fnm-fullplayer__tint')
+  })
+
+  it('extractCoverColor：图片加载失败时解析成 null（回退默认背景）', async () => {
+    stubImage(true)
+    await expect(extractCoverColor('fnm://srv/cover-test')).resolves.toBeNull()
+  })
+
+  it('extractCoverColor：取到像素时给出代表色', async () => {
+    stubImage(false)
+    await expect(extractCoverColor('fnm://srv/cover-test')).resolves.toBe('#0a141e')
   })
 })
