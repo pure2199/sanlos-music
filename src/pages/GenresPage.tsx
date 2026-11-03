@@ -28,13 +28,14 @@ export function GenresPage({ api, store, onOpenGenre }: GenresPageProps): ReactE
   const resolved = useResolvedLibraryStore(api, store)
   const genres = useStore(resolved, (s) => s.genres)
   const loadGenres = useStore(resolved, (s) => s.loadGenres)
-  const pageSize = useStore(resolved, (s) => s.pageSize)
 
   useEffect(() => {
     void loadGenres(1)
   }, [loadGenres])
 
-  const nextPage = Math.floor(genres.items.length / pageSize) + 1
+  // ⚠️ 页码**直接读 store 的页码簿记**——不能用 `items.length / pageSize` 反推
+  //    （短页 / 重复 id 会让翻页永久卡死，详见 `libraryStore.ts` 的 `nextPage`）。
+  const nextPage = genres.nextPage
   const handleLoadMore = useCallback(() => {
     void loadGenres(nextPage)
   }, [loadGenres, nextPage])

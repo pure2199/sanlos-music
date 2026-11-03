@@ -28,13 +28,14 @@ export function ArtistsPage({ api, store, onOpenArtist }: ArtistsPageProps): Rea
   const resolved = useResolvedLibraryStore(api, store)
   const artists = useStore(resolved, (s) => s.artists)
   const loadArtists = useStore(resolved, (s) => s.loadArtists)
-  const pageSize = useStore(resolved, (s) => s.pageSize)
 
   useEffect(() => {
     void loadArtists(1)
   }, [loadArtists])
 
-  const nextPage = Math.floor(artists.items.length / pageSize) + 1
+  // ⚠️ 页码**直接读 store 的页码簿记**——不能用 `items.length / pageSize` 反推
+  //    （短页 / 重复 id 会让翻页永久卡死，详见 `libraryStore.ts` 的 `nextPage`）。
+  const nextPage = artists.nextPage
   const handleLoadMore = useCallback(() => {
     void loadArtists(nextPage)
   }, [loadArtists, nextPage])

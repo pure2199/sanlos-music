@@ -303,18 +303,23 @@ export function SongList(props: SongListProps): ReactElement {
     if (element.ownerDocument.activeElement !== element) element.focus()
   }, [currentIndex, endIndex, startIndex])
 
+  const rows = songs.slice(startIndex, endIndex)
+  const totalText = formatCount(total ?? songs.length)
+  const statusText = `已加载 ${formatCount(songs.length)} / ${totalText}${loading ? '，加载中…' : ''}`
+
+  // 空态**也要**渲染状态行：组件必须始终暴露「已加载 / 总共」（要求 E）。
   if (songs.length === 0) {
     return (
       <div className="fnm-songlist" style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0 }}>
         <p className="fnm-songlist__empty" style={EMPTY}>
           {emptyLabel}
         </p>
+        <p className="fnm-songlist__status" style={STATUS}>
+          {statusText}
+        </p>
       </div>
     )
   }
-
-  const rows = songs.slice(startIndex, endIndex)
-  const totalText = formatCount(total ?? songs.length)
 
   return (
     <div
@@ -401,7 +406,7 @@ export function SongList(props: SongListProps): ReactElement {
       </div>
 
       <p className="fnm-songlist__status" style={STATUS}>
-        {`已加载 ${formatCount(songs.length)} / ${totalText}${loading ? '，加载中…' : ''}`}
+        {statusText}
       </p>
     </div>
   )

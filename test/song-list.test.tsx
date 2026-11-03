@@ -15,8 +15,9 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import type { Album, Artist, Genre, Playlist, Song } from '../shared/types'
 import { SongList, SONG_ROW_HEIGHT, SONG_LIST_BUFFER_ROWS } from '../src/components/SongList'
@@ -151,6 +152,17 @@ function listFiles(dir: string): string[] {
  */
 const COVER_PATH_LITERAL = ['static', 'cover'].join('/')
 
+/**
+ * 仓库根目录（**不依赖 `process.cwd()`**）。
+ *
+ * ⚠️ 用 `process.cwd()` 锚定时，cwd ≠ 仓库根（例如从别的目录跑 vitest），
+ *    扫描的就是别的目录 → 断言**空转通过**（既没扫到东西，也没报错）。
+ *    这里从**本测试文件自身的位置**推导仓库根，与 cwd 无关。
+ */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+/** 源码目录（扫描目标）。 */
+const SRC_DIR = join(REPO_ROOT, 'src')
+
 // ---------------------------------------------------------------------------
 // SongList 交互语义（要求 D）
 // ---------------------------------------------------------------------------
@@ -260,6 +272,11 @@ describe('SongList 交互语义', () => {
     render(<SongList songs={[]} onPlay={vi.fn()} />)
     expect(screen.getByText('暂无歌曲')).toBeTruthy()
   })
+
+  it('空列表时**也**渲染状态行（已加载 0 / 总共 N）', () => {
+    render(<SongList songs={[]} onPlay={vi.fn()} total={173669} />)
+    expect(screen.getByText('已加载 0 / 173,669')).toBeTruthy()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -360,10 +377,13 @@ describe('封面 URL 收敛点', () => {
   })
 
   it('全项目只有 src/components/coverUrl.ts 拼装封面地址', () => {
-    const srcDir = join(process.cwd(), 'src')
-    const hits = listFiles(srcDir)
+    // ⚠️ 先确认扫描目录**确实**是仓库的 src（否则下面的断言会空转通过）。
+    expect(existsSync(join(SRC_DIR, 'components', 'coverUrl.ts'))).toBe(true)
+    expect(listFiles(SRC_DIR).length).toBeGreaterThan(0)
+
+    const hits = listFiles(SRC_DIR)
       .filter((file) => readFileSync(file, 'utf8').includes(COVER_PATH_LITERAL))
-      .map((file) => relative(srcDir, file).split(sep).join('/'))
+      .map((file) => relative(SRC_DIR, file).split(sep).join('/'))
       .sort()
     expect(hits).toEqual(['components/coverUrl.ts'])
   })
@@ -526,7 +546,16 @@ describe('曲库页面', () => {
     }))
     const store = createLibraryStore(createFakeApi())
     store.setState({
-      albums: { items: many, total: 34071, loading: false, hasMore: true, error: null, loaded: true },
+      albums: {
+        items: many,
+        total: 34071,
+        loading: false,
+        hasMore: true,
+        error: null,
+        loaded: true,
+        // 页码簿记的对外视图：已加载第 1 页 → 下一个该请求第 2 页。
+        nextPage: 2,
+      },
     })
 
     const { container } = render(<AlbumsPage store={store} />)
@@ -583,5 +612,109 @@ describe('曲库页面', () => {
 
     expect(await screen.findByText('歌一')).toBeTruthy()
     expect(api.playlistSongs).toHaveBeenCalledWith('playlist-1', expect.any(Number), expect.any(Number))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 增量翻页（OF-01：页码簿记必须暴露成状态，页面**不许**从 items.length 反推）
+//
+// ⚠️ 这三条用例守护的是**页面层**的增量加载触发：
+//    - 服务端某页返回条数少于 `pageSize`（短页）；
+//    - 相邻两页出现重复 id（去重后不足整页）；
+//    - 一次滚到底只追加**一页**。
+//
+//    三者在「用 `Math.floor(items.length / pageSize) + 1` 反推页码」的实现下
+//    都会**永久卡死**：反推出的页码退回已加载过的页 → store 的页码幂等守卫
+//    把它变成空操作 → `hasMore` 仍为 true，但列表永远停在原地。
+// ---------------------------------------------------------------------------
+
+describe('曲库页面的增量翻页', () => {
+  /** jsdom 没有布局引擎：`scrollTop` 必须手工定死。 */
+  function pinScrollTop(element: HTMLElement, value: number): void {
+    Object.defineProperty(element, 'scrollTop', {
+      value,
+      writable: true,
+      configurable: true,
+    })
+  }
+
+  /** 等当前这页请求结束（`loading` 回到 false）。 */
+  async function waitForIdle(
+    store: ReturnType<typeof createLibraryStore>,
+    key: 'songs' | 'albums',
+  ): Promise<void> {
+    await waitFor(() => expect(store.getState()[key].loading).toBe(false))
+  }
+
+  it('服务端返回短页（少于 pageSize）时仍能翻到下一页', async () => {
+    // 每页只给 20 条（`pageSize` 是 50）——反推页码会退回第 1 页 → 永久卡死。
+    const api = createFakeApi({
+      songs: vi.fn(async (page: number) => ({
+        list: Array.from({ length: 20 }, (_, i) => makeSong((page - 1) * 20 + i)),
+        total: 100,
+      })),
+    })
+    const store = createLibraryStore(api)
+    render(<SongsPage store={store} />)
+    await waitFor(() => expect(store.getState().songs.items).toHaveLength(20))
+
+    const viewport = screen.getByRole('listbox')
+    pinScrollTop(viewport, 10_000)
+    fireEvent.scroll(viewport)
+
+    // 必须请求**第 2 页**（反推页码的实现会一直请求第 1 页 → 被幂等守卫吞掉）。
+    await waitFor(() => expect(api.songs).toHaveBeenCalledWith(2, 50))
+    await waitForIdle(store, 'songs')
+    expect(store.getState().songs.items).toHaveLength(40)
+  })
+
+  it('相邻两页出现重复 id 时仍能翻到下一页', async () => {
+    // 第 2 页返回与第 1 页**完全相同**的 50 个 id → 去重后 items 不增长。
+    const firstPage = Array.from({ length: 50 }, (_, i) => makeSong(i))
+    const api = createFakeApi({
+      songs: vi.fn(async () => ({ list: firstPage, total: 100 })),
+    })
+    const store = createLibraryStore(api)
+    render(<SongsPage store={store} />)
+    await waitFor(() => expect(store.getState().songs.items).toHaveLength(50))
+
+    const viewport = screen.getByRole('listbox')
+    pinScrollTop(viewport, 10_000)
+
+    fireEvent.scroll(viewport)
+    await waitFor(() => expect(api.songs).toHaveBeenCalledWith(2, 50))
+    await waitForIdle(store, 'songs')
+    // 重复 id → 条数不增长（这是对的），但**页码必须继续往前推**。
+    expect(store.getState().songs.items).toHaveLength(50)
+
+    // 再滚一次 → 必须请求**第 3 页**（反推页码的实现会永远停在第 2 页）。
+    fireEvent.scroll(viewport)
+    await waitFor(() => expect(api.songs).toHaveBeenCalledWith(3, 50))
+  })
+
+  it('滚动到底只追加一页（一次滚动不多拉）', async () => {
+    const api = createFakeApi({
+      albums: vi.fn(async (page: number) => ({
+        list: Array.from({ length: 20 }, (_, i) => ({
+          ...ALBUM,
+          id: `album-${(page - 1) * 20 + i}`,
+          title: `示例专辑${(page - 1) * 20 + i}`,
+        })),
+        total: 100,
+      })),
+    })
+    const store = createLibraryStore(api)
+    render(<AlbumsPage store={store} />)
+    await waitFor(() => expect(store.getState().albums.items).toHaveLength(20))
+
+    const grid = screen.getByRole('list')
+    pinScrollTop(grid, 10_000)
+    fireEvent.scroll(grid)
+
+    await waitFor(() => expect(api.albums).toHaveBeenCalledWith(2, 50))
+    await waitForIdle(store, 'albums')
+    // 一次滚动 → **恰好一页**（既不追加零页，也不追加两页）。
+    expect(store.getState().albums.items).toHaveLength(40)
+    expect(api.albums).toHaveBeenCalledTimes(2)
   })
 })

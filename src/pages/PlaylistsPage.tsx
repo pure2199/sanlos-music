@@ -74,7 +74,6 @@ export function PlaylistsPage({
   const loadPlaylists = useStore(resolved, (s) => s.loadPlaylists)
   const loadPlaylistSongs = useStore(resolved, (s) => s.loadPlaylistSongs)
   const selectPlaylist = useStore(resolved, (s) => s.selectPlaylist)
-  const pageSize = useStore(resolved, (s) => s.pageSize)
 
   useEffect(() => {
     void loadPlaylists()
@@ -89,7 +88,9 @@ export function PlaylistsPage({
     [loadPlaylistSongs, selectPlaylist],
   )
 
-  const nextPage = Math.floor(playlistSongs.items.length / pageSize) + 1
+  // ⚠️ 页码**直接读 store 的页码簿记**——不能用 `items.length / pageSize` 反推
+  //    （短页 / 重复 id 会让翻页永久卡死，详见 `libraryStore.ts` 的 `nextPage`）。
+  const nextPage = playlistSongs.nextPage
   const handleLoadMore = useCallback(() => {
     if (!playlistId) return
     void loadPlaylistSongs(playlistId, nextPage)

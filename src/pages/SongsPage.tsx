@@ -32,13 +32,14 @@ export function SongsPage({ api, store, onPlay, onSelect }: SongsPageProps): Rea
   const resolved = useResolvedLibraryStore(api, store)
   const songs = useStore(resolved, (s) => s.songs)
   const loadSongs = useStore(resolved, (s) => s.loadSongs)
-  const pageSize = useStore(resolved, (s) => s.pageSize)
 
   useEffect(() => {
     void loadSongs(1)
   }, [loadSongs])
 
-  const nextPage = Math.floor(songs.items.length / pageSize) + 1
+  // ⚠️ 页码**直接读 store 的页码簿记**——不能用 `items.length / pageSize` 反推
+  //    （短页 / 重复 id 会让翻页永久卡死，详见 `libraryStore.ts` 的 `nextPage`）。
+  const nextPage = songs.nextPage
   const handleLoadMore = useCallback(() => {
     void loadSongs(nextPage)
   }, [loadSongs, nextPage])

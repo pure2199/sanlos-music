@@ -90,11 +90,33 @@ export interface LibraryCollection<T> {
   error: string | null
   /** 是否至少成功加载过一次。 */
   loaded: boolean
+  /**
+   * **下一个应该请求的页码**（页码簿记对外的视图）。
+   *
+   * ⚠️ 页面**必须**直接读这个值去请求下一页，
+   *    **不能**用 `Math.floor(items.length / pageSize) + 1` 反推：
+   *    - 服务端某页返回条数**少于** `pageSize`（短页）时，反推会退回已加载过的页；
+   *    - 相邻两页出现**重复 id**（去重后不足整页）时，同样会退回；
+   *    - 退回来的页码会被下面的**页码幂等守卫**变成空操作 →
+   *      `hasMore` 仍为 true，但列表**永远停在原地**（不可恢复的功能性卡死）。
+   *
+   * 这里记录的是「**请求过**的页码」，与「**收到多少条**」无关——
+   * 所以短页 / 重复 id 都**不会**让翻页停滞。
+   */
+  nextPage: number
 }
 
 /** 造一个空集合。 */
 function emptyCollection<T>(): LibraryCollection<T> {
-  return { items: [], total: 0, loading: false, hasMore: false, error: null, loaded: false }
+  return {
+    items: [],
+    total: 0,
+    loading: false,
+    hasMore: false,
+    error: null,
+    loaded: false,
+    nextPage: 1,
+  }
 }
 
 /** 把异常变成可读的文案。 */
@@ -213,6 +235,9 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
         hasMore: merged.length < result.total && result.list.length > 0,
         error: null,
         loaded: true,
+        // 页码簿记的对外视图：**请求过的页码**往前推一格。
+        // （与 `items.length` 无关——短页 / 重复 id 都不会让翻页停滞。）
+        nextPage: Math.max(latest.nextPage, page + 1),
       })
     } catch (err) {
       const latest = read()
@@ -254,6 +279,8 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
         hasMore: false,
         error: null,
         loaded: true,
+        // 全量接口：没有「下一页」。
+        nextPage: 1,
       })
     } catch (err) {
       const latest = read()

@@ -31,7 +31,6 @@ export function AlbumsPage({ api, store, onOpenAlbum }: AlbumsPageProps): ReactE
   const resolved = useResolvedLibraryStore(api, store)
   const albums = useStore(resolved, (s) => s.albums)
   const loadAlbums = useStore(resolved, (s) => s.loadAlbums)
-  const pageSize = useStore(resolved, (s) => s.pageSize)
 
   // 首次加载第一页（store 内部是幂等的，重复调用不会重复追加）。
   useEffect(() => {
@@ -39,7 +38,11 @@ export function AlbumsPage({ api, store, onOpenAlbum }: AlbumsPageProps): ReactE
   }, [loadAlbums])
 
   // 增量加载：每次只追加**一页**。
-  const nextPage = Math.floor(albums.items.length / pageSize) + 1
+  // ⚠️ 页码**直接读 store 的页码簿记**（`albums.nextPage`）——
+  //    **不能**用 `items.length / pageSize` 反推：服务端返回短页、
+  //    或相邻两页出现重复 id 时，反推出的页码会退回已加载过的页 →
+  //    被 store 的幂等守卫吞成空操作 → 列表**永久卡死**。
+  const nextPage = albums.nextPage
   const handleLoadMore = useCallback(() => {
     void loadAlbums(nextPage)
   }, [loadAlbums, nextPage])
