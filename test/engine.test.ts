@@ -113,11 +113,26 @@ class FakeAudioElement implements MediaElementLike {
   muted = false
   playCalls = 0
   playResult: Promise<void> | void = undefined
+  /**
+   * 依次交给 `play()` 的结果队列（**按调用顺序**，取完即从队列移除）。
+   *
+   * 空 → 每次 `play()` 都返回 `playResult`（旧行为，不变）。
+   * 用来模拟「上一首的 `play()` 一直不兑现（流还在缓冲）」这类场景。
+   */
+  playResults: Array<Promise<void> | void> = []
+  /**
+   * `removeEventListener` 的调用记录（按调用顺序记录事件类型）。
+   *
+   * ⚠️ 有了它，「旧元素的监听已解绑」才**有鉴别力**：只断言「旧元素发事件不影响引擎」
+   * 是**空洞**的（引擎读的是**新**元素，旧元素挂没挂监听都测不出来）。
+   */
+  removedTypes: string[] = []
   private listeners = new Map<string, Set<(event: unknown) => void>>()
 
   play(): Promise<void> | void {
     this.playCalls += 1
     this.paused = false
+    if (this.playResults.length > 0) return this.playResults.shift()
     return this.playResult
   }
 
@@ -132,6 +147,7 @@ class FakeAudioElement implements MediaElementLike {
   }
 
   removeEventListener(type: string, listener: (event: unknown) => void): void {
+    this.removedTypes.push(type)
     this.listeners.get(type)?.delete(listener)
   }
 
@@ -357,6 +373,120 @@ describe('PlayerEngine：换歌引发的 abort 不是错误（回归）', () => 
   })
 })
 
+// ---------------------------------------------------------------------------
+// 修复轮次 2 · I-1：`play()` 的 Promise 被拒（`AbortError`）也要区分「换歌」与「真实中止」
+//
+// 真实 Chromium 128（Electron 32.3.3）实测：**上一首的 `play()` Promise 尚未兑现
+// （流还在缓冲）时切歌**，那个 Promise 会被以 `AbortError` 拒掉——
+// 机制**不是** `abort` 事件，而是 **Promise 拒绝**，所以上一轮（F1）那个
+// 「自主动作」布尔标记**管不到它**（`emptied`/`loadstart` 一到就把标记清零了）。
+//
+// 判据：**记住「这次 `play()` 调用属于哪一轮加载」**（`loadGeneration`）。
+// - 引擎每改一次 `src` 就把轮次号 +1；
+// - Promise 被拒时若轮次号**已经变了** → 引擎**后来换过歌** → 这次中止是
+//   **自主动作** → 不写错误、也不动 `playing`（新歌照播）；
+// - 轮次号**没变** → 没有任何引擎自主动作介入 → **真实**的中止 → 必须报错。
+//
+// ⚠️ 为什么不能只看布尔标记：标记在 `emptied`/`loadstart` 时清零，而浏览器把这两个
+// 事件排在**上一首的 play() Promise 被拒之前**送达 → 到达拒绝处理器时标记早已是 false。
+// 轮次号**只增不减**，不受事件顺序影响。
+// ---------------------------------------------------------------------------
+describe('PlayerEngine：play() 被 AbortError 拒掉（修复轮次 2 · I-1）', () => {
+  /** 造一个 `AbortError`（`DOMException` 不是 `Error` 的实例，用普通对象模拟）。 */
+  const abortError = (): { name: string } => ({ name: 'AbortError' })
+
+  /** 造一个「永不兑现」的 Promise（模拟流还在缓冲）。 */
+  const neverSettles = (): Promise<void> => new Promise<void>(() => {})
+
+  /** 造一个「稍后会被拒」的 Promise。 */
+  const rejectable = (): { promise: Promise<void>; reject: (reason: unknown) => void } => {
+    let reject!: (reason: unknown) => void
+    const promise = new Promise<void>((_resolve, r) => {
+      reject = r
+    })
+    return { promise, reject }
+  }
+
+  /** 冲刷微任务（让 `play()` 的拒绝处理器跑完）。 */
+  const flush = (): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+  it('换歌后：上一首未兑现的 play() 被 AbortError 拒掉也不写错误', async () => {
+    // ⚠️ 鉴别力：把「按加载轮次判定」的守卫删掉 → 本条**红**。
+    const { engine, element } = createEngine()
+    const first = rejectable()
+    element.playResults.push(first.promise)
+    engine.play(song('a'))
+    // 切歌：引擎改 `src` → 上一首那个还没兑现的 play() Promise 被中止
+    element.playResults.push(neverSettles())
+    engine.play(song('b'))
+    // ⚠️ 真实浏览器里 `emptied`/`loadstart` 会**先于**拒绝送达
+    //    → 布尔「自主动作」标记此时已被清零（这正是单靠布尔标记不够的原因）。
+    element.emit('emptied', { target: element })
+    element.emit('loadstart', { target: element })
+    first.reject(abortError())
+    await flush()
+    expect(engine.state.error).toBeNull()
+    expect(engine.state.isPlaying).toBe(true)
+  })
+
+  it('同一任务内连续换两次歌：最早的 play() 被 AbortError 拒掉同样不写错误', async () => {
+    // ⚠️ 鉴别力：这一条覆盖「同任务连改两次 `src`」——上一轮报告曾写它「现网不可达」，
+    //    复审实测证伪（机制是 Promise 拒绝，不是 `abort` 事件）。
+    const { engine, element } = createEngine()
+    const first = rejectable()
+    const second = rejectable()
+    element.playResults.push(first.promise, second.promise, neverSettles())
+    engine.play(song('a'))
+    engine.play(song('b'))
+    engine.play(song('c'))
+    element.emit('emptied', { target: element })
+    element.emit('loadstart', { target: element })
+    first.reject(abortError())
+    second.reject(abortError())
+    await flush()
+    expect(engine.state.error).toBeNull()
+    expect(engine.state.isPlaying).toBe(true)
+  })
+
+  it('非换歌场景：真实的 AbortError 仍然写入可读错误（反向用例）', async () => {
+    // ⚠️ 反向用例：防止「把整个 `AbortError` 分支删掉 / 一律忽略」这种假修复。
+    const { engine, element } = createEngine()
+    const only = rejectable()
+    element.playResults.push(only.promise)
+    engine.play(song('a'))
+    // 引擎**没有**再改 `src` → 这次中止不是换歌造成的 → 真实错误
+    only.reject(abortError())
+    await flush()
+    expect(engine.state.error).toContain('中止')
+    expect(engine.state.isPlaying).toBe(false)
+  })
+
+  it('真实 abort 之后引擎不再声称在播放（修复轮次 2 · M-4）', () => {
+    // ⚠️ 鉴别力：把 `handleAbort` 里的 `playing = false` / `stopTicking()` 删掉 → 本条**红**。
+    const { engine, element, clock } = createEngine()
+    engine.play(song('a'))
+    expect(clock.pendingFrames()).toBe(1)
+    // 新一轮加载已经开始 → 此时的 abort 来自引擎**之外** → 真实错误
+    element.emit('emptied', { target: element })
+    element.emit('loadstart', { target: element })
+    element.emit('abort', { target: element })
+    expect(engine.state.error).toContain('中止')
+    expect(engine.state.isPlaying).toBe(false)
+    expect(clock.pendingFrames()).toBe(0)
+  })
+
+  it('换歌自主动作的 abort 不打断播放（不置 playing=false，也不停进度推进）', () => {
+    // ⚠️ M-4 的另一半：自主动作的 abort 必须**只静默忽略**，不得停播放。
+    const { engine, element, clock } = createEngine()
+    engine.play(song('a'))
+    engine.play(song('b'))
+    element.emit('abort', { target: element })
+    expect(engine.state.error).toBeNull()
+    expect(engine.state.isPlaying).toBe(true)
+    expect(clock.pendingFrames()).toBe(1)
+  })
+})
+
 describe('PlayerEngine：音量与进度', () => {
   it('音量钳制到 [0,1]，NaN 被忽略', () => {
     const { engine } = createEngine()
@@ -560,6 +690,11 @@ describe('PlayerEngine：dispose 之后仍可复用（回归）', () => {
     created[0]!.emit('timeupdate', { target: created[0] })
     expect(engine.state.position).toBe(7)
     // 旧元素的监听已解绑（不该再影响引擎）
+    // ⚠️ 鉴别力：只断言「旧元素发事件不影响引擎」是**空洞**的——引擎读的是**新**元素，
+    //    旧元素上就算还挂着监听也测不出来。真正能钉住「解绑」的是
+    //    **旧元素的 `removeEventListener` 确实被调用过**（假元素记录调用）。
+    expect(injected.removedTypes).toContain('timeupdate')
+    expect(injected.removedTypes.length).toBeGreaterThan(0)
     injected.currentTime = 99
     injected.emit('timeupdate', { target: injected })
     expect(engine.state.position).toBe(7)
@@ -692,6 +827,19 @@ describe('playerStore', () => {
     store.getState().next() // 队尾 → 没有下一首
     expect(engine.pauseCalls).toBe(pauseCallsBefore + 1)
     expect(store.getState().isPlaying).toBe(false)
+  })
+
+  it('非队尾的 next() 不会调用引擎的 pause()（只换歌，不打断播放）', () => {
+    // ⚠️ 鉴别力：在**非队尾**分支加一次 `engine.pause()` → 本条**红**。
+    //    基线必须在**第一次 `next()` 之前**取，否则会被后续调用污染。
+    const engine = new FakeEngine()
+    const store = createPlayerStore(engine)
+    store.getState().playTrack(song('a'), [song('a'), song('b'), song('c')])
+    const pauseCallsBefore = engine.pauseCalls
+    store.getState().next() // 从 a → b（非队尾）
+    expect(store.getState().current?.id).toBe('b')
+    expect(engine.pauseCalls).toBe(pauseCallsBefore)
+    expect(store.getState().isPlaying).toBe(true)
   })
 
   it('prev 在播放超过 3 秒时回到本曲开头', () => {

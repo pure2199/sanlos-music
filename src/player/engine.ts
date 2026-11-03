@@ -352,6 +352,27 @@ export class PlayerEngine implements PlayerEngineLike {
    */
   private selfInitiatedLoad = false
 
+  /**
+   * 加载轮次号（**单调递增**，只在引擎自己换歌时 +1）。
+   *
+   * 用途：区分「`play()` 的 Promise 被 `AbortError` 拒掉」到底是**引擎自己换歌**
+   * 造成的，还是**真实的加载被中止**。
+   *
+   * 背景（真实 Chromium 128 / Electron 32.3.3 实测）：**上一首的 `play()` Promise
+   * 尚未兑现（流还在缓冲）时切歌**，那个 Promise 会被以 `AbortError` 拒掉——
+   * 机制**不是** `abort` 事件，而是 **Promise 拒绝**，所以上面那个布尔标记
+   * （`selfInitiatedLoad`）**管不到它**：`emptied`/`loadstart` 一到就把标记清零，
+   * 等拒绝处理器跑到时标记早已是 `false`。
+   *
+   * 判据：**记住「这次 `play()` 调用属于哪一轮加载」**——
+   * - 轮次号**变了** → 引擎在这之后**换过歌** → 这次中止是**自主动作**
+   *   → 不写错误、不动 `playing`（新歌照播）；
+   * - 轮次号**没变** → 没有任何引擎自主动作介入 → **真实**的中止 → 必须报错。
+   *
+   * 轮次号**只增不减**，所以不受媒体事件到达顺序的影响。
+   */
+  private loadGeneration = 0
+
   // --- 状态 ---------------------------------------------------------------
   private currentSong: Song | null = null
   private queueItems: Song[] = []
@@ -458,6 +479,10 @@ export class PlayerEngine implements PlayerEngineLike {
       //    （Chromium 发 `abort` → `emptied` → `loadstart`，**不发** `error`）。
       //    置「自主动作」标记：这个 `abort` 不是加载失败，不能写错误。
       this.selfInitiatedLoad = true
+      // ⚠️ 轮次号必须**先**自增再改 `src`：改 `src` 会触发媒体元素的加载算法，
+      //    它会把**上一首**尚未兑现的 `play()` Promise 以 `AbortError` 拒掉。
+      //    先自增 → 那个拒绝处理器跑起来时，轮次号已经变了 → 判定为「换歌自主动作」。
+      this.loadGeneration += 1
       element.src = url
     }
 
@@ -587,6 +612,10 @@ export class PlayerEngine implements PlayerEngineLike {
     this.element = null
     this.injectedElement = null
     this.selfInitiatedLoad = false
+    // ⚠️ 轮次号**只增不减**（这里 +1 而不是归零）：`dispose()` 丢弃了当前加载，
+    //    旧元素上还没兑现的 `play()` Promise 若随后被拒（`AbortError`），
+    //    轮次号已变 → 判定为「被丢弃的自主动作」→ 不写错误。
+    this.loadGeneration += 1
     this.playing = false
   }
 
@@ -671,17 +700,23 @@ export class PlayerEngine implements PlayerEngineLike {
     return this.element?.src ?? ''
   }
 
-  /** 调 `audio.play()` 并处理异步拒绝。 */
+  /**
+   * 调 `audio.play()` 并处理异步拒绝。
+   *
+   * ⚠️ 记下「这次 `play()` 调用属于**哪一轮加载**」（`loadGeneration`），
+   *    好在 Promise 被拒时区分「换歌导致的中止」与「真实的中止」（见 `loadGeneration`）。
+   */
   private invokePlay(element: MediaElementLike): void {
+    const generation = this.loadGeneration
     let result: Promise<void> | void
     try {
       result = element.play()
     } catch {
-      this.handlePlayRejection({ name: 'NotSupportedError' })
+      this.handlePlayRejection({ name: 'NotSupportedError' }, generation)
       return
     }
     if (isPromiseLike(result)) {
-      result.then(undefined, (error: unknown) => this.handlePlayRejection(error))
+      result.then(undefined, (error: unknown) => this.handlePlayRejection(error, generation))
     }
   }
 
@@ -789,16 +824,33 @@ export class PlayerEngine implements PlayerEngineLike {
    *
    * 之所以不吞掉真实 abort：「自主动作」标记在 `emptied` / `loadstart` 时清零，
    * 新一轮加载开始之后到达的 abort 一律照常报错。
+   *
+   * ⚠️ 真实 abort 与 `handlePlayRejection` 的 `AbortError` 分支**行为一致**：
+   *    都要 `playing = false` + `stopTicking()`——真实中止后媒体元素已经停了，
+   *    UI 却还显示「正在播放」是错的。
+   *    但**引擎自己换歌**引发的 abort 仍然**只静默忽略**（不得停播放）。
    */
   private handleAbort(): void {
     if (this.selfInitiatedLoad) return
     this.errorMessage = '音频加载被中止'
+    this.playing = false
+    this.stopTicking()
     this.emit()
   }
 
-  /** `play()` 的 Promise 被拒。 */
-  private handlePlayRejection(error: unknown): void {
+  /**
+   * `play()` 的 Promise 被拒。
+   *
+   * @param error      被拒的原因（读它的 `name`）。
+   * @param generation **发起这次 `play()` 时**的加载轮次号（见 `loadGeneration`）。
+   */
+  private handlePlayRejection(error: unknown, generation: number): void {
     const name = readErrorName(error)
+    // ⚠️ **换歌导致的中止不算错误**：`AbortError` 说明这次 `play()` 所属的加载被中止了。
+    //    若轮次号已经变了 → 引擎在这之后**换过歌** → 是**自主动作**，不是加载失败：
+    //    既不写错误，也**不动 `playing`**（新歌照播，旧歌那个 Promise 只是被拒了）。
+    //    轮次号没变 → 没有任何引擎自主动作介入 → **真实**的中止 → 照常报错。
+    if (name === 'AbortError' && generation !== this.loadGeneration) return
     switch (name) {
       case 'NotAllowedError':
         this.errorMessage = '浏览器阻止了自动播放，请手动点击播放按钮'
