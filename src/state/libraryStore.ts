@@ -19,6 +19,10 @@
 //   本模块**没有任何「取全量」的入口**——收藏 / 歌单除外（那两个接口本身就是全量的）。
 // - **追加语义**：重复调用 `load*()` **不会**把已加载的数据清空重来；
 //   同一页重复请求是**幂等**的（不会把同一页追加两遍，也不会重复发请求）。
+// - **分页护栏**：连续若干页「没有带来任何新条目」（服务端重复返回同一批 id）时，
+//   本模块**主动停下**（`hasMore = false` + `nextPage` 不再前进）。
+//   护栏落在 **store 层**——页面层的「内容填不满视口就自动续一页」effect
+//   （`SongList` 与 `CardGrid` 各一处）因此**同时**被挡住，不会变成无界的请求自旋。
 // - **不放任何凭证**：token / 口令只存在于主进程，本 store 一个都不碰。
 // - 只用浏览器 API，不 import Node 内置模块或 Electron API。
 // ---------------------------------------------------------------------------
@@ -61,6 +65,29 @@ export interface LibraryApi {
   playlistSongs(playlistId: string, page: number, size: number): Promise<Page<Song>>
 }
 
+/**
+ * 连续「**本页无新增**」的页数上限（分页护栏的阈值）。
+ *
+ * ⚠️ 「本页无新增」= 服务端给了条数，但**全是已经加载过的 id**（重复 id）。
+ *    - 它**不等于**「没有更多」：服务端排序不稳定 / 页码对不齐时，
+ *      后面几页可能仍然有新数据 —— 直接停会把 17.3 万首的曲库**截断**；
+ *    - 但也**不能**无限继续翻页：每页都没新增时，页码会一路往前推，
+ *      页面又会在「内容填不满视口」时自动续页 → 变成**无界的请求自旋**
+ *      （每一轮都打一次 API，列表永远不收敛，NAS 被持续轰炸）。
+ *
+ * → 连续这么多页都没进展，就认定这条翻页路径走不动了：停下（`hasMore = false`）。
+ *
+ * 阈值取 **3** 的理由：
+ * - **≥ 2**：既有用例 `test/song-list.test.tsx`「相邻两页出现重复 id 时仍能翻到下一页」
+ *   要求「重复一页之后再滚一次仍会请求第 3 页」——容忍 2 页重复，第 3 页照样会请求；
+ * - **≤ 3**：真机上「偶尔一页重复」是常态（排序抖动 / 页码对不齐），
+ *   容忍 3 页能吸收抖动，又足以让「服务端持续吐同一批数据」在**个位数**次请求内收敛
+ *   （复审探针：500ms 内 31 次 → 修完后 4 次）；
+ * - 真实曲库 17.3 万首 / 每页 50 条 ≈ 3474 页，只要**每页都有新条目**，
+ *   计数永远是 0 → 护栏**一次也不会触发**，不会截断曲库。
+ */
+export const LIBRARY_MAX_NO_PROGRESS_PAGES = 3
+
 /** 默认实现：走 `src/api/*` 的真实实现。 */
 export const defaultLibraryApi: LibraryApi = {
   albums: (page, size) => libraryApi.albums(page, size),
@@ -102,8 +129,27 @@ export interface LibraryCollection<T> {
    *
    * 这里记录的是「**请求过**的页码」，与「**收到多少条**」无关——
    * 所以短页 / 重复 id 都**不会**让翻页停滞。
+   *
+   * ⚠️ 但「一直往前推」也不能没边：连续 `LIBRARY_MAX_NO_PROGRESS_PAGES` 页
+   *    **都没带来新条目**时，本页簿记**停止前进**（并把 `hasMore` 置 false），
+   *    否则重复 id 的页会把翻页变成**无界的请求自旋**（详见该常量的注释）。
    */
   nextPage: number
+  /**
+   * **连续「本页无新增」的页数**（分页护栏的计数）。
+   *
+   * - 「本页无新增」= 服务端给了条数，但全是已经加载过的 id（重复 id）；
+   * - 只要有一页带来了**新条目**，计数就**归零**（重新开始数）；
+   * - 空页（服务端说「没有更多了」）**不计入**——那不是护栏该管的事。
+   */
+  noProgressPages: number
+  /**
+   * 是否**因护栏停下**（连续无进展页数达到 `LIBRARY_MAX_NO_PROGRESS_PAGES`）。
+   *
+   * 护栏状态**暴露在集合上**，便于测试断言与 UI 反馈
+   * （「服务端反复返回同一批数据，已停止继续翻页」）。
+   */
+  stalled: boolean
 }
 
 /** 造一个空集合。 */
@@ -116,6 +162,8 @@ function emptyCollection<T>(): LibraryCollection<T> {
     error: null,
     loaded: false,
     nextPage: 1,
+    noProgressPages: 0,
+    stalled: false,
   }
 }
 
@@ -238,16 +286,41 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
         merged.push(item)
       }
       loadedPages.add(page)
+
+      // ---- 分页护栏 ------------------------------------------------------
+      //
+      // 「本页无新增」= 服务端给了条数，但**全是已经加载过的 id**（重复 id）。
+      // 每页都没新增时：条数不增长 → `hasMore` 仍为 true → 页面层
+      // 「内容填不满视口就自动续一页」的 effect 会继续触发 → **无界的请求自旋**。
+      //
+      // → 连续 `LIBRARY_MAX_NO_PROGRESS_PAGES` 页没有新条目就**停下**：
+      //    `hasMore = false` **且** `nextPage` 不再前进（两者必须同时成立，
+      //    否则 effect 仍会触发 / 页码簿记会空转）。
+      const addedCount = merged.length - latest.items.length
+      // 空页 = 服务端说「没有更多了」→ **不计入**「无进展」（那不是护栏该管的事）。
+      const isEmptyPage = result.list.length === 0
+      const noProgressPages =
+        addedCount > 0 || isEmptyPage ? 0 : latest.noProgressPages + 1
+      const stalled = noProgressPages >= LIBRARY_MAX_NO_PROGRESS_PAGES
+      const hasMore = !stalled && merged.length < result.total && result.list.length > 0
+      // 停下时页码簿记**不再前进**（`Math.max(latest.nextPage, page)` = 停在刚请求的那一页）。
+      const nextPage = stalled
+        ? Math.max(latest.nextPage, page)
+        : Math.max(latest.nextPage, page + 1)
+
       write({
         items: merged,
         total: result.total,
         loading: false,
-        hasMore: merged.length < result.total && result.list.length > 0,
+        hasMore,
         error: null,
         loaded: true,
+        noProgressPages,
+        stalled,
         // 页码簿记的对外视图：**请求过的页码**往前推一格。
-        // （与 `items.length` 无关——短页 / 重复 id 都不会让翻页停滞。）
-        nextPage: Math.max(latest.nextPage, page + 1),
+        // （与 `items.length` 无关——短页 / 重复 id 都不会让翻页停滞；
+        //   护栏停下时**不前进**，见上面的 `nextPage` 计算。）
+        nextPage,
       })
     } catch (err) {
       const latest = read()
@@ -289,8 +362,10 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
         hasMore: false,
         error: null,
         loaded: true,
-        // 全量接口：没有「下一页」。
+        // 全量接口：没有「下一页」，也没有分页护栏可言。
         nextPage: 1,
+        noProgressPages: 0,
+        stalled: false,
       })
     } catch (err) {
       const latest = read()

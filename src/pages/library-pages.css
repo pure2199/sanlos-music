@@ -2,7 +2,8 @@
  * 曲库页面级样式（Task 14）。
  *
  * 只放**页面自己**的布局（不归通用外壳管的那些）——
- * 通用外壳（标题 / 状态 / 错误）在 `library-page-shell.css` 里。
+ * 通用外壳（标题 / 状态 / 错误）在 `src/components/library-page-shell.css` 里
+ * （外壳是组件，样式跟组件住在同一个目录）。
  *
  * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
  */

@@ -48,23 +48,45 @@
   background: transparent;
 }
 
-/* 悬停反馈（内联 style 表达不了伪类，只能靠样式表） */
+/*
+ * 悬停反馈：抬升一层表面（`--surface-raised`）。
+ *
+ * ⚠️ 与「选中态」**刻意不同**：悬停只是轻微抬升，
+ *    选中是**强调色填充**（见下）——两者必须一眼可辨。
+ */
 .fnm-songlist__row:hover {
   background: var(--surface-raised);
 }
 
 /*
- * 选中态：与封面占位块（`--surface-sunken`）**刻意不同色**，
- * 再加一道强调条（`--accent`）把它和悬停态区分开。
+ * 选中态：强调色填充（`--accent`）+ 反色文字 + 左侧强调条。
+ *
+ * ⚠️ 之前这里与 `:hover` 用的是**同一个** `--surface-raised`，
+ *    「鼠标停在这一行」和「这一行被选中」在视觉上完全一样 → 分不出来。
+ *    现在选中态用 `--accent` 填充 + `--accent-text` 文字（都是既有语义令牌，
+ *    **不是**新色值），悬停态保持 `--surface-raised`。
  */
 .fnm-songlist__row[aria-selected='true'] {
-  background: var(--surface-raised);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: inset 2px 0 0 var(--accent-hover);
 }
 
-/* 选中行的悬停：强调条用 `--accent-hover`（不是新色值，是既有令牌）。 */
+/* 选中行的悬停：强调色加深一档（仍是既有令牌）。 */
 .fnm-songlist__row[aria-selected='true']:hover {
-  box-shadow: inset 2px 0 0 var(--accent-hover);
+  background: var(--accent-hover);
+}
+
+/*
+ * 选中行里的文字：跟着强调色填充走**反色**，
+ * 否则深色文字压在强调色上会看不清。
+ */
+.fnm-songlist__row[aria-selected='true'] .fnm-songlist__title,
+.fnm-songlist__row[aria-selected='true'] .fnm-songlist__artist,
+.fnm-songlist__row[aria-selected='true'] .fnm-songlist__album,
+.fnm-songlist__row[aria-selected='true'] .fnm-songlist__duration,
+.fnm-songlist__row[aria-selected='true'] .fnm-songlist__favorite {
+  color: var(--accent-text);
 }
 
 /* 键盘焦点环（`--focus-ring` 令牌） */

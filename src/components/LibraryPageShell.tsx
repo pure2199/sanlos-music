@@ -5,11 +5,15 @@
 //    放在卡片模块（`Cards.tsx`）里不纯——
 //    卡片模块只该管「封面 + 卡片 + 网格」，外壳管「标题 / 状态 / 错误 / 主体」。
 //    六个曲库页面共用同一套外壳，独立成文件后职责边界更清楚。
+//
+// ⚠️ 样式住在**同目录**的 `library-page-shell.css`：
+//    组件层不许反向 import 页面层（`../pages/…`）的东西——
+//    那是页面层的依赖方向，组件只该依赖自己的样式表。
 // ---------------------------------------------------------------------------
 
 import type { ReactElement, ReactNode } from 'react'
 
-import '../pages/library-page-shell.css'
+import './library-page-shell.css'
 
 /** `LibraryPageShell` 的属性。 */
 export interface LibraryPageShellProps {
