@@ -185,16 +185,22 @@ afterEach(() => {
 
 describe('收藏写回：简报 Step 1', () => {
   it('收藏调用 create 接口并传 trackGUID', async () => {
-    const f = vi.fn(async () => new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 }))
+    const f = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 }),
+    )
     vi.stubGlobal('fetch', f)
     await apiCall('/favorite-track/create', { method: 'POST', body: { trackGUID: 'g1' } })
-    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit]
+    const [url, init] = f.mock.calls[0] as [string, RequestInit | undefined]
     expect(String(url)).toContain('/favorite-track/create')
-    expect(JSON.parse(String(init.body))).toEqual({ trackGUID: 'g1' })
+    expect(JSON.parse(String(init?.body))).toEqual({ trackGUID: 'g1' })
   })
 
   it('favoriteApi.set(true/false) 分别打到 create / delete 端点', async () => {
-    const f = vi.fn(async () => new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 }))
+    const f = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ code: 0, data: {} }), { status: 200 }),
+    )
     vi.stubGlobal('fetch', f)
 
     await favoriteApi.set('song-1', true)
@@ -203,7 +209,7 @@ describe('收藏写回：简报 Step 1', () => {
     const urls = f.mock.calls.map((call) => String(call[0]))
     expect(urls[0]).toContain('/favorite-track/create')
     expect(urls[1]).toContain('/favorite-track/delete')
-    const bodies = f.mock.calls.map((call) => JSON.parse(String((call[1] as RequestInit).body)))
+    const bodies = f.mock.calls.map((call) => JSON.parse(String(call[1]?.body)))
     expect(bodies).toEqual([{ trackGUID: 'song-1' }, { trackGUID: 'song-1' }])
   })
 })
@@ -480,15 +486,15 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
   })
 
   it('单次请求的条数被限制住（搜索不退化成「拉全库再本地过滤」）', async () => {
-    const query = vi.fn(async () => emptyResult())
+    const query = vi.fn(async (_q: string, _opts?: { page?: number; size?: number }) => emptyResult())
     render(createElement(SearchPanel, { api: { query }, debounceMs: 0 }))
     await typeKeyword('甲')
 
     await waitFor(() => expect(query).toHaveBeenCalled())
-    const opts = query.mock.calls[0]?.[1] as { page?: number; size?: number }
-    expect(opts.page).toBe(1)
-    expect(opts.size).toBe(SEARCH_PAGE_SIZE)
-    expect(opts.size).toBeLessThanOrEqual(50)
+    const opts = query.mock.calls[0]?.[1]
+    expect(opts?.page).toBe(1)
+    expect(opts?.size).toBe(SEARCH_PAGE_SIZE)
+    expect(opts?.size).toBeLessThanOrEqual(50)
   })
 
   it('服务端忽略分页（一次返回超过 size 的条数）时不再提供「加载更多」', async () => {
