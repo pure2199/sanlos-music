@@ -1,0 +1,153 @@
+# 飞牛音乐 桌面客户端
+
+直连 **fnOS 飞牛音乐**（NAS）的 Windows 桌面客户端。
+
+曲库浏览与播放、桌面悬浮歌词、收藏/歌单/播放记录回写 NAS、下载到本地播放、软件 EQ —— 全部在本地完成，**唯一出网通道是应用自己的 NAS 代理**。
+
+> 技术栈：Electron 32 + React 18 + TypeScript 5（`strict`）+ Vite 5 + Zustand 4 + Vitest 2 + Playwright。
+> 目标平台：Windows 10 1809 及以上 / x64。
+
+---
+
+## 一、功能清单
+
+| 能力 | 说明 |
+|---|---|
+| **曲库浏览** | 歌曲 / 专辑 / 歌手 / 风格 / 歌单 / 收藏 / 最近播放 / 搜索，八个页面；专辑·歌手·风格可下钻到详情页 |
+| **播放** | 播放 / 暂停 / 上一首 / 下一首、进度拖动、队列、循环与随机模式、媒体会话（系统媒体控制中心） |
+| **歌词** | LRC 解析、双行逐字高亮、翻译合并、偏移校正；**桌面悬浮歌词**独立窗口（可拖动、可点歌跳转） |
+| **收藏 / 歌单** | 收藏状态**单一真相源**，跨页面一致；歌单可写回 NAS（新建 / 加入 / 移除） |
+| **播放记录** | 本机记录（`localStorage`）+ NAS 只读历史（`play-history/list`） |
+| **下载到本地** | 主进程下载器，断点续传；**本地优先播放**；下载目录可配置 |
+| **软件 EQ** | 10 段 / 15 段可切换，10 条预置曲线（平直 / 流行 / 摇滚 / 爵士 / 古典 / 电子 / 原声 / 响度 / 人声 / 低音增强），增益 ±12 dB |
+| **双主题** | **Apple 风** 与 **Windows 11 Fluent 风** 随时切换，即时生效 |
+| **托盘常驻** | 关闭窗口默认隐藏到托盘、播放继续；托盘菜单可播放控制 / 显示窗口 / 开关桌面歌词 / 退出 |
+
+---
+
+## 二、两种登录方式
+
+### 方式 A：FN ID 探测（推荐）
+
+输入 fnOS 的 **FN ID**，应用会自动构造候选链路并**并行探测**，列出可达的地址供你选择：
+
+- 中继链路 `https://<fnId>.fnos.net`（外网可达，**带宽受限**）
+- 内网 / 公网 v4 / v6 直连（需你的网络能到 NAS）
+
+> ⚠️ **中继限速**：走中继时播放会限速。客户端会带上 `mode=relay` Cookie —— 这是中继的**硬性关卡**，不带会返回 HTML 错误页。
+
+### 方式 B：地址 + 账号口令
+
+直接填 NAS 地址（`http://host` 或 `https://host`），**只填 host 会自动补默认端口**（HTTP `5666` / HTTPS `5667`）；显式写的端口**原样保留**。然后用飞牛音乐的独立账号 + 口令登录。
+
+---
+
+## 三、快速开始
+
+### 开发
+
+```bash
+npm install       # postinstall 会兜底安装 electron 二进制
+npm run dev       # Vite dev server + Electron
+```
+
+### 构建与打包
+
+```bash
+npm run build     # 主进程（esbuild）+ 渲染层（Vite）
+npm run pack      # 打包 → release/
+```
+
+产物：
+
+| 文件 | 说明 |
+|---|---|
+| `release/FN-Music-Setup-<version>.exe` | NSIS 安装包（可改安装目录） |
+| `release/FN-Music-Portable-<version>.exe` | 便携版（免安装） |
+| `release/win-unpacked/` | 解包后的目录，可直接运行 |
+
+> 打包口径、可复现的定义与离线打包条件见 [`docs/packaging.md`](./docs/packaging.md)。
+
+---
+
+## 四、脚本一览
+
+| 命令 | 作用 |
+|---|---|
+| `npm run dev` | 开发模式（Vite + Electron） |
+| `npm run build` | 构建主进程 + 渲染层 |
+| `npm run typecheck` | `tsc --noEmit`（开着 `noUnusedLocals` / `noUnusedParameters` 闸门） |
+| `npm test` | 单元测试（Vitest） |
+| `npm run e2e` | E2E 冒烟（Playwright 驱动**真实 Electron** + 内嵌 mock NAS） |
+| `npm run pack` | 打包 → `release/` |
+| `npm run pack:probe` | 打包 → `release-probe/`（**不碰** `release/`，适合验证打包本身可行） |
+
+---
+
+## 五、目录结构
+
+```
+electron/          主进程：窗口、托盘、IPC、NAS 代理、下载器、FFmpeg 兜底、悬浮歌词窗
+shared/            渲染层与主进程共用：类型、桥接口、主题、签名常量
+src/
+  api/             NAS API 客户端（走 fnm:// 代理）
+  components/      通用组件（播放条、歌曲列表、卡片、EQ 面板、设置面板…）
+  pages/           曲库各页面 + 登录页 + 全屏播放页
+  player/          播放引擎、队列、EQ、歌词、媒体会话
+  state/           Zustand store（曲库、播放器、偏好、下载、历史…）
+  ui/lyrics/       歌词视图、双行逐字算法
+src/lyric/         悬浮歌词窗口的渲染入口
+mock-server/       测试用的假 NAS（内嵌 HTTP 服务）
+e2e/               Playwright E2E（真实 Electron + mock NAS）
+test/              Vitest 单元测试
+scripts/           构建与打包脚本
+tools/             联调探针脚本（读环境变量取凭证，不落盘）
+docs/              设计与计划文档、打包与验证文档
+```
+
+---
+
+## 六、安全边界（不可放宽）
+
+这些是本项目的硬约束，改动前请先读 [`docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md`](./docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md)：
+
+- **渲染进程永远拿不到凭证**：token 由主进程用 DPAPI（Windows `safeStorage`）加密存进 `session.bin`；`prefs.json` 只存非敏感偏好。
+- **唯一出网通道**是主进程代理的自定义协议 `fnm://`；渲染层不能直接发网络请求。
+- **证书只对 TrustedHosts 放行**，不做全局 `callback(0)`。
+- **主进程的 NAS 流量走同一个 Chromium 分区 HttpStack**，与渲染层共享连接池与 Cookie 语义。
+- 自定义协议特权**整个进程只注册一次**（`fnm` 与 `fnml` 必须合并注册，见 `electron/schemes.ts`）—— Electron 的 `registerSchemesAsPrivileged()` 第二次调用会**静默覆盖**第一次。
+
+---
+
+## 七、常见问题
+
+**Q：提示「无法播放」/「该格式解码失败」？**
+A：Chromium 解不了某些无损格式（APE / ALAC / DSF 等）。客户端支持 **FFmpeg 兜底解码**：安装 FFmpeg 后会转成 Opus 播放（**音质有损，原始文件不变**，界面会如实提示）。没装 FFmpeg 时，提示会引导你安装 —— 此时请**先下载到本地**，兜底只对本地副本生效。
+
+**Q：提示「该操作需要下载到本地」？**
+A：兜底解码需要本地文件副本。请先点下载，等它完成再播放。
+
+**Q：Windows 提示「未知发布者」？**
+A：产物**未做代码签名**，这是预期状态。正式分发需要自备代码签名证书。
+
+**Q：连不上 / 地址无效？**
+A：① 只填 host 时会自动补端口，但如果你在前面写了 `https` 而 NAS 只开了 `http`，请显式改成 `http`；② 中继链路必须能带上 `mode=relay`；③ 自签证书场景下，客户端**只对 TrustedHosts 放行**，不会全局忽略证书错误。
+
+**Q：播放历史在哪儿？**
+A：「最近播放」页 = 本机记录（按本机 `localStorage`）+ NAS 只读历史。NAS 端历史的写入由服务端负责，客户端只读。
+
+**Q：关闭窗口后应用还在吗？**
+A：默认**隐藏窗口、播放继续**，可在「设置 → 关闭窗口时」改成「直接退出应用」。
+
+---
+
+## 八、文档索引
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/packaging.md`](./docs/packaging.md) | 打包口径、可复现的确切定义、离线打包、验证步骤 |
+| [`docs/build-verification.md`](./docs/build-verification.md) | 实际跑过的构建/打包验证记录与证据 |
+| [`docs/calibration.md`](./docs/calibration.md) | 真机联调校准清单（哪些已验证、哪些待真机确认） |
+| [`docs/changelog.md`](./docs/changelog.md) | 版本号变更说明 |
+| [`docs/superpowers/specs/`](./docs/superpowers/specs/) | 设计规格 |
+| [`docs/superpowers/plans/`](./docs/superpowers/plans/) | 实施计划 |
