@@ -48,6 +48,7 @@
 // 2. `AppPrefs` 是**偏好**（窗口位置 / 主题名 / 关闭窗口的行为），
 //    **不是**会话——偏好文件里绝不允许出现凭证。
 
+import type { EqPrefsPayload } from './eqPrefs'
 import type { PlayMode, ThemeName } from './types'
 
 // ---------------------------------------------------------------------------
@@ -159,6 +160,14 @@ export interface AppPrefs {
   closeBehavior?: CloseBehavior
   /** 上次关闭时的窗口位置与尺寸。 */
   windowBounds?: WindowBounds
+  /**
+   * 软件 EQ 的偏好（Task 5）。
+   *
+   * ⚠️ **只有曲线参数**：预置 key / 手动偏移 / 段数 / 开关 / 基线——
+   *    里面**没有任何凭证**，与 `session.bin` 无关。
+   * ⚠️ 形状定义在 `shared/eqPrefs.ts`（主进程白名单与渲染进程共用一份）。
+   */
+  eq?: EqPrefsPayload
 }
 
 // ---------------------------------------------------------------------------

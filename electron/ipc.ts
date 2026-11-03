@@ -62,6 +62,7 @@ import { dirname, join } from 'node:path'
 
 import { API_PREFIX, CODE_OK, RELAY_DOMAIN_SUFFIX } from '../shared/constants'
 import type { AuthSessionInfo, CandidateInfo, ServerInfo } from '../shared/bridge'
+import { sanitizeEqPrefsPayload } from '../shared/eqPrefs'
 import type {
   AppPrefs,
   CloseBehavior,
@@ -869,6 +870,13 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
       if (y !== undefined) sanitized.y = Math.floor(y)
       out.windowBounds = sanitized
     }
+  }
+
+  // EQ 偏好（Task 5）：**形状不对就整段丢弃**（不写半截进文件）。
+  // ⚠️ 这里只做**浅**校验；深度校验（增益钳制等）在渲染进程的 `normalizeEqPrefs`。
+  if (record['eq'] !== undefined) {
+    const eq = sanitizeEqPrefsPayload(record['eq'])
+    if (eq) out.eq = eq
   }
 
   return out

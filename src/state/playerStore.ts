@@ -42,6 +42,7 @@ import {
   type EqPrefsPort,
 } from '../player/eq'
 import { Queue } from '../player/queue'
+import { eqPrefsPort } from '../player/eqPrefsBridge'
 
 // 引擎接口从 `engine.ts` 定义（它是引擎的对外契约），这里**再导出**一份，
 // 便于「store 的依赖」与「store 的类型」从同一个入口取。
@@ -473,5 +474,16 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
   return store
 }
 
-/** 默认播放器 store（生产用：默认引擎 + 真实的 `<audio>` 与 `AudioContext`）。 */
-export const usePlayerStore = createPlayerStore(new PlayerEngine())
+/**
+ * 默认播放器 store（生产用：默认引擎 + 真实的 `<audio>` 与 `AudioContext`）。
+ *
+ * ⚠️ **注入 EQ 偏好端口**（Task 5）：EQ 设置要能**跨重启**保留，
+ *    就必须真的接上主进程的 `prefs:get` / `prefs:set`——
+ *    此前这里**没有**端口（`createEqPrefsPort` 零调用），
+ *    导致 EQ 设置**只在本次运行内有效**（审计报表 P0-2）。
+ *    端口在**没有桥**的环境（浏览器 / 单元测试）里自动降级为 no-op，
+ *    不崩、不静默写盘。
+ */
+export const usePlayerStore = createPlayerStore(new PlayerEngine(), {
+  eqPrefs: eqPrefsPort,
+})

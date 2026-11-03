@@ -53,6 +53,7 @@ import {
   EQ_PRESETS,
   EQ_Q,
 } from '../../shared/constants'
+import type { EqPrefsPayload } from '../../shared/eqPrefs'
 import type {
   AudioBufferLike,
   AudioBufferSourceNodeLike,
@@ -268,24 +269,11 @@ export function defaultEqSettings(): EqSettings {
  * 要落进 `prefs.json` 的那部分 EQ 设置。
  *
  * ⚠️ **绝不含凭证**（这里只有曲线参数）。
+ *
+ * ⚠️ 形状**定义在 `shared/eqPrefs.ts`**（主进程的偏好白名单也要认它），
+ *    这里只是**别名**——单一真相源，避免两边各写一份走偏。
  */
-export interface EqPrefs {
-  /** 选中的预置（`'custom'` 也合法）。 */
-  presetKey: string
-  /** 手动偏移（每个段）。 */
-  manualOffset: number[]
-  /** 段数。 */
-  bandCount: EqBandCount
-  /** 是否启用。 */
-  enabled: boolean
-  /**
-   * 预置基线（**可选**）。
-   *
-   * 存了就能**无损**恢复「自定义」曲线（否则重启后基线丢失，
-   * 原本「基线 + 偏移」会退化成「只有偏移」）。缺省时按 `presetKey` 反推。
-   */
-  presetBaseline?: number[]
-}
+export type EqPrefs = EqPrefsPayload
 
 /**
  * EQ 偏好的持久化端口（**可注入**）。

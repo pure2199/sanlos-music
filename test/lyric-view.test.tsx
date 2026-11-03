@@ -573,13 +573,19 @@ describe('PlayerBar：进度条与音量（要求 G）', () => {
     expect(store.getState().volume).toBeGreaterThanOrEqual(0)
   })
 
-  it('EQ 入口只留位置（禁用 + 提示「即将支持」，不实现 EQ 逻辑）', () => {
+  it('EQ 入口可点：点开就是均衡器面板（Task 5 起不再是禁用占位）', () => {
     const store = createPlayerStore(new FakeEngine())
     render(<PlayerBar store={store} />)
 
     const eq = screen.getByRole('button', { name: 'EQ' })
-    expect(eq.hasAttribute('disabled')).toBe(true)
-    expect(eq.getAttribute('title')).toContain('即将支持')
+    // ⚠️ 这里原本断言的是「禁用 + 提示即将支持」——那是 Task 21 留下���**占位**行为，
+    //    Task 5 把面板真正挂上之后，这条断言的前提已不成立 → 改成断言新行为。
+    expect(eq.hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByRole('dialog', { name: '均衡器' })).toBeNull()
+
+    fireEvent.click(eq)
+    expect(screen.getByRole('dialog', { name: '均衡器' })).toBeTruthy()
+    expect(screen.getByLabelText('预置曲线')).toBeTruthy()
   })
 })
 

@@ -45,6 +45,7 @@ import {
 import type { Song } from '../../shared/types'
 import { usePlayerStore, type PlayerStore } from '../state/playerStore'
 import { CoverImage } from './Cards'
+import { EqPanel } from './EqPanel'
 import './player-bar.css'
 
 // ---------------------------------------------------------------------------
@@ -207,7 +208,7 @@ export function removeSongFromQueue(store: PlayerStoreLike, songId: string): voi
  * - 音量滑块范围 `[0, 1]`（与 `playerStore.volume` 一致），越界在组件里也钳一次；
  * - 静音是**独立**的 `muted` 标志，**不**与音量 0 混为一谈；
  * - 播放 / 暂停按钮反映 `playerStore.isPlaying`；
- * - **EQ 入口只留位置**（Task 21 才实现），按钮禁用并提示「即将支持」；
+ * - **EQ 入口**打开均衡器面板（`EqPanel`，Task 5 真正落地）；
  * - **队列入口**打开队列面板（显示当前队列，可切换曲目、移除）。
  */
 export function PlayerBar(props: PlayerBarProps): ReactElement {
@@ -227,6 +228,8 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
   const pendingSeekRef = useRef<number | null>(null)
   /** 队列面板是否展开。 */
   const [queueOpen, setQueueOpen] = useState(false)
+  /** 均衡器面板是否展开（Task 5）。 */
+  const [eqOpen, setEqOpen] = useState(false)
 
   const total = duration > 0 ? duration : 0
   const max = total > 0 ? total : 1
@@ -439,7 +442,11 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         <button
           type="button"
           className="fnm-playerbar__button"
-          onClick={() => setQueueOpen((open) => !open)}
+          onClick={() => {
+            // 队列与 EQ 两个弹层**互斥**（叠在一起会互相遮挡）。
+            setEqOpen(false)
+            setQueueOpen((open) => !open)
+          }}
           aria-expanded={queueOpen}
           aria-label="播放队列"
         >
@@ -448,8 +455,11 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         <button
           type="button"
           className="fnm-playerbar__button"
-          disabled
-          title="均衡器即将支持（Task 21）"
+          onClick={() => {
+            setQueueOpen(false)
+            setEqOpen((open) => !open)
+          }}
+          aria-expanded={eqOpen}
         >
           EQ
         </button>
@@ -501,6 +511,17 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
               ))}
             </>
           )}
+        </div>
+      )}
+
+      {/*
+        均衡器面板（Task 5）。
+        ⚠️ 面板**与队列面板互斥**：两个弹层叠在一起会互相遮挡，
+           所以打开一个就把另一个关掉。
+      */}
+      {eqOpen && (
+        <div className="fnm-playerbar__eq" role="dialog" aria-label="均衡器">
+          <EqPanel store={store} />
         </div>
       )}
     </div>
