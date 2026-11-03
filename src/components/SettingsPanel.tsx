@@ -17,10 +17,12 @@
 //    样式住在同目录的 `settings-panel.css`。
 // ---------------------------------------------------------------------------
 
-import { useCallback, type ReactElement } from 'react'
+import { useCallback, useEffect, useState, type ReactElement } from 'react'
 
 import type { CloseBehavior } from '../../shared/playerBridge'
 import { useAppPrefsStore } from '../state/appPrefsStore'
+import { totalDownloadedBytes, useDownloadStore } from '../state/downloadStore'
+import { formatBytes } from './DownloadButton'
 import './settings-panel.css'
 
 /** `SettingsPanel` 的属性。 */
@@ -51,6 +53,39 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
     },
     [setLyricOverlayVisible],
   )
+
+  // --- 本地下载（Task 11）-------------------------------------------------
+  const localFirst = useDownloadStore((state) => state.localFirst)
+  const setLocalFirst = useDownloadStore((state) => state.setLocalFirst)
+  const entries = useDownloadStore((state) => state.entries)
+  const dir = useDownloadStore((state) => state.dir)
+  const setDir = useDownloadStore((state) => state.setDir)
+  const clearDownloads = useDownloadStore((state) => state.clear)
+  const downloadError = useDownloadStore((state) => state.error)
+
+  /** 下载目录的**输入草稿**（点「保存」才写回主进程偏好）。 */
+  const [dirDraft, setDirDraft] = useState(dir)
+  useEffect(() => {
+    setDirDraft(dir)
+  }, [dir])
+
+  const handleToggleLocalFirst = useCallback(
+    (enabled: boolean) => {
+      void setLocalFirst(enabled)
+    },
+    [setLocalFirst],
+  )
+
+  const handleSaveDir = useCallback(() => {
+    void setDir(dirDraft)
+  }, [dirDraft, setDir])
+
+  const handleClearDownloads = useCallback(() => {
+    void clearDownloads()
+  }, [clearDownloads])
+
+  const downloadedCount = Object.keys(entries).length
+  const downloadedBytes = totalDownloadedBytes(entries)
 
   const rootClass = className ? `fnm-settings ${className}` : 'fnm-settings'
 
@@ -93,6 +128,56 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           />
           <span>显示悬浮歌词（双行逐字，可拖动 / 点歌跳转）</span>
         </label>
+      </fieldset>
+
+      <fieldset className="fnm-settings__group">
+        <legend className="fnm-settings__legend">本地下载</legend>
+        <label className="fnm-settings__option">
+          <input
+            type="checkbox"
+            name="fnm-local-first"
+            checked={localFirst}
+            onChange={(event) => handleToggleLocalFirst(event.target.checked)}
+          />
+          <span>本地优先播放（本地有副本就播本地，不再走 NAS）</span>
+        </label>
+        <label className="fnm-settings__option fnm-settings__option--stack">
+          <span>下载目录</span>
+          <input
+            type="text"
+            className="fnm-settings__input"
+            name="fnm-download-dir"
+            value={dirDraft}
+            placeholder="默认：我的音乐\飞牛音乐"
+            onChange={(event) => setDirDraft(event.target.value)}
+          />
+        </label>
+        <div className="fnm-settings__row">
+          <button
+            type="button"
+            className="fnm-settings__button"
+            onClick={handleSaveDir}
+            disabled={dirDraft.trim() === dir.trim()}
+          >
+            保存目录
+          </button>
+          <button
+            type="button"
+            className="fnm-settings__button fnm-settings__button--danger"
+            onClick={handleClearDownloads}
+            disabled={downloadedCount === 0}
+          >
+            清空本地下载
+          </button>
+        </div>
+        <p className="fnm-settings__hint">
+          已下载 {downloadedCount} 首，占用 {formatBytes(downloadedBytes)}。
+        </p>
+        {downloadError && (
+          <p className="fnm-settings__error" role="alert">
+            {downloadError}
+          </p>
+        )}
       </fieldset>
 
       <p className="fnm-settings__hint">窗口位置与尺寸会自动记住，下次启动时恢复。</p>

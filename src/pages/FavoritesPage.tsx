@@ -13,6 +13,7 @@ import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
 import { SongList } from '../components/SongList'
+import { useDownloadRowActions } from '../components/DownloadButton'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
@@ -46,6 +47,9 @@ export function FavoritesPage({ api, store, onPlay, onSelect }: FavoritesPagePro
     void loadFavorites()
   }, [loadFavorites])
 
+  // 行内下载入口（Task 11）。
+  const renderRowActions = useDownloadRowActions()
+
   return (
     <LibraryPageShell
       title="收藏"
@@ -63,6 +67,7 @@ export function FavoritesPage({ api, store, onPlay, onSelect }: FavoritesPagePro
         loading={favorites.loading}
         emptyLabel="暂无收藏"
         ariaLabel="收藏列表"
+        renderRowActions={renderRowActions}
       />
     </LibraryPageShell>
   )

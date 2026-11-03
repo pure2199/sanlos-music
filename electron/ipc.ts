@@ -66,6 +66,9 @@ import { sanitizeEqPrefsPayload } from '../shared/eqPrefs'
 import type {
   AppPrefs,
   CloseBehavior,
+  DownloadEntry,
+  DownloadRequest,
+  DownloadTask,
   LyricOverlayLine,
   LyricOverlayMessage,
   LyricOverlayTrack,
@@ -729,8 +732,8 @@ export interface PrefsStoreOptions {
  * 1. **偏好文件里绝不能出现凭证**（token / 密码 / deviceId）——
  *    那是 `session.bin`（DPAPI 加密）的职责，两者**不许混**。
  *    本类用**白名单**实现这一点：`write()` 只接受 `theme` / `closeBehavior` /
- *    `windowBounds` / `eq` / `lyricOverlay` 五个键，其余键**一律丢弃**——
- *    渲染进程就算塞进来也写不进去。
+ *    `windowBounds` / `eq` / `lyricOverlay` / `downloadDir` / `localFirst` 七个键，
+ *    其余键**一律丢弃**——渲染进程就算塞进来也写不进去。
  * 2. 写盘**原子化**：先写 `<file>.tmp` 再 `rename` 覆盖，
  *    避免写到一半崩溃留下截断的偏好文件。
  * 3. 读盘**容错**：文件不存在 / 内容损坏 → 返回默认值，**不抛异常**
@@ -906,6 +909,19 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
     }
   }
 
+  // 下载相关偏好（Task 11）：目录 + 「本地优先播放」开关。
+  // ⚠️ `downloadDir` 是**路径**：只接受非空、不含控制字符、长度有限的字符串。
+  //    「这个目录到底能不能用」由下载时判断（不存在 / 不可写 → 给出可读错误），
+  //    这里**不猜**它是否合法。
+  const downloadDir = record['downloadDir']
+  if (typeof downloadDir === 'string' && downloadDir.length > 0 && downloadDir.length <= 512) {
+    if (!/[\u0000-\u001f]/.test(downloadDir)) out.downloadDir = downloadDir
+  }
+  // ⚠️ `localFirst` 是**布尔**：`undefined` = 用默认值（开启）。
+  if (typeof record['localFirst'] === 'boolean') {
+    out.localFirst = record['localFirst']
+  }
+
   return out
 }
 
@@ -986,6 +1002,32 @@ export interface PlayerIpcOptions {
    * ⚠️ 由主进程负责**创建 / 隐藏窗口**并**落盘**（`prefs.lyricOverlay.visible`）。
    */
   setLyricVisible?: (visible: boolean) => void
+  /**
+   * 下载控制器（Task 11）。
+   *
+   * ⚠️ **落盘路径、文件名清洗、断点续传全在主进程**——
+   *    渲染进程只能发「我要下这首歌」，**不能指定写到哪**。
+   */
+  downloads?: DownloadControllerLike
+}
+
+/**
+ * 下载控制器的最小接口（Task 11）。
+ *
+ * ⚠️ 由 `electron/downloadManager.ts` 的 `DownloadManager` 实现；
+ *    这里只描述 IPC 用到的那几个方法，便于单测注入替身。
+ */
+export interface DownloadControllerLike {
+  /** 索引 + 任务列表。 */
+  list(): { entries: Record<string, DownloadEntry>; tasks: DownloadTask[] }
+  /** 开始下载。 */
+  start(request: DownloadRequest): DownloadTask
+  /** 取消下载。 */
+  cancel(songId: string): void
+  /** 清空本地下载（删文件 + 清索引）。 */
+  clear(): Promise<void>
+  /** 当前下载目录（绝对路径）。 */
+  getDir(): string
 }
 
 /**
@@ -1034,6 +1076,38 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
   // 渲染进程 → 主进程：设置悬浮窗可见性（创建 / 隐藏 + 落盘）。
   ipcMain.handle('lyric:set-visible', (_event, arg) => {
     opts.setLyricVisible?.(arg === true)
+  })
+
+  // --- 下载（Task 11）-----------------------------------------------------
+  //
+  // ⚠️ 渲染进程**只发请求、只收进度**：落盘路径、文件名清洗、断点续传
+  //    **全在主进程**（`electron/downloadManager.ts`）。
+
+  // 渲染进程 → 主进程：读本地下载索引 + 当前任务 + 下载目录。
+  ipcMain.handle('download:list', () => {
+    const downloads = opts.downloads
+    if (!downloads) return { entries: {}, tasks: [], dir: '' }
+    return { ...downloads.list(), dir: downloads.getDir() }
+  })
+
+  // 渲染进程 → 主进程：开始下载。
+  ipcMain.handle('download:start', (_event, arg) => {
+    const request = sanitizeDownloadRequest(arg)
+    // ⚠️ 形状不对 / songId 为空 → **直接忽略**（不下载，也不报错）。
+    if (!request) return null
+    return opts.downloads?.start(request) ?? null
+  })
+
+  // 渲染进程 → 主进程：取消下载。
+  ipcMain.handle('download:cancel', (_event, arg) => {
+    const songId = readString(asRecord(arg)?.['songId'] ?? arg)
+    if (songId.length === 0) return
+    opts.downloads?.cancel(songId)
+  })
+
+  // 渲染进程 → 主进程：清空本地下载。
+  ipcMain.handle('download:clear', async () => {
+    await opts.downloads?.clear()
   })
 
   // 窗口控制。
@@ -1130,6 +1204,31 @@ function sanitizeCommand(value: unknown): PlayerCommand | null {
     }
     default:
       return null
+  }
+}
+
+/**
+ * 把渲染进程发来的下载请求压成合法形状（Task 11）。
+ *
+ * ⚠️ 渲染进程**只能**说「我要下这首歌」——
+ *    **落盘路径不在请求里**（那是主进程的职责，也是安全边界：
+ *    否则渲染进程就等于一个任意写文件的口子）。
+ * - `songId`：**必须非空**（它是索引键）；
+ * - `title` / `artist`：用于拼文件名，**可以是空串**（主进程会清洗）；
+ * - `ext`：扩展名；主进程会归一化（不合法的 → `bin`）。
+ *
+ * @returns 合法请求；形状不对时返回 `null`（**不下载**）。
+ */
+export function sanitizeDownloadRequest(value: unknown): DownloadRequest | null {
+  const record = asRecord(value)
+  if (!record) return null
+  const songId = readString(record['songId'])
+  if (songId.length === 0) return null
+  return {
+    songId,
+    title: readString(record['title']),
+    artist: readString(record['artist']),
+    ext: readString(record['ext']),
   }
 }
 

@@ -25,6 +25,7 @@ import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
 import { LibraryPageShell } from '../components/LibraryPageShell'
+import { useDownloadRowActions } from '../components/DownloadButton'
 import { PagingNotice } from '../components/PagingNotice'
 import { SongList } from '../components/SongList'
 import { useLocalHistory } from '../state/historyStore'
@@ -64,6 +65,9 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
     void loadHistory(nextPage)
   }, [loadHistory, nextPage])
 
+  // 行内下载入口（Task 11）。
+  const renderRowActions = useDownloadRowActions()
+
   return (
     <LibraryPageShell
       title="最近播放"
@@ -82,6 +86,7 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
             total={localItems.length}
             emptyLabel="本机还没有播放记录"
             ariaLabel="本机播放记录"
+            renderRowActions={renderRowActions}
           />
         </section>
 
@@ -99,6 +104,7 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
             onLoadMore={handleLoadMore}
             emptyLabel="暂无播放历史"
             ariaLabel="NAS 播放历史"
+            renderRowActions={renderRowActions}
           />
           {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
           <PagingNotice kind="history" store={resolved} />

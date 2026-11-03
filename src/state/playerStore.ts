@@ -43,6 +43,7 @@ import {
 } from '../player/eq'
 import { Queue } from '../player/queue'
 import { eqPrefsPort } from '../player/eqPrefsBridge'
+import { resolvePlaybackSource } from './downloadStore'
 
 // 引擎接口从 `engine.ts` 定义（它是引擎的对外契约），这里**再导出**一份，
 // 便于「store 的依赖」与「store 的类型」从同一个入口取。
@@ -484,6 +485,12 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
  *    端口在**没有桥**的环境（浏览器 / 单元测试）里自动降级为 no-op，
  *    不崩、不静默写盘。
  */
-export const usePlayerStore = createPlayerStore(new PlayerEngine(), {
-  eqPrefs: eqPrefsPort,
-})
+export const usePlayerStore = createPlayerStore(
+  // ⚠️ **本地优先播放**（Task 11）：解析器在「本地有副本且开关打开」时
+  //    返回 `fnml://local/track/<id>`，否则照旧返回 `fnm://srv/track/stream?guid=…`
+  //    （**既有行为与既有断言一字不变**）。
+  new PlayerEngine({ resolveSource: resolvePlaybackSource }),
+  {
+    eqPrefs: eqPrefsPort,
+  },
+)

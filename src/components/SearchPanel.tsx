@@ -64,6 +64,7 @@ import {
   type LibraryStoreApi,
 } from '../state/libraryStore'
 import { AlbumCard, ArtistCard, CardGrid, formatCount } from './Cards'
+import { DownloadButton } from './DownloadButton'
 import { SongList } from './SongList'
 import './search-panel.css'
 
@@ -584,7 +585,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
     [effectiveTracks, onPlay],
   )
 
-  /** 行内操作：收藏按钮（乐观更新 + 串行化写回）。 */
+  /** 行内操作：收藏按钮（乐观更新 + 串行化写回）+ 下载按钮（Task 11）。 */
   const renderRowActions = useCallback(
     (song: Song): ReactNode => {
       // 基准值 = store 里的**已确认态**（未登记时用搜索结果自带的字段）。
@@ -592,25 +593,29 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
       const entry = writeback.get(song.id, base)
       const canWrite = Boolean(api.setFavorite) && song.id.length > 0
       return (
-        <button
-          type="button"
-          className="fnm-searchpanel__favorite"
-          data-testid="fnm-favorite-toggle"
-          data-song-id={song.id}
-          data-favorite={entry.target ? 'true' : 'false'}
-          data-pending={entry.pending ? 'true' : 'false'}
-          aria-pressed={entry.target}
-          aria-label={entry.target ? '取消收藏' : '收藏'}
-          disabled={!canWrite}
-          onClick={(event) => {
-            // ⚠️ 别让收藏点击冒泡到行上（行单击是「选中」）。
-            event.stopPropagation()
-            writeback.toggle(song.id, base)
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-        >
-          {entry.target ? '已收藏' : '收藏'}
-        </button>
+        <>
+          <button
+            type="button"
+            className="fnm-searchpanel__favorite"
+            data-testid="fnm-favorite-toggle"
+            data-song-id={song.id}
+            data-favorite={entry.target ? 'true' : 'false'}
+            data-pending={entry.pending ? 'true' : 'false'}
+            aria-pressed={entry.target}
+            aria-label={entry.target ? '取消收藏' : '收藏'}
+            disabled={!canWrite}
+            onClick={(event) => {
+              // ⚠️ 别让收藏点击冒泡到行上（行单击是「选中」）。
+              event.stopPropagation()
+              writeback.toggle(song.id, base)
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            {entry.target ? '已收藏' : '收藏'}
+          </button>
+          {/* 下载入口（Task 11）：同样是行内操作，点击不冒泡到行上。 */}
+          <DownloadButton song={song} />
+        </>
       )
     },
     [api.setFavorite, favoriteStates, writeback],

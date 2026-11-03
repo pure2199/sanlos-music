@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { FnBridge } from '../shared/bridge'
-import type { LyricOverlayMessage, PlayerBridge, PlayerCommand } from '../shared/playerBridge'
+import type { DownloadTask, LyricOverlayMessage, PlayerBridge, PlayerCommand } from '../shared/playerBridge'
 
 // 渲染进程与主进程之间的桥。凭证永远不经过这里，只暴露只读的平台信息。
 const api = {
@@ -108,6 +108,25 @@ const fnPlayer: PlayerBridge = {
     }
   },
   setLyricVisible: (visible) => ipcRenderer.invoke('lyric:set-visible', visible === true),
+  // -------------------------------------------------------------------------
+  // 下载（Task 11）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 渲染进程**只能发请求、只能收进度**：
+  //    落盘路径、文件名清洗、断点续传**全在主进程**。
+  listDownloads: () => ipcRenderer.invoke('download:list'),
+  startDownload: (request) => ipcRenderer.invoke('download:start', request),
+  cancelDownload: (songId) => ipcRenderer.invoke('download:cancel', { songId }),
+  clearDownloads: () => ipcRenderer.invoke('download:clear'),
+  onDownloadChange: (handler) => {
+    const listener = (_event: unknown, tasks: DownloadTask[]): void => {
+      handler(Array.isArray(tasks) ? tasks : [])
+    }
+    ipcRenderer.on('download:changed', listener)
+    return () => {
+      ipcRenderer.removeListener('download:changed', listener)
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('fnPlayer', fnPlayer)

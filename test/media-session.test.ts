@@ -150,6 +150,12 @@ function fakeBridge(): {
     onLyricState: () => () => {},
     onLyricVisibility: () => () => {},
     setLyricVisible: async () => {},
+    // 本地下载（Task 11）：本用例不碰它，给个空实现即可。
+    listDownloads: async () => ({ entries: {}, tasks: [], dir: '' }),
+    startDownload: async () => {},
+    cancelDownload: async () => {},
+    clearDownloads: async () => {},
+    onDownloadChange: () => () => {},
   }
   return {
     bridge,

@@ -13,6 +13,7 @@ import { useStore } from 'zustand'
 
 import type { Playlist, Song } from '../../shared/types'
 import { CardGrid, PlaylistCard } from '../components/Cards'
+import { useDownloadRowActions } from '../components/DownloadButton'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { PagingNotice } from '../components/PagingNotice'
 import { SongList } from '../components/SongList'
@@ -75,6 +76,9 @@ export function PlaylistsPage({
     void loadPlaylistSongs(playlistId, nextPage)
   }, [loadPlaylistSongs, nextPage, playlistId])
 
+  // 行内下载入口（Task 11）。
+  const renderRowActions = useDownloadRowActions()
+
   return (
     <LibraryPageShell
       title="歌单"
@@ -109,6 +113,7 @@ export function PlaylistsPage({
               onLoadMore={handleLoadMore}
               emptyLabel="该歌单暂无歌曲"
               ariaLabel="歌单歌曲列表"
+              renderRowActions={renderRowActions}
             />
           ) : (
             <p className="fnm-playlists__hint">请选择一个歌单</p>

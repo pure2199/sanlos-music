@@ -348,6 +348,14 @@ export interface PlayerEngineOptions {
   requestFrame?: (callback: (time: number) => void) => number
   /** 帧取消；缺省用 `cancelAnimationFrame`。 */
   cancelFrame?: (handle: number) => void
+  /**
+   * 解析这一曲的**播放地址**（Task 11 的「本地优先播放」接缝）。
+   *
+   * ⚠️ **不给就用默认的 `streamUrl(song.id)`**——既有行为与既有断言**一字不变**。
+   *    给了就可以在本地有副本时改用 `fnml://local/track/<id>`。
+   * ⚠️ 解析器**抛异常或返回空串**时一律**退回流式地址**（不崩、不黑屏）。
+   */
+  resolveSource?: (song: Song) => string
 }
 
 /** 引擎的对外接口（store 依赖它；也是单测替身的形状）。 */
@@ -490,6 +498,24 @@ export class PlayerEngine implements PlayerEngineLike {
     }
   }
 
+  /**
+   * 解析这一曲的播放地址。
+   *
+   * ⚠️ **默认行为一字不变**：没注入 `resolveSource` 时就是 `streamUrl(song.id)`。
+   *    注入后（Task 11 的「本地优先播放」）可以在本地有副本时改用 `fnml://`。
+   * ⚠️ 解析器**抛异常或返回空串** → 一律**退回流式地址**（不崩、不黑屏）。
+   */
+  private resolveSource(song: Song): string {
+    const resolver = this.options.resolveSource
+    if (!resolver) return streamUrl(song.id)
+    try {
+      const url = resolver(song)
+      return typeof url === 'string' && url.length > 0 ? url : streamUrl(song.id)
+    } catch {
+      return streamUrl(song.id)
+    }
+  }
+
   /** 订阅状态变化，返回退订函数。 */
   onStateChange(cb: (state: PlayerState) => void): () => void {
     this.stateListeners.add(cb)
@@ -541,7 +567,7 @@ export class PlayerEngine implements PlayerEngineLike {
     this.positionSec = 0
     this.durationSec = song.duration
 
-    const url = streamUrl(song.id)
+    const url = this.resolveSource(song)
     if (this.currentSrc() === url) {
       // 同一首重播：回到开头，**不要**重设 src（重设 src 会让媒体元素重新加载）。
       element.currentTime = 0

@@ -593,14 +593,20 @@ describe('registerPlayerIpc', () => {
     return { ipcMain, handlers, listeners }
   }
 
-  it('注册了全部通道（含 Task 10 新增的悬浮歌词通道）', () => {
-    // ⚠️ T10（桌面悬浮歌词）**显式新增**了两个通道：
+  it('注册了全部通道（含 Task 10 的悬浮歌词通道与 Task 11 的下载通道）', () => {
+    // ⚠️ T10（桌面悬浮歌词）新增了两个通道，T11（本地下载）又新增了四个：
     //    - `lyric:set-visible`（调用式）：开关悬浮窗；
-    //    - `lyric:state`（推送式）：主进程只转发歌词消息。
-    //    → 原来的「全部八个通道」前提被本任务推翻，这里改写为**新的完整集合**。
+    //    - `lyric:state`（推送式）：主进程只转发歌词消息；
+    //    - `download:list` / `download:start` / `download:cancel` / `download:clear`
+    //      （调用式）：本地下载的索引、启动、取消、清空。
+    //    → 原来的「全部八个通道」前提被这两个任务推翻，这里改写为**新的完整集合**。
     const { ipcMain, handlers, listeners } = fakeIpcMain()
     registerPlayerIpc({ ipcMain, prefs: new PrefsStore({ filePath: tempFile() }) })
     expect([...handlers.keys()].sort()).toEqual([
+      'download:cancel',
+      'download:clear',
+      'download:list',
+      'download:start',
       'lyric:set-visible',
       'prefs:get',
       'prefs:set',
@@ -610,6 +616,94 @@ describe('registerPlayerIpc', () => {
       'win:toggle-maximize',
     ])
     expect([...listeners.keys()].sort()).toEqual(['lyric:state', 'player:command', 'player:state'])
+  })
+
+  it('download:list 是调用：返回索引 + 任务 + 下载目录', async () => {
+    const { ipcMain, handlers } = fakeIpcMain()
+    const entries = {
+      'song-1': {
+        songId: 'song-1',
+        file: 'C:\\Music\\a.flac',
+        bytes: 100,
+        ext: 'flac',
+        downloadedAt: '2026-01-01T00:00:00.000Z',
+      },
+    }
+    const downloads = {
+      list: () => ({ entries, tasks: [] }),
+      start: vi.fn(),
+      cancel: vi.fn(),
+      clear: vi.fn(async () => undefined),
+      getDir: () => 'C:\\Music\\飞牛音乐',
+    }
+    registerPlayerIpc({
+      ipcMain,
+      prefs: new PrefsStore({ filePath: tempFile() }),
+      downloads,
+    })
+
+    const result = await handlers.get('download:list')?.(undefined)
+    expect(result).toEqual({ entries, tasks: [], dir: 'C:\\Music\\飞牛音乐' })
+  })
+
+  it('download:start 是调用：形状对的请求交给下载控制器；songId 为空则**不下载**', async () => {
+    const { ipcMain, handlers } = fakeIpcMain()
+    const start = vi.fn()
+    const downloads = {
+      list: () => ({ entries: {}, tasks: [] }),
+      start,
+      cancel: vi.fn(),
+      clear: vi.fn(async () => undefined),
+      getDir: () => 'C:\\Music',
+    }
+    registerPlayerIpc({
+      ipcMain,
+      prefs: new PrefsStore({ filePath: tempFile() }),
+      downloads,
+    })
+
+    await handlers.get('download:start')?.(undefined, {
+      songId: 'song-1',
+      title: '示例歌名',
+      artist: '示例歌手',
+      ext: 'flac',
+    })
+    expect(start).toHaveBeenCalledWith({
+      songId: 'song-1',
+      title: '示例歌名',
+      artist: '示例歌手',
+      ext: 'flac',
+    })
+
+    // songId 为空 / 形状不对 → **不下载**。
+    start.mockClear()
+    await handlers.get('download:start')?.(undefined, { songId: '', title: 'x' })
+    await handlers.get('download:start')?.(undefined, null)
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('download:cancel / download:clear 是调用：交给下载控制器', async () => {
+    const { ipcMain, handlers } = fakeIpcMain()
+    const cancel = vi.fn()
+    const clear = vi.fn(async () => undefined)
+    const downloads = {
+      list: () => ({ entries: {}, tasks: [] }),
+      start: vi.fn(),
+      cancel,
+      clear,
+      getDir: () => 'C:\\Music',
+    }
+    registerPlayerIpc({
+      ipcMain,
+      prefs: new PrefsStore({ filePath: tempFile() }),
+      downloads,
+    })
+
+    await handlers.get('download:cancel')?.(undefined, { songId: 'song-1' })
+    expect(cancel).toHaveBeenCalledWith('song-1')
+
+    await handlers.get('download:clear')?.(undefined)
+    expect(clear).toHaveBeenCalled()
   })
 
   it('lyric:state 是推送：主进程**只转发**，形状不对的消息被丢弃', () => {

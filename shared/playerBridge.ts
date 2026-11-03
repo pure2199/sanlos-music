@@ -227,6 +227,85 @@ export interface AppPrefs {
     /** 悬浮窗的位置与尺寸。 */
     bounds?: WindowBounds
   }
+  /**
+   * 下载目录（Task 11）。
+   *
+   * ⚠️ **绝对路径**；不设 = 用默认的「我的音乐\飞牛音乐」子目录。
+   *    非敏感（只是路径），与 `session.bin`（凭证）无关。
+   */
+  downloadDir?: string
+  /**
+   * 本地优先播放（Task 11）：本地有副本就播本地。
+   *
+   * ⚠️ **默认开启**（`undefined` 视为 `true`）。
+   */
+  localFirst?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// 下载（Task 11）
+// ---------------------------------------------------------------------------
+
+/**
+ * 下载任务的状态。
+ *
+ * - `pending`：已排队，**还没开始**；
+ * - `running`：正在下载；
+ * - `done`：已完成（文件已落到下载目录）；
+ * - `error`：失败（`error` 里有可读原因）；
+ * - `canceled`：被用户取消。
+ */
+export type DownloadStatus = 'pending' | 'running' | 'done' | 'error' | 'canceled'
+
+/**
+ * 一首歌的下载请求（渲染进程 → 主进程）。
+ *
+ * ⚠️ **只带拼文件名要用的元数据**：文件名由主进程清洗后生成，
+ *    渲染进程**不能**指定落盘路径（那是主进程的职责）。
+ */
+export interface DownloadRequest {
+  /** 歌曲 guid。 */
+  songId: string
+  /** 歌名（拼文件名用）。 */
+  title: string
+  /** 歌手名（拼文件名用）。 */
+  artist: string
+  /** 文件扩展名（不含点，如 `flac`）。 */
+  ext: string
+}
+
+/** 已下载完成的一首歌（主进程索引里的一条）。 */
+export interface DownloadEntry {
+  /** 歌曲 guid。 */
+  songId: string
+  /** 本地绝对路径。 */
+  file: string
+  /** 文件字节数。 */
+  bytes: number
+  /** 扩展名（不含点）。 */
+  ext: string
+  /** 下载完成时间（ISO 8601 字符串）。 */
+  downloadedAt: string
+}
+
+/** 下载任务（进度用；主进程 → 渲染进程推送）。 */
+export interface DownloadTask {
+  /** 歌曲 guid。 */
+  songId: string
+  /** 歌名。 */
+  title: string
+  /** 歌手名。 */
+  artist: string
+  /** 当前状态。 */
+  status: DownloadStatus
+  /** 已下载字节数。 */
+  received: number
+  /** 总字节数（`0` = 未知）。 */
+  total: number
+  /** 失败原因（可读文案，**不含任何凭证**）。 */
+  error: string | null
+  /** 完成后的本地绝对路径（未完成时为 `null`）。 */
+  file: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -293,4 +372,26 @@ export interface PlayerBridge {
   onLyricVisibility(handler: (visible: boolean) => void): () => void
   /** 设置悬浮窗的可见性（`lyric:set-visible`；主进程据此创建 / 隐藏窗口并落盘）。 */
   setLyricVisible(visible: boolean): Promise<void>
+  // -------------------------------------------------------------------------
+  // 下载（Task 11）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 渲染进程**只发请求**、**只收进度**：
+  //    落盘路径、文件名清洗、断点续传**全在主进程**；
+  //    渲染进程既不能指定落盘路径，也拿不到任何凭证。
+  /** 读本地下载索引 + 当前任务 + 下载目录（`download:list`）。 */
+  listDownloads(): Promise<{
+    entries: Record<string, DownloadEntry>
+    tasks: DownloadTask[]
+    /** 当前下载目录（绝对路径）。 */
+    dir: string
+  }>
+  /** 开始下载一首歌（`download:start`）。 */
+  startDownload(request: DownloadRequest): Promise<void>
+  /** 取消下载（`download:cancel`）。 */
+  cancelDownload(songId: string): Promise<void>
+  /** 清空本地下载（删文件 + 清索引，`download:clear`）。 */
+  clearDownloads(): Promise<void>
+  /** 订阅下载任务变化（`download:changed`，主进程推送）。 */
+  onDownloadChange(handler: (tasks: DownloadTask[]) => void): () => void
 }

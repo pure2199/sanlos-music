@@ -1,14 +1,24 @@
 import { app, BrowserWindow, session as electronSession } from 'electron'
 import path from 'node:path'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 
 import type { LyricOverlayMessage, PlayerCommand, PlayerStateSnapshot } from '../shared/playerBridge'
 import type { ThemeName } from '../shared/types'
+import { API_PREFIX } from '../shared/constants'
 import { resolveThemeName, themeSpec } from '../shared/themes'
 import { registerAuthIpc, registerPlayerIpc, PrefsStore } from './ipc'
 import { TrustedHosts } from './cert'
+import {
+  DEFAULT_DOWNLOAD_SUBDIR,
+  DOWNLOAD_INDEX_FILE_NAME,
+  DOWNLOAD_INDEX_VERSION,
+  DownloadManager,
+  type DownloadIndex,
+} from './downloadManager'
 import { createHttpStack } from './http'
+import { registerLocalMedia, registerLocalMediaSchemePrivileges } from './localMedia'
 import { createNasOAuthHandlers } from './oauthWindow'
-import { registerFnmSchemePrivileges, registerProxy } from './proxy'
+import { buildUpstreamRequest, registerFnmSchemePrivileges, registerProxy } from './proxy'
 import { SessionManager } from './session'
 import { createCoverFetcher, createTray } from './tray'
 import { createBoundsSaver, resolveWindowBounds } from './windowBounds'
@@ -81,6 +91,10 @@ function showMainWindow(): void {
 //    Electron 只允许在 ready 之前调用 `registerSchemesAsPrivileged()`，
 //    放到 ready 之后会抛错。
 registerFnmSchemePrivileges()
+
+// 1b. `fnml://`（本地媒体，Task 11）同样**必须在 ready 之前**注册特权。
+//     它只读本地磁盘、不出网，但 Chromium 对 scheme 的处理规则与 `fnm://` 一致。
+registerLocalMediaSchemePrivileges()
 
 // 2. **单实例锁**（**尽早调用**，`app.whenReady()` 之前即可）。
 //
@@ -239,6 +253,113 @@ if (!isPrimaryInstance) {
 
       win.once('ready-to-show', () => win.show())
 
+      // 11b. 本地下载（Task 11）。
+      //
+      //     ⚠️ **下载在主进程**：渲染进程不能写盘、也不该让几十 MB 的音频
+      //        在渲染进程里过一遍内存；更要紧的是**凭证只在主进程**——
+      //        下载请求的 `authx` 与 Cookie 由主进程拼，渲染进程全程不参与。
+      //     ⚠️ 下载**复用同一个 `HttpStack`**：自签证书放行、中继 `mode=relay`
+      //        Cookie 全部继承既有链路，不新造出网通道。
+      const downloadIndexPath = path.join(app.getPath('userData'), DOWNLOAD_INDEX_FILE_NAME)
+
+      /** 读下载索引（`<userData>/downloads.json`）。 */
+      const readDownloadIndex = (): DownloadIndex => {
+        try {
+          const raw = readFileSync(downloadIndexPath, 'utf8')
+          const parsed = JSON.parse(raw) as Partial<DownloadIndex>
+          const entries = parsed?.entries
+          if (!entries || typeof entries !== 'object') {
+            return { version: DOWNLOAD_INDEX_VERSION, entries: {} }
+          }
+          return { version: DOWNLOAD_INDEX_VERSION, entries: entries as DownloadIndex['entries'] }
+        } catch {
+          // 文件不存在 / 损坏 → 当作没有索引（**不抛**）。
+          return { version: DOWNLOAD_INDEX_VERSION, entries: {} }
+        }
+      }
+
+      /** 写下载索引（原子写：先 `.tmp` 再改名）。 */
+      const writeDownloadIndex = (index: DownloadIndex): void => {
+        const tmpPath = `${downloadIndexPath}.tmp`
+        try {
+          mkdirSync(path.dirname(downloadIndexPath), { recursive: true })
+          writeFileSync(tmpPath, JSON.stringify(index, null, 2), 'utf8')
+          renameSync(tmpPath, downloadIndexPath)
+        } catch {
+          // 半成品临时文件不能留下。
+          try {
+            rmSync(tmpPath, { force: true })
+          } catch {
+            // 清理失败不掩盖原始错误。
+          }
+        }
+      }
+
+      /**
+       * 下载目录：优先用用户设置的（`prefs.downloadDir`），
+       * 否则用「我的音乐\飞牛音乐」子目录。
+       */
+      const resolveDownloadDir = (): string => {
+        const override = prefs.read().downloadDir
+        if (typeof override === 'string' && override.trim().length > 0) return override
+        let base = ''
+        try {
+          base = app.getPath('music')
+        } catch {
+          base = ''
+        }
+        if (base.length === 0) {
+          try {
+            base = app.getPath('userData')
+          } catch {
+            base = process.cwd()
+          }
+        }
+        return path.join(base, DEFAULT_DOWNLOAD_SUBDIR)
+      }
+
+      /**
+       * 取音频流（**主进程拼签名与凭证**）。
+       *
+       * @param rangeStart 断点续传起点（`0` = 从头）。
+       */
+      const fetchDownloadStream = async (
+        songId: string,
+        rangeStart: number,
+      ): Promise<Response> => {
+        const base = session.state.base
+        const token = session.state.token
+        if (!base || !token) {
+          throw new Error('尚未登录或未连接服务器')
+        }
+        const url = `${base}${API_PREFIX}/track/stream?guid=${encodeURIComponent(songId)}`
+        const headers = new Headers()
+        if (rangeStart > 0) headers.set('range', `bytes=${rangeStart}-`)
+        const request = buildUpstreamRequest(
+          { method: 'GET', url, headers },
+          token,
+          session.state.isRelay,
+        )
+        return await http.fetch(request)
+      }
+
+      const downloads = new DownloadManager({
+        fetchStream: fetchDownloadStream,
+        getDownloadDir: resolveDownloadDir,
+        readIndex: readDownloadIndex,
+        writeIndex: writeDownloadIndex,
+        onChange: (tasks) => {
+          if (win.isDestroyed()) return
+          win.webContents.send('download:changed', tasks)
+        },
+      })
+
+      // `fnml://` 协议：把已下载的文件交给渲染进程的 `<audio>` 播放。
+      // ⚠️ 路径**只**来自下载索引（已落盘的记录），渲染进程碰不到文件系统。
+      registerLocalMedia({
+        lookup: (songId) => downloads.localPath(songId),
+      })
+
       // 12. 托盘（Task 17）。
       //
       //     封面字节由主进程自己取（**同一个 `HttpStack` 实例**），
@@ -378,6 +499,8 @@ if (!isPrimaryInstance) {
           lyricWindow.webContents.send('lyric:state', message)
         },
         setLyricVisible,
+        // 本地下载（Task 11）：落盘 / 断点续传 / 索引全在主进程。
+        downloads,
       })
 
       // 13b. 启动时按偏好恢复悬浮窗（上次是开着的就接着开）。
