@@ -212,6 +212,11 @@
   accent-color: var(--accent-hover);
 }
 
+/* 按下（拖动中）：与 hover 同色，明确「正在操作」的状态（F15-06：hover/active/disabled 齐备）。 */
+.fnm-playerbar__slider:active:not(:disabled) {
+  accent-color: var(--accent-hover);
+}
+
 .fnm-playerbar__slider:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
@@ -301,6 +306,17 @@
 .fnm-playerbar__queue-remove:hover {
   background: var(--danger-surface);
   color: var(--danger);
+}
+
+/* 队列只剩一首歌时移除按钮被禁用（给它可读的「不可用」样式，别看起来还能点）。 */
+.fnm-playerbar__queue-remove:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.fnm-playerbar__queue-remove:disabled:hover {
+  background: transparent;
+  color: var(--disabled);
 }
 
 .fnm-playerbar__queue-remove:focus-visible {

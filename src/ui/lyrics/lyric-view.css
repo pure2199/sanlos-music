@@ -23,6 +23,15 @@
   overflow-y: auto;
   overflow-x: hidden;
   color: var(--text-primary);
+
+  /*
+   * 歌词行的左右内边距（**唯一**来源，F15-07）。
+   *
+   * ⚠️ 底层原文与上层着色层必须用**同一个**值：两层的内容宽度一致 →
+   *    长句换行时折行点相同 → 高亮色块与文字严丝合缝。
+   *    （绝对定位的 overlay 相对**padding box**定位，不加这份内边距就会比底层宽 24px。）
+   */
+  --fnm-lyricview__line-pad: 12px;
 }
 
 .fnm-lyricview__canvas {
@@ -46,7 +55,7 @@
   position: relative;
   display: block;
   box-sizing: border-box;
-  padding: 0 12px;
+  padding: 0 var(--fnm-lyricview__line-pad);
   text-align: center;
   color: var(--text-secondary);
   white-space: pre-wrap;
@@ -104,11 +113,21 @@
  * （aria-hidden，不重复朗读）。两层字号字重完全一致 → 着色层与底层的字形严丝合缝。
  * -------------------------------------------------------------------------- */
 
+/*
+ * 着色层：绝对定位在行元素上，**内容宽度与底层原文一致**（F15-07）。
+ *
+ * ⚠️ 绝对定位的盒子相对**包含块的 padding box**定位：这里用 `left/right: 0` + 同样的
+ *    左右内边距 → 内容宽度 = 行元素的 content box 宽度 = 底层原文的折行宽度。
+ *    （早先这里写的是 `width: 100%` 且没有内边距 → 比底层宽 24px →
+ *      长句换行时两层折行点不同 → 高亮色块与文字错位。）
+ */
 .fnm-lyricview__overlay {
   position: absolute;
   left: 0;
+  right: 0;
   top: 0;
-  width: 100%;
+  box-sizing: border-box;
+  padding: 0 var(--fnm-lyricview__line-pad);
   overflow: hidden;
   pointer-events: none;
   color: inherit;

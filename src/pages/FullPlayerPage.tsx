@@ -17,8 +17,11 @@
 // 封面取色（控制器追加要求 F / N）
 // ---------------------------------------------------------------------------
 // - 封面地址**只**由 `components/coverUrl.ts` 拼（全项目唯一的拼装点），本文件**不拼第二份**；
-// - 取色用 **canvas 绘制封面并取像素**：封面走 `fnm://` **同源代理**，
-//   canvas **不会被污染**；CSP（`index.html`）已放行 `fnm:`（`img-src`）→ **取色不受 CSP 阻断**。
+// - 取色用 **canvas 绘制封面并取像素**：封面走 `fnm://` 代理，与页面**跨源**
+//   （`electron/proxy.ts` 的注释明写「渲染进程页面来自 `file://` / dev server，与 `fnm://` 跨源」）
+//   → 图片必须带 `crossOrigin = 'anonymous'`，否则 canvas 被污染、取不到像素。
+//   代理对所有响应都带了 `access-control-allow-origin: *` → 普通 GET 不触发预检 → 能读到像素。
+//   CSP（`index.html`）已放行 `fnm:`（`img-src`）→ **取色不受 CSP 阻断**。
 //   ⚠️ 本任务**不改 CSP**。
 // - 取色**必须异步**、**不得阻塞**首屏渲染；
 // - 取不到色（无封面 / 加载失败 / canvas 被污染）→ **回退到默认背景**（CSS 变量）；
@@ -45,6 +48,7 @@ import { lyricApi } from '../api/lyric'
 import { CoverImage } from '../components/Cards'
 import { coverUrl } from '../components/coverUrl'
 import type { PlayerStoreLike } from '../components/PlayerBar'
+import { QUEUE_ONLY_ONE_HINT, removeSongFromQueue } from '../components/PlayerBar'
 import { usePlayerStore } from '../state/playerStore'
 import { LyricView } from '../ui/lyrics/LyricView'
 import { parseLyricEntries, type LyricLine } from '../ui/lyrics/parse'
@@ -113,7 +117,14 @@ function toHex(r: number, g: number, b: number): string {
  *
  * - **异步**：返回 Promise，**不阻塞**首屏渲染；
  * - 失败（图片加载失败 / canvas 被污染 / 取不到 2D 上下文）→ 解析成 `null`（回退默认背景）；
- * - ⚠️ **不设 `crossOrigin`**：`fnm://` 是同源代理，设了反而会触发 CORS 预检而失败。
+ * - ⚠️ **必须设 `crossOrigin = 'anonymous'`**（且**在设 `src` 之前**）：
+ *    封面走 `fnm://` 代理，而渲染进程页面来自 `file://` / dev server → 与封面**跨源**
+ *    （`electron/proxy.ts` 自己的注释就是这么写的）。不设 `crossOrigin` 时图片以
+ *    no-cors 方式载入 → canvas 被污染 → `getImageData` 抛 SecurityError → **永远取不到色**。
+ *    代理对所有响应都带了 `access-control-allow-origin: *`，普通 GET 不触发预检 →
+ *    设上 `anonymous` 就能读到像素。
+ *    ⚠️ 这条**只针对封面图片**（要喂给 canvas 取色）；媒体元素 `<audio src="fnm://...">`
+ *    **不要**设 `crossOrigin`（Task 13 的要求 H）。
  *
  * @param url 封面地址（由 `coverUrl()` 拼）。
  */
@@ -124,6 +135,8 @@ export function extractCoverColor(url: string): Promise<string | null> {
       return
     }
     const image = new Image()
+    // ⚠️ **在设 `src` 之前**设置（顺序有意义：先设 crossOrigin，再让图片开始加载）。
+    image.crossOrigin = 'anonymous'
     image.onload = () => {
       try {
         const canvas = document.createElement('canvas')
@@ -197,6 +210,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
 
   const state = usePlayerState(store)
   const { current, isPlaying, position, queue } = state
+  /** 队列只剩一首歌时**不能移除**（移除按钮禁用 + 提示，不静默无反应）。 */
+  const canRemove = queue.length > 1
 
   const [tab, setTab] = useState<'lyrics' | 'queue'>('lyrics')
   const [lines, setLines] = useState<LyricLine[]>([])
@@ -343,29 +358,37 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
               {queue.length === 0 ? (
                 <li className="fnm-fullplayer__status">队列为空</li>
               ) : (
-                queue.map((song) => (
-                  <li key={song.id} className="fnm-fullplayer__queue-row">
-                    <button
-                      type="button"
-                      className={`fnm-fullplayer__queue-item${
-                        song.id === current?.id ? ' fnm-fullplayer__queue-item--current' : ''
-                      }`}
-                      onClick={() => store.getState().playTrack(song, queue)}
-                    >
-                      <span className="fnm-fullplayer__queue-name">
-                        {`${song.title} · ${song.artist}`}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="fnm-fullplayer__queue-remove"
-                      aria-label={`从队列移除 ${song.title}`}
-                      onClick={() => removeFromQueue(store, song.id)}
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))
+                <>
+                  {/* 队列只剩一首歌 → 移除按钮禁用 + 给出可读提示（不静默无反应）。 */}
+                  {queue.length === 1 && (
+                    <li className="fnm-fullplayer__status">{QUEUE_ONLY_ONE_HINT}</li>
+                  )}
+                  {queue.map((song) => (
+                    <li key={song.id} className="fnm-fullplayer__queue-row">
+                      <button
+                        type="button"
+                        className={`fnm-fullplayer__queue-item${
+                          song.id === current?.id ? ' fnm-fullplayer__queue-item--current' : ''
+                        }`}
+                        onClick={() => store.getState().playTrack(song, queue)}
+                      >
+                        <span className="fnm-fullplayer__queue-name">
+                          {`${song.title} · ${song.artist}`}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="fnm-fullplayer__queue-remove"
+                        aria-label={`从队列移除 ${song.title}`}
+                        title={canRemove ? `从队列移除 ${song.title}` : QUEUE_ONLY_ONE_HINT}
+                        disabled={!canRemove}
+                        onClick={() => removeSongFromQueue(store, song.id)}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </>
               )}
             </ul>
           )}
@@ -406,34 +429,12 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
 }
 
 // ---------------------------------------------------------------------------
-// 队列移除（与播放条同一套语义）
+// 取封面地址
 // ---------------------------------------------------------------------------
 
 /**
- * 从队列里移除一首。
- *
- * ⚠️ **接口缺口**：Task 13 的 store 没有 `removeFromQueue` 动作，而本任务不允许改
- *    `playerStore.ts` → 这里用「剩余队列重新入队」实现（详见 `PlayerBar.tsx` 的同名函数）。
+ * 取封面地址（**全项目唯一的拼装点**是 `components/coverUrl.ts`）。
  */
-function removeFromQueue(store: PlayerStoreLike, songId: string): void {
-  const snapshot = store.getState()
-  const remaining = snapshot.queue.filter((item) => item.id !== songId)
-  if (!remaining.length) return
-
-  const currentStillThere = remaining.find((item) => item.id === snapshot.current?.id)
-  const target = currentStillThere ?? remaining[0]!
-  const wasPlaying = snapshot.isPlaying
-  const keptPosition = snapshot.position
-
-  snapshot.playTrack(target, remaining)
-
-  if (currentStillThere) {
-    snapshot.seek(keptPosition)
-    if (!wasPlaying) snapshot.togglePlay()
-  }
-}
-
-/** 取封面地址（**全项目唯一的拼装点**是 `components/coverUrl.ts`）。 */
 function coverUrlFor(coverId: string): string | null {
   return coverUrl(coverId)
 }

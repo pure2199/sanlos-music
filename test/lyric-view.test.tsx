@@ -65,6 +65,26 @@ function withoutSlot(className: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// F15-04：单行模式的每一行都要有**稳定的 key**
+// ---------------------------------------------------------------------------
+
+describe('LyricView：渲染 key（F15-04）', () => {
+  it('单行模式渲染不刷 React 的 key 警告（每一行都有 key）', () => {
+    const errors: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map((arg) => String(arg)).join(' '))
+    })
+    try {
+      render(<LyricView lines={LINES} currentTime={12} mode="single" />)
+      const keyWarnings = errors.filter((message) => message.includes('unique "key"'))
+      expect(keyWarnings).toHaveLength(0)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 简报 Step 1 的两条用例
 // ---------------------------------------------------------------------------
 
@@ -122,6 +142,22 @@ describe('LyricView：双行模式', () => {
     // 新的「上一行」= 旧的「下一行」
     expect(lineAt(after, 1)).toBeTruthy()
     expect(lineAt(after, 2)).toBeTruthy()
+  })
+
+  it('整页换行有**真信号**（跨越点上暴露页序号）：t=29.9 与 t=30 的页序号不同', () => {
+    const { container: before } = render(
+      <LyricView lines={THREE_LINES} currentTime={29.9} mode="double" />,
+    )
+    const { container: after } = render(
+      <LyricView lines={THREE_LINES} currentTime={30} mode="double" />,
+    )
+
+    const pageIndexOf = (container: HTMLElement): string =>
+      container.querySelector('[data-testid="lyric-view"]')?.getAttribute('data-page-index') ?? ''
+
+    expect(pageIndexOf(before)).toBe('0')
+    expect(pageIndexOf(after)).toBe('1')
+    expect(pageIndexOf(before)).not.toBe(pageIndexOf(after))
   })
 
   it('两行字号一致、等粗（不把上一行降级成更弱的样子）', () => {
@@ -406,6 +442,23 @@ describe('PlayerBar：进度条与音量（要求 G）', () => {
     expect(engine.seeks).toEqual([42])
   })
 
+  it('在滑块**外**松手也会 seek（拖动不会卡住、预览态会复位）', () => {
+    const engine = new FakeEngine()
+    const store = createPlayerStore(engine)
+    store.getState().playTrack(makeSong(1))
+    render(<PlayerBar store={store} />)
+
+    const slider = screen.getByLabelText('播放进度') as HTMLInputElement
+    fireEvent.change(slider, { target: { value: '42' } })
+
+    // 松手发生在滑块之外（例如用户把鼠标移出滑块再松开）→ 仍然要提交 seek
+    fireEvent.mouseUp(window)
+
+    expect(engine.seeks).toEqual([42])
+    // 预览态复位（不再是「预览中」的样式）
+    expect(screen.getByTestId('player-position').className).not.toContain('preview')
+  })
+
   it('音量变化触发 setVolume 且被钳制在 [0,1]', () => {
     const engine = new FakeEngine()
     const store = createPlayerStore(engine)
@@ -492,6 +545,44 @@ describe('PlayerBar：队列面板（要求 G）', () => {
 
     expect(store.getState().queue.map((song) => song.title)).toEqual(['歌2'])
   })
+
+  it('移除**当前曲**时切到队列里的**下一首**（不是队列第一首）', () => {
+    const store = createPlayerStore(new FakeEngine())
+    const songs = [makeSong(1), makeSong(2), makeSong(3)]
+    store.getState().playTrack(songs[1]!, songs)
+    render(<PlayerBar store={store} />)
+
+    fireEvent.click(screen.getByLabelText('播放队列'))
+    fireEvent.click(screen.getByLabelText('从队列移除 歌2'))
+
+    expect(store.getState().current?.title).toBe('歌3')
+    expect(store.getState().queue.map((song) => song.title)).toEqual(['歌1', '歌3'])
+  })
+
+  it('移除当前曲（它在队尾）时回到队列第一首（下一首越界 → 回到开头）', () => {
+    const store = createPlayerStore(new FakeEngine())
+    const songs = [makeSong(1), makeSong(2)]
+    store.getState().playTrack(songs[1]!, songs)
+    render(<PlayerBar store={store} />)
+
+    fireEvent.click(screen.getByLabelText('播放队列'))
+    fireEvent.click(screen.getByLabelText('从队列移除 歌2'))
+
+    expect(store.getState().current?.title).toBe('歌1')
+  })
+
+  it('队列只剩一首歌时，移除按钮禁用并给出**可读提示**（不静默无反应）', () => {
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1), [makeSong(1)])
+    render(<PlayerBar store={store} />)
+
+    fireEvent.click(screen.getByLabelText('播放队列'))
+
+    const remove = screen.getByLabelText('从队列移除 歌1')
+    expect(remove.hasAttribute('disabled')).toBe(true)
+    expect(remove.getAttribute('title')).toContain('只有一首歌')
+    expect(screen.getByText('队列里只有一首歌，不能移除')).toBeTruthy()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -557,6 +648,8 @@ describe('FullPlayerPage：歌词（要求 C / K）', () => {
 describe('FullPlayerPage：封面取色（要求 F / N）', () => {
   /** 记录被创建过的图片地址。 */
   let imageSources: string[] = []
+  /** 记录设置 `src` **那一刻**的 `crossOrigin`（顺序敏感）。 */
+  let crossOriginAtSrc: (string | null)[] = []
   let originalImage: typeof Image
   let originalGetContext: typeof HTMLCanvasElement.prototype.getContext
 
@@ -565,8 +658,10 @@ describe('FullPlayerPage：封面取色（要求 F / N）', () => {
     class StubImage {
       onload: (() => void) | null = null
       onerror: (() => void) | null = null
+      crossOrigin: string | null = null
       set src(value: string) {
         imageSources.push(value)
+        crossOriginAtSrc.push(this.crossOrigin)
         setTimeout(() => {
           if (fail) this.onerror?.()
           else this.onload?.()
@@ -585,6 +680,7 @@ describe('FullPlayerPage：封面取色（要求 F / N）', () => {
 
   beforeEach(() => {
     imageSources = []
+    crossOriginAtSrc = []
     originalImage = window.Image
     originalGetContext = HTMLCanvasElement.prototype.getContext
     clearCoverColorCache()
@@ -655,5 +751,56 @@ describe('FullPlayerPage：封面取色（要求 F / N）', () => {
   it('extractCoverColor：取到像素时给出代表色', async () => {
     stubImage(false)
     await expect(extractCoverColor('fnm://srv/cover-test')).resolves.toBe('#0a141e')
+  })
+
+  it('取色时给封面图片设 crossOrigin=anonymous（**在设 src 之前**）→ canvas 不会被污染', async () => {
+    // 封面走 `fnm://` 代理，与页面**跨源** → 不设 crossOrigin 时 canvas 会被污染、
+    // `getImageData` 抛安全错误 → 取色永远失败。
+    stubImage(false)
+    await expect(extractCoverColor('fnm://srv/cover-test')).resolves.toBe('#0a141e')
+
+    expect(crossOriginAtSrc).toEqual(['anonymous'])
+  })
+
+  it('取色失败时仍然**优雅降级**（解析成 null → 回退 CSS 变量兜底背景）', async () => {
+    // 图片加载失败（onerror）→ null
+    stubImage(true)
+    await expect(extractCoverColor('fnm://srv/cover-test')).resolves.toBeNull()
+    // 依然带着 crossOrigin（说明失败不是「没设 crossOrigin」导致的）
+    expect(crossOriginAtSrc).toEqual(['anonymous'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 全屏播放页：队列移除（与播放条同一套语义）
+// ---------------------------------------------------------------------------
+
+describe('FullPlayerPage：队列移除', () => {
+  it('移除**当前曲**时切到队列里的**下一首**（不是队列第一首）', () => {
+    const store = createPlayerStore(new FakeEngine())
+    const songs = [makeSong(1), makeSong(2), makeSong(3)]
+    store.getState().playTrack(songs[1]!, songs)
+    const api = { list: vi.fn(async () => [] as LyricEntry[]) }
+
+    render(<FullPlayerPage store={store} lyricApi={api} />)
+    fireEvent.click(screen.getByRole('button', { name: '队列' }))
+    fireEvent.click(screen.getByLabelText('从队列移除 歌2'))
+
+    expect(store.getState().current?.title).toBe('歌3')
+    expect(store.getState().queue.map((song) => song.title)).toEqual(['歌1', '歌3'])
+  })
+
+  it('队列只剩一首歌时，移除按钮禁用并给出**可读提示**（不静默无反应）', () => {
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1), [makeSong(1)])
+    const api = { list: vi.fn(async () => [] as LyricEntry[]) }
+
+    render(<FullPlayerPage store={store} lyricApi={api} />)
+    fireEvent.click(screen.getByRole('button', { name: '队列' }))
+
+    const remove = screen.getByLabelText('从队列移除 歌1')
+    expect(remove.hasAttribute('disabled')).toBe(true)
+    expect(remove.getAttribute('title')).toContain('只有一首歌')
+    expect(screen.getByText('队列里只有一首歌，不能移除')).toBeTruthy()
   })
 })

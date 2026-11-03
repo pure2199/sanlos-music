@@ -15,6 +15,7 @@ import { parseLrc } from '../src/ui/lyrics/parse'
 import {
   computeDoubleLineState,
   computeLineProgress,
+  isPageSwapped,
   lineEndTime,
   type DoubleLineState,
 } from '../src/ui/lyrics/doubleLine'
@@ -206,6 +207,84 @@ describe('phase：换行前 / 换行后', () => {
 
   it('上一行已走满（停在全满态）→ 换行后', () => {
     expect(computeDoubleLineState(LINES, 25).phase).toBe('after')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 整页换行（页面切换）的**真信号**（复审 I-1）
+// ---------------------------------------------------------------------------
+
+describe('整页换行信号（页面切换）：phase 不是换行信号', () => {
+  it('跨越点：t=29.9 与 t=30 的状态差异能反映换行（swappedAt 变了）', () => {
+    // 乙行 20~30s → t=30 整页走完 → 换成新的一页（上一行 = 乙行）
+    const before = computeDoubleLineState(LINES, 29.9)
+    const after = computeDoubleLineState(LINES, 30)
+
+    // 「刚刚走满的那一行」换行后成了 previous
+    expect(before.previousIndex).toBe(0)
+    expect(after.previousIndex).toBe(1)
+    expect(after.previous?.completed).toBe(true)
+
+    // 真信号：swappedAt（= 本页成为当前页的时刻）在跨越点**变化**
+    //   跨越前还在第 0 页（还没换过页）→ null；跨越后是第 1 页 → 甲行走满的那一刻（20s）
+    expect(before.swappedAt).toBeNull()
+    expect(after.swappedAt).toBe(20)
+    expect(after.swappedAt).not.toBe(before.swappedAt)
+  })
+
+  it('phase 在跨越点上**完全相同**（所以不能用 phase 判换行）', () => {
+    const before = computeDoubleLineState(LINES, 29.9)
+    const after = computeDoubleLineState(LINES, 30)
+
+    expect(before.phase).toBe(after.phase)
+    expect(before.phase).toBe('after')
+  })
+
+  it('上一行走满（t=20）时 phase 变了，但换行信号**没变**（两者不是同一个事件）', () => {
+    const atBoundary = computeDoubleLineState(LINES, 20)
+    const later = computeDoubleLineState(LINES, 25)
+
+    expect(atBoundary.phase).toBe('after')
+    expect(later.phase).toBe('after')
+    // 还在同一页 → 换行信号不变
+    expect(atBoundary.swappedAt).toBe(later.swappedAt)
+    expect(atBoundary.previousIndex).toBe(later.previousIndex)
+  })
+
+  it('isPageSwapped：跨过换行点为 true，同一页内为 false', () => {
+    const before = computeDoubleLineState(LINES, 29.9)
+    const after = computeDoubleLineState(LINES, 30)
+
+    expect(isPageSwapped(before, after)).toBe(true)
+    expect(isPageSwapped(computeDoubleLineState(LINES, 20), computeDoubleLineState(LINES, 25))).toBe(false)
+    // 没有上一帧时不算换行（首帧不播换行动画）
+    expect(isPageSwapped(null, after)).toBe(false)
+  })
+
+  it('第一页还没换过页（swappedAt 为 null）', () => {
+    const state = computeDoubleLineState(LINES, 12)
+    expect(state.swappedAt).toBeNull()
+    expect(state.previousIndex).toBe(0)
+  })
+
+  it('换行后「刚刚走满的那一行」是 previous（completed === true）', () => {
+    const state = computeDoubleLineState(LINES, 30)
+    expect(state.previousIndex).toBe(1)
+    expect(state.previous?.completed).toBe(true)
+    expect(state.previous?.progress).toBe(1)
+  })
+
+  it('next 永远是「还没走满的那一行」（next.completed 恒为 false，不能用来判换行）', () => {
+    for (const t of [0, 12, 20, 25, 29.9, 30, 30.5, 999]) {
+      expect(computeDoubleLineState(LINES, t).next?.completed ?? false).toBe(false)
+    }
+  })
+
+  it('空歌词时没有换行信号（swappedAt 为 null）', () => {
+    const state = computeDoubleLineState([], 12)
+    expect(state.swappedAt).toBeNull()
+    expect(state.previousIndex).toBe(-1)
+    expect(state.nextIndex).toBe(-1)
   })
 })
 

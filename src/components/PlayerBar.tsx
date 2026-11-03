@@ -34,6 +34,8 @@
 
 import {
   useCallback,
+  useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type ChangeEvent,
@@ -146,6 +148,53 @@ function usePlayerState(store: PlayerStoreLike): PlayerStore {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
+/** 队列只剩一首歌时的提示文案（移除按钮禁用 + 面板里显示）。 */
+export const QUEUE_ONLY_ONE_HINT = '队列里只有一首歌，不能移除'
+
+/**
+ * 从队列里移除一首（**播放条与全屏播放页共用这一份语义**）。
+ *
+ * ⚠️ **接口缺口**：Task 13 的 store **没有** `removeFromQueue` 动作
+ *    （队列的可变对象在 store 内部闭包里），而本任务**不允许改** `playerStore.ts`。
+ *    所以这里走「用剩余队列重新入队」这条路：
+ *    - 移除的是**别的曲子** → 队列换新后**恢复原来的播放进度与暂停态**
+ *      （`playTrack` 会把当前曲从头播一遍）；
+ *    - 移除的是**当前曲** → 切到**队列里的下一首**（原队列中当前曲的**后面**那一首；
+ *      当前曲已经是队列最后一首时 → **回到队列的第一首**）。
+ *
+ * @param store 播放器 store。
+ * @param songId 要移除的曲目 id。
+ */
+export function removeSongFromQueue(store: PlayerStoreLike, songId: string): void {
+  const snapshot = store.getState()
+  const queue = snapshot.queue
+  const removedIndex = queue.findIndex((item) => item.id === songId)
+  const remaining = queue.filter((item) => item.id !== songId)
+  // 移除后队列空了 → 没有可播的（UI 会禁用按钮并给出提示，不静默无反应）
+  if (!remaining.length) return
+
+  const currentStillThere = remaining.find((item) => item.id === snapshot.current?.id)
+  const wasPlaying = snapshot.isPlaying
+  const keptPosition = snapshot.position
+
+  let target = currentStillThere ?? remaining[0]!
+  if (!currentStillThere) {
+    // 移除的是**当前曲** → 切到「队列里的下一首」（越界则回到队列第一首）。
+    const nextInQueue = removedIndex >= 0 ? queue[removedIndex + 1] : undefined
+    target =
+      (nextInQueue ? remaining.find((item) => item.id === nextInQueue.id) : undefined) ??
+      remaining[0]!
+  }
+
+  snapshot.playTrack(target, remaining)
+
+  if (currentStillThere) {
+    // 队列换新会把当前曲从头播 → 把进度放回去；原来暂停的也恢复暂停。
+    snapshot.seek(keptPosition)
+    if (!wasPlaying) snapshot.togglePlay()
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 组件
 // ---------------------------------------------------------------------------
@@ -169,6 +218,13 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
 
   /** 拖动进度条时的预览值（`null` = 没在拖动）。 */
   const [dragValue, setDragValue] = useState<number | null>(null)
+  /**
+   * 拖动预览值的**同步副本**（F15-05）。
+   *
+   * 同一次松手可能同时触发「滑块上的 `mouseup`」与「window 上的 `mouseup`」
+   * （用户在滑块外松手）→ 提交时用它做**幂等守卫**，保证只 seek 一次。
+   */
+  const pendingSeekRef = useRef<number | null>(null)
   /** 队列面板是否展开。 */
   const [queueOpen, setQueueOpen] = useState(false)
 
@@ -177,6 +233,8 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
   const shown = dragValue !== null ? dragValue : position
   const previewing = dragValue !== null
   const quality = resolveQuality(current)
+  /** 队列只剩一首歌时**不能移除**（移除按钮禁用 + 面板里给出提示，不静默无反应）。 */
+  const canRemove = queue.length > 1
 
   // --- 播放控制 ------------------------------------------------------------
 
@@ -204,15 +262,43 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
     const value = Number(event.target.value)
     if (!Number.isFinite(value)) return
     // 只更新预览，**不**在这里 seek（边拖边 seek 会疯狂发请求）。
-    setDragValue(Math.min(Math.max(value, 0), max))
+    const clamped = Math.min(Math.max(value, 0), max)
+    pendingSeekRef.current = clamped
+    setDragValue(clamped)
   }, [max])
 
-  /** 松手（或键盘操作结束）时才真正 seek。 */
+  /**
+   * 松手（或键盘操作结束）时才真正 seek。
+   *
+   * ⚠️ **幂等**（F15-05）：同一次松手可能既触发滑块上的 `mouseup`、又触发
+   *    window 上的 `mouseup` → 用 `pendingSeekRef` 保证**只提交一次**。
+   */
   const commitSeek = useCallback((): void => {
-    if (dragValue === null) return
-    store.getState().seek(dragValue)
+    const pending = pendingSeekRef.current
+    if (pending === null) return
+    pendingSeekRef.current = null
     setDragValue(null)
-  }, [dragValue, store])
+    store.getState().seek(pending)
+  }, [store])
+
+  /**
+   * 拖动期间监听 **window** 的松手事件（F15-05）。
+   *
+   * ⚠️ 只监听滑块自己的 `mouseup` 是不够的：用户把鼠标拖出滑块再松开时，
+   *    松手事件落在滑块外 → 不会 seek、`dragValue` 卡住 → 预览态不复位、本次拖动不生效。
+   */
+  useEffect(() => {
+    if (dragValue === null) return
+    const handleRelease = (): void => commitSeek()
+    window.addEventListener('mouseup', handleRelease)
+    window.addEventListener('pointerup', handleRelease)
+    window.addEventListener('touchend', handleRelease)
+    return () => {
+      window.removeEventListener('mouseup', handleRelease)
+      window.removeEventListener('pointerup', handleRelease)
+      window.removeEventListener('touchend', handleRelease)
+    }
+  }, [commitSeek, dragValue])
 
   // --- 音量 ----------------------------------------------------------------
 
@@ -229,33 +315,11 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
   // --- 队列 ----------------------------------------------------------------
 
   /**
-   * 从队列里移除一首。
-   *
-   * ⚠️ **接口缺口**：Task 13 的 store **没有** `removeFromQueue` 动作
-   *    （队列的可变对象在 store 内部闭包里），而本任务**不允许改** `playerStore.ts`。
-   *    所以这里走「用剩余队列重新入队」这条路：
-   *    - 移除的是**当前曲** → 切到队列里的下一首；
-   *    - 移除的是**别的曲子** → 队列换新后**恢复原来的播放进度与暂停态**
-   *      （`playTrack` 会把当前曲从头播一遍）。
+   * 从队列里移除一首（语义见 `removeSongFromQueue`）。
    */
   const removeFromQueue = useCallback(
     (songId: string): void => {
-      const snapshot = store.getState()
-      const remaining = snapshot.queue.filter((item) => item.id !== songId)
-      if (!remaining.length) return
-
-      const currentStillThere = remaining.find((item) => item.id === snapshot.current?.id)
-      const target = currentStillThere ?? remaining[0]!
-      const wasPlaying = snapshot.isPlaying
-      const keptPosition = snapshot.position
-
-      snapshot.playTrack(target, remaining)
-
-      if (currentStillThere) {
-        // 队列换新会把当前曲从头播 → 把进度放回去；原来暂停的也恢复暂停。
-        snapshot.seek(keptPosition)
-        if (!wasPlaying) snapshot.togglePlay()
-      }
+      removeSongFromQueue(store, songId)
     },
     [store],
   )
@@ -400,27 +464,35 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
           {queue.length === 0 ? (
             <p className="fnm-playerbar__queue-title">队列为空</p>
           ) : (
-            queue.map((song) => (
-              <div key={song.id} className="fnm-playerbar__queue-row">
-                <button
-                  type="button"
-                  className={`fnm-playerbar__queue-item${
-                    song.id === current?.id ? ' fnm-playerbar__queue-item--current' : ''
-                  }`}
-                  onClick={() => store.getState().playTrack(song, queue)}
-                >
-                  <span className="fnm-playerbar__queue-name">{`${song.title} · ${song.artist}`}</span>
-                </button>
-                <button
-                  type="button"
-                  className="fnm-playerbar__queue-remove"
-                  aria-label={`从队列移除 ${song.title}`}
-                  onClick={() => removeFromQueue(song.id)}
-                >
-                  ×
-                </button>
-              </div>
-            ))
+            <>
+              {/* 队列只剩一首歌 → 移除按钮禁用 + 给出可读提示（不静默无反应）。 */}
+              {queue.length === 1 && (
+                <p className="fnm-playerbar__queue-title">{QUEUE_ONLY_ONE_HINT}</p>
+              )}
+              {queue.map((song) => (
+                <div key={song.id} className="fnm-playerbar__queue-row">
+                  <button
+                    type="button"
+                    className={`fnm-playerbar__queue-item${
+                      song.id === current?.id ? ' fnm-playerbar__queue-item--current' : ''
+                    }`}
+                    onClick={() => store.getState().playTrack(song, queue)}
+                  >
+                    <span className="fnm-playerbar__queue-name">{`${song.title} · ${song.artist}`}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="fnm-playerbar__queue-remove"
+                    aria-label={`从队列移除 ${song.title}`}
+                    title={canRemove ? `从队列移除 ${song.title}` : QUEUE_ONLY_ONE_HINT}
+                    disabled={!canRemove}
+                    onClick={() => removeFromQueue(song.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </>
           )}
         </div>
       )}

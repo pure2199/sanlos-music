@@ -15,6 +15,15 @@
 // ---------------------------------------------------------------------------
 // 语义模型（「一页两行」）
 // ---------------------------------------------------------------------------
+// ⚠️ **「两行」= 两行「歌词行」**：`previous` / `next` 都是 `LyricLine`。
+//    `LyricLine.translation` 只是挂在歌词行下面的**副行**（一个 `string`，
+//    **没有逐字时间**）→ **不参与推进**、**不是**第二行歌词。
+//
+//    （简报 B 末句「没有翻译时双行模式退化为单行」**是误写**——把「翻译副行」
+//      与「第二行歌词」混为一谈。**以 Step 1 的测试代码与要求 A 为准**：
+//      双行模式的「两行」永远是两行**歌词行**，与有没有翻译无关。
+//      翻译的渲染在 `LyricView.tsx`，与本模块无关。）
+//
 // 双行模式同时呈现**两行歌词**：
 //
 //     上一行（上一行 slot）  ←  已经走满、停在全满态的那一行
@@ -50,15 +59,41 @@
 // 「上一行变成旧的下一行，下一行变成再下一行」。
 //
 // ---------------------------------------------------------------------------
-// `phase`（换行前 / 换行后）
+// `phase`（**上一行**走满前 / 后）—— ⚠️ **不是**整页换行信号
 // ---------------------------------------------------------------------------
-// 双行推进里唯一的一次「换行」动作 = **上一行走满**（该行从「正在走」变成「停在全满态」）：
+// `phase` 描述的是**上一行**的状态：
 //
-// - `'before'`（换行前）：上一行**还没走满**，它还在逐字推进；
-// - `'after'` （换行后）：上一行**已走满**，停在全满态，下一行接管推进。
+// - `'before'`：上一行**还没走满**，它还在逐字推进；
+// - `'after'` （原「换行后」）：上一行**已走满**，停在全满态，下一行接管推进。
 //
-// 消费方（`LyricView` / Task 19 的 `LyricOverlay`）可以直接用 `phase` 决定要不要做换行动画；
-// 若需要更细的信号，直接读 `previous.completed` / `next.completed` / `previous.wordIndex`。
+// ⚠️ **它与「整页换行」不是同一个事件**（复审 I-1）：
+//    `phase` 在**上一行走满**时翻转（t=20），而**整页换行**发生在**下一行走满**时（t=30）。
+//    t=29.9 与 t=30 的 `phase` **完全相同**（都是 `'after'`）——
+//    所以**绝不能**用 `phase` 决定要不要做换行动画。
+//
+// ---------------------------------------------------------------------------
+// 整页换行（页面切换）：**确切判据**
+// ---------------------------------------------------------------------------
+// 「整页走完才一起换行」= 下一行也走满 → 整体换成新的「上一行 / 下一行」。
+// 换行发生在**下一行走满的那一刻**。
+//
+// **确切判据（Task 19 的悬浮歌词照抄）**：
+//
+//     整页换行 ⇔ 换行**之后**的 `previousIndex` 与换行**之前**不同
+//              （等价：换行后的 `previous` 就是**刚刚走满**的那一行 —— `previous.completed === true`；
+//                也等价：`swappedAt` 变了 —— 它是**本页成为当前页的时刻**）
+//
+// 消费方（`LyricView` / Task 19 的 `LyricOverlay`）用法：
+//
+//     const prev = prevRef.current
+//     if (isPageSwapped(prev, state)) {
+//       // 整页换行 → 播换行动画
+//     }
+//     prevRef.current = state
+//
+// ⚠️ **不能用 `next.completed` 判换行**：本模块的 `next` 永远是「**还没走满**的那一行」
+//    （`nextIndex = done`，而 `done` 正是已走满的行数）→ `next.completed` **恒为 false**。
+//    真正「刚刚走满」的那一行，在换行**之后**是 `previous`（换行**之前**才是 `next`）。
 // ---------------------------------------------------------------------------
 
 import { findActiveWord } from './parse'
@@ -105,7 +140,7 @@ export interface LyricWordProgress {
   completed: boolean
 }
 
-/** 双行推进的阶段：换行前 / 换行后。 */
+/** 双行推进的阶段：**上一行**走满前 / 后（⚠️ 不是整页换行信号，见文件头注释）。 */
 export type DoubleLinePhase = 'before' | 'after'
 
 /** 双行模式在某一时刻的完整状态。 */
@@ -118,8 +153,22 @@ export interface DoubleLineState {
   previous: LyricWordProgress | null
   /** 下一行的逐字推进状态（没有下一行时为 `null`）。 */
   next: LyricWordProgress | null
-  /** 当前处于「换行前」还是「换行后」。 */
+  /**
+   * 当前处于「上一行**还没走满**」还是「上一行**已走满**」。
+   *
+   * ⚠️ **它不是整页换行信号**（整页换行的判据见文件头注释与 `swappedAt`）。
+   */
   phase: DoubleLinePhase
+  /**
+   * **本页成为当前页的时刻**（秒）。
+   *
+   * - `null` = 还在**第 0 页**（还没发生过整页换行）；
+   * - 否则 = 上一页的「上一行」走满的那一刻（也就是整页换行发生的时刻）。
+   *
+   * ⭐ **这是整页换行的真信号**：整页换行时它**必然变化**，
+   *    同一页内它**保持不变**（消费方用 `isPageSwapped(上一帧, 这一帧)` 判定）。
+   */
+  swappedAt: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +238,7 @@ function emptyState(): DoubleLineState {
     previous: null,
     next: null,
     phase: 'before',
+    swappedAt: null,
   }
 }
 
@@ -222,12 +272,46 @@ export function computeDoubleLineState(lines: LyricLine[], t: number): DoubleLin
   const previous = previousLine ? computeLineProgress(previousLine, time) : null
   const next = nextLine ? computeLineProgress(nextLine, time) : null
 
+  // 本页成为当前页的时刻：
+  // - 第 0 页（`previousIndex === 0`）→ 还没换过页 → `null`；
+  // - 第 p 页（`p >= 1`）→ 第 p-1 页的「上一行」走满的那一刻 = `end(lines[p-1])`。
+  const swappedAt = previousIndex >= 1 ? lineEndTime(lines[previousIndex - 1]!) : null
+
   return {
     previousIndex,
     nextIndex: nextLine ? nextIndex : -1,
     previous,
     next,
-    // 「换行」= 上一行走满（从「正在走」变成「停在全满态」）。
+    // 「上一行」走满前 / 后（⚠️ **不是**整页换行信号）。
     phase: previous?.completed ? 'after' : 'before',
+    // 整页换行的真信号（同一页内不变，换行时变化）。
+    swappedAt,
   }
+}
+
+/**
+ * 判定相邻两帧之间是否发生了**整页换行**（页面切换）。
+ *
+ * ⭐ **Task 19（桌面悬浮歌词）做换行动画就用它**：
+ *
+ *     const prev = prevRef.current
+ *     if (isPageSwapped(prev, state)) {
+ *       // 整页换行 → 播换行动画
+ *     }
+ *     prevRef.current = state
+ *
+ * 判据（文件头有完整说明）：换行**之后**的 `previousIndex` 与换行**之前**不同
+ * —— 等价于「换行后的 `previous` 是刚刚走满的那一行」。
+ *
+ * ⚠️ **不要用 `phase`**：`phase` 在**上一行走满**时翻转，与整页换行不是同一个事件。
+ *
+ * @param previous 上一帧的状态（没有上一帧时传 `null` → 返回 `false`，首帧不播动画）。
+ * @param current  当前帧的状态。
+ */
+export function isPageSwapped(
+  previous: DoubleLineState | null | undefined,
+  current: DoubleLineState,
+): boolean {
+  if (!previous) return false
+  return previous.previousIndex !== current.previousIndex
 }

@@ -296,11 +296,17 @@ export function LyricView(props: LyricViewProps): ReactElement {
   const previousLine = state.previousIndex >= 0 ? safeLines[state.previousIndex] : undefined
   const nextLine = state.nextIndex >= 0 ? safeLines[state.nextIndex] : undefined
 
+  // ⭐ **整页换行的真信号**（复审 I-1）：
+  //    `data-page-index` = 当前页序号（第 0 页 = lines[0]/lines[1]，即「上一行」的下标），
+  //    跨过换行点时它**变化**；`data-swapped-at` = 本页成为当前页的时刻。
+  //    ⚠️ `data-phase` 在跨越点上**不变**（它在「上一行走满」时就翻转了）→ **别用它判换行**。
   return (
     <div
       className={`${classes} fnm-lyricview--double`}
       data-testid="lyric-view"
       data-phase={state.phase}
+      data-page-index={state.previousIndex}
+      data-swapped-at={state.swappedAt ?? ''}
       role="list"
       aria-label="歌词"
     >
@@ -353,6 +359,11 @@ interface RenderLineOptions {
  *
  * 两层的字号字重完全一致 → 着色层与底层的字形严丝合缝。
  *
+ * ⚠️ **翻译（`line.translation`）不是「第二行歌词」**（F15-10）：
+ *    翻译只是一个**副行**（`string`，**没有逐字时间**）→ **不参与推进**。
+ *    双行模式的「两行」永远是**两行歌词行**（`previous` / `next`，见 `doubleLine.ts`）。
+ *    （简报 B 末句「没有翻译时双行模式退化为单行」**是误写**。）
+ *
  * 翻译（`line.translation` 非空时）挂在下面当副行；**没有翻译时不渲染任何空的翻译节点**
  * （不渲染空的第二行）。
  */
@@ -397,6 +408,11 @@ function renderLine(options: RenderLineOptions): ReactElement {
   ) : null
 
   const shared = {
+    // ⚠️ **必须有 `key`**（F15-04）：单行模式把若干行放进一个数组渲染，
+    //    没有 key 会每次渲染都刷 React 的 key 警告、并且按下标 reconcile。
+    //    这里用**歌词行的绝对下标**做 key —— 窗口滚动时行会进出数组，
+    //    绝对下标是稳定的（不会因为窗口移动而错位）。
+    key: index,
     className: classNames.join(' '),
     'data-index': index,
     style,
