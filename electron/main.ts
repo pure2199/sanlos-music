@@ -1,7 +1,7 @@
 import { app, BrowserWindow, session as electronSession } from 'electron'
 import path from 'node:path'
 
-import type { PlayerCommand, PlayerStateSnapshot } from '../shared/playerBridge'
+import type { LyricOverlayMessage, PlayerCommand, PlayerStateSnapshot } from '../shared/playerBridge'
 import type { ThemeName } from '../shared/types'
 import { resolveThemeName, themeSpec } from '../shared/themes'
 import { registerAuthIpc, registerPlayerIpc, PrefsStore } from './ipc'
@@ -16,6 +16,15 @@ import { createBoundsSaver, resolveWindowBounds } from './windowBounds'
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
 // 生产模式（npm start / 打包后的应用）加载随包发布的 dist/index.html。
 const devServerUrl = process.env.VITE_DEV_SERVER_URL
+
+// ---------------------------------------------------------------------------
+// 桌面悬浮歌词窗口（Task 10）
+// ---------------------------------------------------------------------------
+
+/** 悬浮窗的默认宽度（像素）。 */
+const LYRIC_WINDOW_WIDTH = 560
+/** 悬浮窗的默认高度（像素）。 */
+const LYRIC_WINDOW_HEIGHT = 200
 
 // ---------------------------------------------------------------------------
 // 进程级状态（托盘 / 单实例 / 关闭拦截都要用）
@@ -35,6 +44,25 @@ let isQuitting = false
 
 /** 主进程缓存的播放器状态（托盘 tooltip / 图标用）。 */
 let currentPlayerState: PlayerStateSnapshot | null = null
+
+/**
+ * 桌面悬浮歌词窗口（Task 10）。
+ *
+ * ⚠️ **播放只有一个 `<audio>`**（在主窗口的渲染进程里）——
+ *    悬浮窗**只负责显示**，绝不自己播音频（否则双解码 + 双倍流量 + 同步地狱）。
+ */
+let lyricWindow: BrowserWindow | null = null
+
+/** 悬浮窗当前是否可见（主进程侧的状态；与 `prefs.lyricOverlay.visible` 同步）。 */
+let lyricVisible = false
+
+/**
+ * 主进程缓存的**最后一条**悬浮歌词消息。
+ *
+ * ⚠️ 悬浮窗**刚创建**时，渲染进程可能还没推过消息 →
+ *    页面加载完成后把这条缓存补给它（否则它要等到下一次切歌才有内容）。
+ */
+let lastLyricMessage: LyricOverlayMessage | null = null
 
 /** 调出主窗口（托盘左键、单实例 `second-instance`、IPC `win:*` 都走它）。 */
 function showMainWindow(): void {
@@ -224,11 +252,106 @@ if (!isPrimaryInstance) {
           win.webContents.send('player:command', command)
         },
         showWindow: showMainWindow,
+        // 桌面悬浮歌词（Task 10）：开 / 关切换（窗口由主进程管）。
+        toggleLyricOverlay: () => {
+          setLyricVisible(!lyricVisible)
+        },
         quit: () => {
           isQuitting = true
           app.quit()
         },
       })
+
+      // 12b. 桌面悬浮歌词窗口（Task 10）。
+      //
+      //     ⚠️ **窗口归主进程管**（创建 / 显示 / 隐藏 / 位置尺寸记忆）；
+      //     ⚠️ **内容归渲染进程管**（主窗口推数据 → 主进程转发 → 悬浮窗渲染）。
+      //     ⚠️ 悬浮窗**不碰音频**：播放只有一个 `<audio>`（在主窗口里）。
+      const createLyricWindow = (): BrowserWindow | null => {
+        if (lyricWindow && !lyricWindow.isDestroyed()) return lyricWindow
+
+        const saved = prefs.read().lyricOverlay?.bounds
+        const win = new BrowserWindow({
+          width: saved?.width ?? LYRIC_WINDOW_WIDTH,
+          height: saved?.height ?? LYRIC_WINDOW_HEIGHT,
+          x: saved?.x,
+          y: saved?.y,
+          show: false,
+          // 悬浮窗：无边框 + 透明 + 不进任务栏 + 不可缩放。
+          frame: false,
+          transparent: true,
+          resizable: false,
+          maximizable: false,
+          fullscreenable: false,
+          skipTaskbar: true,
+          alwaysOnTop: true,
+          hasShadow: false,
+          webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            contextIsolation: true,
+            sandbox: true,
+            nodeIntegration: false,
+          },
+        })
+        // 置顶到最高级（'screen-saver'）：连全屏应用都压得住它。
+        win.setAlwaysOnTop(true, 'screen-saver')
+        // 所有工作区都可见（含全屏）。
+        win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+        lyricWindow = win
+
+        // 位置尺寸记忆（与主窗口同一套机制：`electron/windowBounds.ts`）。
+        const lyricBoundsSaver = createBoundsSaver({
+          getBounds: () => (win.isDestroyed() ? null : win.getBounds()),
+          save: (bounds) => {
+            prefs.write({ lyricOverlay: { visible: lyricVisible, bounds } })
+          },
+        })
+        win.on('resize', () => lyricBoundsSaver.schedule())
+        win.on('move', () => lyricBoundsSaver.schedule())
+        win.on('closed', () => {
+          lyricBoundsSaver.saveNow()
+          lyricWindow = null
+        })
+
+        // 页面加载完成 → 把缓存的消息补给它（否则要等到下一次切歌才有内容）。
+        win.webContents.on('did-finish-load', () => {
+          if (lastLyricMessage) {
+            win.webContents.send('lyric:state', lastLyricMessage)
+          }
+        })
+
+        if (devServerUrl) {
+          const url = `${devServerUrl.replace(/\/$/, '')}/lyric.html`
+          win.loadURL(url).catch((err: unknown) => {
+            console.error(`[fnmusic] 悬浮歌词页面加载失败 (${url}):`, err)
+          })
+        } else {
+          const lyricPath = path.join(__dirname, '../dist/lyric.html')
+          win.loadFile(lyricPath).catch((err: unknown) => {
+            console.error(`[fnmusic] 悬浮歌词页面加载失败 (${lyricPath}):`, err)
+          })
+        }
+        return win
+      }
+
+      /** 显示 / 隐藏悬浮窗（落盘 + 通知主窗口渲染进程）。 */
+      const setLyricVisible = (visible: boolean): void => {
+        lyricVisible = visible
+        if (visible) {
+          createLyricWindow()?.show()
+        } else {
+          lyricWindow?.hide()
+        }
+        // 落盘（下次启动恢复）：可见性 + 当前（或上次记住的）位置尺寸。
+        const live = lyricWindow && !lyricWindow.isDestroyed() ? lyricWindow.getBounds() : null
+        const previous = prefs.read().lyricOverlay?.bounds
+        const bounds = live
+          ? { width: live.width, height: live.height, x: live.x, y: live.y }
+          : previous
+        prefs.write({ lyricOverlay: bounds ? { visible, bounds } : { visible } })
+        // 通知主窗口渲染进程：它据此决定要不要拉歌词、要不要继续推进度。
+        if (!win.isDestroyed()) win.webContents.send('lyric:visibility', visible)
+      }
 
       // 13. 播放器 / 窗口 / 偏好 IPC（Task 17）。
       //
@@ -248,7 +371,19 @@ if (!isPrimaryInstance) {
           if (win.isDestroyed()) return
           win.close()
         },
+        // 悬浮歌词（Task 10）：主进程**只转发**，不理解歌词内容。
+        onLyricState: (message) => {
+          lastLyricMessage = message
+          if (!lyricWindow || lyricWindow.isDestroyed()) return
+          lyricWindow.webContents.send('lyric:state', message)
+        },
+        setLyricVisible,
       })
+
+      // 13b. 启动时按偏好恢复悬浮窗（上次是开着的就接着开）。
+      if (prefs.read().lyricOverlay?.visible === true) {
+        setLyricVisible(true)
+      }
     })
     .catch((err: unknown) => {
       console.error('[fnmusic] 应用启动失败:', err)

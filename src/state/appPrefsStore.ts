@@ -49,19 +49,29 @@ export interface AppPrefsStore {
   setTheme: (theme: ThemeName) => Promise<void>
   /** 改「关闭窗口」的行为（乐观应用 + 写回主进程；失败则回滚）。 */
   setCloseBehavior: (behavior: CloseBehavior) => Promise<void>
+  /** 桌面悬浮歌词当前是否显示（Task 10）。 */
+  lyricOverlayVisible: boolean
+  /** 显示 / 隐藏桌面悬浮歌词（乐观应用 + 写回主进程；失败则回滚）。 */
+  setLyricOverlayVisible: (visible: boolean) => Promise<void>
 }
 
 /** 应用偏好镜像 store（生产用）。 */
 export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
   theme: DEFAULT_THEME,
   closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
+  lyricOverlayVisible: false,
   error: null,
 
   load: async (): Promise<void> => {
     const bridge = playerBridge()
     if (!bridge) {
       // 没有桥（浏览器预览 / 单测）→ 用默认值，不报错、不崩。
-      set({ theme: applyTheme(DEFAULT_THEME), closeBehavior: DEFAULT_CLOSE_BEHAVIOR, error: null })
+      set({
+        theme: applyTheme(DEFAULT_THEME),
+        closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
+        lyricOverlayVisible: false,
+        error: null,
+      })
       return
     }
     try {
@@ -69,6 +79,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
       set({
         theme: applyTheme(resolveThemeName(prefs.theme)),
         closeBehavior: prefs.closeBehavior === 'quit' ? 'quit' : DEFAULT_CLOSE_BEHAVIOR,
+        lyricOverlayVisible: prefs.lyricOverlay?.visible === true,
         error: null,
       })
     } catch {
@@ -76,6 +87,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
       set({
         theme: applyTheme(DEFAULT_THEME),
         closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
+        lyricOverlayVisible: false,
         error: null,
       })
     }
@@ -111,6 +123,23 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
       await bridge.setPrefs({ closeBehavior: behavior })
     } catch {
       set({ closeBehavior: previous, error: '设置保存失败，已恢复原设置' })
+    }
+  },
+
+  setLyricOverlayVisible: async (visible: boolean): Promise<void> => {
+    const previous = get().lyricOverlayVisible
+    // 乐观应用：开关必须即时反馈（主进程那边还要建 / 藏窗口）。
+    set({ lyricOverlayVisible: visible, error: null })
+
+    const bridge = playerBridge()
+    if (!bridge) return
+
+    try {
+      // ⚠️ 走**专用通道**：主进程要据此**创建 / 隐藏窗口**并落盘，
+      //    光改偏好是不够的（窗口不会凭空出现）。
+      await bridge.setLyricVisible(visible)
+    } catch {
+      set({ lyricOverlayVisible: previous, error: '悬浮歌词开关失败，已恢复原设置' })
     }
   },
 }))

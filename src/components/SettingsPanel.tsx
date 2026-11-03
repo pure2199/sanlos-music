@@ -34,6 +34,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const { className } = props
   const closeBehavior = useAppPrefsStore((state) => state.closeBehavior)
   const setCloseBehavior = useAppPrefsStore((state) => state.setCloseBehavior)
+  const lyricOverlayVisible = useAppPrefsStore((state) => state.lyricOverlayVisible)
+  const setLyricOverlayVisible = useAppPrefsStore((state) => state.setLyricOverlayVisible)
   const error = useAppPrefsStore((state) => state.error)
 
   const handleChange = useCallback(
@@ -41,6 +43,13 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
       void setCloseBehavior(behavior)
     },
     [setCloseBehavior],
+  )
+
+  const handleToggleLyricOverlay = useCallback(
+    (visible: boolean) => {
+      void setLyricOverlayVisible(visible)
+    },
+    [setLyricOverlayVisible],
   )
 
   const rootClass = className ? `fnm-settings ${className}` : 'fnm-settings'
@@ -70,6 +79,19 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             onChange={() => handleChange('quit')}
           />
           <span>直接退出应用</span>
+        </label>
+      </fieldset>
+
+      <fieldset className="fnm-settings__group">
+        <legend className="fnm-settings__legend">桌面悬浮歌词</legend>
+        <label className="fnm-settings__option">
+          <input
+            type="checkbox"
+            name="fnm-lyric-overlay"
+            checked={lyricOverlayVisible}
+            onChange={(event) => handleToggleLyricOverlay(event.target.checked)}
+          />
+          <span>显示悬浮歌词（双行逐字，可拖动 / 点歌跳转）</span>
         </label>
       </fieldset>
 

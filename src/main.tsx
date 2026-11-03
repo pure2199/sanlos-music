@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import { installLocalHistory } from './state/historyStore'
 import { installMediaSession } from './player/mediaSession'
+import { installLyricOverlay } from './player/lyricOverlay'
 
 const container = document.getElementById('root')
 if (!container) {
@@ -19,6 +20,11 @@ installMediaSession()
 // ⚠️ 服务端**不会**随 stream 自动写播放历史，也没有可用的上报端点（实测），
 //    所以本机记录只能留在本地——见 `src/state/historyStore.ts`。
 installLocalHistory()
+
+// 桌面悬浮歌词（Task 10）：把「曲目 + 歌词」与「播放进度」推给主进程，
+// 由主进程转发给**悬浮窗**的渲染进程。
+// ⚠️ **只在悬浮窗可见时才拉歌词**（关着就不多打 NAS）。
+installLyricOverlay()
 
 createRoot(container).render(
   <StrictMode>

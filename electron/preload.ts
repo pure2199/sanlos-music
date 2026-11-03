@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { FnBridge } from '../shared/bridge'
-import type { PlayerBridge, PlayerCommand } from '../shared/playerBridge'
+import type { LyricOverlayMessage, PlayerBridge, PlayerCommand } from '../shared/playerBridge'
 
 // 渲染进程与主进程之间的桥。凭证永远不经过这里，只暴露只读的平台信息。
 const api = {
@@ -82,6 +82,32 @@ const fnPlayer: PlayerBridge = {
   minimize: () => ipcRenderer.invoke('win:minimize'),
   toggleMaximize: () => ipcRenderer.invoke('win:toggle-maximize'),
   close: () => ipcRenderer.invoke('win:close'),
+  // -------------------------------------------------------------------------
+  // 桌面悬浮歌词（Task 10）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **同一个桥在两个窗口里都存在**：主窗口用它**推**数据，
+  //    悬浮窗用它**收**数据；两边各用各的方法，互不冲突。
+  pushLyricState: (message) => ipcRenderer.send('lyric:state', message),
+  onLyricState: (handler) => {
+    const listener = (_event: unknown, message: LyricOverlayMessage): void => {
+      handler(message)
+    }
+    ipcRenderer.on('lyric:state', listener)
+    return () => {
+      ipcRenderer.removeListener('lyric:state', listener)
+    }
+  },
+  onLyricVisibility: (handler) => {
+    const listener = (_event: unknown, visible: boolean): void => {
+      handler(visible === true)
+    }
+    ipcRenderer.on('lyric:visibility', listener)
+    return () => {
+      ipcRenderer.removeListener('lyric:visibility', listener)
+    }
+  },
+  setLyricVisible: (visible) => ipcRenderer.invoke('lyric:set-visible', visible === true),
 }
 
 contextBridge.exposeInMainWorld('fnPlayer', fnPlayer)

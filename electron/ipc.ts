@@ -66,6 +66,9 @@ import { sanitizeEqPrefsPayload } from '../shared/eqPrefs'
 import type {
   AppPrefs,
   CloseBehavior,
+  LyricOverlayLine,
+  LyricOverlayMessage,
+  LyricOverlayTrack,
   PlayerCommand,
   PlayerStateSnapshot,
   WindowBounds,
@@ -726,7 +729,8 @@ export interface PrefsStoreOptions {
  * 1. **偏好文件里绝不能出现凭证**（token / 密码 / deviceId）——
  *    那是 `session.bin`（DPAPI 加密）的职责，两者**不许混**。
  *    本类用**白名单**实现这一点：`write()` 只接受 `theme` / `closeBehavior` /
- *    `windowBounds` 三个键，其余键**一律丢弃**——渲染进程就算塞进来也写不进去。
+ *    `windowBounds` / `eq` / `lyricOverlay` 五个键，其余键**一律丢弃**——
+ *    渲染进程就算塞进来也写不进去。
  * 2. 写盘**原子化**：先写 `<file>.tmp` 再 `rename` 覆盖，
  *    避免写到一半崩溃留下截断的偏好文件。
  * 3. 读盘**容错**：文件不存在 / 内容损坏 → 返回默认值，**不抛异常**
@@ -879,6 +883,29 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
     if (eq) out.eq = eq
   }
 
+  // 桌面悬浮歌词偏好（Task 10）：可见性 + 窗口位置尺寸。
+  // ⚠️ 与 `windowBounds` 同一套校验（宽高必须是正数，坐标可选）。
+  if (record['lyricOverlay'] !== undefined) {
+    const overlay = asRecord(record['lyricOverlay'])
+    if (overlay) {
+      const entry: NonNullable<AppPrefs['lyricOverlay']> = { visible: overlay['visible'] === true }
+      const overlayBounds = asRecord(overlay['bounds'])
+      if (overlayBounds) {
+        const width = readNumberOrUndefined(overlayBounds['width'])
+        const height = readNumberOrUndefined(overlayBounds['height'])
+        if (width !== undefined && height !== undefined && width > 0 && height > 0) {
+          const sanitized: WindowBounds = { width: Math.floor(width), height: Math.floor(height) }
+          const x = readNumberOrUndefined(overlayBounds['x'])
+          const y = readNumberOrUndefined(overlayBounds['y'])
+          if (x !== undefined) sanitized.x = Math.floor(x)
+          if (y !== undefined) sanitized.y = Math.floor(y)
+          entry.bounds = sanitized
+        }
+      }
+      out.lyricOverlay = entry
+    }
+  }
+
   return out
 }
 
@@ -947,6 +974,18 @@ export interface PlayerIpcOptions {
   onTheme?: (theme: ThemeName) => void
   /** 「关闭窗口」请求（默认只是隐藏；由主进程决定隐藏还是退出）。 */
   requestClose?: () => void
+  /**
+   * 渲染进程推来**悬浮歌词消息**时的回调（Task 10）。
+   *
+   * ⚠️ 主进程**只转发**：把消息原样交给悬浮窗的渲染进程。
+   */
+  onLyricState?: (message: LyricOverlayMessage) => void
+  /**
+   * 设置悬浮窗的可见性（Task 10）。
+   *
+   * ⚠️ 由主进程负责**创建 / 隐藏窗口**并**落盘**（`prefs.lyricOverlay.visible`）。
+   */
+  setLyricVisible?: (visible: boolean) => void
 }
 
 /**
@@ -982,6 +1021,19 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
     const command = sanitizeCommand(arg)
     if (!command) return
     opts.getTarget?.()?.send('player:command', command)
+  })
+
+  // 渲染进程 → 主进程：悬浮歌词消息 → **转发**给悬浮窗（Task 10）。
+  // ⚠️ 形状不对的消息**直接丢弃**（不转发给悬浮窗）。
+  ipcMain.on('lyric:state', (_event, arg) => {
+    const message = sanitizeLyricMessage(arg)
+    if (!message) return
+    opts.onLyricState?.(message)
+  })
+
+  // 渲染进程 → 主进程：设置悬浮窗可见性（创建 / 隐藏 + 落盘）。
+  ipcMain.handle('lyric:set-visible', (_event, arg) => {
+    opts.setLyricVisible?.(arg === true)
   })
 
   // 窗口控制。
@@ -1079,6 +1131,73 @@ function sanitizeCommand(value: unknown): PlayerCommand | null {
     default:
       return null
   }
+}
+
+/**
+ * 把渲染进程发来的悬浮歌词消息压成合法消息（Task 10）。
+ *
+ * ⚠️ 主进程**只转发、不解析**歌词内容；但**形状不对的消息必须丢弃**
+ *    （否则一个坏消息就能把悬浮窗的渲染进程打崩）。
+ * - `kind: 'track'`：曲目信息 + 歌词行；
+ * - `kind: 'progress'`：播放位置 + 是否在播。
+ *
+ * @returns 合法消息；形状不对时返回 `null`（**丢弃**）。
+ */
+export function sanitizeLyricMessage(value: unknown): LyricOverlayMessage | null {
+  const record = asRecord(value)
+  if (!record) return null
+
+  const kind = readString(record['kind'])
+  if (kind === 'progress') {
+    const position = readNumberOrUndefined(record['position'])
+    if (position === undefined) return null
+    return { kind: 'progress', position: Math.max(0, position), isPlaying: record['isPlaying'] === true }
+  }
+
+  if (kind !== 'track') return null
+
+  const trackRaw = record['track']
+  let track: LyricOverlayTrack | null = null
+  if (trackRaw !== undefined && trackRaw !== null) {
+    const obj = asRecord(trackRaw)
+    // ⚠️ 曲目**形状不对就整条丢弃**：宁可没有，也不要一个 id 为空的假曲目。
+    if (!obj) return null
+    const id = obj['id']
+    const title = obj['title']
+    const artist = obj['artist']
+    if (typeof id !== 'string' || typeof title !== 'string' || typeof artist !== 'string') return null
+    track = { id, title, artist }
+  }
+
+  const linesRaw = record['lines']
+  if (!Array.isArray(linesRaw)) return null
+  const lines: LyricOverlayLine[] = []
+  for (const item of linesRaw) {
+    const line = asRecord(item)
+    if (!line) continue
+    const time = readNumberOrUndefined(line['time'])
+    if (time === undefined) continue
+    const wordsRaw = line['words']
+    const words: LyricOverlayLine['words'] = []
+    if (Array.isArray(wordsRaw)) {
+      for (const wordRaw of wordsRaw) {
+        const word = asRecord(wordRaw)
+        if (!word) continue
+        const start = readNumberOrUndefined(word['start'])
+        const end = readNumberOrUndefined(word['end'])
+        if (start === undefined || end === undefined) continue
+        words.push({ text: readString(word['text']), start, end })
+      }
+    }
+    lines.push({
+      time,
+      text: readString(line['text']),
+      words,
+      translation: readString(line['translation']),
+    })
+  }
+
+  return { kind: 'track', track, lines }
 }
 
 /**

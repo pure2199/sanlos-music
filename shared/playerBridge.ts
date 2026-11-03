@@ -123,6 +123,53 @@ export interface PlayerStateSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// 桌面悬浮歌词（Task 10）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **主进程只转发、不解析**歌词内容：它既不渲染也不懂逐字时间，
+//    收到就原样转给悬浮窗的渲染进程。故这里的歌词形状是**结构化但宽松**的。
+
+/** 悬浮窗显示的曲目信息。 */
+export interface LyricOverlayTrack {
+  /** 歌曲 guid。 */
+  id: string
+  /** 歌曲名。 */
+  title: string
+  /** 歌手名。 */
+  artist: string
+}
+
+/**
+ * 悬浮窗的一行歌词。
+ *
+ * ⚠️ 与渲染层的 `LyricLine` **结构完全相同**（可直接赋值），
+ *    但这里**独立声明**——`shared/` **不许**依赖 `src/`（层次反了）。
+ */
+export interface LyricOverlayLine {
+  /** 行时间（秒）。 */
+  time: number
+  /** 行文本。 */
+  text: string
+  /** 逐字（词级时间，秒）。 */
+  words: Array<{ text: string; start: number; end: number }>
+  /** 翻译（副行；没有就是空串）。 */
+  translation: string
+}
+
+/**
+ * 悬浮歌词消息（主窗口渲染进程 → 主进程 → 悬浮窗渲染进程）。
+ *
+ * ⚠️ **判别联合**（`kind` 区分），因为两者的**频率差了两个数量级**：
+ * - `track`：**低频**（切歌时一次）——带整份歌词（几十 KB）；
+ * - `progress`：**高频**（每次位置更新，~4Hz）——只有两个数字。
+ *
+ * → 分开是为了**不把整份歌词每秒推 4 次**。
+ */
+export type LyricOverlayMessage =
+  | { kind: 'track'; track: LyricOverlayTrack | null; lines: LyricOverlayLine[] }
+  | { kind: 'progress'; position: number; isPlaying: boolean }
+
+// ---------------------------------------------------------------------------
 // 偏好
 // ---------------------------------------------------------------------------
 
@@ -168,6 +215,18 @@ export interface AppPrefs {
    * ⚠️ 形状定义在 `shared/eqPrefs.ts`（主进程白名单与渲染进程共用一份）。
    */
   eq?: EqPrefsPayload
+  /**
+   * 桌面悬浮歌词的偏好（Task 10）。
+   *
+   * ⚠️ **非敏感**：只有「要不要显示」与「窗口在哪儿」——
+   *    与 `session.bin`（凭证）**无关**。
+   */
+  lyricOverlay?: {
+    /** 是否显示悬浮窗。 */
+    visible: boolean
+    /** 悬浮窗的位置与尺寸。 */
+    bounds?: WindowBounds
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -211,4 +270,27 @@ export interface PlayerBridge {
   toggleMaximize(): Promise<void>
   /** 关闭窗口（`win:close`；默认只是隐藏，播放继续）。 */
   close(): Promise<void>
+  /**
+   * 推送悬浮歌词消息（`lyric:state`，`ipcRenderer.send`）。
+   *
+   * ⚠️ **主窗口渲染进程**用它把「曲目 + 歌词」与「播放进度」推给主进程，
+   *    主进程再转给悬浮窗的渲染进程。
+   */
+  pushLyricState(message: LyricOverlayMessage): void
+  /**
+   * 订阅悬浮歌词消息（`lyric:state`，`webContents.send`）。
+   *
+   * ⚠️ **悬浮窗渲染进程**用它接收数据；两种 `kind` 都要处理
+   *    （`track` 换歌时来一次，`progress` 高频来）。
+   */
+  onLyricState(handler: (message: LyricOverlayMessage) => void): () => void
+  /**
+   * 订阅悬浮窗的**可见性**变化（`lyric:visibility`，`webContents.send`）。
+   *
+   * ⚠️ **主窗口渲染进程**用它决定「要不要去拉歌词、要不要继续推进度」
+   *    （悬浮窗关着时**不多打 NAS**）。
+   */
+  onLyricVisibility(handler: (visible: boolean) => void): () => void
+  /** 设置悬浮窗的可见性（`lyric:set-visible`；主进程据此创建 / 隐藏窗口并落盘）。 */
+  setLyricVisible(visible: boolean): Promise<void>
 }

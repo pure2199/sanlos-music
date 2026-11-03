@@ -364,6 +364,14 @@ export interface TrayDeps {
   sendCommand?: (command: PlayerCommand) => void
   /** 显示主窗口。 */
   showWindow?: () => void
+  /**
+   * 切换**桌面悬浮歌词**的显示（Task 10）。
+   *
+   * ⚠️ 由主进程负责创建 / 隐藏悬浮窗并落盘。
+   * ⚠️ 菜单是**一次性构建**的（Electron 的 `Menu` 是静态的），所以这里的文案
+   *    只能是静态的「桌面歌词」；**当前开关状态**看设置面板。
+   */
+  toggleLyricOverlay?: () => void
   /** 真正退出应用（托盘菜单的「退出」）。 */
   quit?: () => void
   /** 封面字节来源（主进程自己去 NAS 取）。 */
@@ -443,6 +451,13 @@ export function createTray(deps: TrayDeps): TrayController {
         label: '显示窗口',
         click: () => {
           deps.showWindow?.()
+        },
+      },
+      {
+        // ⚠️ 桌面悬浮歌词（Task 10）：开 / 关切换。
+        label: '桌面歌词',
+        click: () => {
+          deps.toggleLyricOverlay?.()
         },
       },
       {

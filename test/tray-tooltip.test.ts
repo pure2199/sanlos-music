@@ -593,10 +593,15 @@ describe('registerPlayerIpc', () => {
     return { ipcMain, handlers, listeners }
   }
 
-  it('注册了全部八个通道', () => {
+  it('注册了全部通道（含 Task 10 新增的悬浮歌词通道）', () => {
+    // ⚠️ T10（桌面悬浮歌词）**显式新增**了两个通道：
+    //    - `lyric:set-visible`（调用式）：开关悬浮窗；
+    //    - `lyric:state`（推送式）：主进程只转发歌词消息。
+    //    → 原来的「全部八个通道」前提被本任务推翻，这里改写为**新的完整集合**。
     const { ipcMain, handlers, listeners } = fakeIpcMain()
     registerPlayerIpc({ ipcMain, prefs: new PrefsStore({ filePath: tempFile() }) })
     expect([...handlers.keys()].sort()).toEqual([
+      'lyric:set-visible',
       'prefs:get',
       'prefs:set',
       'theme:set',
@@ -604,7 +609,44 @@ describe('registerPlayerIpc', () => {
       'win:minimize',
       'win:toggle-maximize',
     ])
-    expect([...listeners.keys()].sort()).toEqual(['player:command', 'player:state'])
+    expect([...listeners.keys()].sort()).toEqual(['lyric:state', 'player:command', 'player:state'])
+  })
+
+  it('lyric:state 是推送：主进程**只转发**，形状不对的消息被丢弃', () => {
+    const { ipcMain, listeners } = fakeIpcMain()
+    const onLyricState = vi.fn()
+    registerPlayerIpc({
+      ipcMain,
+      prefs: new PrefsStore({ filePath: tempFile() }),
+      onLyricState,
+    })
+
+    listeners.get('lyric:state')?.(undefined, { kind: 'progress', position: 3, isPlaying: true })
+    expect(onLyricState).toHaveBeenCalledWith({ kind: 'progress', position: 3, isPlaying: true })
+
+    // 形状不对 → **丢弃**（不转发给悬浮窗）
+    onLyricState.mockClear()
+    listeners.get('lyric:state')?.(undefined, { kind: 'bogus' })
+    listeners.get('lyric:state')?.(undefined, null)
+    expect(onLyricState).not.toHaveBeenCalled()
+  })
+
+  it('lyric:set-visible 是调用：交给主进程去创建 / 隐藏窗口', () => {
+    const { ipcMain, handlers } = fakeIpcMain()
+    const setLyricVisible = vi.fn()
+    registerPlayerIpc({
+      ipcMain,
+      prefs: new PrefsStore({ filePath: tempFile() }),
+      setLyricVisible,
+    })
+
+    handlers.get('lyric:set-visible')?.(undefined, true)
+    expect(setLyricVisible).toHaveBeenCalledWith(true)
+
+    setLyricVisible.mockClear()
+    handlers.get('lyric:set-visible')?.(undefined, 'yes')
+    // 只有 `true` 算「开」，其余一律按「关」处理
+    expect(setLyricVisible).toHaveBeenCalledWith(false)
   })
 
   it('player:state 是推送：渲染进程推来 → 主进程消费（更新托盘）', () => {

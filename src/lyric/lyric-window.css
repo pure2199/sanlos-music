@@ -1,0 +1,23 @@
+/*
+ * 悬浮歌词窗口的页面样式（Task 10）。
+ *
+ * ⚠️ 这个窗口是**透明窗口**（`transparent: true`），所以页面底色必须是
+ *    `transparent`——否则窗口会是一块不透明的方块，挡住桌面。
+ *
+ * ⚠️ 组件本身的样式在 `src/ui/lyrics/lyric-overlay.css`；这里只管**页面骨架**。
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}

@@ -145,6 +145,11 @@ function fakeBridge(): {
     minimize: async () => {},
     toggleMaximize: async () => {},
     close: async () => {},
+    // 桌面悬浮歌词（Task 10）：本用例不碰它，给个空实现即可。
+    pushLyricState: () => {},
+    onLyricState: () => () => {},
+    onLyricVisibility: () => () => {},
+    setLyricVisible: async () => {},
   }
   return {
     bridge,
