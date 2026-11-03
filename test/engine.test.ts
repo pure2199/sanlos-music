@@ -78,11 +78,13 @@ class FakeGainNode extends FakeNode implements GainNodeLike {
   gain = { value: 1 }
 }
 
-/** 假 AudioContext（记录 createMediaElementSource 的调用次数）。 */
+/** 假 AudioContext（记录 createMediaElementSource 的调用次数与目标元素）。 */
 class FakeAudioContext implements AudioContextLike {
   state = 'running'
   destination = new FakeNode()
   sourceCalls = 0
+  /** `createMediaElementSource` 被调用的元素（按调用顺序记录）。 */
+  sourceElements: unknown[] = []
   lastGain: FakeGainNode | null = null
   lastSource: FakeNode | null = null
 
@@ -91,8 +93,9 @@ class FakeAudioContext implements AudioContextLike {
     return this.lastGain
   }
 
-  createMediaElementSource(): MediaElementSourceLike {
+  createMediaElementSource(element: unknown): MediaElementSourceLike {
     this.sourceCalls += 1
+    this.sourceElements.push(element)
     this.lastSource = new FakeNode()
     return this.lastSource
   }
@@ -282,6 +285,78 @@ describe('PlayerEngine：error 三类语义', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// 复审 F1：换歌引发的 `abort` 是**假错误**
+//
+// 真实 Chromium 128（Electron 32.3.3）里改 `audio.src` 时的加载算法发的是
+// `abort` → `emptied` → `loadstart` → `canplay`，**不发** `error`。
+// 于是「换歌」这个**引擎自主动作**会让 `PlayerState.error` 变成「音频加载被中止」，
+// 而且**此后无人清除**（下一次 `play()` 才清）→ UI 全程显示红字，音乐却正常播。
+// ---------------------------------------------------------------------------
+describe('PlayerEngine：换歌引发的 abort 不是错误（回归）', () => {
+  it('引擎自己换歌引发的 abort 不写错误', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    engine.play(song('b'))
+    // 换歌后到达的 abort：引擎的自主动作 → **不是**加载失败
+    element.emit('abort', { target: element })
+    expect(engine.state.error).toBeNull()
+    expect(engine.state.isPlaying).toBe(true)
+  })
+
+  it('真实 Chromium 的事件序列（abort → emptied → loadstart → canplay）全程不写错误', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    engine.play(song('b'))
+    element.emit('abort', { target: element })
+    element.emit('emptied', { target: element })
+    element.emit('loadstart', { target: element })
+    element.emit('canplay', { target: element })
+    expect(engine.state.error).toBeNull()
+    expect(engine.state.isPlaying).toBe(true)
+  })
+
+  it('没有自主动作标记时的 abort 仍然写入可读错误', () => {
+    // ⚠️ 鉴别力：把 abort 处理器整个删掉，这条也会红。
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    // 新的一轮加载已经开始（`emptied` / `loadstart` 会让「自主动作」标记作废）
+    element.emit('emptied', { target: element })
+    element.emit('loadstart', { target: element })
+    // 此时的 abort 来自引擎**之外**（例如别处改了 src / 调了 load()）→ 真实错误
+    element.emit('abort', { target: element })
+    expect(engine.state.error).toContain('中止')
+  })
+
+  it('换歌之后到来的真实 abort 仍然会被报出来（标记不会一直挂着）', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    engine.play(song('b'))
+    element.emit('emptied', { target: element })
+    element.emit('loadstart', { target: element })
+    element.emit('abort', { target: element })
+    expect(engine.state.error).toContain('中止')
+  })
+
+  it('换歌自主动作里的 error code 1 不算错误（防御性兜底）', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    engine.play(song('b'))
+    element.emit('error', { target: { error: { code: 1 } } })
+    expect(engine.state.error).toBeNull()
+    expect(engine.state.isPlaying).toBe(true)
+  })
+
+  it('自主动作窗口之外的 error code 1 仍然报错', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    element.emit('emptied', { target: element })
+    element.emit('loadstart', { target: element })
+    element.emit('error', { target: { error: { code: 1 } } })
+    expect(engine.state.error).toContain('中止')
+  })
+})
+
 describe('PlayerEngine：音量与进度', () => {
   it('音量钳制到 [0,1]，NaN 被忽略', () => {
     const { engine } = createEngine()
@@ -436,6 +511,69 @@ describe('PlayerEngine：EQ 接缝（Task 21）', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// 复审 F3：`dispose()` 之后引擎必须仍可复用
+//
+// 不变量（要求 B）：**同一个 `<audio>` 元素只能 createMediaElementSource 一次**
+// （真实浏览器第二次会抛 InvalidStateError）。所以 `dispose()` 之后再 `play()`，
+// 必须**新建元素 + 重建音频图 + 重挂媒体事件监听**，而不是拿旧元素接着用。
+// ---------------------------------------------------------------------------
+describe('PlayerEngine：dispose 之后仍可复用（回归）', () => {
+  it('dispose() 之后再 play()：重建元素与 AudioContext，事件监听重新挂上', () => {
+    const injected = new FakeAudioElement()
+    const created: FakeAudioElement[] = []
+    const createElement = vi.fn(() => {
+      const element = new FakeAudioElement()
+      created.push(element)
+      return element
+    })
+    const contexts: FakeAudioContext[] = []
+    const clock = createClock()
+    const engine = new PlayerEngine({
+      audio: injected,
+      createAudioElement: createElement,
+      createAudioContext: () => {
+        const context = new FakeAudioContext()
+        contexts.push(context)
+        return context
+      },
+      now: clock.now,
+      requestFrame: clock.requestFrame,
+      cancelFrame: clock.cancelFrame,
+    })
+
+    engine.play(song('a'))
+    expect(contexts).toHaveLength(1)
+    expect(contexts[0]!.sourceElements).toEqual([injected])
+
+    engine.dispose()
+
+    engine.play(song('b'))
+    // 新建了媒体元素与 AudioContext
+    expect(createElement).toHaveBeenCalledTimes(1)
+    expect(created).toHaveLength(1)
+    expect(contexts).toHaveLength(2)
+    // createMediaElementSource 第二次调用发生在**新元素**上（不是同一个元素）
+    expect(contexts[1]!.sourceElements).toEqual([created[0]])
+    // 媒体事件监听重新挂上：timeupdate 能推进进度
+    created[0]!.currentTime = 7
+    created[0]!.emit('timeupdate', { target: created[0] })
+    expect(engine.state.position).toBe(7)
+    // 旧元素的监听已解绑（不该再影响引擎）
+    injected.currentTime = 99
+    injected.emit('timeupdate', { target: injected })
+    expect(engine.state.position).toBe(7)
+  })
+
+  it('dispose() 之后引擎不再声称自己在播放', () => {
+    const { engine } = createEngine()
+    engine.play(song('a'))
+    expect(engine.state.isPlaying).toBe(true)
+    engine.dispose()
+    expect(engine.state.isPlaying).toBe(false)
+  })
+})
+
 describe('playerStore', () => {
   /** 假引擎（只记录调用，不碰媒体栈）。 */
   class FakeEngine implements PlayerEngineLike {
@@ -537,6 +675,23 @@ describe('playerStore', () => {
     expect(store.getState().current?.id).toBe('b')
     store.getState().prev()
     expect(store.getState().current?.id).toBe('a')
+  })
+
+  it('顺序模式播到队尾时 next() 会同步引擎（暂停），并把 isPlaying 置 false', () => {
+    // ⚠️ 回归用例：队尾时 `queue.next()` 返回 null，只改 store 的 isPlaying 的话，
+    //    引擎仍在播（媒体元素没暂停），下一次引擎 emit 又把 isPlaying 覆盖回 true
+    //    →「下一首」点击完全无效。
+    const engine = new FakeEngine()
+    const store = createPlayerStore(engine)
+    store.getState().playTrack(song('a'), [song('a'), song('b')])
+    store.getState().next()
+    expect(store.getState().current?.id).toBe('b')
+    expect(store.getState().isPlaying).toBe(true)
+
+    const pauseCallsBefore = engine.pauseCalls
+    store.getState().next() // 队尾 → 没有下一首
+    expect(engine.pauseCalls).toBe(pauseCallsBefore + 1)
+    expect(store.getState().isPlaying).toBe(false)
   })
 
   it('prev 在播放超过 3 秒时回到本曲开头', () => {

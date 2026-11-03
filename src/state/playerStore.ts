@@ -130,6 +130,10 @@ export function createPlayerStore(engine: PlayerEngineLike) {
       const song = queue.next()
       if (!song) {
         // 没有下一首了（顺序模式播到队尾）——停在这里，不自动绕回。
+        // ⚠️ **必须同步引擎**：只改 store 的 `isPlaying` 的话，媒体元素仍在播、
+        //    引擎的 `playing` 仍是 true，下一次引擎 emit 又会把 `isPlaying`
+        //    覆盖回 true →「下一首」点击完全无效（当前曲继续播到底）。
+        engine.pause()
         set({ isPlaying: false })
         return
       }

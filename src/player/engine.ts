@@ -326,7 +326,7 @@ export class PlayerEngine implements PlayerEngineLike {
 
   // --- 媒体与音频图（全部懒创建） -----------------------------------------
   /** 构造时注入的音频元素（还没挂监听，等真正使用时统一挂）。 */
-  private readonly injectedElement: MediaElementLike | null
+  private injectedElement: MediaElementLike | null
   private element: MediaElementLike | null = null
   private context: AudioContextLike | null = null
   private source: MediaElementSourceLike | null = null
@@ -334,6 +334,23 @@ export class PlayerEngine implements PlayerEngineLike {
   private eqChain: EqChainNodes | null = null
   /** 播放前就装好的 EQ builder（建图时补装）。 */
   private pendingEqBuilder: EqChainBuilder | null = null
+
+  /**
+   * 「自主动作」标记：引擎**自己**改 `src`（换歌）时置位。
+   *
+   * 背景（真实 Chromium 128 / Electron 32.3.3 实测）：改 `audio.src` 时的加载算法
+   * 发的是 `abort` → `emptied` → `loadstart` → `canplay`，**不发** `error`。
+   * 也就是说换歌必然让媒体元素「中止」上一次加载——那是**引擎自己的动作**，
+   * 不是加载失败，绝不能写进 `PlayerState.error`（否则从第 2 首歌起全程显示
+   * 红字「音频加载被中止」，而音乐在正常播）。
+   *
+   * 生命周期：
+   * - 改 `src` **之前**置位；
+   * - 在 `emptied` / `loadstart`（新一轮加载开始）时**清零**——
+   *   于是新一轮加载开始之后到达的 `abort` / `error` 都是**真实**的加载失败，
+   *   必须报错（不会被这个标记吞掉）。
+   */
+  private selfInitiatedLoad = false
 
   // --- 状态 ---------------------------------------------------------------
   private currentSong: Song | null = null
@@ -437,6 +454,10 @@ export class PlayerEngine implements PlayerEngineLike {
       // 同一首重播：回到开头，**不要**重设 src（重设 src 会让媒体元素重新加载）。
       element.currentTime = 0
     } else {
+      // ⚠️ 换歌 = 引擎**自己**改 `src`：媒体元素必然中止上一次加载
+      //    （Chromium 发 `abort` → `emptied` → `loadstart`，**不发** `error`）。
+      //    置「自主动作」标记：这个 `abort` 不是加载失败，不能写错误。
+      this.selfInitiatedLoad = true
       element.src = url
     }
 
@@ -558,6 +579,15 @@ export class PlayerEngine implements PlayerEngineLike {
     this.source = null
     this.gain = null
     this.eqChain = null
+    // ⚠️ **媒体元素必须一起丢掉**：同一个 `<audio>` 元素**只能** createMediaElementSource
+    //    一次（真实浏览器第二次会抛 InvalidStateError）。`dispose()` 之后再 `play()` 时
+    //    必须**新建元素 + 重建音频图 + 重挂媒体事件监听**（要求 B 的不变量）；
+    //    否则会出现「被 catch 成『音频引擎初始化失败：当前环境不支持 Web Audio』」
+    //    的误导性错误，且 timeupdate / ended / error 全部失联、进度不再推进。
+    this.element = null
+    this.injectedElement = null
+    this.selfInitiatedLoad = false
+    this.playing = false
   }
 
   // --- 内部：音频元素与音频图 ---------------------------------------------
@@ -566,6 +596,8 @@ export class PlayerEngine implements PlayerEngineLike {
   private ensureAudioElement(): MediaElementLike | null {
     if (this.element) return this.element
     try {
+      // ⚠️ `dispose()` 会把注入的元素一起丢掉（同一个元素只能 createMediaElementSource
+      //    一次），所以 dispose() 之后再进来时走的是工厂 → **新元素**。
       const element = this.injectedElement ?? this.createAudioElement()
       // 简报既定：`preload="auto"`（只影响**当前**这个元素，不会预取整张专辑）。
       element.preload = 'auto'
@@ -672,10 +704,9 @@ export class PlayerEngine implements PlayerEngineLike {
       ['ended', () => this.handleEnded()],
       ['error', (event) => this.handleMediaError(event)],
       ['stalled', () => this.handleStalled()],
-      ['abort', () => {
-        this.errorMessage = '音频加载被中止'
-        this.emit()
-      }],
+      ['emptied', () => this.handleLoadCycleStart()],
+      ['loadstart', () => this.handleLoadCycleStart()],
+      ['abort', () => this.handleAbort()],
     ]
     for (const [type, listener] of bindings) {
       element.addEventListener(type, listener)
@@ -717,6 +748,12 @@ export class PlayerEngine implements PlayerEngineLike {
   /** `error` 事件：媒体错误 / 网络错误。 */
   private handleMediaError(event: unknown): void {
     const code = readMediaErrorCode(event)
+    // ⚠️ 防御性兜底：`code === 1`（MEDIA_ERR_ABORTED）若落在**换歌自主动作**的窗口里，
+    //    那是引擎自己引发的中止，不是加载失败——不能把正在播放的新歌打成
+    //    `playing = false` + 假错误。
+    //    （实测 Chromium 改 `src` 时**只**发 `abort`、**不发** `error`，
+    //     所以这条分支平时走不到；留着是为了别的内核不踩同一个坑。）
+    if (code === 1 && this.selfInitiatedLoad) return
     const info = describeMediaError(code)
     this.errorMessage = info.message
     this.playing = false
@@ -727,6 +764,35 @@ export class PlayerEngine implements PlayerEngineLike {
   /** `stalled` 事件：加载停滞（网络类）。 */
   private handleStalled(): void {
     this.errorMessage = '音频加载停滞：网络较慢或连接中断'
+    this.emit()
+  }
+
+  /**
+   * `emptied` / `loadstart`：媒体**新一轮**加载开始了。
+   *
+   * 「自主动作」标记到此作废：此后到达的 `abort` / `error` 都属于新一轮加载，
+   * 是**真实**的加载失败，必须报错（所以这个标记不会吞掉后续的真实错误）。
+   */
+  private handleLoadCycleStart(): void {
+    this.selfInitiatedLoad = false
+  }
+
+  /**
+   * `abort`：媒体加载被中止。
+   *
+   * **判据（什么算真实错误）**：
+   * - **引擎自己换歌**引发的 abort → **不是错误**（直接忽略）。
+   *   Chromium 改 `audio.src` 时的加载算法必然发 `abort`（随后 `emptied`、
+   *   `loadstart`，**不发** `error`）——那是引擎的**自主动作**，不是加载失败。
+   * - 其余 abort → **真实错误**：引擎之外改了 `src` / 调了 `load()`，
+   *   或 UA 主动中止了资源选择 → 写入可读文案。
+   *
+   * 之所以不吞掉真实 abort：「自主动作」标记在 `emptied` / `loadstart` 时清零，
+   * 新一轮加载开始之后到达的 abort 一律照常报错。
+   */
+  private handleAbort(): void {
+    if (this.selfInitiatedLoad) return
+    this.errorMessage = '音频加载被中止'
     this.emit()
   }
 
