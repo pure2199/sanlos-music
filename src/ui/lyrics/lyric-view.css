@@ -1,0 +1,150 @@
+/*
+ * 歌词视图样式（Task 15）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值
+ *    （`#hex` / `rgb()` / `hsl()`）——这样 Task 18/19 换主题时只换变量、不重写组件。
+ *
+ * ---------------------------------------------------------------------------
+ * 动态值（CSS 表达不了的少数几个）走 CSS 自定义属性，由组件用内联 style 写：
+ * - `--fnm-lyricview__canvas-height`：画布总高度（随歌词行数变化）；
+ * - `--fnm-lyricview__line-top`：单行模式下某一行的纵向位置（随行号变化）。
+ *
+ * 其余几何（行高、字号、间距、圆角、颜色）全部在本文件里。
+ */
+
+/* --------------------------------------------------------------------------
+ * 容器
+ * -------------------------------------------------------------------------- */
+
+.fnm-lyricview {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  color: var(--text-primary);
+}
+
+.fnm-lyricview__canvas {
+  position: relative;
+  width: 100%;
+  height: var(--fnm-lyricview__canvas-height, auto);
+}
+
+.fnm-lyricview--double {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+}
+
+/* --------------------------------------------------------------------------
+ * 歌词行
+ * -------------------------------------------------------------------------- */
+
+.fnm-lyricview__line {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  padding: 0 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  font-size: 15px;
+  line-height: 34px;
+}
+
+/* 单行模式：行是绝对定位的，纵向位置由组件用 CSS 变量给。 */
+.fnm-lyricview--single .fnm-lyricview__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--fnm-lyricview__line-top, 0px);
+}
+
+/* 当前行：居中放大。 */
+.fnm-lyricview__line--active {
+  height: 44px;
+  font-size: 20px;
+  line-height: 44px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 双行模式：两行字号一致、等粗（不把上一行降级成更弱的样子）。 */
+.fnm-lyricview--double .fnm-lyricview__line {
+  height: auto;
+  font-size: 20px;
+  line-height: 32px;
+  font-weight: 600;
+}
+
+/* 可点的歌词行（给了 onSeek 才是 <button>）。 */
+.fnm-lyricview__line--clickable {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-lyricview__line--clickable:hover {
+  color: var(--text-primary);
+}
+
+.fnm-lyricview__line--clickable:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* --------------------------------------------------------------------------
+ * 逐字着色层
+ *
+ * 底下是整行原文（行元素的直接文本节点），上面是同一段文字的逐字着色副本
+ * （aria-hidden，不重复朗读）。两层字号字重完全一致 → 着色层与底层的字形严丝合缝。
+ * -------------------------------------------------------------------------- */
+
+.fnm-lyricview__overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  color: inherit;
+}
+
+.fnm-lyricview__overlay-inner {
+  display: block;
+  width: 100%;
+}
+
+.fnm-lyricview__word {
+  display: inline;
+  white-space: pre;
+}
+
+/* 已经唱到的词。 */
+.fnm-lyricview__word--sung {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+ * 翻译（副行）与空态
+ * -------------------------------------------------------------------------- */
+
+.fnm-lyricview__translation {
+  display: block;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+.fnm-lyricview__empty {
+  margin: 0;
+  padding: 24px 12px;
+  font-size: 13px;
+  text-align: center;
+  color: var(--text-secondary);
+}
