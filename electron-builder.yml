@@ -1,15 +1,45 @@
+# ---------------------------------------------------------------------------
+# electron-builder 配置（Windows / x64）
+# ---------------------------------------------------------------------------
+#
+# ⚠️ **可复现的口径**：本配置保证的是「**同样的输入 → 同样能构建、同样能安装、
+#    同样能运行**」，**不承诺字节级一致**——NSIS 安装器会内嵌构建时间戳，
+#    两次构建的 exe 哈希必然不同。要追字节一致需额外固定 `SOURCE_DATE_EPOCH`
+#    与工具链版本，超出本项目当前目标。
+#
+# 版本锁定：见 `scripts/pack.cjs`（锁 electron 版本 + 复用本地二进制，离线可打包）。
+
 appId: com.fnmusic.desktop
 productName: 飞牛音乐
 copyright: Copyright © 2026 fnmusic-desktop
+
+# ⚠️ **锁死 electron 版本**：不写这一行，builder 会自己解析版本，
+#    可能拉到与项目里那份不同的 electron（→ 产物行为随时间漂移）。
+electronVersion: 32.3.3
 
 directories:
   output: release
   buildResources: build
 
+# ⚠️ **运行时依赖为空**：本应用是纯静态渲染层 + Node 主进程，
+#    产物里不含任何 npm 运行时依赖（react / react-dom / zustand 只在**构建期**
+#    被 Vite 打进 dist/assets/*.js）→ 所以它们在 package.json 里属于
+#    devDependencies，**不会**被塞进 app.asar。
+#    依赖为空也让 electron-builder 不必做依赖收集 / npmRebuild → 更可复现。
 files:
   - dist/**/*
   - dist-electron/**/*
   - package.json
+  # 锁死口径：包体里**不带**源码映射（当前构建也不产出 .map，这里只是兜底）。
+  - '!dist/**/*.map'
+  - '!dist-electron/**/*.map'
+
+# 打包进 asar（单个文件，减少解压次数，也避免散落一堆小文件）。
+asar: true
+
+# 去掉安装期的 npm 脚本（`postinstall` 是给开发用的兜底安装脚本，
+# 装到用户机器上不需要跑）。
+removePackageScripts: true
 
 win:
   target:

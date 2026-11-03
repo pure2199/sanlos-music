@@ -1,6 +1,7 @@
 node_modules/
 dist/
 release/
+release-probe/
 out/
 *.log
 .DS_Store

@@ -10,15 +10,18 @@
     "postinstall": "node scripts/ensure-electron.cjs",
     "dev": "concurrently -k -n vite,electron -c cyan,magenta \"vite\" \"npm:dev:electron\"",
     "dev:electron": "npm run build:electron && wait-on http-get://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
-    "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --target=node20 --format=cjs --external:electron --outdir=dist-electron",
+    "build:electron": "node scripts/build-electron.cjs",
     "build": "npm run build:electron && vite build",
     "prestart": "npm run build",
     "start": "electron .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "e2e": "npm run build && playwright test",
     "e2e:only": "playwright test",
-    "dist": "npm run build && electron-builder"
+    "pack": "npm run build && node scripts/pack.cjs",
+    "pack:probe": "cross-env FNM_PACK_OUTPUT=release-probe node scripts/pack.cjs",
+    "dist": "npm run pack"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
@@ -35,20 +38,18 @@
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "jsdom": "^30.1.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.9.3",
     "vite": "^5.4.21",
     "vitest": "^2.1.9",
-    "wait-on": "^9.5.1"
+    "wait-on": "^9.5.1",
+    "zustand": "^4.5.7"
   },
   "allowScripts": {
     "electron@32.3.3": true,
     "esbuild@0.21.5": true,
     "electron-winstaller@5.4.0": true,
     "esbuild@0.28.2": true
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "zustand": "^4.5.7"
   }
 }
