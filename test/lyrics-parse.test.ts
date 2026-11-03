@@ -109,6 +109,34 @@ describe('parseLrc', () => {
     }
   })
 
+  it('伪逐字：各词时长均匀分配（相邻词时长近似相等，总和等于行时长）', () => {
+    const lines = parseLrc('[00:10.00]占位歌词\n[00:20.00]下一句')
+    const words = lines[0]!.words
+    const lineDuration = lines[1]!.time - lines[0]!.time
+    const expected = lineDuration / words.length
+    for (const word of words) {
+      expect(word.end - word.start).toBeCloseTo(expected, 3)
+    }
+    expect(words[words.length - 1]!.end - words[0]!.start).toBeCloseTo(lineDuration, 6)
+  })
+
+  it('含逐字标签时也解析逐字（与 parseEnhancedLrc 完全一致）', () => {
+    const raw = '[00:10.00]<00:10.00>你<00:10.50>好<00:11.00>世界'
+    expect(parseLrc(raw).map((l) => l.words)).toEqual(parseEnhancedLrc(raw).map((l) => l.words))
+    const words = parseLrc(raw)[0]!.words
+    expect(words.map((w) => w.text)).toEqual(['你', '好', '世界'])
+    expect(words[0]!.start).toBe(10)
+    expect(words[1]!.start).toBeCloseTo(10.5, 6)
+    expect(words[2]!.start).toBe(11)
+  })
+
+  it('小数位超过 3 位的时间标签不会丢行（按毫秒精度截断）', () => {
+    const lines = parseLrc('[00:10.1234]甲')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]!.time).toBeCloseTo(10.123, 6)
+    expect(lines[0]!.text).toBe('甲')
+  })
+
   it('伪逐字：最后一行 end = 自身 time + 0.5', () => {
     const lines = parseLrc('[00:10.00]甲乙')
     const words = lines[0]!.words
@@ -204,6 +232,20 @@ describe('findActiveWord', () => {
     expect(findActiveWord(line, line.words[1]!.start)).toBe(1)
   })
 
+  it('落在词间空隙时归下一个词', () => {
+    // 解析器构造的词区间恒连续；这里用**手工构造**的非连续行验证兜底语义。
+    const gapped = {
+      time: 0,
+      text: '甲乙',
+      words: [
+        { text: '甲', start: 0, end: 1 },
+        { text: '乙', start: 2, end: 3 },
+      ],
+      translation: '',
+    }
+    expect(findActiveWord(gapped, 1.5)).toBe(1)
+  })
+
   it('早于第一个词返回 -1', () => {
     expect(findActiveWord(line, 9)).toBe(-1)
   })
@@ -241,6 +283,21 @@ describe('attachTranslations', () => {
     expect(merged[0]!.translation).toBe('')
   })
 
+  it('容差边界：时间差恰为 0.5s 时仍然对齐（含边界）', () => {
+    const original = parseLrc('[00:10.00]甲')
+    const translation = parseLrc('[00:10.50]AAA')
+    const merged = attachTranslations(original, translation)
+    expect(merged[0]!.translation).toBe('AAA')
+  })
+
+  it('不覆盖原文行已有的翻译', () => {
+    const original = parseLrc('[00:10.00]甲')
+    original[0]!.translation = '同文件内的已有译文'
+    const translation = parseLrc('[00:10.00]AAA')
+    const merged = attachTranslations(original, translation)
+    expect(merged[0]!.translation).toBe('同文件内的已有译文')
+  })
+
   it('合并不改变原文行的 time 与 words', () => {
     const original = parseLrc('[00:10.00]甲')
     const translation = parseLrc('[00:10.00]AAA')
@@ -266,12 +323,31 @@ describe('applyOffset', () => {
     expect(shifted[0]!.time).toBeCloseTo(7, 6)
   })
 
-  it('偏移后出现负数时间时钳到 0', () => {
+  it('偏移后出现负数时间时钳到 0（不产生负值，词区间仍为正长度）', () => {
     const lines = parseLrc('[00:05.00]甲')
     const shifted = applyOffset(lines, -10000)
     expect(shifted[0]!.time).toBe(0)
     expect(shifted[0]!.words[0]!.start).toBe(0)
-    expect(shifted[0]!.words[0]!.end).toBe(0)
+    expect(shifted[0]!.words[0]!.end).toBeGreaterThanOrEqual(0)
+    expect(shifted[0]!.words[0]!.end).toBeGreaterThan(shifted[0]!.words[0]!.start)
+  })
+
+  it('大幅负偏移后：时间非负、词与行仍严格单调递增，行高亮仍落在第一行', () => {
+    const lines = parseLrc('[00:05.00]甲乙\n[00:06.00]丙')
+    const shifted = applyOffset(lines, -10000)
+    expect(shifted[0]!.time).toBe(0)
+    expect(shifted[1]!.time).toBeGreaterThan(shifted[0]!.time)
+    const words = shifted[0]!.words
+    expect(words[0]!.start).toBe(0)
+    for (let i = 1; i < words.length; i++) {
+      expect(words[i]!.start).toBeGreaterThan(words[i - 1]!.start)
+    }
+    for (const word of words) {
+      expect(word.start).toBeGreaterThanOrEqual(0)
+      expect(word.end).toBeGreaterThan(word.start)
+    }
+    // 钳平后行时间仍严格递增 → t=0 应命中第一行，而不是跳到末行
+    expect(findActiveLine(shifted, 0)).toBe(0)
   })
 
   it('偏移后仍保持单调递增', () => {
@@ -316,8 +392,25 @@ describe('parseLyricEntries', () => {
     ])
     // 原文整体延后 1s
     expect(lines[0]!.time).toBeCloseTo(11, 6)
-    // 翻译没偏移 → 与原文差 1s > 0.5s 容差 → 不挂上（证明翻译确实按自己的 offset 处理了）
+    // 翻译没偏移 → 与原文差 1s > 0.5s 容差 → 不挂上
+    // （本条只钉住**原文**的 offset 生效；翻译 offset 的效果由「翻译条目自身的 offset 生效后才参与对齐」钉住）
     expect(lines[0]!.translation).toBe('')
+  })
+
+  it('对含逐字标签的原文产出正确的逐字', () => {
+    const lines = parseLyricEntries([entry({ content: '[00:10.00]<00:10.00>你<00:10.50>好' })])
+    expect(lines[0]!.words.map((w) => w.text)).toEqual(['你', '好'])
+    expect(lines[0]!.words[0]!.start).toBe(10)
+    expect(lines[0]!.words[1]!.start).toBeCloseTo(10.5, 6)
+  })
+
+  it('翻译条目自身的 offset 生效后才参与对齐', () => {
+    const lines = parseLyricEntries([
+      entry({ content: '[00:10.00]甲', offset: 0 }),
+      entry({ content: '[00:10.80]AAA', offset: -400 }),
+    ])
+    // 翻译按自己的 offset -400ms → 10.4s，与原文相差 0.4s ≤ 0.5s 容差 → 对齐
+    expect(lines[0]!.translation).toBe('AAA')
   })
 
   it('翻译自身的 offset 生效且仍在容差内时能对齐', () => {

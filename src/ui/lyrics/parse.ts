@@ -27,11 +27,15 @@ export type LyricLine = { time: number; text: string; words: LyricWord[]; transl
  * - `[mm:ss:xx]` → 厘秒（÷100，与 `.xx` 同义）。
  * - 小数/厘秒部分按**位数**折算（`N` 位 → ÷10^N），所以 `.xx`=÷100、`.xxx`=÷1000 一并成立。
  * - 分钟可以超过 59（长音频）。
+ * - 小数位允许**最多 9 位**（超出的部分按毫秒精度截断），**绝不因为精度不够而丢掉整行**。
  */
-const TIME_TAG = /\[(\d+):(\d{1,2})(?:[.:](\d{1,3}))?\]/
+const TIME_TAG = /\[(\d+):(\d{1,2})(?:[.:](\d{1,9}))?\]/
 
-/** 逐字标签：`<mm:ss.xx>`（A2 增强 LRC 格式）。 */
-const WORD_TAG = /<(\d+):(\d{1,2})(?:[.:](\d{1,3}))?>/g
+/** 逐字标签：`<mm:ss.xx>`（A2 增强 LRC 格式）；小数位规则同 `TIME_TAG`。 */
+const WORD_TAG = /<(\d+):(\d{1,2})(?:[.:](\d{1,9}))?>/g
+
+/** 钳到 0 后的最小步进（1ms）：保证钳平后的时间序列仍然**严格单调递增**。 */
+const MIN_STEP = 0.001
 
 /** 拉丁字母或十进制数字（连续的整串算一个词）。 */
 const LATIN_OR_DIGIT = /[\p{Script=Latin}\p{Nd}]/u
@@ -72,6 +76,12 @@ function isCjk(ch: string): boolean {
  * 4. **标点 / 其它符号** → 不单独成词，并入**前一个词**；行首没有前词时并入**后一个词**。
  *
  * 由此保证：`splitIntoWords(text).join('') === text.replace(/\s+/g, '')`（不丢字）。
+ *
+ * ⚠️ **关于第 3 条与简报追加要求 H 的字面冲突（已定夺，别按字面「修」回去）**：
+ * 要求 H 同时写了「空格 → 并入前一个词」与「拼回原文 == 行文本**去掉空白**后的结果」，
+ * 这两条**不可兼得**——若把空格留在词里，拼回结果就等于**含空白**的原文，而不是去掉空白的原文。
+ * 本实现选择**后者**（不变式优先），所以空白是**丢弃**而不是并入词里；
+ * 若改成「空格并入前一个词」，拼回结果就会多出空白，破坏上面那条不变式。
  */
 export function splitIntoWords(text: string): string[] {
   const words: string[] = []
@@ -246,18 +256,23 @@ function assemble(entries: RawEntry[]): LyricLine[] {
 }
 
 /**
- * 解析普通（行级）LRC。
+ * 解析 LRC（**行级与逐字都吃**）。
  *
- * **伪逐字兜底**：行级 LRC 没有词级时间戳时，按该行时长把文本切成
- * 「中文按字、英文/数字按词」的伪逐字（见 `splitIntoWords`），
- * 因此每行的 `words` **非空**（空文本行除外）——双行逐字高亮可以直接消费。
+ * - **行级 LRC**（没有 `<mm:ss.xx>` 逐字标签）→ 按该行时长把文本切成
+ *   「中文按字、英文/数字按词」的伪逐字（见 `splitIntoWords`），
+ *   因此每行的 `words` **非空**（空文本行除外）——双行逐字高亮可以直接消费。
+ * - **带逐字标签的 LRC** → 按**真实词级时间戳**解析（与 `parseEnhancedLrc` 完全一致）。
+ *   控制器追加要求 I 明写：「两个函数在有逐字标签的输入上都必须正确解析逐字」——
+ *   若这里忽略逐字标签，下游会拿到**静默错误**的逐字时间
+ *   （词被按 CJK 逐字重切、时间被均匀铺满整行），且**没有任何报错**。
+ *
+ * 本函数等价于 `parseEnhancedLrc`（简报要求两个入口都存在，语义统一到这里）。
  *
  * @param raw LRC 原文；`null` / `undefined` / 空串 → 返回空数组。
  * @param options.offsetMs 可选的时间偏移（毫秒），语义见 `applyOffset`。
  */
 export function parseLrc(raw: string, options?: { offsetMs?: number }): LyricLine[] {
-  const lines = assemble(parseRawLines(raw, false))
-  return options?.offsetMs ? applyOffset(lines, options.offsetMs) : lines
+  return parseEnhancedLrc(raw, options)
 }
 
 /**
@@ -266,6 +281,9 @@ export function parseLrc(raw: string, options?: { offsetMs?: number }): LyricLin
  * **降级兜底**：实测真实 NAS 的歌词**只有行级 LRC、没有逐字标签**，
  * 因此遇到没有逐字标签的行时，本函数退化成与 `parseLrc` **完全一致**的伪逐字，
  * 绝不返回 `words: []`。
+ *
+ * `parseLrc` 直接委托到这里——两者行为一致（要求 I：行级输入逐字一致，
+ * 有逐字标签的输入也都要正确解析逐字）。
  *
  * @param raw LRC 原文；`null` / `undefined` / 空串 → 返回空数组。
  * @param options.offsetMs 可选的时间偏移（毫秒），语义见 `applyOffset`。
@@ -288,7 +306,14 @@ export function parseEnhancedLrc(raw: string, options?: { offsetMs?: number }): 
  * 本模块统一按「正 = 延后」解释，**调用方不要再自己翻转符号**。
  *
  * **负数时间**：偏移后出现负数时间戳时**钳到 0**（不保留负值）。
- * 钳零是单调操作，因此偏移后时间仍保持单调不减。
+ *
+ * **钳零后的单调性修复（要求 G：必须仍然单调递增）**：
+ * 钳零会把相邻时间戳压到同一刻（例如整行都落到 0），因此钳零之后**逐项抬升**：
+ * - 行时间：若 `lines[i].time <= lines[i-1].time` → 抬到 `lines[i-1].time + 1ms`；
+ * - 词起点：若 `words[i].start <= words[i-1].start` → 抬到 `words[i-1].start + 1ms`；
+ * - 词终点：若 `words[i].end <= words[i].start` → 抬到 `words[i].start + 1ms`。
+ * 于是偏移后**行时间与词时间都严格单调递增**、且**没有任何负数**；
+ * 行时间仍严格递增 ⇒ 被钳平的文件上 `findActiveLine` 依然能选对行（不会跳到末行）。
  *
  * 偏移**同时**作用于 `line.time` 与该行所有 `word.start` / `word.end`。
  *
@@ -299,7 +324,7 @@ export function applyOffset(lines: LyricLine[], ms: number): LyricLine[] {
   if (!Number.isFinite(ms) || ms === 0) return lines.map((line) => ({ ...line, words: [...line.words] }))
   const delta = ms / 1000
   const clamp = (value: number): number => Math.max(0, round3(value + delta))
-  return lines.map((line) => ({
+  const result = lines.map((line) => ({
     ...line,
     time: clamp(line.time),
     words: line.words.map((word) => ({
@@ -308,6 +333,23 @@ export function applyOffset(lines: LyricLine[], ms: number): LyricLine[] {
       end: clamp(word.end),
     })),
   }))
+  // 钳零可能让相邻时间戳塌缩到同一刻 → 逐项抬升 1ms，恢复严格单调递增。
+  for (let i = 1; i < result.length; i++) {
+    const previous = result[i - 1]!
+    const current = result[i]!
+    if (current.time <= previous.time) current.time = round3(previous.time + MIN_STEP)
+  }
+  for (const line of result) {
+    for (let i = 0; i < line.words.length; i++) {
+      const word = line.words[i]!
+      if (i > 0) {
+        const previous = line.words[i - 1]!
+        if (word.start <= previous.start) word.start = round3(previous.start + MIN_STEP)
+      }
+      if (word.end <= word.start) word.end = round3(word.start + MIN_STEP)
+    }
+  }
+  return result
 }
 
 /**
@@ -385,6 +427,12 @@ export function findActiveLine(lines: LyricLine[], t: number): number {
  * - `t` 落在词与词之间的空隙 → 归到**下一个**词（即将到来）；
  * - `t` 晚于最后一个词 → **最后一个词的索引**（行尾不丢高亮）；
  * - `words` 为空 → `-1`。
+ *
+ * ⚠️ **关于「词间空隙」分支的可达性（注释与实现必须一致）**：
+ * 本解析器构造出来的词区间**恒连续**（`words[i].end === words[i+1].start`，
+ * 见 `assemble` 与 `applyOffset`），所以**本模块产出的行不会命中空隙分支**。
+ * 该分支只对**外部手工构造**的非连续 `LyricLine` 兜底（例如 Task 19 自建的行），
+ * 此时 `t` 落在 `words[i].end` 与 `words[i+1].start` 之间 → 返回下一个词的索引。
  */
 export function findActiveWord(line: LyricLine, t: number): number {
   const words = line?.words
