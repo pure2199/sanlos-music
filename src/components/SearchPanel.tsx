@@ -317,6 +317,12 @@ type SectionTarget = 'all' | 'tracks' | 'albums' | 'artists'
  *
  * ⚠️ **服务端可能忽略分页参数**（一次返回全量）——这时**不再翻页**，
  *    否则会把 17.3 万首的曲库一页页拉完（严禁全量拉取）。
+ *
+ * ⚠️ **翻页决策不依赖服务端的 `total`**（简报明写「不要假设 `total` 一定准」）：
+ *    `total` 偏小 / 为 0 时，若拿它当翻页依据，「加载更多」会**直接消失**
+ *    （明明还有下一页，用户再也翻不动）。
+ *    → 判据是「**本页返回条数达到请求的 size** 且**去重后有新增**」。
+ *    `total` 只用于**显示**「命中 N 首」。
  */
 function mergeSection<T extends { id: string }>(
   section: Section<T>,
@@ -333,8 +339,10 @@ function mergeSection<T extends { id: string }>(
   const added = merged.length - section.items.length
   // 返回条数超过请求的 size → 服务端**忽略了 size**（返回的是全量）→ 停止翻页。
   const ignoredPaging = page.list.length > SEARCH_PAGE_SIZE
+  // 「本页无新增」= 服务端重复返回同一批 id → 停下（否则「加载更多」永远重复同一页）。
+  // 「本页不足一整页」= 服务端大概率没有下一页了 → 也停下（不依赖 total）。
   const hasMore =
-    !ignoredPaging && page.list.length > 0 && added > 0 && merged.length < page.total
+    !ignoredPaging && added > 0 && page.list.length >= SEARCH_PAGE_SIZE
   return {
     items: merged,
     total: Math.max(page.total, merged.length),

@@ -31,3 +31,58 @@
 .app-shell__main {
   flex: 1;
 }
+
+/*
+ * 顶栏主导航（Task 16 修复轮次 1 · M-9）
+ *
+ * ⚠️ 这组按钮的**标记在应用外壳层**（`src/App.tsx`）→ 样式也必须住在**外壳**的
+ *    样式文件里（原来放在 `src/pages/search-page.css`，类名却是 `fnm-searchpage__*`：
+ *    归属失真，且一旦改成代码分割，连接页上的这两颗按钮会完全失去样式）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
+ */
+
+/* 入口按钮组 */
+.fnm-app__nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 入口按钮 */
+.fnm-app__nav-button {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fnm-app__nav-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-app__nav-button:active {
+  background: var(--surface-sunken);
+}
+
+.fnm-app__nav-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 当前所在的入口 */
+.fnm-app__nav-button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.fnm-app__nav-button:disabled {
+  border-color: var(--border);
+  color: var(--disabled);
+  cursor: not-allowed;
+}

@@ -24,6 +24,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createElement } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { apiCall } from '../src/api/client'
 import { favoriteApi } from '../src/api/favorite'
@@ -165,6 +168,27 @@ function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+/**
+ * 仓库根目录（**不依赖 `process.cwd()`**）。
+ *
+ * ⚠️ 用 `process.cwd()` 锚定时，cwd ≠ 仓库根（例如从别的目录跑 vitest），
+ *    读到的就是别的目录 → 断言**空转通过**。
+ *    这里从**本测试文件自身的位置**推导仓库根，与 cwd 无关。
+ */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+/** 读仓库里的一个源码 / 样式文件。 */
+function readRepoFile(...segments: string[]): string {
+  return readFileSync(join(REPO_ROOT, ...segments), 'utf8')
+}
+
+/** 造一整页（`SEARCH_PAGE_SIZE` 条）占位歌曲。 */
+function makeFullPage(offset: number): Song[] {
+  return Array.from({ length: SEARCH_PAGE_SIZE }, (_, i) =>
+    makeSong(offset + i, { id: `song-${offset + i}`, title: `歌${offset + i}` }),
+  )
+}
+
 /** 在搜索框里输入关键字，并等防抖落地。 */
 async function typeKeyword(keyword: string): Promise<void> {
   const input = screen.getByLabelText('搜索关键字')
@@ -265,7 +289,7 @@ describe('收藏写回：并发策略（串行化）', () => {
     expect(writeback.get('song-1', false).target).toBe(false)
   })
 
-  it('过期的一笔失败：不回滚更新的乐观态（只有最新一笔失败才回滚）', async () => {
+  it('过期的一笔失败：不回滚更新的乐观态（3 连击，只有最新一笔失败才回滚）', async () => {
     const deferreds: Array<{ resolve: () => void; reject: (err: unknown) => void }> = []
     const writeback = createFavoriteWriteback(
       () =>
@@ -274,23 +298,35 @@ describe('收藏写回：并发策略（串行化）', () => {
         }),
     )
 
+    // ⚠️ **3 连击**（不是 2 次）：2 次点击时 `committed` 恰等于最新乐观态，
+    //    断言**区分不出**「回滚」与「不回滚」两种实现（复审 I-3）。
     writeback.toggle('song-1', false) // → true
-    writeback.toggle('song-1', true) // → false（更新的意图）
+    writeback.toggle('song-1', true) // → false
+    writeback.toggle('song-1', false) // → true（用户最后点击的意图）
     await tick()
     expect(deferreds.length).toBe(1)
 
-    // 第一笔失败（**已过期**：用户后来又点了一次）
+    // 第一笔失败（**已过期**：用户后来又点了两次）
     deferreds[0]?.reject(new Error('服务端拒绝'))
     await tick()
     await tick()
 
-    // 乐观态仍是用户最新的一次点击，没有被过期失败抹掉
-    expect(writeback.get('song-1', false).target).toBe(false)
-    // 第二笔照常发出
+    // 乐观态仍是用户**第三次**点击的值，没有被过期失败抹掉
+    expect(writeback.get('song-1', false).target).toBe(true)
+    // 第二笔照常发出（写回是**串行**的：一笔落地才发下一笔）
     await waitFor(() => expect(deferreds.length).toBe(2))
     deferreds[1]?.resolve()
     await tick()
-    expect(writeback.get('song-1', false).committed).toBe(false)
+    await tick()
+    // 第三笔照常发出
+    await waitFor(() => expect(deferreds.length).toBe(3))
+    deferreds[2]?.resolve()
+    await tick()
+    await tick()
+
+    const state = writeback.get('song-1', false)
+    expect(state.target).toBe(true)
+    expect(state.committed).toBe(true)
   })
 
   it('最新的一笔失败：回滚到「已确认态」并留下错误提示', async () => {
@@ -464,25 +500,61 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
     expect(alert.textContent).toContain('搜索失败')
   })
 
-  it('「加载更多」请求下一页并追加结果', async () => {
+  it('「加载更多」请求下一页并追加结果（满页才继续翻）', async () => {
+    const page1 = makeFullPage(0)
+    const page2 = makeFullPage(100)
     const query = vi.fn(async (_q: string, opts?: { page?: number }) => ({
-      tracks:
-        opts?.page === 1
-          ? { list: [SONGS[0] as Song], total: 2 }
-          : { list: [SONGS[1] as Song], total: 2 },
+      tracks: opts?.page === 1 ? { list: page1, total: 200 } : { list: page2, total: 200 },
       albums: { list: [], total: 0 },
       artists: { list: [], total: 0 },
     }))
     render(createElement(SearchPanel, { api: { query }, debounceMs: 0 }))
     await typeKeyword('甲')
 
-    expect(await screen.findByText('歌一')).toBeTruthy()
+    await waitFor(() => expect(screen.getByTestId('fnm-load-more-tracks')).toBeTruthy())
+    expect(screen.getByText(/已加载 50 \/ 200/)).toBeTruthy()
+
     fireEvent.click(screen.getByTestId('fnm-load-more-tracks'))
 
     await waitFor(() =>
       expect(query).toHaveBeenCalledWith('甲', { page: 2, size: SEARCH_PAGE_SIZE }),
     )
-    expect(await screen.findByText('歌二')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(/已加载 100 \/ 200/)).toBeTruthy())
+  })
+
+  it('服务端重复返回同一页时：「加载更多」不再出现（不会永远重复同一页）', async () => {
+    // 每页都返回**完全相同**的 id（服务端排序抖动 / 页码对不齐时的典型症状）
+    const samePage = makeFullPage(0)
+    const query = vi.fn(async () => ({
+      tracks: { list: samePage, total: 173669 },
+      albums: { list: [], total: 0 },
+      artists: { list: [], total: 0 },
+    }))
+    render(createElement(SearchPanel, { api: { query }, debounceMs: 0 }))
+    await typeKeyword('甲')
+
+    await waitFor(() => expect(screen.getByTestId('fnm-load-more-tracks')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('fnm-load-more-tracks'))
+    await waitFor(() =>
+      expect(query).toHaveBeenCalledWith('甲', { page: 2, size: SEARCH_PAGE_SIZE }),
+    )
+
+    // 第 2 页去重后**没有任何新增** → 「加载更多」必须消失（否则永远重复同一页）
+    await waitFor(() => expect(screen.queryByTestId('fnm-load-more-tracks')).toBeNull())
+  })
+
+  it('服务端 total 不可信（=0）但确实返回了满页时：「加载更多」仍然存在', async () => {
+    // ⚠️ 简报明写「不要假设 total 一定准」→ 翻页决策**不能**依赖 total。
+    const full = makeFullPage(0)
+    const query = vi.fn(async () => ({
+      tracks: { list: full, total: 0 },
+      albums: { list: [], total: 0 },
+      artists: { list: [], total: 0 },
+    }))
+    render(createElement(SearchPanel, { api: { query }, debounceMs: 0 }))
+    await typeKeyword('甲')
+
+    await waitFor(() => expect(screen.getByTestId('fnm-load-more-tracks')).toBeTruthy())
   })
 
   it('单次请求的条数被限制住（搜索不退化成「拉全库再本地过滤」）', async () => {
@@ -539,16 +611,43 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
 // ---------------------------------------------------------------------------
 
 describe('SongList：行内操作是可选增量（要求 H）', () => {
-  it('不传 renderRowActions 时渲染结果与之前完全一致（行内没有附加节点）', () => {
-    const { container } = render(createElement(SongList, { songs: SONGS, onPlay: vi.fn() }))
-    expect(container.querySelector('.fnm-songlist__row')?.children.length).toBe(
-      container.querySelectorAll('.fnm-songlist__row')[0]?.children.length,
-    )
-    expect(container.querySelector('[data-testid="fnm-favorite-toggle"]')).toBeNull()
+  /** 取第一行的子节点类名列表（行内结构的「指纹」）。 */
+  function rowChildClasses(container: HTMLElement): string[] {
+    const row = container.querySelector('.fnm-songlist__row')
+    return Array.from(row?.children ?? []).map((child) => child.className)
+  }
+
+  it('不传 renderRowActions 时行内结构与基线一致（没有任何附加节点）', () => {
+    // ⚠️ 基线是**写死的结构指纹**（不是「自己跟自己比」——那是恒真断言）。
+    //    行内只有：封面 / 标题 / 歌手 / 专辑 / 时长（歌曲未收藏 → 没有 ♡ 标记）。
+    const expected = [
+      'fnm-songlist__cover',
+      'fnm-songlist__title',
+      'fnm-songlist__artist',
+      'fnm-songlist__album',
+      'fnm-songlist__duration',
+    ]
+
+    const baseline = render(createElement(SongList, { songs: SONGS, onPlay: vi.fn() }))
+    expect(rowChildClasses(baseline.container)).toEqual(expected)
+    expect(baseline.container.querySelector('[data-testid="fnm-favorite-toggle"]')).toBeNull()
   })
 
-  it('传了 renderRowActions 时在行内渲染调用方给的内容', () => {
-    render(
+  it('传了 renderRowActions 但回调返回 null 时，行内结构与不传时逐项相等', () => {
+    const baseline = render(createElement(SongList, { songs: SONGS, onPlay: vi.fn() }))
+    const withNull = render(
+      createElement(SongList, {
+        songs: SONGS,
+        onPlay: vi.fn(),
+        renderRowActions: () => null,
+      }),
+    )
+    expect(rowChildClasses(withNull.container)).toEqual(rowChildClasses(baseline.container))
+  })
+
+  it('传了 renderRowActions 时在行内渲染调用方给的内容（且只多出这一个节点）', () => {
+    const baseline = render(createElement(SongList, { songs: SONGS, onPlay: vi.fn() }))
+    const withButton = render(
       createElement(SongList, {
         songs: SONGS,
         onPlay: vi.fn(),
@@ -556,9 +655,14 @@ describe('SongList：行内操作是可选增量（要求 H）', () => {
           createElement('button', { type: 'button', 'data-testid': 'row-action' }, song.title),
       }),
     )
-    const buttons = screen.getAllByTestId('row-action')
+
+    const buttons = withButton.container.querySelectorAll('[data-testid="row-action"]')
     expect(buttons.length).toBeGreaterThan(0)
     expect(buttons[0]?.textContent).toBe('歌一')
+    // 行内只**多出**调用方给的那一个节点（其余结构一字不变）
+    expect(rowChildClasses(withButton.container)).toHaveLength(
+      rowChildClasses(baseline.container).length + 1,
+    )
   })
 })
 
@@ -576,14 +680,15 @@ describe('歌单写回（要求 D / J）', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('把选中的歌曲加入歌单，成功后刷新歌单详情缓存', async () => {
+  it('把选中的歌曲加入歌单，成功后刷新**该歌单**的详情缓存（不受「当前选中歌单」守卫）', async () => {
     const addTracks = vi.fn(async () => undefined)
     const playlistApi = makePlaylistApi({ addTracks })
-    const libraryApi = makeLibraryApi()
+    const libraryApi = makeLibraryApi({
+      playlistSongs: vi.fn(async () => ({ list: [SONGS[0] as Song], total: 1 })),
+    })
     const store = createLibraryStore(libraryApi)
-    // 曲库 store 正在看这个歌单（缓存里有它）
-    store.setState({ playlistId: PLAYLIST.id })
-
+    // ⚠️ **不**设置 `playlistId`：运行期它恒为 null（歌单页从未被任何组件挂载）——
+    //    旧实现在这里直接 return → 这次刷新**一次都不会发生**（复审 I-1）。
     render(createElement(SearchPage, { api: makeSearchApiWithSongs(), playlistApi, store }))
     await typeKeyword('甲')
     fireEvent.click(await screen.findByText('歌一'))
@@ -593,9 +698,13 @@ describe('歌单写回（要求 D / J）', () => {
     fireEvent.click(addButton)
 
     await waitFor(() => expect(addTracks).toHaveBeenCalledWith(PLAYLIST.id, ['song-1']))
-    // 写回成功后刷新歌单详情缓存（重新取 `playlistApi.songs` 的结果）
+    // 写回成功后刷新该歌单的详情缓存（重新取 `playlistApi.songs` 的结果）
     await waitFor(() =>
       expect(libraryApi.playlistSongs).toHaveBeenCalledWith(PLAYLIST.id, 1, expect.any(Number)),
+    )
+    // 缓存**真的**被更新了（不是静默 no-op）
+    await waitFor(() =>
+      expect(store.getState().playlistSongsById[PLAYLIST.id]?.items).toHaveLength(1),
     )
     expect(await screen.findByText(/已把 1 首加入歌单/)).toBeTruthy()
   })
@@ -631,7 +740,7 @@ describe('歌单写回（要求 D / J）', () => {
     expect(alert.textContent).toContain('服务端拒绝')
   })
 
-  it('playlist/create 返回空 guid 时提示「已创建，但未能拿到歌单标识」且不崩溃', async () => {
+  it('playlist/create 返回空 guid 且按名字找不回时：提示文案就是「已创建，但未能拿到歌单标识」', async () => {
     const playlistApi = makePlaylistApi({
       create: vi.fn(async () => ''),
       list: vi.fn(async () => []),
@@ -641,8 +750,30 @@ describe('歌单写回（要求 D / J）', () => {
     fireEvent.change(screen.getByLabelText('新歌单名称'), { target: { value: '新歌单' } })
     fireEvent.click(screen.getByText('新建歌单'))
 
-    expect(await screen.findByText(/已创建，但未能拿到歌单标识/)).toBeTruthy()
+    const message = await screen.findByText(/已创建，但未能拿到歌单标识/)
+    // ⚠️ 提示**不能**是任何形式的「创建成功」——找不到标识就如实说找不到
+    expect(message.textContent).toBe('已创建，但未能拿到歌单标识（服务端未回显 guid）')
+    expect(message.textContent).not.toContain('创建成功')
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('playlist/create 返回空 guid 但能按名字找回时：选中该歌单并说明原因', async () => {
+    const created: Playlist = { ...PLAYLIST, id: 'playlist-2', name: '新歌单' }
+    const playlistApi = makePlaylistApi({
+      create: vi.fn(async () => ''),
+      list: vi.fn(async () => [PLAYLIST, created]),
+    })
+    render(createElement(SearchPage, { api: makeSearchApi(), playlistApi }))
+
+    fireEvent.change(screen.getByLabelText('新歌单名称'), { target: { value: '新歌单' } })
+    fireEvent.click(screen.getByText('新建歌单'))
+
+    // 按名字找回了 → 选中它
+    await waitFor(() =>
+      expect((screen.getByLabelText('选择歌单') as HTMLSelectElement).value).toBe('playlist-2'),
+    )
+    const message = await screen.findByText(/已创建，但未能拿到歌单标识/)
+    expect(message.textContent).toContain('已按名称选中')
   })
 
   it('playlist/create 返回 guid 时选中新建的歌单', async () => {
@@ -664,6 +795,56 @@ describe('歌单写回（要求 D / J）', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 歌单详情缓存的刷新语义（修复轮次 1 · I-1）
+//
+// ⚠️ **直接调 store 动作**（不经 UI）——复审要求的配套用例：
+//    「对**非当前选中**的 playlistId 调用刷新 → 该歌单的 items 确实被更新，
+//      且 playlistId（当前选中项）**不变**」。
+// ---------------------------------------------------------------------------
+
+describe('歌单详情缓存：刷新语义（I-1）', () => {
+  it('刷新**非当前选中**的歌单：该歌单的曲目缓存被更新，且「当前选中歌单」不变', async () => {
+    const other: Playlist = { ...PLAYLIST, id: 'playlist-2', name: '另一个歌单' }
+    const libraryApi = makeLibraryApi({
+      playlistSongs: vi.fn(async (playlistId: string) => ({
+        list: [makeSong(9, { id: `song-of-${playlistId}`, title: `歌${playlistId}` })],
+        total: 1,
+      })),
+    })
+    const store = createLibraryStore(libraryApi)
+    // 当前选中的是**另一个**歌单
+    store.setState({ playlistId: PLAYLIST.id })
+
+    await store.getState().refreshPlaylistSongs(other.id)
+
+    // 按传入的 id 直接拉取（**不受**「当前选中歌单」守卫）
+    expect(libraryApi.playlistSongs).toHaveBeenCalledWith(other.id, 1, expect.any(Number))
+    // 该歌单的缓存确实被更新（找不到条目 → **新建**一条，而不是静默 no-op）
+    expect(store.getState().playlistSongsById[other.id]?.items.map((song) => song.id)).toEqual([
+      `song-of-${other.id}`,
+    ])
+    // 「当前选中歌单」**不变**
+    expect(store.getState().playlistId).toBe(PLAYLIST.id)
+    // 别的歌单的缓存不受影响
+    expect(store.getState().playlistSongsById[PLAYLIST.id]).toBeUndefined()
+  })
+
+  it('刷新当前选中的歌单：当前歌单视图也跟着更新（且仍不改变选中项）', async () => {
+    const libraryApi = makeLibraryApi({
+      playlistSongs: vi.fn(async () => ({ list: [SONGS[0] as Song], total: 1 })),
+    })
+    const store = createLibraryStore(libraryApi)
+    store.setState({ playlistId: PLAYLIST.id })
+
+    await store.getState().refreshPlaylistSongs(PLAYLIST.id)
+
+    expect(store.getState().playlistId).toBe(PLAYLIST.id)
+    expect(store.getState().playlistSongs.items.map((song) => song.id)).toEqual(['song-1'])
+    expect(store.getState().playlistSongsById[PLAYLIST.id]?.items).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 应用接线（要求 I）
 // ---------------------------------------------------------------------------
 
@@ -677,5 +858,22 @@ describe('应用外壳：搜索页接线（要求 I）', () => {
     fireEvent.click(screen.getByRole('button', { name: '连接' }))
     expect(screen.queryByLabelText('搜索关键字')).toBeNull()
     expect(screen.getByText('连接飞牛音乐')).toBeTruthy()
+  })
+
+  it('顶栏入口按钮的样式归属**应用外壳**（app-shell.css），类名与归属一致（M-9）', () => {
+    const shell = readRepoFile('src', 'styles', 'app-shell.css')
+    // 样式在**外壳**的样式文件里（将来改成代码分割也不会丢样式）
+    expect(shell).toContain('.fnm-app__nav')
+    expect(shell).toContain('.fnm-app__nav-button')
+
+    // 页面样式文件里**不再有** nav 规则（避免两处各写一份）
+    const pageCss = readRepoFile('src', 'pages', 'search-page.css')
+    expect(pageCss).not.toContain('.fnm-app__nav')
+    expect(pageCss).not.toContain('.fnm-searchpage__nav')
+
+    // 标记用的类名与归属一致
+    const app = readRepoFile('src', 'App.tsx')
+    expect(app).toContain('fnm-app__nav-button')
+    expect(app).not.toContain('fnm-searchpage__nav')
   })
 })

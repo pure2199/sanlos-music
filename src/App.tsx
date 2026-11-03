@@ -34,6 +34,10 @@ import './styles/tokens.css'
 //
 // ⚠️ 搜索结果双击播放 → `playerStore.playTrack(song, list)`：
 //    队列上下文用**当前搜索结果**（整队入队并定位到点的那首）。
+//
+// ⚠️ 入口按钮的样式住在**应用外壳**的样式文件里（`src/styles/app-shell.css`，
+//    类名 `fnm-app__nav*`）——这两颗按钮是外壳的元素，样式也归外壳；
+//    将来即便改成代码分割（`React.lazy`），样式也不会丢。
 // ---------------------------------------------------------------------------
 
 /** 主区的两个视图。 */
@@ -47,10 +51,10 @@ export default function App() {
     <div className="app-shell">
       <header className="app-shell__topbar">
         <span className="app-shell__brand">飞牛音乐</span>
-        <nav className="fnm-searchpage__nav" aria-label="主导航">
+        <nav className="fnm-app__nav" aria-label="主导航">
           <button
             type="button"
-            className="fnm-searchpage__nav-button"
+            className="fnm-app__nav-button"
             aria-pressed={view === 'connect'}
             onClick={() => setView('connect')}
           >
@@ -58,7 +62,7 @@ export default function App() {
           </button>
           <button
             type="button"
-            className="fnm-searchpage__nav-button"
+            className="fnm-app__nav-button"
             aria-pressed={view === 'search'}
             onClick={() => setView('search')}
           >

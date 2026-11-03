@@ -192,8 +192,19 @@ export interface LibraryStore {
   playlists: LibraryCollection<Playlist>
   /** 收藏（全量接口）。 */
   favorites: LibraryCollection<Song>
-  /** 当前歌单里的歌曲（分页）。 */
+  /** 当前歌单里的歌曲（分页）——「**当前选中**歌单」的那一份缓存。 */
   playlistSongs: LibraryCollection<Song>
+  /**
+   * **各歌单的曲目缓存**（key = 歌单 id）。
+   *
+   * ⚠️ 为什么不能只有 `playlistSongs` 一个槽位：
+   *    写回（加歌 / 删歌）之后要刷新的是**指定歌单**的缓存，
+   *    而那个歌单**不一定是当前选中的那个**（歌单页根本没被挂载时更是如此）——
+   *    单槽位只能存一份 → 刷新别的歌单就会把当前视图顶掉。
+   *
+   * → 缓存**按歌单 id 分开存**；`playlistSongs` 是「当前选中歌单」的那一份视图。
+   */
+  playlistSongsById: Record<string, LibraryCollection<Song>>
   /** 当前选中的歌单 id。 */
   playlistId: string | null
   /** 每页条数。 */
@@ -216,13 +227,17 @@ export interface LibraryStore {
   /** 选中歌单（切换歌单会重置歌单内的歌曲列表）。 */
   selectPlaylist: (playlistId: string | null) => void
   /**
-   * 刷新某个歌单里的歌曲（**清空后重取第一页**）。
+   * **刷新指定歌单**的曲目缓存（**清空后重取第一页**）。
    *
    * ⚠️ 这是「**追加语义**」的例外：增删曲目后必须重取，否则列表里还留着
    *    已被移走的歌、也看不到刚加进去的歌。
    *
-   * ⚠️ **只刷新「当前正在看的那个歌单」**：缓存里只有它的歌；
-   *    刷新别的歌单会把歌单页的选中项切走（那是「切换上下文」，不是「刷新缓存」）。
+   * ⚠️ **不受「当前选中歌单」守卫**：按传入的 `id` 直接拉取并**覆盖该歌单**的缓存，
+   *    即使它不是当前选中的那个；找不到缓存条目就**新建**一条（不静默 no-op）。
+   *    「守卫」属于 `selectPlaylist`（那是**切换上下文**），不属于「刷新缓存」——
+   *    否则写回成功却没刷新缓存 = **假成功**。
+   *
+   * ⚠️ **不修改**「当前选中歌单」这个 UI 状态（`playlistId` 原样保留）。
    */
   refreshPlaylistSongs: (playlistId: string) => Promise<void>
   /** 显式刷新歌单列表（清空后重取——这是「重复 load 不清空」的例外）。 */
@@ -383,6 +398,7 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
       playlists: emptyCollection<Playlist>(),
       favorites: emptyCollection<Song>(),
       playlistSongs: emptyCollection<Song>(),
+      playlistSongsById: {},
       playlistId: null,
       pageSize,
 
@@ -469,7 +485,12 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
         return loadPage<Song>(
           {
             read: () => get().playlistSongs,
-            write: (next) => set({ playlistSongs: next }),
+            // 缓存按歌单 id 分开存（写回后刷新的就是它）→ 每次写入都同步一份。
+            write: (next) =>
+              set((state) => ({
+                playlistSongs: next,
+                playlistSongsById: { ...state.playlistSongsById, [playlistId]: next },
+              })),
             pages: pages.playlistSongs,
             fetcher: (p, size) => api.playlistSongs(playlistId, p, size),
             idOf: (song) => song.id,
@@ -480,18 +501,56 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
       },
 
       selectPlaylist: (playlistId) => {
+        // ⚠️ **守卫属于这里**：「当前选中歌单」是**上下文**，
+        //    重复选中同一个歌单是空操作，换歌单则重置该歌单的视图。
         if (get().playlistId === playlistId) return
         pages.playlistSongs.clear()
         set({ playlistId, playlistSongs: emptyCollection<Song>() })
       },
 
       refreshPlaylistSongs: async (playlistId) => {
-        // 只有「当前正在看的那个歌单」才有缓存可刷新（见接口注释）。
-        if (get().playlistId !== playlistId) return
-        // 清空后重取第一页：追加语义在这里是错的（移走的歌会留在列表里）。
-        pages.playlistSongs.clear()
-        set({ playlistSongs: emptyCollection<Song>() })
-        await get().loadPlaylistSongs(playlistId, 1)
+        // ⚠️ **不受「当前选中歌单」守卫**：按传入的 id 直接拉取并覆盖**该歌单**的缓存。
+        //    「守卫」属于 `selectPlaylist`（切换上下文），不属于「刷新缓存」。
+        const isCurrent = get().playlistId === playlistId
+        try {
+          const result = await api.playlistSongs(playlistId, 1, pageSize)
+          const collection: LibraryCollection<Song> = {
+            items: result.list,
+            total: result.total,
+            loading: false,
+            hasMore: result.list.length > 0 && result.list.length < result.total,
+            error: null,
+            loaded: true,
+            nextPage: 2,
+            noProgressPages: 0,
+            stalled: false,
+          }
+          set((state) => {
+            const next: Partial<LibraryStore> = {
+              playlistSongsById: { ...state.playlistSongsById, [playlistId]: collection },
+            }
+            // 当前选中的正好是它 → 「当前歌单视图」也跟着更新
+            //（但**不改** `playlistId`：刷新缓存不是切换上下文）。
+            if (state.playlistId === playlistId) next.playlistSongs = collection
+            return next
+          })
+          // 页码簿记重置：否则后续按页加载会被幂等守卫吞掉（视图停在第一页）。
+          if (isCurrent) pages.playlistSongs.clear()
+        } catch (err) {
+          // ⚠️ 刷新失败**不抛**：写回本身已经成功，
+          //    让异常冒到调用方会把「写回成功」误报成「写回失败」。
+          const message = describeError(err)
+          set((state) => ({
+            playlistSongsById: {
+              ...state.playlistSongsById,
+              [playlistId]: {
+                ...(state.playlistSongsById[playlistId] ?? emptyCollection<Song>()),
+                loading: false,
+                error: message,
+              },
+            },
+          }))
+        }
       },
 
       refreshPlaylists: async () => {

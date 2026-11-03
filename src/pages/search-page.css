@@ -7,9 +7,8 @@
  * ⚠️ 交互态（`:hover` / `:active` / `:focus-visible` / `:disabled`）**只能**靠样式表表达——
  *    内联 style 表达不了伪类与伪元素。
  *
- * ⚠️ 「搜索入口」按钮（应用顶栏里切到搜索页的那个）的样式**也放在这里**：
- *    应用外壳的样式文件（`src/styles/app-shell.css`）不归本任务的文件范围，
- *    而这两颗按钮就是搜索页的入口，故随搜索页一起维护。
+ * ⚠️ 顶栏的「连接 / 搜索」入口按钮**不在这里**：它的标记在应用外壳层
+ *    （`src/App.tsx`）→ 样式住在 `src/styles/app-shell.css`。
  */
 
 /* 页面主体（搜索面板 + 歌单写回区） */
@@ -19,53 +18,6 @@
   gap: 16px;
   flex: 1 1 auto;
   min-height: 0;
-}
-
-/* --- 顶栏的搜索入口 ------------------------------------------------------ */
-
-/* 入口按钮组 */
-.fnm-searchpage__nav {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* 入口按钮 */
-.fnm-searchpage__nav-button {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.fnm-searchpage__nav-button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.fnm-searchpage__nav-button:active {
-  background: var(--surface-sunken);
-}
-
-.fnm-searchpage__nav-button:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
-/* 当前所在的入口 */
-.fnm-searchpage__nav-button[aria-pressed='true'] {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-text);
-}
-
-.fnm-searchpage__nav-button:disabled {
-  border-color: var(--border);
-  color: var(--disabled);
-  cursor: not-allowed;
 }
 
 /* --- 歌单写回区 ---------------------------------------------------------- */
