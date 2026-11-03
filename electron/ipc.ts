@@ -743,12 +743,10 @@ export interface PrefsStoreOptions {
  *    （偏好丢了不该让应用起不来）。
  */
 export class PrefsStore {
-  private readonly options: PrefsStoreOptions
   /** 解析出来的文件路径（缓存，避免每次读写都问一遍 Electron）。 */
   private resolvedPath: string | null
 
   constructor(opts: PrefsStoreOptions = {}) {
-    this.options = opts
     this.resolvedPath = opts.filePath ?? null
   }
 

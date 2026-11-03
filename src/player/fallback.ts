@@ -82,13 +82,15 @@ export async function detectFfmpegStatus(): Promise<FfmpegStatus> {
  * 为一首歌做兜底解码（引擎的 `prepareSource` 接缝）。
  *
  * @param song  要播的曲目（**只用它的 `id`**，其余字段不参与）。
- * @param label 命中的格式名（大写，如 `APE`）——只用于拼提示文案。
+ * @param _label 命中的格式名（大写，如 `APE`）——**本函数不用它**：
+ *    提示文案由**引擎**用它自己那份 `label` 拼（`fallbackUnavailableMessage`）；
+ *    这里保留该形参，只是为了与引擎的 `prepareSource` 接缝**保持同形**。
  *
  * @returns 成功时带可播放的**本地地址**；失败时带**可判别**的 `reason`。
  */
 export async function prepareFallbackSource(
   song: Song,
-  label: string,
+  _label: string,
 ): Promise<FallbackPreparation> {
   const bridge = playerBridge()
   // ⚠️ 没有桥 → 引擎会写「兜底不可用」的可读错误（**不静默失败**）。
@@ -100,7 +102,3 @@ export async function prepareFallbackSource(
     return unavailable('failed', null)
   }
 }
-
-/** 兜底不可用时的文案（供设置面板复用；**不含凭证**）。 */
-export const FALLBACK_UNAVAILABLE_HINT =
-  '未检测到 FFmpeg：APE / ALAC / DSF 等格式无法播放。安装 FFmpeg 后即可通过转码播放。'

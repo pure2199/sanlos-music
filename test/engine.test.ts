@@ -293,7 +293,7 @@ describe('PlayerEngine：error 三类语义', () => {
   })
 
   it('播放新曲目会清掉旧错误', () => {
-    const { engine, element } = createEngine()
+    const { engine } = createEngine()
     engine.play(song('a', 'APE'))
     expect(engine.state.error).toBeTruthy()
     engine.play(song('b'))

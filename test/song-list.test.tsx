@@ -511,7 +511,7 @@ describe('libraryStore', () => {
 
   it('store 里没有任何凭证字段', async () => {
     const store = createLibraryStore(createFakeApi())
-    const dump = JSON.stringify(store.getState(), (key, value) =>
+    const dump = JSON.stringify(store.getState(), (_key, value) =>
       typeof value === 'function' ? undefined : value,
     )
     expect(dump).not.toMatch(/token|password|cookie/i)
@@ -594,7 +594,7 @@ describe('曲库页面', () => {
     expect(await screen.findByText('示例风格')).toBeTruthy()
     genres.unmount()
 
-    const playlists = render(<PlaylistsPage api={api} />)
+    render(<PlaylistsPage api={api} />)
     expect(await screen.findByText('示例歌单')).toBeTruthy()
   })
 

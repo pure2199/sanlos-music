@@ -17,7 +17,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { PlayerEngine, type AudioContextLike, type AudioNodeLike, type EqChainBuilder, type MediaElementLike, type MediaElementSourceLike } from '../src/player/engine'
 import { EqChain } from '../src/player/eq'
 import { createPlayerStore, type PlayerEngineLike } from '../src/state/playerStore'
-import type { PlayerState, Song } from '../shared/types'
+import type { Song } from '../shared/types'
 import { EQ_PRESETS } from '../shared/constants'
 
 // ---------------------------------------------------------------------------

@@ -37,10 +37,7 @@ import { extname } from 'node:path'
 
 import { LOCAL_MEDIA_HOST, LOCAL_MEDIA_SCHEME, localMediaUrl } from '../shared/localMedia'
 import {
-  APP_SCHEME_PRIVILEGES,
-  FNML_SCHEME,
   registerAppSchemes,
-  registerSchemePrivileges,
   resolveElectronProtocol,
   type ProtocolLike,
 } from './schemes'
@@ -304,23 +301,11 @@ export async function handleLocalMediaRequest(
 // 注册
 // ---------------------------------------------------------------------------
 
-/**
- * 注册 `fnml` scheme 的特权（**单个** scheme）。
- *
- * ⚠️⚠️ **应用启动时不要用本函数**——Electron 的
- *    `registerSchemesAsPrivileged()` **整个进程只能调用一次**，
- *    第二次会**静默覆盖**第一次的注册结果（本项目正是踩了这个坑：
- *    `fnm` 被 `fnml` 覆盖掉 → 渲染进程里 `fnm://` 完全不可用）。
- *    应用启动的正确入口是 `electron/schemes.ts` 的 `registerAppSchemes()`。
- *
- * ⚠️ **主进程必须在 `app.whenReady()` 之前调用它**（Electron 硬性约束）。
- */
-export function registerLocalMediaSchemePrivileges(protocol?: ProtocolLike): void {
-  registerSchemePrivileges(
-    [{ scheme: FNML_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } }],
-    protocol,
-  )
-}
+// ⚠️ 这里**不再**提供「只注册 `fnml`」的入口——Electron 的
+//    `registerSchemesAsPrivileged()` 整个进程只能调用一次，
+//    单 scheme 注册会**覆盖掉**另一个 scheme 的特权（这正是本项目踩过的坑：
+//    `fnm` 被 `fnml` 覆盖掉 → 渲染进程里 `fnm://` 完全不可用）。
+//    → 正确的入口只有 `electron/schemes.ts` 的 `registerAppSchemes()`。
 
 /**
  * 注册 `fnml://` 协议处理器（**必须在 app ready 之后调用**）。

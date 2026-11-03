@@ -57,19 +57,6 @@ function makeSong(index: number, overrides: Partial<Song> = {}): Song {
   }
 }
 
-/** 一张占位专辑。 */
-function makeAlbum(index: number): Album {
-  return {
-    id: `album-${index}`,
-    title: `示例专辑${index}`,
-    artist: '甲',
-    artistId: '',
-    coverId: null,
-    year: null,
-    trackCount: 1,
-  }
-}
-
 /** 一个占位歌单。 */
 const PLAYLIST: Playlist = {
   id: 'playlist-1',
@@ -159,7 +146,9 @@ describe('P-LIB-4 分页护栏：停下后有「继续加载」入口', () => {
   /** 造一个「每页都返回同一批 id」的假接口（排序抖动的典型症状）。 */
   function duplicateApi(): { api: LibraryApi; songs: ReturnType<typeof vi.fn> } {
     const duplicate = Array.from({ length: 5 }, (_, i) => makeSong(i))
-    const songs = vi.fn(async (page: number) => ({ list: duplicate, total: 100 }))
+    // ⚠️ 这个假接口**故意忽略页码**（每页都返回同一批 id）→ 形参用不到；
+    //    但 `vi.fn` 仍会**记录调用实参**，断言读的是 `mock.calls`，不受影响。
+    const songs = vi.fn(async () => ({ list: duplicate, total: 100 }))
     return { api: createFakeApi({ songs }), songs }
   }
 

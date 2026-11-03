@@ -578,7 +578,7 @@ describe('PlayerBar：进度条与音量（要求 G）', () => {
     render(<PlayerBar store={store} />)
 
     const eq = screen.getByRole('button', { name: 'EQ' })
-    // ⚠️ 这里原本断言的是「禁用 + 提示即将支持」——那是 Task 21 留下���**占位**行为，
+    // ⚠️ 这里原本断言的是「禁用 + 提示即将支持」——那是 Task 21 留下的**占位**行为，
     //    Task 5 把面板真正挂上之后，这条断言的前提已不成立 → 改成断言新行为。
     expect(eq.hasAttribute('disabled')).toBe(false)
     expect(screen.queryByRole('dialog', { name: '均衡器' })).toBeNull()

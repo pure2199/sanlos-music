@@ -111,7 +111,7 @@ describe('保存窗口位置尺寸', () => {
     saver.saveNow()
 
     expect(prefs.read().windowBounds).toEqual({ x: 33, y: 44, width: 1024, height: 768 })
-    // 下一��启动时按它摆窗口。
+    // 下一次启动时按它摆窗口。
     expect(resolveWindowBounds(prefs.read().windowBounds, { width: 1200, height: 800 })).toEqual({
       width: 1024,
       height: 768,

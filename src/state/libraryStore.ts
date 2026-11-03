@@ -28,7 +28,6 @@
 // ---------------------------------------------------------------------------
 
 import { useMemo } from 'react'
-import { useStore } from 'zustand'
 import { createStore, type StateCreator, type StoreApi } from 'zustand/vanilla'
 
 import type { Album, Artist, Genre, Playlist, Song } from '../../shared/types'
@@ -1109,11 +1108,6 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
 
 /** 默认曲库 store（生产用：真实 API 实现）。 */
 export const libraryStore: LibraryStoreApi = createLibraryStore(defaultLibraryApi)
-
-/** 默认 store 的选择器 hook（页面通常直接用 `useStore(store, selector)`）。 */
-export function useLibraryStore<T>(selector: (state: LibraryStore) => T): T {
-  return useStore(libraryStore, selector)
-}
 
 /**
  * 解析页面该用哪个 store。

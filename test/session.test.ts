@@ -428,7 +428,7 @@ describe('token 失效的续期与重试', () => {
 
     const res = await m.request('track/list')
     expect(res.status).toBe(200)
-    expect(res.json.code).toBe(0)
+    expect((res.json as { code?: number }).code).toBe(0)
     // 续期只触发**一次**登录请求
     expect(loginCount).toBe(2)
     // 首发 + 重试 = 2 次业务请求
@@ -461,7 +461,7 @@ describe('token 失效的续期与重试', () => {
 
     const res = await m.request('track/list')
     expect(res.status).toBe(200)
-    expect(res.json.code).toBe(CODE_TOKEN_EXPIRED)
+    expect((res.json as { code?: number }).code).toBe(CODE_TOKEN_EXPIRED)
     expect(businessCount).toBe(2)
     expect(loginCount).toBe(2)
   })

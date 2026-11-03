@@ -19,7 +19,7 @@
 
 import type { WindowBounds } from '../shared/playerBridge'
 
-/** 窗口当前的��置与尺寸（与 Electron 的 `getBounds()` 同形）。 */
+/** 窗口当前的位置与尺寸（与 Electron 的 `getBounds()` 同形）。 */
 export interface WindowBoundsSnapshot {
   x: number
   y: number

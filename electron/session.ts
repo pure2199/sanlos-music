@@ -358,11 +358,11 @@ function buildQuery(query: Record<string, string | number | undefined> | undefin
  * **不是 JSON 时返回 `null`（不抛异常）**：调用方要靠 `status` 判断真实状态码，
  * 这里抛异常会把原始状态码掩盖掉。
  */
-async function readJson(res: Response): Promise<any> {
+async function readJson(res: Response): Promise<unknown> {
   try {
     const text = await res.text()
     if (!text) return null
-    return JSON.parse(text) as any
+    return JSON.parse(text) as unknown
   } catch {
     return null
   }
@@ -747,7 +747,7 @@ export class SessionManager {
   async request(
     path: string,
     opts: SessionRequestOptions = {},
-  ): Promise<{ status: number; json: any }> {
+  ): Promise<{ status: number; json: unknown }> {
     if (!this.state.base) {
       throw new SessionStateError('NO_SESSION', '尚未连接服务器：缺少会话基址')
     }

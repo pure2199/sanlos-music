@@ -89,7 +89,7 @@ export function withDefaultPort(input: string): string {
   const trimmed = input.trim()
   if (!trimmed) return trimmed
 
-  const { scheme, schemeName, authority, tail } = splitAddress(trimmed)
+  const { schemeName, authority, tail } = splitAddress(trimmed)
   const protocol = schemeName || 'http'
   if (protocol !== 'http' && protocol !== 'https') return trimmed
 
