@@ -1,0 +1,40 @@
+/*
+ * 曲库页面级样式（Task 14）。
+ *
+ * 只放**页面自己**的布局（不归通用外壳管的那些）——
+ * 通用外壳（标题 / 状态 / 错误）在 `library-page-shell.css` 里。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
+ */
+
+/* 歌单页双栏布局 */
+.fnm-playlists {
+  display: flex;
+  gap: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 左侧歌单栏 */
+.fnm-playlists__side {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 右侧歌曲栏 */
+.fnm-playlists__detail {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 提示文案（未选中歌单时） */
+.fnm-playlists__hint {
+  margin: 0;
+  padding: 24px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}

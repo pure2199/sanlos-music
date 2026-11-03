@@ -10,7 +10,8 @@ import { useCallback, useEffect, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Genre } from '../../shared/types'
-import { CardGrid, GenreCard, LibraryPageShell, formatCount } from '../components/Cards'
+import { CardGrid, GenreCard, formatCount } from '../components/Cards'
+import { LibraryPageShell } from '../components/LibraryPageShell'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
 /** `GenresPage` 的属性。 */

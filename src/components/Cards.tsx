@@ -14,9 +14,13 @@
 //    （`#hex` / `rgb()` / `hsl()` 一律不行）——这样 Task 18/19 换主题时只换变量、
 //    不重写组件。
 //
-// ⚠️ 本任务的「拥有文件」清单里**没有 .css 文件**，所以样式走**内联 style**，
-//    且一律引用 `var(--token)`：效果与外部样式表等价（同样只依赖语义变量），
-//    又不会和别的任务并行新建同名样式表冲突。
+// ⚠️ 样式住在 `src/components/cards.css`（组件有自己的 `.css`——仓库约定），
+//    悬停 / 焦点 / 按下 / 禁用这类**伪类**只能靠样式表表达，内联 style 做不到。
+//    内联 style 只保留 CSS 表达不了的东西：封面的 `width` / `height`、
+//    画布的 `height`、网格单元的 `top` / `left` / `width`。
+//
+// ⚠️ 网格行高的**唯一真值**是 `CARD_GRID_ROW_HEIGHT`（TS 侧）；
+//    CSS 里不写死 224，而是消费组件注入的 `--grid-row-height` 变量。
 // ---------------------------------------------------------------------------
 
 import {
@@ -27,12 +31,12 @@ import {
   useState,
   type CSSProperties,
   type ReactElement,
-  type ReactNode,
   type UIEvent,
 } from 'react'
 
 import type { Album, Artist, Genre, Playlist } from '../../shared/types'
 import { coverUrl } from './coverUrl'
+import './cards.css'
 
 // ---------------------------------------------------------------------------
 // 公共小工具
@@ -47,30 +51,15 @@ export function formatCount(value: number): string {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
+/** 支持 CSS 自定义属性（`--grid-row-height` 这类）的内联样式。 */
+type StyleVars = CSSProperties & Record<`--${string}`, string | number>
+
 // ---------------------------------------------------------------------------
 // 封面
 // ---------------------------------------------------------------------------
 
 /** 封面盒子的默认边长（像素，正方形）。 */
 export const CARD_COVER_SIZE = 160
-
-/** 封面框（图片与占位块共用，保证切换时不跳动）。 */
-const COVER_BOX: CSSProperties = {
-  borderRadius: '8px',
-  overflow: 'hidden',
-  background: 'var(--surface-sunken)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-}
-
-/** 封面图片。 */
-const COVER_IMAGE: CSSProperties = {
-  width: '100%',
-  height: '100%',
-  objectFit: 'cover',
-  display: 'block',
-}
 
 /** `CoverImage` 的属性。 */
 export interface CoverImageProps {
@@ -113,13 +102,7 @@ export function CoverImage({ coverId, alt, boxSize = CARD_COVER_SIZE, className 
         className={`${classNames} fnm-cover__placeholder`}
         data-testid="cover-placeholder"
         aria-hidden="true"
-        style={{
-          ...COVER_BOX,
-          width: boxSize,
-          height: boxSize,
-          color: 'var(--text-secondary)',
-          fontSize: '20px',
-        }}
+        style={{ width: boxSize, height: boxSize }}
       >
         ♪
       </div>
@@ -135,7 +118,7 @@ export function CoverImage({ coverId, alt, boxSize = CARD_COVER_SIZE, className 
       loading="lazy"
       decoding="async"
       onError={() => setFailed(true)}
-      style={{ ...COVER_IMAGE, width: boxSize, height: boxSize }}
+      style={{ width: boxSize, height: boxSize }}
     />
   )
 }
@@ -143,45 +126,6 @@ export function CoverImage({ coverId, alt, boxSize = CARD_COVER_SIZE, className 
 // ---------------------------------------------------------------------------
 // 卡片
 // ---------------------------------------------------------------------------
-
-/** 卡片外框。 */
-const CARD: CSSProperties = {
-  boxSizing: 'border-box',
-  height: '100%',
-}
-
-/** 卡片按钮（整卡可点）。 */
-const CARD_BUTTON: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '6px',
-  width: '100%',
-  padding: 0,
-  border: 'none',
-  background: 'transparent',
-  color: 'var(--text-primary)',
-  textAlign: 'left',
-  cursor: 'pointer',
-}
-
-/** 卡片主标题。 */
-const CARD_TITLE: CSSProperties = {
-  fontSize: '13px',
-  fontWeight: 600,
-  color: 'var(--text-primary)',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-}
-
-/** 卡片副标题。 */
-const CARD_SUBTITLE: CSSProperties = {
-  fontSize: '12px',
-  color: 'var(--text-secondary)',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-}
 
 /** `AlbumCard` 的属性。 */
 export interface AlbumCardProps {
@@ -194,20 +138,11 @@ export interface AlbumCardProps {
 /** 专辑卡片。 */
 export function AlbumCard({ album, onOpen }: AlbumCardProps): ReactElement {
   return (
-    <article className="fnm-card" data-testid="fnm-card" style={CARD}>
-      <button
-        type="button"
-        className="fnm-card__button"
-        onClick={() => onOpen?.(album)}
-        style={CARD_BUTTON}
-      >
+    <article className="fnm-card" data-testid="fnm-card">
+      <button type="button" className="fnm-card__button" onClick={() => onOpen?.(album)}>
         <CoverImage coverId={album.coverId} alt={album.title} />
-        <span className="fnm-card__title" style={CARD_TITLE}>
-          {album.title}
-        </span>
-        <span className="fnm-card__subtitle" style={CARD_SUBTITLE}>
-          {album.artist}
-        </span>
+        <span className="fnm-card__title">{album.title}</span>
+        <span className="fnm-card__subtitle">{album.artist}</span>
       </button>
     </article>
   )
@@ -224,20 +159,11 @@ export interface ArtistCardProps {
 /** 歌手卡片。 */
 export function ArtistCard({ artist, onOpen }: ArtistCardProps): ReactElement {
   return (
-    <article className="fnm-card" data-testid="fnm-card" style={CARD}>
-      <button
-        type="button"
-        className="fnm-card__button"
-        onClick={() => onOpen?.(artist)}
-        style={CARD_BUTTON}
-      >
+    <article className="fnm-card" data-testid="fnm-card">
+      <button type="button" className="fnm-card__button" onClick={() => onOpen?.(artist)}>
         <CoverImage coverId={artist.coverId} alt={artist.name} />
-        <span className="fnm-card__title" style={CARD_TITLE}>
-          {artist.name}
-        </span>
-        <span className="fnm-card__subtitle" style={CARD_SUBTITLE}>
-          {`${artist.albumCount} 张专辑 · ${artist.trackCount} 首`}
-        </span>
+        <span className="fnm-card__title">{artist.name}</span>
+        <span className="fnm-card__subtitle">{`${artist.albumCount} 张专辑 · ${artist.trackCount} 首`}</span>
       </button>
     </article>
   )
@@ -254,20 +180,11 @@ export interface GenreCardProps {
 /** 风格卡片。 */
 export function GenreCard({ genre, onOpen }: GenreCardProps): ReactElement {
   return (
-    <article className="fnm-card" data-testid="fnm-card" style={CARD}>
-      <button
-        type="button"
-        className="fnm-card__button"
-        onClick={() => onOpen?.(genre)}
-        style={CARD_BUTTON}
-      >
+    <article className="fnm-card" data-testid="fnm-card">
+      <button type="button" className="fnm-card__button" onClick={() => onOpen?.(genre)}>
         <CoverImage coverId={genre.coverId} alt={genre.name} />
-        <span className="fnm-card__title" style={CARD_TITLE}>
-          {genre.name}
-        </span>
-        <span className="fnm-card__subtitle" style={CARD_SUBTITLE}>
-          {`${genre.trackCount} 首`}
-        </span>
+        <span className="fnm-card__title">{genre.name}</span>
+        <span className="fnm-card__subtitle">{`${genre.trackCount} 首`}</span>
       </button>
     </article>
   )
@@ -284,20 +201,11 @@ export interface PlaylistCardProps {
 /** 歌单卡片。 */
 export function PlaylistCard({ playlist, onOpen }: PlaylistCardProps): ReactElement {
   return (
-    <article className="fnm-card" data-testid="fnm-card" style={CARD}>
-      <button
-        type="button"
-        className="fnm-card__button"
-        onClick={() => onOpen?.(playlist)}
-        style={CARD_BUTTON}
-      >
+    <article className="fnm-card" data-testid="fnm-card">
+      <button type="button" className="fnm-card__button" onClick={() => onOpen?.(playlist)}>
         <CoverImage coverId={playlist.coverId} alt={playlist.name} />
-        <span className="fnm-card__title" style={CARD_TITLE}>
-          {playlist.name}
-        </span>
-        <span className="fnm-card__subtitle" style={CARD_SUBTITLE}>
-          {`${playlist.trackCount} 首`}
-        </span>
+        <span className="fnm-card__title">{playlist.name}</span>
+        <span className="fnm-card__subtitle">{`${playlist.trackCount} 首`}</span>
       </button>
     </article>
   )
@@ -317,14 +225,6 @@ export const CARD_GRID_MIN_COLUMN_WIDTH = 180
 export const CARD_GRID_FALLBACK_COLUMNS = 4
 /** 量不到高度时的兜底可视区高度。 */
 export const CARD_GRID_FALLBACK_VIEWPORT_HEIGHT = 600
-
-/** 空态文案样式。 */
-const EMPTY: CSSProperties = {
-  margin: 0,
-  padding: '24px 4px',
-  fontSize: '13px',
-  color: 'var(--text-secondary)',
-}
 
 /** `CardGrid` 的属性。 */
 export interface CardGridProps<T> {
@@ -456,19 +356,13 @@ export function CardGrid<T>(props: CardGridProps<T>): ReactElement {
       ref={viewportRef}
       data-scroll-top={scrollTop}
       onScroll={handleScroll}
-      style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto' }}
+      // 行高：唯一真值在 TS 侧，这里以 CSS 变量桥接给样式表。
+      style={{ '--grid-row-height': `${rowHeight}px` } as StyleVars}
     >
       {items.length === 0 ? (
-        loading ? null : (
-          <p className="fnm-cardgrid__empty" style={EMPTY}>
-            {emptyLabel}
-          </p>
-        )
+        loading ? null : <p className="fnm-cardgrid__empty">{emptyLabel}</p>
       ) : (
-        <div
-          className="fnm-cardgrid__canvas"
-          style={{ position: 'relative', height: rowCount * rowHeight }}
-        >
+        <div className="fnm-cardgrid__canvas" style={{ height: rowCount * rowHeight }}>
           {visibleItems.map((item, offset) => {
             const index = startIndex + offset
             const column = index % columns
@@ -480,13 +374,9 @@ export function CardGrid<T>(props: CardGridProps<T>): ReactElement {
                 role="listitem"
                 data-index={index}
                 style={{
-                  position: 'absolute',
                   top: row * rowHeight,
                   left: `calc(${(column * 100) / columns}% / ${columns})`,
                   width: `calc(100% / ${columns})`,
-                  height: rowHeight,
-                  padding: '8px',
-                  boxSizing: 'border-box',
                 }}
               >
                 {renderItem(item, index)}
@@ -500,111 +390,13 @@ export function CardGrid<T>(props: CardGridProps<T>): ReactElement {
 }
 
 // ---------------------------------------------------------------------------
-// 页面外壳
-//
-// ⚠️ 为什么页面外壳放在这里：本任务的「拥有文件」清单里只有
-//    `Cards.tsx` / `SongList.tsx` / `coverUrl.ts` 三个组件文件，
-//    没有单独的「页面外壳」文件。六个曲库页面共用同一套外壳，
-//    放在这里比在六个页面里各抄一遍样式好。
+// 兼容导出
 // ---------------------------------------------------------------------------
-
-/** 页面根容器。 */
-const PAGE: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  flex: '1 1 auto',
-  minHeight: 0,
-  height: '100%',
-  gap: '8px',
-  padding: '12px 16px',
-  color: 'var(--text-primary)',
-}
-
-/** 页面头部。 */
-const PAGE_HEADER: CSSProperties = {
-  display: 'flex',
-  alignItems: 'baseline',
-  justifyContent: 'space-between',
-  gap: '12px',
-  flex: '0 0 auto',
-}
-
-/** 页面标题。 */
-const PAGE_TITLE: CSSProperties = {
-  margin: 0,
-  fontSize: '18px',
-  fontWeight: 600,
-  color: 'var(--text-primary)',
-}
-
-/** 页面状态文案。 */
-const PAGE_STATUS: CSSProperties = {
-  margin: 0,
-  fontSize: '12px',
-  color: 'var(--text-secondary)',
-}
-
-/** 页面错误文案。 */
-const PAGE_ERROR: CSSProperties = {
-  margin: 0,
-  padding: '8px 10px',
-  border: '1px solid var(--danger)',
-  borderRadius: '8px',
-  background: 'var(--danger-surface)',
-  color: 'var(--danger)',
-  fontSize: '13px',
-}
-
-/** `LibraryPageShell` 的属性。 */
-export interface LibraryPageShellProps {
-  /** 页面标题。 */
-  title: string
-  /** 右上角状态文案（例如「已加载 200 / 173,669」）。 */
-  status?: string
-  /** 错误信息（有则显示一条错误条）。 */
-  error?: string | null
-  /** 是否正在加载。 */
-  loading?: boolean
-  /** 加载中的提示文案。 */
-  loadingText: string
-  /** 主体。 */
-  children: ReactNode
-}
-
-/**
- * 曲库页面的外壳。
- *
- * 统一给出**加载中 / 加载失败 / 空列表**三种状态的可读呈现——
- * 三种状态都不该是白屏（控制器追加要求 M）。
- */
-export function LibraryPageShell(props: LibraryPageShellProps): ReactElement {
-  const { title, status, error, loading = false, loadingText, children } = props
-  return (
-    <section className="fnm-page" style={PAGE}>
-      <header className="fnm-page__header" style={PAGE_HEADER}>
-        <h1 className="fnm-page__title" style={PAGE_TITLE}>
-          {title}
-        </h1>
-        {status && (
-          <p className="fnm-page__status" style={PAGE_STATUS}>
-            {status}
-          </p>
-        )}
-      </header>
-
-      {error && (
-        <p className="fnm-page__error" role="alert" style={PAGE_ERROR}>
-          {`加载失败：${error}`}
-        </p>
-      )}
-
-      {loading && (
-        <p className="fnm-page__loading" role="status" style={PAGE_STATUS}>
-          {loadingText}
-        </p>
-      )}
-
-      {children}
-    </section>
-  )
-}
+//
+// ⚠️ 页面外壳已经**独立成文件**（`src/components/LibraryPageShell.tsx`）——
+//    卡片模块不该背页面外壳的职责。
+//    这里保留一行再导出，只是为了让可能还在从 `Cards` 取外壳的调用方
+//    （并行开发中的其它任务）不必立刻改 import；新代码请直接从
+//    `../components/LibraryPageShell` 引入。
+export { LibraryPageShell } from './LibraryPageShell'
+export type { LibraryPageShellProps } from './LibraryPageShell'

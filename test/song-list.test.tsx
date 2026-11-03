@@ -153,6 +153,23 @@ function listFiles(dir: string): string[] {
 const COVER_PATH_LITERAL = ['static', 'cover'].join('/')
 
 /**
+ * 去掉**注释**后再扫描。
+ *
+ * ⚠️ 注释里**拼不出**封面地址——「只有 `coverUrl.ts` 拼装封面地址」约束的是**代码**。
+ *    不去注释的话，任何解释 URL 形状的文档注释（例如
+ *    `src/pages/FullPlayerPage.tsx` 里讲 CSP 的那几行）都会被误判成「第二处拼装点」。
+ *    这里只去掉「整行都是注释」的行与块注释——**代码行里的字面量照样会被扫到**，
+ *    收敛点的约束一点没松。
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith('//'))
+    .join('\n')
+}
+
+/**
  * 仓库根目录（**不依赖 `process.cwd()`**）。
  *
  * ⚠️ 用 `process.cwd()` 锚定时，cwd ≠ 仓库根（例如从别的目录跑 vitest），
@@ -382,7 +399,7 @@ describe('封面 URL 收敛点', () => {
     expect(listFiles(SRC_DIR).length).toBeGreaterThan(0)
 
     const hits = listFiles(SRC_DIR)
-      .filter((file) => readFileSync(file, 'utf8').includes(COVER_PATH_LITERAL))
+      .filter((file) => stripComments(readFileSync(file, 'utf8')).includes(COVER_PATH_LITERAL))
       .map((file) => relative(SRC_DIR, file).split(sep).join('/'))
       .sort()
     expect(hits).toEqual(['components/coverUrl.ts'])

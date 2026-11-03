@@ -1,0 +1,132 @@
+/*
+ * 歌曲列表样式（Task 14）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值
+ *    （`#hex` / `rgb()` / `hsl()` 一律不行）——
+ *    这样 Task 18/19 换主题时只换变量、不重写组件。
+ *
+ * ⚠️ 行高**不在这里写死**：唯一真值是 TS 侧的 `SONG_ROW_HEIGHT`，
+ *    由组件以 `--row-height` 这个 CSS 变量注入（见 `SongList.tsx`）。
+ *    这里只消费变量 → 48 这个数字**只存在一处**。
+ */
+
+/* 列表外壳 */
+.fnm-songlist {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 可视区（滚动容器） */
+.fnm-songlist__viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  outline-offset: -2px;
+}
+
+/* 虚拟滚动画布（高度 = 行数 × 行高，由组件内联给出） */
+.fnm-songlist__canvas {
+  position: relative;
+}
+
+/* 歌曲行 */
+.fnm-songlist__row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+  user-select: none;
+  /* 行高：唯一真值在 TS 侧（`SONG_ROW_HEIGHT`）→ 这里只消费变量。 */
+  height: var(--row-height);
+  background: transparent;
+}
+
+/* 悬停反馈（内联 style 表达不了伪类，只能靠样式表） */
+.fnm-songlist__row:hover {
+  background: var(--surface-raised);
+}
+
+/*
+ * 选中态：与封面占位块（`--surface-sunken`）**刻意不同色**，
+ * 再加一道强调条（`--accent`）把它和悬停态区分开。
+ */
+.fnm-songlist__row[aria-selected='true'] {
+  background: var(--surface-raised);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 选中行的悬停：强调条用 `--accent-hover`（不是新色值，是既有令牌）。 */
+.fnm-songlist__row[aria-selected='true']:hover {
+  box-shadow: inset 2px 0 0 var(--accent-hover);
+}
+
+/* 键盘焦点环（`--focus-ring` 令牌） */
+.fnm-songlist__row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* 行内缩略图 */
+.fnm-songlist__cover {
+  flex: 0 0 auto;
+}
+
+/* 行内文本块（标题 / 歌手 / 专辑 / 时长） */
+.fnm-songlist__title,
+.fnm-songlist__artist,
+.fnm-songlist__album,
+.fnm-songlist__duration {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.fnm-songlist__title {
+  flex: 2 1 0;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.fnm-songlist__artist,
+.fnm-songlist__album {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.fnm-songlist__duration {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+/* 已收藏标记 */
+.fnm-songlist__favorite {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+/* 状态行（「已加载 N / 总共 M」） */
+.fnm-songlist__status {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 空态 */
+.fnm-songlist__empty {
+  margin: 0;
+  padding: 24px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}

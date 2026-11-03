@@ -12,7 +12,7 @@ import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
 import { SongList } from '../components/SongList'
-import { LibraryPageShell } from '../components/Cards'
+import { LibraryPageShell } from '../components/LibraryPageShell'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
 /** `SongsPage` 的属性。 */

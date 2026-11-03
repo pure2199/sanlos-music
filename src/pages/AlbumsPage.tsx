@@ -13,7 +13,8 @@ import { useCallback, useEffect, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Album } from '../../shared/types'
-import { AlbumCard, CardGrid, LibraryPageShell, formatCount } from '../components/Cards'
+import { AlbumCard, CardGrid, formatCount } from '../components/Cards'
+import { LibraryPageShell } from '../components/LibraryPageShell'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
 /** `AlbumsPage` 的属性。 */

@@ -8,45 +8,15 @@
 // ⚠️ 本页**只读**：不做歌单增删改（那是 Task 16）。
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, type CSSProperties, type ReactElement } from 'react'
+import { useCallback, useEffect, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Playlist, Song } from '../../shared/types'
-import { CardGrid, LibraryPageShell, PlaylistCard } from '../components/Cards'
+import { CardGrid, PlaylistCard } from '../components/Cards'
+import { LibraryPageShell } from '../components/LibraryPageShell'
 import { SongList } from '../components/SongList'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
-
-/** 双栏布局。 */
-const PANES: CSSProperties = {
-  display: 'flex',
-  gap: '16px',
-  flex: '1 1 auto',
-  minHeight: 0,
-}
-
-/** 左侧歌单栏。 */
-const SIDE: CSSProperties = {
-  flex: '0 0 300px',
-  display: 'flex',
-  flexDirection: 'column',
-  minHeight: 0,
-}
-
-/** 右侧歌曲栏。 */
-const DETAIL: CSSProperties = {
-  flex: '1 1 auto',
-  display: 'flex',
-  flexDirection: 'column',
-  minHeight: 0,
-}
-
-/** 提示文案样式。 */
-const HINT: CSSProperties = {
-  margin: 0,
-  padding: '24px 12px',
-  fontSize: '13px',
-  color: 'var(--text-secondary)',
-}
+import './library-pages.css'
 
 /** `PlaylistsPage` 的属性。 */
 export interface PlaylistsPageProps {
@@ -103,8 +73,8 @@ export function PlaylistsPage({
       loading={playlists.loading}
       loadingText="正在加载歌单…"
     >
-      <div style={PANES}>
-        <div style={SIDE}>
+      <div className="fnm-playlists">
+        <div className="fnm-playlists__side">
           <CardGrid
             items={playlists.items}
             keyOf={(playlist) => playlist.id}
@@ -118,7 +88,7 @@ export function PlaylistsPage({
           />
         </div>
 
-        <div style={DETAIL}>
+        <div className="fnm-playlists__detail">
           {playlistId ? (
             <SongList
               songs={playlistSongs.items}
@@ -132,9 +102,7 @@ export function PlaylistsPage({
               ariaLabel="歌单歌曲列表"
             />
           ) : (
-            <p className="fnm-playlists__hint" style={HINT}>
-              请选择一个歌单
-            </p>
+            <p className="fnm-playlists__hint">请选择一个歌单</p>
           )}
         </div>
       </div>

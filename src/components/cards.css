@@ -1,0 +1,128 @@
+/*
+ * 曲库卡片 / 虚拟网格样式（Task 14）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值
+ *    （`#hex` / `rgb()` / `hsl()` 一律不行）——
+ *    这样 Task 18/19 换主题时只换变量、不重写组件。
+ *
+ * ⚠️ 网格行高**不在这里写死**：唯一真值是 TS 侧的 `CARD_GRID_ROW_HEIGHT`，
+ *    由组件以 `--grid-row-height` 这个 CSS 变量注入（见 `Cards.tsx`）。
+ */
+
+/* 封面框（图片与占位块共用，保证切换时不跳动） */
+.fnm-cover {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-sunken);
+}
+
+/* 封面图片 */
+.fnm-cover__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 封面占位块（没有封面 / 加载失败） */
+.fnm-cover__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 20px;
+}
+
+/* 卡片外框 */
+.fnm-card {
+  box-sizing: border-box;
+  height: 100%;
+}
+
+/* 卡片按钮（整卡可点） */
+.fnm-card__button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 悬停反馈（内联 style 表达不了伪类，只能靠样式表） */
+.fnm-card__button:hover:not(:disabled) {
+  background: var(--surface-raised);
+}
+
+/* 键盘焦点环（`--focus-ring` 令牌） */
+.fnm-card__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 按下态 */
+.fnm-card__button:active:not(:disabled) {
+  background: var(--surface-sunken);
+}
+
+/* 禁用态 */
+.fnm-card__button:disabled {
+  cursor: not-allowed;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+/* 卡片主标题 */
+.fnm-card__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 卡片副标题 */
+.fnm-card__subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 虚拟网格（滚动容器） */
+.fnm-cardgrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 虚拟网格画布（高度 = 行数 × 行高，由组件内联给出） */
+.fnm-cardgrid__canvas {
+  position: relative;
+}
+
+/* 网格单元 */
+.fnm-cardgrid__cell {
+  position: absolute;
+  padding: 8px;
+  box-sizing: border-box;
+  /* 行高：唯一真值在 TS 侧（`CARD_GRID_ROW_HEIGHT`）→ 这里只消费变量。 */
+  height: var(--grid-row-height);
+}
+
+/* 空态 */
+.fnm-cardgrid__empty {
+  margin: 0;
+  padding: 24px 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}

@@ -21,7 +21,12 @@
 // 样式约定
 // ---------------------------------------------------------------------------
 // ⚠️ 颜色**只用 CSS 语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
-//    本任务的「拥有文件」清单里没有 .css 文件，故样式走内联 style（一律 `var(--token)`）。
+//    样式住在 `src/components/song-list.css`（组件有自己的 `.css`——仓库约定），
+//    悬停 / 选中 / 焦点环这类**伪类**只能靠样式表表达，内联 style 做不到。
+//
+// ⚠️ 行高的**唯一真值**是 `SONG_ROW_HEIGHT`（TS 侧）；
+//    CSS 里不写死 48，而是消费组件注入的 `--row-height` 变量。
+//    内联 style 只保留 CSS 表达不了的东西：行的 `top`、画布的 `height`。
 // ---------------------------------------------------------------------------
 
 import {
@@ -38,6 +43,7 @@ import {
 
 import type { Song } from '../../shared/types'
 import { CoverImage, formatCount } from './Cards'
+import './song-list.css'
 
 /** 歌曲行的固定行高（像素）——裁剪计算依赖它。 */
 export const SONG_ROW_HEIGHT = 48
@@ -48,45 +54,8 @@ export const SONG_LIST_FALLBACK_VIEWPORT_HEIGHT = 600
 /** 行内缩略图的边长（像素）。 */
 const SONG_COVER_SIZE = 28
 
-/** 行样式。 */
-const ROW: CSSProperties = {
-  position: 'absolute',
-  left: 0,
-  right: 0,
-  display: 'flex',
-  alignItems: 'center',
-  gap: '10px',
-  padding: '0 12px',
-  borderBottom: '1px solid var(--border)',
-  cursor: 'default',
-  userSelect: 'none',
-}
-
-/** 行的文本块。 */
-const ROW_TEXT: CSSProperties = {
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  fontSize: '13px',
-}
-
-/** 状态行样式。 */
-const STATUS: CSSProperties = {
-  flex: '0 0 auto',
-  margin: 0,
-  padding: '6px 12px',
-  fontSize: '12px',
-  color: 'var(--text-secondary)',
-  borderTop: '1px solid var(--border)',
-}
-
-/** 空态样式。 */
-const EMPTY: CSSProperties = {
-  margin: 0,
-  padding: '24px 12px',
-  fontSize: '13px',
-  color: 'var(--text-secondary)',
-}
+/** 支持 CSS 自定义属性（`--row-height` 这类）的内联样式。 */
+type StyleVars = CSSProperties & Record<`--${string}`, string | number>
 
 /** 时长格式化（秒 → `m:ss`）。 */
 function formatDuration(seconds: number): string {
@@ -307,25 +276,21 @@ export function SongList(props: SongListProps): ReactElement {
   const totalText = formatCount(total ?? songs.length)
   const statusText = `已加载 ${formatCount(songs.length)} / ${totalText}${loading ? '，加载中…' : ''}`
 
+  // 行高：唯一真值在 TS 侧，这里以 CSS 变量桥接给样式表（CSS 里不重复写 48）。
+  const rootStyle = { '--row-height': `${rowHeight}px` } as StyleVars
+
   // 空态**也要**渲染状态行：组件必须始终暴露「已加载 / 总共」（要求 E）。
   if (songs.length === 0) {
     return (
-      <div className="fnm-songlist" style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0 }}>
-        <p className="fnm-songlist__empty" style={EMPTY}>
-          {emptyLabel}
-        </p>
-        <p className="fnm-songlist__status" style={STATUS}>
-          {statusText}
-        </p>
+      <div className="fnm-songlist" style={rootStyle}>
+        <p className="fnm-songlist__empty">{emptyLabel}</p>
+        <p className="fnm-songlist__status">{statusText}</p>
       </div>
     )
   }
 
   return (
-    <div
-      className="fnm-songlist"
-      style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0 }}
-    >
+    <div className="fnm-songlist" style={rootStyle}>
       <div
         className="fnm-songlist__viewport"
         role="listbox"
@@ -336,11 +301,10 @@ export function SongList(props: SongListProps): ReactElement {
         data-scroll-top={scrollTop}
         onScroll={handleScroll}
         onKeyDown={handleKeyDown}
-        style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', outlineOffset: '-2px' }}
       >
         <div
           className="fnm-songlist__canvas"
-          style={{ position: 'relative', height: songs.length * rowHeight }}
+          style={{ height: songs.length * rowHeight }}
         >
           {rows.map((song, offset) => {
             const index = startIndex + offset
@@ -360,54 +324,27 @@ export function SongList(props: SongListProps): ReactElement {
                 }}
                 onClick={(event) => handleRowClick(index, event)}
                 onDoubleClick={() => handleRowDoubleClick(index)}
-                style={{
-                  ...ROW,
-                  top: index * rowHeight,
-                  height: rowHeight,
-                  background: isSelected ? 'var(--surface-sunken)' : 'transparent',
-                }}
+                style={{ top: index * rowHeight }}
               >
-                <span style={{ flex: '0 0 auto' }}>
+                <span className="fnm-songlist__cover">
                   <CoverImage coverId={song.coverId} alt="" boxSize={SONG_COVER_SIZE} />
                 </span>
-                <span
-                  className="fnm-songlist__title"
-                  style={{ ...ROW_TEXT, flex: '2 1 0', minWidth: 0, color: 'var(--text-primary)' }}
-                >
-                  {song.title}
-                </span>
-                <span
-                  className="fnm-songlist__artist"
-                  style={{ ...ROW_TEXT, flex: '1 1 0', minWidth: 0, color: 'var(--text-secondary)' }}
-                >
-                  {song.artist}
-                </span>
-                <span
-                  className="fnm-songlist__album"
-                  style={{ ...ROW_TEXT, flex: '1 1 0', minWidth: 0, color: 'var(--text-secondary)' }}
-                >
-                  {song.album}
-                </span>
+                <span className="fnm-songlist__title">{song.title}</span>
+                <span className="fnm-songlist__artist">{song.artist}</span>
+                <span className="fnm-songlist__album">{song.album}</span>
                 {song.favorite && (
                   <span className="fnm-songlist__favorite" role="img" aria-label="已收藏">
                     ♥
                   </span>
                 )}
-                <span
-                  className="fnm-songlist__duration"
-                  style={{ ...ROW_TEXT, flex: '0 0 auto', color: 'var(--text-secondary)' }}
-                >
-                  {formatDuration(song.duration)}
-                </span>
+                <span className="fnm-songlist__duration">{formatDuration(song.duration)}</span>
               </div>
             )
           })}
         </div>
       </div>
 
-      <p className="fnm-songlist__status" style={STATUS}>
-        {statusText}
-      </p>
+      <p className="fnm-songlist__status">{statusText}</p>
     </div>
   )
 }

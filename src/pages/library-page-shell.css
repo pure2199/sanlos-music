@@ -1,0 +1,53 @@
+/*
+ * 曲库页面外壳样式（Task 14）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
+ */
+
+/* 页面根容器 */
+.fnm-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  gap: 8px;
+  padding: 12px 16px;
+  color: var(--text-primary);
+}
+
+/* 页面头部 */
+.fnm-page__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+/* 页面标题 */
+.fnm-page__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 页面状态文案 / 加载中文案 */
+.fnm-page__status,
+.fnm-page__loading {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 页面错误文案 */
+.fnm-page__error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger-surface);
+  color: var(--danger);
+  font-size: 13px;
+}
