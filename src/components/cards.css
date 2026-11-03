@@ -13,7 +13,8 @@
 .fnm-cover {
   flex: 0 0 auto;
   box-sizing: border-box;
-  border-radius: 8px;
+  /* ⚠️ 圆角走**令牌**（Task 6）：两套主题的卡片形状不同。 */
+  border-radius: var(--radius-card);
   overflow: hidden;
   background: var(--surface-sunken);
 }
@@ -49,7 +50,7 @@
   width: 100%;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: transparent;
   color: var(--text-primary);
   text-align: left;

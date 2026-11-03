@@ -1,9 +1,10 @@
-import { useCallback, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useState, type ReactElement } from 'react'
 
 import type { Album, Artist, Genre, Song } from '../shared/types'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { formatCount } from './components/Cards'
 import { PlayerBar } from './components/PlayerBar'
+import { ThemeSwitcher } from './components/ThemeSwitcher'
 import { AlbumsPage } from './pages/AlbumsPage'
 import { ArtistsPage } from './pages/ArtistsPage'
 import { DetailPage } from './pages/DetailPage'
@@ -16,6 +17,7 @@ import { SearchPage } from './pages/SearchPage'
 import { SongsPage } from './pages/SongsPage'
 import type { DetailKind } from './state/libraryStore'
 import { usePlayerStore } from './state/playerStore'
+import { useThemeStore } from './state/themeStore'
 import './styles/app-shell.css'
 import './styles/tokens.css'
 
@@ -135,6 +137,12 @@ export default function App() {
   const [view, setView] = useState<MainView>('connect')
   /** 当前下钻目标（`null` = 没在下钻）。 */
   const [detail, setDetail] = useState<DetailTarget | null>(null)
+
+  // 启动时读一次主进程的主题偏好并应用（Task 6）。
+  // ⚠️ 主题的**单一真相源在主进程**（`prefs.json`），这里只是把它读回来。
+  useEffect(() => {
+    void useThemeStore.getState().load()
+  }, [])
 
   /**
    * 整队播放：**四页共用这一个入口**。
@@ -288,6 +296,7 @@ export default function App() {
             />
           </nav>
         </div>
+        <ThemeSwitcher />
         <ConnectionBadge />
       </header>
       <main className="app-shell__main">

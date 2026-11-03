@@ -938,6 +938,13 @@ export interface PlayerIpcOptions {
   getWindow?: () => WindowLike | null
   /** 渲染进程推来播放器状态时的回调（主进程用它更新托盘）。 */
   onPlayerState?: (state: PlayerStateSnapshot) => void
+  /**
+   * 主题变更后的回调（Task 6）。
+   *
+   * ⚠️ 只在 `theme:set` **落盘成功之后**才调用——
+   *    主进程据此把窗口底色换成新主题的表面色（避免启动/切主题瞬间的白闪）。
+   */
+  onTheme?: (theme: ThemeName) => void
   /** 「关闭窗口」请求（默认只是隐藏；由主进程决定隐藏还是退出）。 */
   requestClose?: () => void
 }
@@ -1007,7 +1014,10 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
     if (!(THEME_NAMES as readonly string[]).includes(theme)) {
       throw new Error('主题名无效：只支持 apple / fluent')
     }
-    return prefs.write({ theme: theme as ThemeName })
+    const written = prefs.write({ theme: theme as ThemeName })
+    // ⚠️ 只在**落盘成功之后**通知主进程改窗口底色。
+    opts.onTheme?.(written.theme ?? (theme as ThemeName))
+    return written
   })
 }
 

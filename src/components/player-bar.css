@@ -241,7 +241,8 @@
   overflow-y: auto;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  /* ⚠️ 圆角走**令牌**（Task 6）：两套主题的弹层形状不同。 */
+  border-radius: var(--radius-panel);
   background: var(--surface-raised);
   box-shadow: 0 8px 24px var(--shadow);
 }
@@ -260,7 +261,8 @@
   overflow-y: auto;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  /* ⚠️ 圆角走**令牌**（Task 6）。 */
+  border-radius: var(--radius-panel);
   background: var(--surface-raised);
   box-shadow: 0 8px 24px var(--shadow);
 }

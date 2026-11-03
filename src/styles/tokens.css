@@ -1,16 +1,25 @@
 /*
- * 语义化设计令牌（Task 10b）。
+ * 语义化设计令牌（Task 10b；Task 6 补齐双主题）。
  *
  * ⚠️ 本文件是渲染进程里**唯一**允许出现具体色值的地方。
  *    组件样式（src/pages/*.css、src/components/*.css、src/styles/app-shell.css）
  *    一律用 `var(--token)` 引用，**不得**出现 `#hex` / `rgb()` / `hsl()`。
  *
- * Task 18/19 的双主题（Apple Music 风 / Windows 11 Fluent 风）只需为两套主题
- * 各写一组变量覆盖（例如 `[data-theme='fluent'] { --accent: ...; }`），
- * **不需要重写任何组件**。
+ * ---------------------------------------------------------------------------
+ * 双主题（Task 6）
+ * ---------------------------------------------------------------------------
+ * 两套主题各写一组**变量覆盖**，**不需要重写任何组件**：
+ * - `:root`（**默认**）= Apple Music 风（圆润、浅灰底、蓝色强调）；
+ * - `[data-theme='fluent']` = Windows 11 Fluent 风（更方的圆角、
+ *   Mica 般的浅灰底、Windows 蓝强调）。
+ *
+ * 主题名写在 `<html data-theme="…">` 上（见 `src/theme.ts` 的 `applyTheme`），
+ * 真相源是主进程的 `prefs.json`（`AppPrefs.theme`）。
  */
 
 :root {
+  color-scheme: light;
+
   /* 表面层级 */
   --surface: #f2f2f7;
   --surface-raised: #ffffff;
@@ -42,4 +51,56 @@
   /* 阴影与焦点环 */
   --shadow: #0000001f;
   --focus-ring: #0a66ff59;
+
+  /* 圆角（两套主题的**形状**差异就走这三个令牌） */
+  --radius-pill: 999px;
+  --radius-panel: 10px;
+  --radius-card: 10px;
+}
+
+/*
+ * Windows 11 Fluent 风。
+ *
+ * ⚠️ 差异集中在三处：**更方的圆角**（Fluent 用 4~6px 而不是胶囊形）、
+ *    **Windows 蓝强调色**（#0067c0）、**Mica 般的浅灰表面**。
+ */
+[data-theme='fluent'] {
+  color-scheme: light;
+
+  /* 表面层级 */
+  --surface: #f3f3f3;
+  --surface-raised: #fbfbfb;
+  --surface-sunken: #e9e9e9;
+
+  /* 文本 */
+  --text-primary: #1a1a1a;
+  --text-secondary: #5d5d5d;
+  --text-inverse: #ffffff;
+
+  /* 主色（Windows 11 蓝） */
+  --accent: #0067c0;
+  --accent-hover: #005494;
+  --accent-text: #ffffff;
+
+  /* 描边 */
+  --border: #d6d6d6;
+  --border-strong: #9a9a9a;
+
+  /* 状态色 */
+  --danger: #c42b1c;
+  --danger-surface: #fdf3f4;
+  --warning: #8a6100;
+  --warning-surface: #fff4ce;
+  --success: #0f7b0f;
+  --success-surface: #dff6dd;
+  --disabled: #9a9a9a;
+
+  /* 阴影与焦点环 */
+  --shadow: #00000024;
+  --focus-ring: #0067c059;
+
+  /* 圆角（Fluent：方正） */
+  --radius-pill: 4px;
+  --radius-panel: 6px;
+  --radius-card: 4px;
 }

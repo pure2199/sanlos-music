@@ -2,6 +2,8 @@ import { app, BrowserWindow, session as electronSession } from 'electron'
 import path from 'node:path'
 
 import type { PlayerCommand, PlayerStateSnapshot } from '../shared/playerBridge'
+import type { ThemeName } from '../shared/types'
+import { resolveThemeName, themeSpec } from '../shared/themes'
 import { registerAuthIpc, registerPlayerIpc, PrefsStore } from './ipc'
 import { TrustedHosts } from './cert'
 import { createHttpStack } from './http'
@@ -142,6 +144,18 @@ if (!isPrimaryInstance) {
       })
       mainWindow = win
 
+      // 10b. 主题（Task 6）：按**已保存**的主题设置窗口底色。
+      //
+      //     ⚠️ 渲染进程的 CSS 会接管窗口内容，但**窗口本身**在页面加载完成前
+      //        是一块默认底色 → 这里先按主题铺上，避免「白闪」。
+      //     ⚠️ 主题的真相源是 `prefs.json`（`prefs.read().theme`），
+      //        不是这里的常量——这里只是**应用**它。
+      const applyWindowTheme = (theme: ThemeName): void => {
+        if (win.isDestroyed()) return
+        win.setBackgroundColor(themeSpec(theme).windowBackground)
+      }
+      applyWindowTheme(resolveThemeName(prefs.read().theme))
+
       win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
         console.error(`[fnmusic] 页面加载失败: ${errorCode} ${errorDescription} (${validatedURL})`)
       })
@@ -205,6 +219,8 @@ if (!isPrimaryInstance) {
           currentPlayerState = state
           tray.update(state)
         },
+        // 主题切了 → 窗口底色跟着换（Task 6）。
+        onTheme: (theme) => applyWindowTheme(theme),
         requestClose: () => {
           if (win.isDestroyed()) return
           win.close()
