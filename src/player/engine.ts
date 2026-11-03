@@ -105,6 +105,48 @@ export interface GainNodeLike extends AudioNodeLike {
 export interface MediaElementSourceLike extends AudioNodeLike {}
 
 /**
+ * peaking 滤波器节点（Task 21 的 EQ 链用）。
+ *
+ * 真实浏览器的 `BiquadFilterNode` 满足这个结构；单测里用假节点替换。
+ */
+export interface BiquadFilterLike extends AudioNodeLike {
+  /** 滤波器类型（EQ 用 `'peaking'`）。 */
+  type: string
+  /** 中心频率（Hz）。 */
+  frequency: { value: number }
+  /** Q 值。 */
+  Q: { value: number }
+  /** 增益（dB）。 */
+  gain: { value: number }
+}
+
+/**
+ * `AudioBuffer` 的最小接口（PCM 数据）。
+ *
+ * Task 20b 的 FFmpeg 解码结果要经它进 EQ 链。
+ */
+export interface AudioBufferLike {
+  /** 时长（秒）。 */
+  readonly duration: number
+  /** 声道数。 */
+  readonly numberOfChannels: number
+  /** 采样率（Hz）。 */
+  readonly sampleRate: number
+  /** 帧数。 */
+  readonly length: number
+}
+
+/** PCM 源节点（`createBufferSource()` 的产物）。 */
+export interface AudioBufferSourceNodeLike extends AudioNodeLike {
+  /** 要播放的 PCM 缓冲（`null` = 没设）。 */
+  buffer: AudioBufferLike | null
+  /** 开始播放。 */
+  start(when?: number): void
+  /** 停止播放。 */
+  stop(when?: number): void
+}
+
+/**
  * `AudioContext` 的最小接口。
  *
  * 真实浏览器的 `AudioContext` 满足这个结构；单测里用假上下文替换。
@@ -118,6 +160,21 @@ export interface AudioContextLike {
   createMediaElementSource(element: unknown): MediaElementSourceLike
   /** 创建增益节点。 */
   createGain(): GainNodeLike
+  /**
+   * 创建 peaking 滤波器（**可选**）。
+   *
+   * ⚠️ 做成**可选成员**：Task 13 已有的实现者与测试替身只实现了
+   *    `createGain` / `createMediaElementSource`，加成必填会把它们全弄红。
+   *    没有它时 EQ 链**退化成直通**（不生效但不崩）。
+   */
+  createBiquadFilter?(): BiquadFilterLike
+  /**
+   * 创建 PCM 源节点（**可选**）。
+   *
+   * ⚠️ 同上：可选成员。没有它时 PCM 入口**不可用**（抛可读错误），
+   *    媒体元素那条路照常。
+   */
+  createBufferSource?(): AudioBufferSourceNodeLike
   /** 恢复上下文（可选）。 */
   resume?(): Promise<void>
   /** 关闭上下文（可选）。 */
@@ -309,6 +366,20 @@ export interface PlayerEngineLike {
   setQueue?(songs: Song[]): void
   /** 同步播放模式。 */
   setMode?(mode: PlayMode): void
+  /**
+   * 装 / 卸 EQ 链（**可选**，Task 21）。
+   *
+   * ⚠️ 做成**可选成员**：Task 13 已有的实现者与测试替身没有这个方法，
+   *    加成必填会把它们全弄红。store 侧在方法缺失时**降级**为
+   *    「不生效但不崩」（EQ 状态照样更新，只是没接进音频图）。
+   */
+  setEqChain?(builder: EqChainBuilder | null): void
+  /**
+   * 暴露音频节点（**可选**，Task 21）。
+   *
+   * @returns 音频图节点；**还没建**（用户还没播过）时返回 `null`。
+   */
+  getAudioNodes?(): PlayerAudioNodes | null
   /** 订阅状态变化。 */
   onStateChange(cb: (state: PlayerState) => void): void
   /** 订阅「播完一曲」。 */

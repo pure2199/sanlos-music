@@ -1,0 +1,257 @@
+/*
+ * 均衡器面板样式（Task 21）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值
+ *    （`#hex` / `rgb()` / `hsl()` 一律不行）——
+ *    这样 Task 18/19 换主题时只换变量、不重写组件。
+ *
+ * ⚠️ 交互态（`:hover` / `:active` / `:focus-visible` / `:disabled`）**只能**靠样式表表达——
+ *    React 的 `style` prop 只会落 CSS **声明**，表达不了伪类与伪元素。
+ *    内联 style 只保留真正动态的值（这里一个都没有）。
+ */
+
+/* --------------------------------------------------------------------------
+ * 面板根容器
+ * -------------------------------------------------------------------------- */
+
+.fnm-eqpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+
+/* --------------------------------------------------------------------------
+ * 头部一行
+ * -------------------------------------------------------------------------- */
+
+.fnm-eqpanel__header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+/* 一个字段（标签 + 控件）。 */
+.fnm-eqpanel__field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* 字段标签。 */
+.fnm-eqpanel__field-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* 字段旁的补充说明。 */
+.fnm-eqpanel__hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+ * 预置曲线下拉
+ * -------------------------------------------------------------------------- */
+
+.fnm-eqpanel__preset {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-eqpanel__preset:hover {
+  border-color: var(--border-strong);
+}
+
+.fnm-eqpanel__preset:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+ * 段数切换
+ * -------------------------------------------------------------------------- */
+
+.fnm-eqpanel__bands-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.fnm-eqpanel__band-count {
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-eqpanel__band-count:hover {
+  background: var(--surface-sunken);
+  color: var(--accent);
+}
+
+.fnm-eqpanel__band-count:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* 当前选中的段数。 */
+.fnm-eqpanel__band-count--active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.fnm-eqpanel__band-count--active:hover {
+  background: var(--accent-hover);
+  color: var(--accent-text);
+}
+
+/* --------------------------------------------------------------------------
+ * 旁路开关与复位
+ * -------------------------------------------------------------------------- */
+
+.fnm-eqpanel__bypass {
+  cursor: pointer;
+}
+
+.fnm-eqpanel__bypass-input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.fnm-eqpanel__bypass-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.fnm-eqpanel__reset {
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-eqpanel__reset:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-eqpanel__reset:active {
+  background: var(--surface-sunken);
+}
+
+.fnm-eqpanel__reset:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* --------------------------------------------------------------------------
+ * 各段
+ * -------------------------------------------------------------------------- */
+
+.fnm-eqpanel__bands {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 一段。 */
+.fnm-eqpanel__band {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+/* 频点标签。 */
+.fnm-eqpanel__freq {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+/* 增益滑块（**填充色走变量**）。 */
+.fnm-eqpanel__slider {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.fnm-eqpanel__slider:hover:not(:disabled) {
+  accent-color: var(--accent-hover);
+}
+
+.fnm-eqpanel__slider:active:not(:disabled) {
+  accent-color: var(--accent-hover);
+}
+
+.fnm-eqpanel__slider:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------------------
+ * 两层数值（基线 / 偏移 / 实际）
+ * -------------------------------------------------------------------------- */
+
+.fnm-eqpanel__values {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 预置基线。 */
+.fnm-eqpanel__baseline {
+  color: var(--text-secondary);
+}
+
+/* 手动偏移。 */
+.fnm-eqpanel__offset {
+  color: var(--text-secondary);
+}
+
+/* 实际生效的增益（= 真正送进滤波器的值）。 */
+.fnm-eqpanel__effective {
+  color: var(--accent);
+  font-weight: 600;
+}

@@ -25,6 +25,22 @@ import { create } from 'zustand'
 
 import type { PlayMode, PlayerState, Song } from '../../shared/types'
 import { PlayerEngine, type PlayerEngineLike } from '../player/engine'
+import {
+  EqChain,
+  EQ_CUSTOM_PRESET,
+  buildBands,
+  clampEqGain,
+  computeEffectiveGains,
+  defaultEqSettings,
+  isEqPresetKey,
+  normalizeEqPrefs,
+  presetBaselineFor,
+  remapByFrequency,
+  type EqBand,
+  type EqBandCount,
+  type EqPrefs,
+  type EqPrefsPort,
+} from '../player/eq'
 import { Queue } from '../player/queue'
 
 // 引擎接口从 `engine.ts` 定义（它是引擎的对外契约），这里**再导出**一份，
@@ -72,16 +88,124 @@ export interface PlayerStore {
   setVolume: (v: number) => void
   /** 设置播放模式。 */
   setMode: (mode: PlayMode) => void
+
+  // --- EQ（Task 21）--------------------------------------------------------
+  //
+  // ⚠️ 「预设基线 vs 手动偏移」是**两层**，不是一层：
+  // - `eqPresetBaseline` = 预置曲线在当前段数下的原始增益；
+  // - `eqManualOffset`   = 用户手动调整的偏移；
+  // - `eqGains`          = 两者相加后钳制（**真正送进滤波器的就是它**）。
+  //
+  // ⚠️ `eqPresetKey` 变成 `'custom'` 表示「用户手动改过」（`custom` **不是**
+  //    `EQ_PRESETS` 里的一条真实曲线，只是标记）。
+  /** 当前选中的预置（`'flat'` / `'pop'` / … / `'custom'`）。 */
+  eqPresetKey: string
+  /** 预置基线（当前段数下的原始增益）。 */
+  eqPresetBaseline: number[]
+  /** 用户手动调整的偏移（每个段）。 */
+  eqManualOffset: number[]
+  /** 段数（10 / 15）。 */
+  eqBandCount: EqBandCount
+  /** EQ 是否启用（关掉 = 旁路）。 */
+  eqEnabled: boolean
+  /** 实际生效的增益（= 基线 + 偏移，钳制到 ±12）。 */
+  eqGains: number[]
+  /** 当前频段（含生效增益）。 */
+  eqBands: EqBand[]
+
+  /** 选一个预置曲线（**重置**手动偏移为全 0）。 */
+  setEqPreset: (presetKey: string) => void
+  /** 改某一段的**手动偏移**（dB，越界钳制）。 */
+  setEqBandGain: (index: number, offset: number) => void
+  /** 切换段数（10 ↔ 15；手动偏移**按频率**保留）。 */
+  setEqBandCount: (count: EqBandCount) => void
+  /** 启用 / 旁路。 */
+  setEqEnabled: (enabled: boolean) => void
+  /** 复位（平直 + 手动偏移清零；**不动启用开关**）。 */
+  resetEq: () => void
+}
+
+/**
+ * `createPlayerStore` 的可选参数。
+ */
+export interface PlayerStoreOptions {
+  /**
+   * EQ 偏好的持久化端口（**可选**）。
+   *
+   * ⚠️ **本任务不自己造 IPC 通道**：Task 17 正在建 `prefs:get` / `prefs:set`，
+   *    通道到位后用 `createEqPrefsPort` 把那两个函数接上即可。
+   *    不给端口时 EQ 设置**只在本次运行内有效**（不崩、不静默写盘）。
+   */
+  eqPrefs?: EqPrefsPort
 }
 
 /**
  * 造一个播放器 store（**依赖注入**）。
  *
- * @param engine 播放引擎；单测可以注入假引擎，生产用默认引擎。
+ * @param engine  播放引擎；单测可以注入假引擎，生产用默认引擎。
+ * @param options 可选参数（EQ 偏好持久化端口）。
  */
-export function createPlayerStore(engine: PlayerEngineLike) {
+export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStoreOptions) {
   // 队列模型（不放进 zustand 的 state 里：它是可变对象，不是可序列化状态）。
   const queue = new Queue()
+
+  // --- EQ（Task 21）--------------------------------------------------------
+  //
+  // ⚠️ **每个 store 一条 EQ 链**：链的状态（段数 / 增益 / 开关）是**权威数据**，
+  //    store 的状态只是它的**可序列化镜像**（界面显示用）。
+  //    链在音频图建好之前不碰任何 WebAudio 节点（`build()` 由引擎在建图时调用）。
+  const eqChain = new EqChain({ bandCount: 10, gains: new Array(10).fill(0) })
+  // ⚠️ 引擎**没有**这个方法时（Task 13 的旧实现者 / 测试替身）→ 降级为
+  //    「不生效但不崩」：EQ 状态照常更新，只是没接进音频图。
+  engine.setEqChain?.(eqChain)
+
+  /** 初始 EQ 状态（平直 / 10 段 / 启用）。 */
+  const initialEq = defaultEqSettings()
+  const initialEqGains = computeEffectiveGains(initialEq.presetBaseline, initialEq.manualOffset)
+
+  /**
+   * 把模型算出来的生效增益推给 EQ 链。
+   *
+   * ⚠️ **顺序要紧**：先切段数（链内部按频率映射旧增益），再写**模型**算出的生效增益
+   *    ——模型是唯一真相源，链自己的映射只是过渡，随后就被覆盖。
+   */
+  const pushEqToChain = (state: {
+    eqBandCount: EqBandCount
+    eqGains: number[]
+    eqEnabled: boolean
+  }): void => {
+    eqChain.setBandCount(state.eqBandCount)
+    eqChain.setGains(state.eqGains)
+    eqChain.setEnabled(state.eqEnabled)
+  }
+
+  /**
+   * 把 EQ 偏好写出去（**可注入**：Task 17 的 `prefs:*` 通道到位后接上）。
+   *
+   * ⚠️ 偏好文件里**绝不会有凭证**——这里只有曲线参数。
+   */
+  const persistEq = (state: {
+    eqPresetKey: string
+    eqManualOffset: number[]
+    eqBandCount: EqBandCount
+    eqEnabled: boolean
+    eqPresetBaseline: number[]
+  }): void => {
+    const port = options?.eqPrefs
+    if (!port) return
+    const prefs: EqPrefs = {
+      presetKey: state.eqPresetKey,
+      manualOffset: [...state.eqManualOffset],
+      bandCount: state.eqBandCount,
+      enabled: state.eqEnabled,
+      presetBaseline: [...state.eqPresetBaseline],
+    }
+    void Promise.resolve()
+      .then(() => port.save(prefs))
+      .catch(() => {
+        // ⚠️ 偏好写失败**不影响播放**（偏好不是关键路径）。
+      })
+  }
 
   const store = create<PlayerStore>()((set, get) => ({
     current: null,
@@ -93,6 +217,15 @@ export function createPlayerStore(engine: PlayerEngineLike) {
     mode: 'sequence',
     muted: false,
     error: null,
+
+    // --- EQ 的初始状态 ---
+    eqPresetKey: initialEq.presetKey,
+    eqPresetBaseline: initialEq.presetBaseline,
+    eqManualOffset: initialEq.manualOffset,
+    eqBandCount: initialEq.bandCount,
+    eqEnabled: initialEq.enabled,
+    eqGains: initialEqGains,
+    eqBands: buildBands(initialEq.bandCount, initialEqGains),
 
     playTrack: (song, list) => {
       if (Array.isArray(list) && list.length > 0) {
@@ -171,7 +304,153 @@ export function createPlayerStore(engine: PlayerEngineLike) {
       engine.setMode?.(mode)
       set({ mode })
     },
+
+    // --- EQ 动作（Task 21）-------------------------------------------------
+
+    /**
+     * 选一个预置曲线。
+     *
+     * ⚠️ 选预置会**重置手动偏移**为全 0（追加要求 C）：
+     *    否则「基线 + 偏移」会把旧的手动调整叠加到新曲线上。
+     */
+    setEqPreset: (presetKey) => {
+      const state = get()
+      const key = isEqPresetKey(presetKey) ? presetKey : EQ_CUSTOM_PRESET
+      const presetBaseline = presetBaselineFor(key, state.eqBandCount)
+      const manualOffset = new Array(state.eqBandCount).fill(0)
+      const gains = computeEffectiveGains(presetBaseline, manualOffset)
+      set({
+        eqPresetKey: key,
+        eqPresetBaseline: presetBaseline,
+        eqManualOffset: manualOffset,
+        eqGains: gains,
+        eqBands: buildBands(state.eqBandCount, gains),
+      })
+      pushEqToChain(get())
+      persistEq(get())
+    },
+
+    /**
+     * 改某一段的**手动偏移**（不是生效增益）。
+     *
+     * ⚠️ 生效增益 = `基线 + 偏移`（钳制到 ±12）——面板显示的两层数值
+     *    与真正送进滤波器的增益**必须一致**，所以这里改的是偏移，
+     *    生效增益由 `computeEffectiveGains` 统一算。
+     * 手动改过之后 `presetKey` 变成 `'custom'`。
+     */
+    setEqBandGain: (index, offset) => {
+      const state = get()
+      if (!Number.isInteger(index) || index < 0 || index >= state.eqBandCount) return
+      const manualOffset = [...state.eqManualOffset]
+      manualOffset[index] = clampEqGain(offset)
+      const gains = computeEffectiveGains(state.eqPresetBaseline, manualOffset)
+      set({
+        eqManualOffset: manualOffset,
+        eqPresetKey: EQ_CUSTOM_PRESET,
+        eqGains: gains,
+        eqBands: buildBands(state.eqBandCount, gains),
+      })
+      pushEqToChain(get())
+      persistEq(get())
+    },
+
+    /**
+     * 切换段数（10 ↔ 15）。
+     *
+     * ⚠️ 手动偏移**按频率保留**（用户的手动调整不该丢）：共有频点
+     *    （63 / 250 / 1000 / 4000 / 16000）沿用，匹配不上的置 0。
+     */
+    setEqBandCount: (count) => {
+      const state = get()
+      if (count !== 10 && count !== 15) return
+      if (count === state.eqBandCount) return
+      const manualOffset = remapByFrequency(state.eqManualOffset, state.eqBandCount, count)
+      // 真实预置 → 取该预置在**新段数**下的基线（gains / gains15 不可互相切片）；
+      // 「自定义」→ 基线按频率映射（保留用户当时的基线上下文）。
+      const presetBaseline = isEqPresetKey(state.eqPresetKey)
+        ? presetBaselineFor(state.eqPresetKey, count)
+        : remapByFrequency(state.eqPresetBaseline, state.eqBandCount, count)
+      const gains = computeEffectiveGains(presetBaseline, manualOffset)
+      set({
+        eqBandCount: count,
+        eqManualOffset: manualOffset,
+        eqPresetBaseline: presetBaseline,
+        eqGains: gains,
+        eqBands: buildBands(count, gains),
+      })
+      pushEqToChain(get())
+      persistEq(get())
+    },
+
+    /** 启用 / 旁路（即时生效，不需要重建音频图）。 */
+    setEqEnabled: (enabled) => {
+      set({ eqEnabled: enabled !== false })
+      pushEqToChain(get())
+      persistEq(get())
+    },
+
+    /** 复位：平直 + 手动偏移清零（**不动启用开关**）。 */
+    resetEq: () => {
+      const state = get()
+      const presetBaseline = presetBaselineFor('flat', state.eqBandCount)
+      const manualOffset = new Array(state.eqBandCount).fill(0)
+      const gains = computeEffectiveGains(presetBaseline, manualOffset)
+      set({
+        eqPresetKey: 'flat',
+        eqPresetBaseline: presetBaseline,
+        eqManualOffset: manualOffset,
+        eqGains: gains,
+        eqBands: buildBands(state.eqBandCount, gains),
+      })
+      pushEqToChain(get())
+      persistEq(get())
+    },
   }))
+
+  // --- EQ 偏好读回（追加要求 F：重启后要能恢复）---------------------------
+  //
+  // ⚠️ **端口是注入的**：Task 17 的 `prefs:get` / `prefs:set` 通道到位后，
+  //    把那两个函数包成 `createEqPrefsPort` 传进来即可，这里**不自己造通道**。
+  const prefsPort = options?.eqPrefs
+
+  /**
+   * 把读回来的偏好套进状态。
+   *
+   * ⚠️ 外部数据**逐项校验**（`normalizeEqPrefs`）：`prefs.json` 是用户可编辑的文件。
+   */
+  const applyEqPrefs = (raw: EqPrefs | null): void => {
+    const prefs = normalizeEqPrefs(raw)
+    if (!prefs) return
+    // 基线：存了就用存的（无损恢复「自定义」曲线），否则按预置反推。
+    const presetBaseline = prefs.presetBaseline
+      ? [...prefs.presetBaseline]
+      : isEqPresetKey(prefs.presetKey)
+        ? presetBaselineFor(prefs.presetKey, prefs.bandCount)
+        : new Array(prefs.bandCount).fill(0)
+    const manualOffset = [...prefs.manualOffset]
+    const gains = computeEffectiveGains(presetBaseline, manualOffset)
+    store.setState({
+      eqPresetKey: prefs.presetKey,
+      eqPresetBaseline: presetBaseline,
+      eqManualOffset: manualOffset,
+      eqBandCount: prefs.bandCount,
+      eqEnabled: prefs.enabled,
+      eqGains: gains,
+      eqBands: buildBands(prefs.bandCount, gains),
+    })
+    pushEqToChain(store.getState())
+  }
+
+  if (prefsPort) {
+    void Promise.resolve()
+      .then(() => prefsPort.load())
+      .then((prefs) => {
+        applyEqPrefs(prefs)
+      })
+      .catch(() => {
+        // ⚠️ 读偏好失败**不影响播放**（没有偏好就按默认值走）。
+      })
+  }
 
   // 引擎的状态变化 → store（`current` / 队列 / 模式由 store 自己管，这里只同步传输层字段）。
   engine.onStateChange((state: PlayerState) => {
