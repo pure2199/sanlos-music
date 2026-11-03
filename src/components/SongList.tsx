@@ -38,6 +38,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactElement,
+  type ReactNode,
   type UIEvent,
 } from 'react'
 
@@ -91,6 +92,15 @@ export interface SongListProps {
   emptyLabel?: string
   /** 无障碍标签。 */
   ariaLabel?: string
+  /**
+   * 行内附加操作（**可选**，Task 16 新增）。
+   *
+   * 由调用方决定在行里渲染什么（搜索页用它放「收藏」按钮）。
+   *
+   * ⚠️ **纯增量**：不传时行内**不渲染任何附加节点**——
+   *    既有调用方（曲库 / 收藏 / 歌单页）的渲染结果与之前**完全一致**。
+   */
+  renderRowActions?: (song: Song, index: number) => ReactNode
 }
 
 /**
@@ -113,6 +123,7 @@ export function SongList(props: SongListProps): ReactElement {
     bufferRows = SONG_LIST_BUFFER_ROWS,
     emptyLabel = '暂无歌曲',
     ariaLabel = '歌曲列表',
+    renderRowActions,
   } = props
 
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -337,6 +348,8 @@ export function SongList(props: SongListProps): ReactElement {
                     ♥
                   </span>
                 )}
+                {/* ⚠️ 可选的行内操作（Task 16）：不传时**不产生任何 DOM 节点**。 */}
+                {renderRowActions ? renderRowActions(song, index) : null}
                 <span className="fnm-songlist__duration">{formatDuration(song.duration)}</span>
               </div>
             )

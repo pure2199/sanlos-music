@@ -1,0 +1,189 @@
+/*
+ * 搜索面板样式（Task 16）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值
+ *    （`#hex` / `rgb()` / `hsl()` 一律不行）——
+ *    这样 Task 18/19 换主题时只换变量、不重写组件。
+ *
+ * ⚠️ 交互态（`:hover` / `:active` / `:focus-visible` / `:disabled`）**只能**靠样式表表达——
+ *    React 的 `style` prop 只会落 CSS **声明**，表达不了伪类与伪元素。
+ *    内联 style 只保留真正动态的值（进度百分比之类）；静态几何一律进这里。
+ */
+
+/* 面板根容器 */
+.fnm-searchpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 搜索框一行 */
+.fnm-searchpanel__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* 搜索框标签 */
+.fnm-searchpanel__label {
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 搜索输入框 */
+.fnm-searchpanel__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+/* 悬停：描边加深 */
+.fnm-searchpanel__input:hover {
+  border-color: var(--border-strong);
+}
+
+/* 键盘焦点环（`--focus-ring` 令牌） */
+.fnm-searchpanel__input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+/* 状态 / 计数文案 */
+.fnm-searchpanel__status,
+.fnm-searchpanel__count {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 错误条 */
+.fnm-searchpanel__error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger-surface);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* 空态（「没有找到」） */
+.fnm-searchpanel__empty {
+  margin: 0;
+  padding: 24px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 一段结果 */
+.fnm-searchpanel__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+/* 一段结果的头部（标题 + 命中总数） */
+.fnm-searchpanel__section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 一段结果的标题 */
+.fnm-searchpanel__section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 「加载更多」按钮 */
+.fnm-searchpanel__more {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fnm-searchpanel__more:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-searchpanel__more:active {
+  background: var(--surface-sunken);
+}
+
+.fnm-searchpanel__more:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-searchpanel__more:disabled {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+/* 行内收藏按钮 */
+.fnm-searchpanel__favorite {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.fnm-searchpanel__favorite:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-searchpanel__favorite:active {
+  background: var(--surface-sunken);
+}
+
+.fnm-searchpanel__favorite:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 已收藏 */
+.fnm-searchpanel__favorite[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 写回在途（乐观态已生效、服务端还没确认） */
+.fnm-searchpanel__favorite[data-pending='true'] {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.fnm-searchpanel__favorite:disabled {
+  border-color: var(--border);
+  color: var(--disabled);
+  cursor: not-allowed;
+}

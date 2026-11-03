@@ -167,6 +167,16 @@ export interface LibraryStore {
   loadPlaylistSongs: (playlistId: string, page?: number) => Promise<void>
   /** 选中歌单（切换歌单会重置歌单内的歌曲列表）。 */
   selectPlaylist: (playlistId: string | null) => void
+  /**
+   * 刷新某个歌单里的歌曲（**清空后重取第一页**）。
+   *
+   * ⚠️ 这是「**追加语义**」的例外：增删曲目后必须重取，否则列表里还留着
+   *    已被移走的歌、也看不到刚加进去的歌。
+   *
+   * ⚠️ **只刷新「当前正在看的那个歌单」**：缓存里只有它的歌；
+   *    刷新别的歌单会把歌单页的选中项切走（那是「切换上下文」，不是「刷新缓存」）。
+   */
+  refreshPlaylistSongs: (playlistId: string) => Promise<void>
   /** 显式刷新歌单列表（清空后重取——这是「重复 load 不清空」的例外）。 */
   refreshPlaylists: () => Promise<void>
   /** 显式刷新收藏列表（清空后重取）。 */
@@ -398,6 +408,15 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
         if (get().playlistId === playlistId) return
         pages.playlistSongs.clear()
         set({ playlistId, playlistSongs: emptyCollection<Song>() })
+      },
+
+      refreshPlaylistSongs: async (playlistId) => {
+        // 只有「当前正在看的那个歌单」才有缓存可刷新（见接口注释）。
+        if (get().playlistId !== playlistId) return
+        // 清空后重取第一页：追加语义在这里是错的（移走的歌会留在列表里）。
+        pages.playlistSongs.clear()
+        set({ playlistSongs: emptyCollection<Song>() })
+        await get().loadPlaylistSongs(playlistId, 1)
       },
 
       refreshPlaylists: async () => {

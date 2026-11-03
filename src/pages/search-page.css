@@ -1,0 +1,252 @@
+/*
+ * 搜索页样式（Task 16）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值
+ *    （`#hex` / `rgb()` / `hsl()` 一律不行）。
+ *
+ * ⚠️ 交互态（`:hover` / `:active` / `:focus-visible` / `:disabled`）**只能**靠样式表表达——
+ *    内联 style 表达不了伪类与伪元素。
+ *
+ * ⚠️ 「搜索入口」按钮（应用顶栏里切到搜索页的那个）的样式**也放在这里**：
+ *    应用外壳的样式文件（`src/styles/app-shell.css`）不归本任务的文件范围，
+ *    而这两颗按钮就是搜索页的入口，故随搜索页一起维护。
+ */
+
+/* 页面主体（搜索面板 + 歌单写回区） */
+.fnm-searchpage {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* --- 顶栏的搜索入口 ------------------------------------------------------ */
+
+/* 入口按钮组 */
+.fnm-searchpage__nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 入口按钮 */
+.fnm-searchpage__nav-button {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fnm-searchpage__nav-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-searchpage__nav-button:active {
+  background: var(--surface-sunken);
+}
+
+.fnm-searchpage__nav-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 当前所在的入口 */
+.fnm-searchpage__nav-button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.fnm-searchpage__nav-button:disabled {
+  border-color: var(--border);
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+/* --- 歌单写回区 ---------------------------------------------------------- */
+
+.fnm-searchpage__playlists {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+/* 区块头部（标题 + 状态） */
+.fnm-searchpage__section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 区块标题 */
+.fnm-searchpage__section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 状态文案 */
+.fnm-searchpage__status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 空态（「暂无歌单」——真实 NAS 的 `playlist/list` 返回空列表是服务端现状） */
+.fnm-searchpage__empty {
+  margin: 0;
+  padding: 12px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 表单字段 */
+.fnm-searchpage__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 字段标签 */
+.fnm-searchpage__label {
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* 下拉选择 */
+.fnm-searchpage__select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.fnm-searchpage__select:hover {
+  border-color: var(--border-strong);
+}
+
+.fnm-searchpage__select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 新建歌单一行 */
+.fnm-searchpage__new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 文本输入 */
+.fnm-searchpage__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.fnm-searchpage__input:hover {
+  border-color: var(--border-strong);
+}
+
+.fnm-searchpage__input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 操作按钮 */
+.fnm-searchpage__button {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fnm-searchpage__button:hover {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+}
+
+.fnm-searchpage__button:active {
+  background: var(--accent-hover);
+}
+
+.fnm-searchpage__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-searchpage__button:disabled {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+/* 次要按钮（描边款） */
+.fnm-searchpage__button--secondary {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.fnm-searchpage__button--secondary:hover {
+  border-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
+}
+
+/* 操作按钮组 */
+.fnm-searchpage__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 成功提示 */
+.fnm-searchpage__message {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--success);
+  border-radius: 8px;
+  background: var(--success-surface);
+  color: var(--success);
+  font-size: 13px;
+}
+
+/* 错误提示 */
+.fnm-searchpage__error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger-surface);
+  color: var(--danger);
+  font-size: 13px;
+}
