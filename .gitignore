@@ -11,3 +11,9 @@ coverage/
 .superpowers/
 *.exe
 dist-electron/
+
+# Playwright（E2E 产物）
+test-results/
+playwright-report/
+blob-report/
+.playwright/

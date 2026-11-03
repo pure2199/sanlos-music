@@ -16,7 +16,8 @@
     "start": "electron .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test",
+    "e2e": "npm run build && playwright test",
+    "e2e:only": "playwright test",
     "dist": "npm run build && electron-builder"
   },
   "devDependencies": {
