@@ -1,19 +1,23 @@
-// 主进程认证 IPC：渲染进程的登录页通过 `window.fn` → `ipcRenderer.invoke('auth:*')` 调用这里。
+// 主进程 IPC：认证（`auth:*`）+ 播放器 / 窗口 / 偏好（Task 17）。
 //
 // ---------------------------------------------------------------------------
 // 职责边界
 // ---------------------------------------------------------------------------
-// - 本模块是**登录链路的主进程侧**：探测服务器、执行登录、维护会话，
-//   并把**脱敏**的状态回传给渲染进程。
-// - 渲染进程**永远拿不到凭证**：token / 密码只存在于主进程内存与 `session.bin`。
-//   本模块的七个处理器**没有任何一个**会把 token 或密码放进返回值或错误消息。
+// - **认证部分**（`registerAuthIpc`）：登录链路的主进程侧——探测服务器、执行登录、
+//   维护会话，并把**脱敏**的状态回传给渲染进程。
+// - **播放器 / 窗口 / 偏好部分**（`registerPlayerIpc`，Task 17）：播放状态同步、
+//   窗口控制、偏好读写与主题持久化。
+// - 渲染进程**永远拿不到凭证**：token / 密码只存在于主进程内存与 `session.bin`；
+//   本文件的处理器**没有任何一个**会把 token 或密码放进返回值、错误消息或偏好文件。
 // - 模块顶层**不得 import Electron**（本文件要能在 Vitest / 普通 Node 里直接单测，
 //   而非 Electron 进程里 `require('electron')` 返回的是可执行文件路径字符串）。
 //   故 Electron 的 `ipcMain` 一律**惰性解析**，并允许通过 `opts.ipcMain` 注入替身。
 //
 // ---------------------------------------------------------------------------
-// 七个 IPC 通道
+// IPC 通道（**两个域，别混**）
 // ---------------------------------------------------------------------------
+// 认证（七个 `auth:*`，Task 10）：
+//
 // | 通道                  | 入参                          | 出参                       |
 // |-----------------------|-------------------------------|----------------------------|
 // | `auth:server-info`    | `server: string`              | `ServerInfo`              |
@@ -23,6 +27,24 @@
 // | `auth:relogin`        | 无                            | `boolean`                 |
 // | `auth:probe`          | `fnId: string`                | `CandidateInfo[]`         |
 // | `auth:connection-info`| 无                            | `ConnectionInfo \| null`  |
+//
+// 播放器 / 窗口 / 偏好（Task 17）：
+//
+// | 通道                  | 方向              | 机制                 | 入参 → 出参                      |
+// |-----------------------|-------------------|----------------------|----------------------------------|
+// | `player:state`        | 渲染进程 → 主进程 | `ipcRenderer.send`   | `PlayerStateSnapshot`            |
+// | `player:command`      | 渲染进程 → 主进程 | `ipcRenderer.send`   | `PlayerCommand`                  |
+// | `player:command`      | 主进程 → 渲染进程 | `webContents.send`   | `PlayerCommand`                  |
+// | `win:minimize`        | 渲染进程 → 主进程 | `ipcRenderer.invoke` | 无 → 无                          |
+// | `win:toggle-maximize` | 渲染进程 → 主进程 | `ipcRenderer.invoke` | 无 → 无                          |
+// | `win:close`           | 渲染进程 → 主进程 | `ipcRenderer.invoke` | 无 → 无                          |
+// | `prefs:get`           | 渲染进程 → 主进程 | `ipcRenderer.invoke` | 无 → `AppPrefs`                  |
+// | `prefs:set`           | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `Partial<AppPrefs>` → `AppPrefs` |
+// | `theme:set`           | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `ThemeName` → `AppPrefs`         |
+//
+// ⚠️ **主进程是唯一的命令路由**：渲染进程发来的 `player:command`（媒体会话的
+//    action handler）会被**转发**回渲染进程执行——渲染进程**只执行**从主进程
+//    收到的命令，绝不本地直接执行自己发出的命令，所以不存在「发一次执行两遍」。
 //
 // ---------------------------------------------------------------------------
 // 依赖注入（便于单测）
@@ -35,9 +57,19 @@
 // - `nasLoginHandler`：NAS 账号（OAuth）登录的**接缝**，由 Task 11 注入；
 //   未注入时 `mode: 'nas'` 抛「尚未安装 NAS 账号登录处理器」。
 
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
 import { API_PREFIX, CODE_OK, RELAY_DOMAIN_SUFFIX } from '../shared/constants'
 import type { AuthSessionInfo, CandidateInfo, ServerInfo } from '../shared/bridge'
-import type { ConnectionInfo, ConnectionKind } from '../shared/types'
+import type {
+  AppPrefs,
+  CloseBehavior,
+  PlayerCommand,
+  PlayerStateSnapshot,
+  WindowBounds,
+} from '../shared/playerBridge'
+import type { ConnectionInfo, ConnectionKind, ThemeName } from '../shared/types'
 import { buildCandidates, fetchConnectionParams, hostOf, normalizeBase } from './connection'
 import { TrustedHosts } from './cert'
 import { probeCandidates } from './probe'
@@ -662,4 +694,404 @@ export function registerAuthIpc(session: SessionManager, opts: AuthIpcOptions = 
   ipcMain.handle('auth:relogin', () => handleRelogin(session))
   ipcMain.handle('auth:probe', (_event, arg) => handleProbe(arg, trusted, http))
   ipcMain.handle('auth:connection-info', () => handleConnectionInfo(session))
+}
+
+// ===========================================================================
+// Task 17：偏好（`<userData>/prefs.json`）+ 播放器 / 窗口 IPC
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 偏好文件
+// ---------------------------------------------------------------------------
+
+/** 偏好文件名（落在 `app.getPath('userData')` 下）。 */
+const PREFS_FILE_NAME = 'prefs.json'
+
+/** 偏好文件的结构版本号（便于将来迁移格式）。 */
+const PREFS_FORMAT_VERSION = 1
+
+/** `PrefsStore` 的可选参数。 */
+export interface PrefsStoreOptions {
+  /** 偏好文件路径；缺省时惰性取 `<userData>/prefs.json`。 */
+  filePath?: string
+}
+
+/**
+ * 偏好存储（`<userData>/prefs.json`）。
+ *
+ * ---------------------------------------------------------------------------
+ * 安全边界（不可放宽）
+ * ---------------------------------------------------------------------------
+ * 1. **偏好文件里绝不能出现凭证**（token / 密码 / deviceId）——
+ *    那是 `session.bin`（DPAPI 加密）的职责，两者**不许混**。
+ *    本类用**白名单**实现这一点：`write()` 只接受 `theme` / `closeBehavior` /
+ *    `windowBounds` 三个键，其余键**一律丢弃**——渲染进程就算塞进来也写不进去。
+ * 2. 写盘**原子化**：先写 `<file>.tmp` 再 `rename` 覆盖，
+ *    避免写到一半崩溃留下截断的偏好文件。
+ * 3. 读盘**容错**：文件不存在 / 内容损坏 → 返回默认值，**不抛异常**
+ *    （偏好丢了不该让应用起不来）。
+ */
+export class PrefsStore {
+  private readonly options: PrefsStoreOptions
+  /** 解析出来的文件路径（缓存，避免每次读写都问一遍 Electron）。 */
+  private resolvedPath: string | null
+
+  constructor(opts: PrefsStoreOptions = {}) {
+    this.options = opts
+    this.resolvedPath = opts.filePath ?? null
+  }
+
+  /**
+   * 偏好文件路径。
+   *
+   * 拿不到（没有 Electron 运行时且没注入 `filePath`）时抛可读错误——
+   * **不静默把偏好写到别处**（与 `SessionManager` 同一纪律）。
+   */
+  private resolveFilePath(): string {
+    if (this.resolvedPath) return this.resolvedPath
+    const dir = resolveUserDataDir()
+    if (!dir) {
+      throw new Error('偏好文件路径不可用：当前进程没有 Electron 运行时，且未注入 filePath')
+    }
+    this.resolvedPath = join(dir, PREFS_FILE_NAME)
+    return this.resolvedPath
+  }
+
+  /**
+   * 读偏好。
+   *
+   * 文件不存在 / 内容损坏 → 返回**默认偏好**（不抛异常）。
+   */
+  read(): AppPrefs {
+    let raw: string
+    try {
+      raw = readFileSync(this.resolveFilePath(), 'utf8')
+    } catch {
+      // 文件不存在 = 正常的「还没设置过偏好」。
+      return defaultPrefs()
+    }
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      return sanitizePrefs(parsed)
+    } catch {
+      // 损坏的偏好文件 → 当作没有偏好。
+      return defaultPrefs()
+    }
+  }
+
+  /**
+   * 合并写入偏好（**只接受白名单键**），返回落盘后的完整偏好。
+   *
+   * ⚠️ 未知键**一律丢弃**——这是「偏好文件里绝不能出现凭证」的实现方式：
+   *    即使渲染进程传了 `{ token: '…' }`，也不会被写进文件。
+   */
+  write(patch: Partial<AppPrefs>): AppPrefs {
+    const current = this.read()
+    const incoming = sanitizePatch(patch)
+    const merged: AppPrefs = { ...current, ...incoming }
+    this.persist(merged)
+    return merged
+  }
+
+  /** 把偏好原子地写到磁盘。 */
+  private persist(prefs: AppPrefs): void {
+    const filePath = this.resolveFilePath()
+    const payload = JSON.stringify(
+      { version: PREFS_FORMAT_VERSION, prefs },
+      null,
+      2,
+    )
+    const tmpPath = `${filePath}.tmp`
+    try {
+      mkdirSync(dirname(filePath), { recursive: true })
+      writeFileSync(tmpPath, payload, 'utf8')
+      renameSync(tmpPath, filePath)
+    } catch (cause) {
+      // 半成品临时文件不能留下（否则下次启动会把它当成偏好文件）。
+      try {
+        rmSync(tmpPath, { force: true })
+      } catch {
+        // 清理失败不掩盖原始错误。
+      }
+      throw new Error('偏好保存失败：无法写入偏好文件', { cause })
+    }
+  }
+}
+
+/** 默认偏好（空）。 */
+function defaultPrefs(): AppPrefs {
+  return {}
+}
+
+/** 合法的主题名。 */
+const THEME_NAMES: readonly ThemeName[] = ['apple', 'fluent']
+
+/** 合法的「关闭窗口」行为。 */
+const CLOSE_BEHAVIORS: readonly CloseBehavior[] = ['hide', 'quit']
+
+/** 取数字（非有限值 / 非数字 → `undefined`）。 */
+function readNumberOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * 把任意输入压成**合法的偏好补丁**（白名单）。
+ *
+ * 不认识的键**一律丢弃**——偏好文件里绝不允许出现凭证。
+ */
+function sanitizePatch(patch: unknown): Partial<AppPrefs> {
+  const record = asRecord(patch)
+  if (!record) return {}
+  const out: Partial<AppPrefs> = {}
+
+  const theme = record['theme']
+  if (typeof theme === 'string' && (THEME_NAMES as readonly string[]).includes(theme)) {
+    out.theme = theme as ThemeName
+  }
+
+  const closeBehavior = record['closeBehavior']
+  if (
+    typeof closeBehavior === 'string' &&
+    (CLOSE_BEHAVIORS as readonly string[]).includes(closeBehavior)
+  ) {
+    out.closeBehavior = closeBehavior as CloseBehavior
+  }
+
+  const bounds = asRecord(record['windowBounds'])
+  if (bounds) {
+    const width = readNumberOrUndefined(bounds['width'])
+    const height = readNumberOrUndefined(bounds['height'])
+    if (width !== undefined && height !== undefined && width > 0 && height > 0) {
+      const x = readNumberOrUndefined(bounds['x'])
+      const y = readNumberOrUndefined(bounds['y'])
+      const sanitized: WindowBounds = { width: Math.floor(width), height: Math.floor(height) }
+      if (x !== undefined) sanitized.x = Math.floor(x)
+      if (y !== undefined) sanitized.y = Math.floor(y)
+      out.windowBounds = sanitized
+    }
+  }
+
+  return out
+}
+
+/** 把磁盘上的内容压成合法偏好（读盘时的同一套白名单）。 */
+function sanitizePrefs(value: unknown): AppPrefs {
+  return sanitizePatch(asRecord(value)?.['prefs'] ?? value)
+}
+
+// ---------------------------------------------------------------------------
+// 播放器 / 窗口 IPC
+// ---------------------------------------------------------------------------
+
+/**
+ * `ipcMain` 的最小接口（**含 `on`**）。
+ *
+ * 播放状态与播放命令是**推送**（`ipcRenderer.send`），不是调用（`invoke`），
+ * 所以还需要 `on`。
+ */
+export interface IpcMainEventsLike extends IpcMainLike {
+  /** 注册一个推送通道的监听器。 */
+  on(channel: string, listener: (event: unknown, arg: unknown) => void): void
+}
+
+/** 主进程 → 渲染进程：命令下发的目标（`webContents` 的最小子集）。 */
+export interface CommandTargetLike {
+  /** 向渲染进程发送一条消息。 */
+  send(channel: string, payload: unknown): void
+}
+
+/** 主窗口的最小接口。 */
+export interface WindowLike {
+  /** 最小化。 */
+  minimize(): void
+  /** 最大化。 */
+  maximize(): void
+  /** 取消最大化。 */
+  unmaximize(): void
+  /** 当前是否最大化。 */
+  isMaximized(): boolean
+  /** 隐藏窗口（播放继续）。 */
+  hide(): void
+  /** 关闭窗口（会触发窗口自己的 `close` 事件）。 */
+  close(): void
+  /** 窗口是否已销毁。 */
+  isDestroyed?(): boolean
+}
+
+/** `registerPlayerIpc` 的参数（全部可注入，便于单测）。 */
+export interface PlayerIpcOptions {
+  /** `ipcMain` 替身；缺省时惰性取 Electron 的 `ipcMain`（必须带 `on`）。 */
+  ipcMain?: IpcMainEventsLike
+  /** 偏好存储（`<userData>/prefs.json`）。 */
+  prefs: PrefsStore
+  /** 主进程 → 渲染进程的下发目标（`webContents`）。 */
+  getTarget?: () => CommandTargetLike | null
+  /** 主窗口。 */
+  getWindow?: () => WindowLike | null
+  /** 渲染进程推来播放器状态时的回调（主进程用它更新托盘）。 */
+  onPlayerState?: (state: PlayerStateSnapshot) => void
+  /** 「关闭窗口」请求（默认只是隐藏；由主进程决定隐藏还是退出）。 */
+  requestClose?: () => void
+}
+
+/**
+ * 注册播放器 / 窗口 / 偏好 IPC（Task 17）。
+ *
+ * 通道：
+ * - `player:state`（`on`，渲染进程 → 主进程）：更新托盘；
+ * - `player:command`（`on`，渲染进程 → 主进程）：**转发**回渲染进程执行
+ *   （主进程是唯一的命令路由）；
+ * - `player:command`（`webContents.send`，主进程 → 渲染进程）：托盘菜单点击时下发；
+ * - `win:minimize` / `win:toggle-maximize` / `win:close`（`handle`）；
+ * - `prefs:get` / `prefs:set` / `theme:set`（`handle`）。
+ */
+export function registerPlayerIpc(opts: PlayerIpcOptions): void {
+  const ipcMain = opts.ipcMain ?? resolveIpcMainEvents()
+  if (!ipcMain || typeof ipcMain.handle !== 'function' || typeof ipcMain.on !== 'function') {
+    throw new Error(
+      '无法注册播放器 IPC：当前进程没有可用的 ipcMain（缺少 Electron 运行时，或替身没有 on）',
+    )
+  }
+
+  const prefs = opts.prefs
+
+  // 渲染进程 → 主进程：播放器状态（推给托盘）。
+  ipcMain.on('player:state', (_event, arg) => {
+    const snapshot = sanitizeSnapshot(arg)
+    if (!snapshot) return
+    opts.onPlayerState?.(snapshot)
+  })
+
+  // 渲染进程 → 主进程：播放命令 → **转发**回渲染进程执行。
+  ipcMain.on('player:command', (_event, arg) => {
+    const command = sanitizeCommand(arg)
+    if (!command) return
+    opts.getTarget?.()?.send('player:command', command)
+  })
+
+  // 窗口控制。
+  ipcMain.handle('win:minimize', () => {
+    const win = opts.getWindow?.()
+    if (!win || win.isDestroyed?.()) return
+    win.minimize()
+  })
+  ipcMain.handle('win:toggle-maximize', () => {
+    const win = opts.getWindow?.()
+    if (!win || win.isDestroyed?.()) return
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
+  ipcMain.handle('win:close', () => {
+    if (opts.requestClose) {
+      opts.requestClose()
+      return
+    }
+    const win = opts.getWindow?.()
+    if (!win || win.isDestroyed?.()) return
+    win.hide()
+  })
+
+  // 偏好。
+  ipcMain.handle('prefs:get', () => prefs.read())
+  ipcMain.handle('prefs:set', (_event, arg) => prefs.write(asRecord(arg) ?? {}))
+  ipcMain.handle('theme:set', async (_event, arg) => {
+    const theme = readString(arg)
+    if (!(THEME_NAMES as readonly string[]).includes(theme)) {
+      throw new Error('主题名无效：只支持 apple / fluent')
+    }
+    return prefs.write({ theme: theme as ThemeName })
+  })
+}
+
+/** 把渲染进程推来的状态压成合法快照。 */
+function sanitizeSnapshot(value: unknown): PlayerStateSnapshot | null {
+  const record = asRecord(value)
+  if (!record) return null
+
+  const currentRaw = asRecord(record['current'])
+  const current = currentRaw
+    ? {
+        id: readString(currentRaw['id']),
+        title: readString(currentRaw['title']),
+        artist: readString(currentRaw['artist']),
+        album: readString(currentRaw['album']),
+        coverId: readString(currentRaw['coverId']),
+        duration: readNumberOrUndefined(currentRaw['duration']) ?? 0,
+      }
+    : null
+
+  const mode = record['mode']
+  const modeText = readString(mode)
+  const safeMode: PlayerStateSnapshot['mode'] =
+    modeText === 'shuffle' || modeText === 'loop-one' || modeText === 'loop-list'
+      ? modeText
+      : 'sequence'
+
+  return {
+    current,
+    isPlaying: record['isPlaying'] === true,
+    position: readNumberOrUndefined(record['position']) ?? 0,
+    duration: readNumberOrUndefined(record['duration']) ?? 0,
+    volume: readNumberOrUndefined(record['volume']) ?? 0,
+    mode: safeMode,
+    muted: record['muted'] === true,
+  }
+}
+
+/** 把渲染进程发来的命令压成合法命令。 */
+function sanitizeCommand(value: unknown): PlayerCommand | null {
+  const record = asRecord(value)
+  if (!record) return null
+  switch (readString(record['type'])) {
+    case 'play':
+      return { type: 'play' }
+    case 'pause':
+      return { type: 'pause' }
+    case 'toggle':
+      return { type: 'toggle' }
+    case 'next':
+      return { type: 'next' }
+    case 'prev':
+      return { type: 'prev' }
+    case 'seek': {
+      const seconds = readNumberOrUndefined(record['seconds'])
+      if (seconds === undefined) return null
+      return { type: 'seek', seconds: Math.max(0, seconds) }
+    }
+    default:
+      return null
+  }
+}
+
+/**
+ * 惰性取带 `on` 的 Electron `ipcMain`（**不在模块顶层调用**）。
+ *
+ * 与 `resolveIpcMain()` 的区别：这里要求 `ipcMain.on` 存在
+ * （播放状态 / 播放命令是推送通道）。
+ */
+function resolveIpcMainEvents(): IpcMainEventsLike | null {
+  const base = resolveIpcMain()
+  if (!base) return null
+  const mod = base as unknown as { on?: unknown }
+  if (typeof mod.on !== 'function') return null
+  return base as IpcMainEventsLike
+}
+
+/**
+ * 惰性取 `app.getPath('userData')`（**不在模块顶层调用**）。
+ *
+ * 非 Electron 进程里返回 `null`，由调用方给出可读错误。
+ */
+function resolveUserDataDir(): string | null {
+  try {
+    if (typeof require !== 'function') return null
+    const mod = require('electron') as { app?: { getPath?: (name: string) => string } } | string
+    if (typeof mod !== 'object' || mod === null) return null
+    const app = mod.app
+    if (!app || typeof app.getPath !== 'function') return null
+    const dir = app.getPath('userData')
+    return typeof dir === 'string' && dir.length > 0 ? dir : null
+  } catch {
+    return null
+  }
 }
