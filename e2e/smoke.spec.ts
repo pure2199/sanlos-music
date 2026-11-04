@@ -568,6 +568,83 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   // -------------------------------------------------------------------------
   // T29：播放模式持久化（切模式 → **重启应用** → 模式还在）
   // -------------------------------------------------------------------------
+  // 外部歌词源（T32）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 这条用例**真的让主进程发了一次外部请求**（`httpStack.fetch`）——
+  //    单测里够不到（那里没有 Electron 主进程、没有 Chromium 分区栈）。
+  //
+  // ⚠️ mock 的 `t2` **故意没有歌词**（`mock-server/fixtures.ts` 的 `LYRICS` 里没有它）
+  //    → 走「NAS 优先 → 缺了再查外部」这条链路 → 外部源（mock 的 `/mock-lyric`）
+  //    返回的**纯文本 LRC** 会显示出来。
+  //
+  test('歌词来源设为自定义 → NAS 没歌词的歌**由外部源补齐**', async () => {
+    // ⚠️ **需要时才登录**：整组跑时前面那条用例已登录（会话还在）；
+    //    单独跑这条（`-g`）时还没登录 → 登录表单在，才登录。
+    //
+    // ⚠️ **必须等渲染完再判断**：一上来就 `count()` 有可能量到「还没渲染」的 0
+    //    → 误判成「已登录」→ 后面点「歌曲」时列表永远不来。
+    const addressField = fixture.window.locator('#fnm-address')
+    const needLogin = await addressField
+      .waitFor({ state: 'visible', timeout: 5000 })
+      .then(() => true)
+      .catch(() => false)
+    if (needLogin) {
+      await login(fixture.window, fixture.mock.url)
+    }
+
+    // 设置：歌词来源 = 自定义模板 → 指向 mock 的外部歌词端点。
+    //
+    // ⚠️ **「设置」按钮是开关**：上一条用例（T23 自动更新）已经**开着**设置面板
+    //    → 再点一次会**关掉**它 → 后面就找不到「歌词来源」那一组了。
+    //    ⇒ 先看面板在不在，不在才点。
+    const settingsDialog = fixture.window.getByRole('dialog', { name: '设置' })
+    const wasOpen = (await settingsDialog.count()) > 0
+    if (!wasOpen) {
+      await fixture.window.getByRole('button', { name: '设置' }).click()
+      await expect(settingsDialog).toBeVisible()
+    }
+    const group = fixture.window.getByRole('group', { name: '歌词来源' })
+    await group.getByRole('combobox', { name: '外部歌词源' }).selectOption('custom')
+    await group
+      .getByRole('textbox', { name: '自定义歌词 API 模板' })
+      .fill(
+        `${fixture.mock.url}/mock-lyric?title={title}&artist={artist}&album={album}&duration={duration}`,
+      )
+    await group.getByRole('button', { name: '保存歌词源' }).click()
+
+    // ⚠️ **关掉设置面板**：它盖在顶栏上 → 会**拦截**播放条按钮的指针事件（点不到全屏按钮）。
+    if (wasOpen) {
+      await fixture.window.getByRole('button', { name: '设置' }).click()
+      await expect(settingsDialog).toHaveCount(0)
+    }
+
+    // 播 `t2`（mock 里**没有**它的歌词 → 必须靠外部源补齐）。
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌曲' })
+      .click()
+    const list = fixture.window.getByRole('listbox', { name: '歌曲列表' })
+    await list.getByRole('option').nth(1).dblclick()
+
+    // 全屏页里应该能看到**外部源**的歌词。
+    await fixture.window.getByRole('button', { name: /全屏/ }).first().click()
+    const page = fixture.window.getByTestId('full-player')
+    await expect(page).toBeVisible()
+    await expect(page.getByText('外部歌词源第一行')).toBeVisible()
+
+    // ⚠️ **复原设置面板的状态**：后面那条用例（T29 重启）假定它是**开着**的
+    //    → 它会点「设置」来关掉面板。我这里进来时它是开着的 → 原样还回去。
+    if (wasOpen) {
+      // ⚠️ **先关掉全屏页**：它是**全屏浮层** → **盖住顶栏** → 点不到「设置」。
+      await fixture.window.getByRole('button', { name: '关闭全屏播放页' }).click()
+      await expect(fixture.window.getByTestId('full-player')).toHaveCount(0)
+      await fixture.window.getByRole('button', { name: '设置' }).click()
+      await expect(settingsDialog).toBeVisible()
+    }
+  })
+
+  // -------------------------------------------------------------------------
   //
   // ⚠️ 此前播放模式**只活在内存里** —— 重启就回到「顺序播放」。
   //

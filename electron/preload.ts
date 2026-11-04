@@ -144,6 +144,13 @@ const fnPlayer: PlayerBridge = {
   checkUpdate: () => ipcRenderer.invoke('update:check'),
   downloadUpdate: (name) => ipcRenderer.invoke('update:download', { name }),
   installUpdate: (name) => ipcRenderer.invoke('update:install', { name }),
+  // -------------------------------------------------------------------------
+  // 外部歌词（Task 32）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 渲染进程**只发请求**：外部歌词的抓取**全在主进程**——
+  //    渲染进程**不碰网络**，也**不能指定要抓哪个地址**（只报歌名 / 歌手 / 时长）。
+  fetchExternalLyric: (query) => ipcRenderer.invoke('lyric:fetch', query),
 }
 
 contextBridge.exposeInMainWorld('fnPlayer', fnPlayer)

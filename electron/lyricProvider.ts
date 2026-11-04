@@ -1,0 +1,550 @@
+// ---------------------------------------------------------------------------
+// 外部歌词 API（Task 32）—— 主进程侧
+// ---------------------------------------------------------------------------
+//
+// 这个模块回答一个问题：**「NAS 没有歌词时，去哪儿再找一份？」**
+//
+// ---------------------------------------------------------------------------
+// 为什么全在主进程
+// ---------------------------------------------------------------------------
+// 安全边界（不可放宽）：
+// - **渲染层永远不直接发网络请求** → 外部歌词的抓取**全在主进程**，
+//   渲染层只发 IPC 请求、只收结果（与自动更新 Task 23 同一套纪律）；
+// - 走**已有的 Chromium 分区栈**（`electron/http.ts`）——
+//   外部歌词源**不在** `TrustedHosts` 里 → 该分区对它的证书校验是 `-3`
+//   （交回 Chromium 默认校验）→ **自签证书不会被放行**，歌词源必须用正规证书；
+// - ⚠️ **绝不附带 NAS 的凭证**：本模块用的是**干净的**分区栈
+//   （不附 token / Cookie）→ 第三方歌词源**看不到** NAS 的任何凭证。
+//
+// ---------------------------------------------------------------------------
+// 模块约束（与 `electron/update.ts` 同一套纪律）
+// ---------------------------------------------------------------------------
+// - **模块顶层不得 import Electron**：本文件要能在 Vitest（普通 Node）里直接单测，
+//   而非 Electron 进程里 `require('electron')` 返回的是可执行文件路径字符串。
+//   故 fetch 走**注入**（`opts.fetchImpl`），由 IPC 层把 `httpStack.fetch` 塞进来。
+// - **不引入新依赖**：只用标准 Web API。
+//
+// ---------------------------------------------------------------------------
+// 实测依据（2026-11-04，本机真打）
+// ---------------------------------------------------------------------------
+// | 源                | 搜索             | 歌词               | 稳定性   |
+// |-------------------|------------------|--------------------|----------|
+// | 网易云（默认）    | 200，18–235ms    | 200，31–41ms，带时间戳 | 10/10 全绿 |
+// | lrclib.net（备选）| 200，366–1300ms  | —                  | **偶发 503** |
+// | QQ 音乐           | 200，**2.2s**    | 200，65ms          | 通（太慢，不内置）|
+//
+// ⚠️ 网易云 / QQ 都是**非官方**公开 Web 接口：没有 SLA、条款上属灰色、接口可能变更。
+//    ⇒ **不押注一家**：默认网易云（国内最快），内置 lrclib 可切，
+//      再留 `custom`（URL 模板）给自建实例。
+//
+// ---------------------------------------------------------------------------
+
+import type {
+  ExternalLyricQuery,
+  ExternalLyricResult,
+  LyricSource,
+} from '../shared/lyricProvider'
+
+// ---------------------------------------------------------------------------
+// 常量
+// ---------------------------------------------------------------------------
+
+/** 网易云搜索接口（公开 Web 接口，**非官方**）。 */
+const NETEASE_SEARCH_URL = 'https://music.163.com/api/search/get/web'
+
+/** 网易云歌词接口（公开 Web 接口，**非官方**）。 */
+const NETEASE_LYRIC_URL = 'https://music.163.com/api/song/lyric'
+
+/** lrclib 的精确匹配接口。 */
+const LRCLIB_GET_URL = 'https://lrclib.net/api/get'
+
+/** lrclib 的模糊搜索接口。 */
+const LRCLIB_SEARCH_URL = 'https://lrclib.net/api/search'
+
+/**
+ * 时长容差（**秒**）。
+ *
+ * ⚠️ 同名歌很多（实测《占位曲目一》有 4 个版本）→ 不比时长就会拿到**别的版本**的歌词。
+ * ⚠️ 各源的时长精度不同（网易云是毫秒、lrclib 是浮点秒），故容差取 3 秒。
+ */
+export const DURATION_TOLERANCE_SECONDS = 3
+
+/** 失败结果的缓存时长（**毫秒**）—— 防止连续切歌把外部源打爆。 */
+export const FAILURE_CACHE_TTL_MS = 5 * 60 * 1000
+
+/** 成功结果的缓存条数上限（LRU）。 */
+export const SUCCESS_CACHE_LIMIT = 64
+
+/** 用户代理（部分公开接口会拒绝没有 UA 的请求）。 */
+const USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+
+// ---------------------------------------------------------------------------
+// 小工具
+// ---------------------------------------------------------------------------
+
+/** 把任意异常压成一句人话。 */
+function readableError(cause: unknown): string {
+  if (cause instanceof Error) return cause.message
+  return String(cause)
+}
+
+/** 取对象（不是对象 → `null`）。 */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null) return null
+  return value as Record<string, unknown>
+}
+
+/** 取非空字符串（不是字符串 / 空串 → `null`）。 */
+function readString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  return text === '' ? null : text
+}
+
+/** 回环主机（本地自测用的歌词源）。 */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+}
+
+/**
+ * 判断一段文本**是不是 LRC**（含 `[mm:ss` 或 `[mm:ss.xx` 时间戳）。
+ *
+ * ⚠️ **必须判**：纯文本歌词（没有时间戳）交给解析器会得到**空数组**
+ *    → 界面上等于「暂无歌词」，用户会以为歌词源坏了。
+ */
+export function looksLikeLrc(text: string): boolean {
+  return /\[\d{1,3}:\d{1,2}([.:]\d{1,3})?\]/.test(text)
+}
+
+// ---------------------------------------------------------------------------
+// 地址校验与模板渲染
+// ---------------------------------------------------------------------------
+
+/**
+ * 校验用户填的**歌词 API 模板**。
+ *
+ * ⚠️ 规则（**不可放宽**）：
+ * - 必须是 `https:`；`http:` **只**允许回环主机（本地自测）；
+ * - **不许**带 `user:pass@`（URL 里绝不能有凭证）；
+ * - 必须有**占位符**（否则每首歌都查同一个地址，必然错）。
+ *
+ * @returns 合法时返回解析后的 URL；不合法返回 `null`。
+ */
+export function validateLyricTemplate(raw: string): URL | null {
+  const text = raw.trim()
+  if (text === '') return null
+  let url: URL
+  try {
+    url = new URL(text)
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+  if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) return null
+  if (url.username !== '' || url.password !== '') return null
+  if (!/\{(title|artist|album|duration)\}/.test(text)) return null
+  return url
+}
+
+/**
+ * 把模板里的占位符换成实际值。
+ *
+ * ⚠️ 替换后的值一律 **`encodeURIComponent`** —— 歌名里有 `&`、`#`、空格是常事，
+ *    不转义会把 URL 拆坏（甚至被当成别的参数）。
+ *
+ * @returns 渲染后的 URL 字符串；模板不合法时返回 `null`。
+ */
+export function renderLyricTemplate(template: string, query: ExternalLyricQuery): string | null {
+  if (!validateLyricTemplate(template)) return null
+  const values: Record<string, string> = {
+    title: query.title,
+    artist: query.artist,
+    album: query.album,
+    duration: String(query.duration),
+  }
+  const rendered = template.replace(/\{(title|artist|album|duration)\}/g, (_all, key: string) =>
+    encodeURIComponent(values[key] ?? ''),
+  )
+  try {
+    return new URL(rendered).toString()
+  } catch {
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 候选挑选
+// ---------------------------------------------------------------------------
+
+/** 一个候选（外部源搜出来的歌）。 */
+interface Candidate {
+  /** 源内部的歌曲 id。 */
+  id: string
+  /** 歌名。 */
+  title: string
+  /** 歌手名。 */
+  artist: string
+  /** 时长（**秒**）。 */
+  duration: number
+}
+
+/** 名字是否「算同一个」（忽略大小写、空白与常见修饰）。 */
+function sameName(a: string, b: string): boolean {
+  const norm = (text: string): string =>
+    text
+      .toLowerCase()
+      .replace(/[\s·・\-_()（）《》"'`,.!?！？]/g, '')
+  return norm(a) === norm(b)
+}
+
+/**
+ * 从候选里挑**最可能**是这首歌的那一条。
+ *
+ * ⚠️ 顺序很重要：
+ * 1. 先按**歌名**完全相同筛掉「同名的别的歌」；
+ * 2. 再按**歌手**相同筛掉「同名不同歌手」（翻唱 / 组合）；
+ * 3. 最后按**时长**（±3s）筛掉「同一歌手的别的版本」（Live / Remix）。
+ *
+ * ⚠️ 时长筛**过严**时（各源时长口径不同）会误杀 → 故先在「名字+歌手都对」的
+ *    候选里按时长挑；全都对不上时长就退回「名字+歌手都对」的第一条。
+ *
+ * @returns 选中的候选；没有合适的返回 `null`。
+ */
+export function pickCandidate(
+  candidates: Candidate[],
+  query: ExternalLyricQuery,
+  tolerance: number = DURATION_TOLERANCE_SECONDS,
+): Candidate | null {
+  if (!candidates.length) return null
+  const byTitle = candidates.filter((item) => sameName(item.title, query.title))
+  const pool = byTitle.length ? byTitle : candidates
+  const byArtist = pool.filter((item) => sameName(item.artist, query.artist))
+  const named = byArtist.length ? byArtist : pool
+  if (query.duration > 0) {
+    const timed = named.filter(
+      (item) => item.duration > 0 && Math.abs(item.duration - query.duration) <= tolerance,
+    )
+    if (timed.length) return timed[0]!
+  }
+  return named[0] ?? null
+}
+
+// ---------------------------------------------------------------------------
+// 网易云适配器
+// ---------------------------------------------------------------------------
+
+/** 网易云搜索响应里的一首歌。 */
+interface NeteaseSong {
+  id?: unknown
+  name?: unknown
+  duration?: unknown
+  artists?: unknown
+  album?: unknown
+}
+
+/** 把网易云的搜索结果读成候选列表。 */
+function readNeteaseCandidates(payload: unknown): Candidate[] {
+  const root = asRecord(payload)
+  const songs = root?.['result']
+  const list = asRecord(songs)?.['songs']
+  if (!Array.isArray(list)) return []
+  const out: Candidate[] = []
+  for (const raw of list) {
+    const song = asRecord(raw) as NeteaseSong | null
+    if (!song) continue
+    // ⚠️ 网易云的 `id` 是**数字**（实测 `222`），不是字符串 → 两种都要认。
+    const id =
+      readString(song.id) ?? (typeof song.id === 'number' && Number.isFinite(song.id) ? String(song.id) : null)
+    const name = readString(song.name)
+    if (!id || !name) continue
+    const artists = Array.isArray(song.artists) ? song.artists : []
+    const artistName = readString(asRecord(artists[0])?.['name']) ?? ''
+    const durationMs = typeof song.duration === 'number' && Number.isFinite(song.duration) ? song.duration : 0
+    out.push({ id, title: name, artist: artistName, duration: durationMs / 1000 })
+  }
+  return out
+}
+
+/** 网易云歌词响应。 */
+interface NeteaseLyricPayload {
+  lrc?: { lyric?: unknown }
+  tlyric?: { lyric?: unknown }
+}
+
+/**
+ * 走网易云取歌词。
+ *
+ * ⚠️ **原文与翻译分两个字段**（`lrc.lyric` / `tlyric.lyric`）→ 正好对应
+ *    渲染层要的两条 `LyricEntry`（原文 + 翻译）→ 现有解析器自动出双语。
+ */
+async function fetchNetease(
+  fetchImpl: FetchLike,
+  query: ExternalLyricQuery,
+): Promise<ExternalLyricResult> {
+  const keyword = [query.title, query.artist].filter((part) => part.trim() !== '').join(' ')
+  const searchUrl = `${NETEASE_SEARCH_URL}?csrf_token=&type=1&offset=0&total=true&limit=10&s=${encodeURIComponent(keyword)}`
+  const searchRes = await fetchImpl(searchUrl, { headers: { accept: 'application/json', 'user-agent': USER_AGENT } })
+  if (!searchRes.ok) {
+    return { status: 'error', message: `网易云搜索返回 ${searchRes.status}` }
+  }
+  const searchText = await searchRes.text()
+  let searchPayload: unknown
+  try {
+    searchPayload = JSON.parse(searchText) as unknown
+  } catch {
+    return { status: 'error', message: '网易云搜索返回的不是 JSON' }
+  }
+  const candidate = pickCandidate(readNeteaseCandidates(searchPayload), query)
+  if (!candidate) return { status: 'not-found' }
+
+  const lyricRes = await fetchImpl(`${NETEASE_LYRIC_URL}?id=${encodeURIComponent(candidate.id)}&lv=1&kv=1&tv=-1`, {
+    headers: { accept: 'application/json', 'user-agent': USER_AGENT },
+  })
+  if (!lyricRes.ok) {
+    return { status: 'error', message: `网易云歌词返回 ${lyricRes.status}` }
+  }
+  const lyricText = await lyricRes.text()
+  let lyricPayload: NeteaseLyricPayload
+  try {
+    lyricPayload = JSON.parse(lyricText) as NeteaseLyricPayload
+  } catch {
+    return { status: 'error', message: '网易云歌词返回的不是 JSON' }
+  }
+  const original = typeof lyricPayload.lrc?.lyric === 'string' ? lyricPayload.lrc.lyric : ''
+  const translation = typeof lyricPayload.tlyric?.lyric === 'string' ? lyricPayload.tlyric.lyric : ''
+  if (!looksLikeLrc(original)) return { status: 'not-found' }
+  return { status: 'ok', source: 'netease', original, translation }
+}
+
+// ---------------------------------------------------------------------------
+// lrclib 适配器
+// ---------------------------------------------------------------------------
+
+/** lrclib 的一条结果。 */
+interface LrclibEntry {
+  trackName?: unknown
+  artistName?: unknown
+  duration?: unknown
+  syncedLyrics?: unknown
+  plainLyrics?: unknown
+}
+
+/**
+ * 走 lrclib 取歌词。
+ *
+ * ⚠️ `syncedLyrics`（带时间戳）与 `plainLyrics`（纯文本）是**同一首歌的两种格式**，
+ *    **不是**原文与翻译 → 只能取其一（优先带时间戳的），
+ *    **绝不**当成两条记录丢给解析器（否则同一句会显示两遍 —— T31 的坑）。
+ */
+async function fetchLrclib(
+  fetchImpl: FetchLike,
+  query: ExternalLyricQuery,
+): Promise<ExternalLyricResult> {
+  const params = new URLSearchParams({
+    track_name: query.title,
+    artist_name: query.artist,
+  })
+  if (query.duration > 0) params.set('duration', String(Math.round(query.duration)))
+  const getRes = await fetchImpl(`${LRCLIB_GET_URL}?${params.toString()}`, {
+    headers: { accept: 'application/json', 'user-agent': USER_AGENT },
+  })
+  if (getRes.ok) {
+    const text = await getRes.text()
+    try {
+      const payload = JSON.parse(text) as LrclibEntry
+      const synced = typeof payload.syncedLyrics === 'string' ? payload.syncedLyrics : ''
+      const content = looksLikeLrc(synced) ? synced : ''
+      if (content) return { status: 'ok', source: 'lrclib', original: content, translation: '' }
+      // ⚠️ 精确匹配到但**没有带时间戳的歌词** → `plainLyrics` 是**纯文本**，
+      //    没有时间戳、解析出来是空的 → 如实报「没找到」，
+      //    别把纯文本硬塞进去（那等于给用户一个「什么都没有」的界面）。
+    } catch {
+      return { status: 'error', message: 'lrclib 返回的不是 JSON' }
+    }
+  } else if (getRes.status !== 404) {
+    return { status: 'error', message: `lrclib 返回 ${getRes.status}` }
+  }
+
+  // 精确匹配没有 → 模糊搜索。
+  const searchParams = new URLSearchParams({
+    track_name: query.title,
+    artist_name: query.artist,
+    q: [query.title, query.artist].filter((part) => part.trim() !== '').join(' '),
+  })
+  const searchRes = await fetchImpl(`${LRCLIB_SEARCH_URL}?${searchParams.toString()}`, {
+    headers: { accept: 'application/json', 'user-agent': USER_AGENT },
+  })
+  if (!searchRes.ok) {
+    // ⚠️ 404 = **确实没有**（不是错误）→ 如实报「没找到」。
+    if (searchRes.status === 404) return { status: 'not-found' }
+    return { status: 'error', message: `lrclib 搜索返回 ${searchRes.status}` }
+  }
+  const searchText = await searchRes.text()
+  let list: unknown
+  try {
+    list = JSON.parse(searchText) as unknown
+  } catch {
+    return { status: 'error', message: 'lrclib 搜索返回的不是 JSON' }
+  }
+  if (!Array.isArray(list)) return { status: 'not-found' }
+  const candidates: Candidate[] = []
+  const contents = new Map<string, string>()
+  for (const raw of list) {
+    const item = asRecord(raw) as LrclibEntry | null
+    if (!item) continue
+    const trackName = readString(item.trackName)
+    const artistName = readString(item.artistName) ?? ''
+    if (!trackName) continue
+    const duration =
+      typeof item.duration === 'number' && Number.isFinite(item.duration) ? item.duration : 0
+    const key = `${trackName}|${artistName}|${duration}`
+    candidates.push({ id: key, title: trackName, artist: artistName, duration })
+    const synced = typeof item.syncedLyrics === 'string' ? item.syncedLyrics : ''
+    if (looksLikeLrc(synced)) contents.set(key, synced)
+  }
+  const picked = pickCandidate(candidates, query)
+  if (!picked) return { status: 'not-found' }
+  const content = contents.get(picked.id)
+  if (!content) return { status: 'not-found' }
+  return { status: 'ok', source: 'lrclib', original: content, translation: '' }
+}
+
+// ---------------------------------------------------------------------------
+// 自定义模板适配器
+// ---------------------------------------------------------------------------
+
+/** 走用户自配的 URL 模板取歌词（响应体必须是**纯文本 LRC**）。 */
+async function fetchCustom(
+  fetchImpl: FetchLike,
+  template: string,
+  query: ExternalLyricQuery,
+): Promise<ExternalLyricResult> {
+  const url = renderLyricTemplate(template, query)
+  if (!url) {
+    return {
+      status: 'error',
+      message: '歌词 API 模板不合法：必须是 https（回环才 http）、不许带凭证、且必须含 {title} 等占位符',
+    }
+  }
+  const res = await fetchImpl(url, { headers: { accept: 'text/plain', 'user-agent': USER_AGENT } })
+  if (!res.ok) return { status: 'error', message: `歌词 API 返回 ${res.status}` }
+  const text = await res.text()
+  if (!looksLikeLrc(text)) {
+    return { status: 'error', message: '歌词 API 返回的不是 LRC（正文里没有 [mm:ss 时间戳）' }
+  }
+  return { status: 'ok', source: 'custom', original: text, translation: '' }
+}
+
+// ---------------------------------------------------------------------------
+// Provider
+// ---------------------------------------------------------------------------
+
+/** 注入的 fetch（主进程里是 `httpStack.fetch`）。 */
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
+
+/** `createLyricProvider` 的参数。 */
+export interface LyricProviderOptions {
+  /** 抓取用的 fetch（**干净分区栈**，不带 NAS 凭证）。 */
+  fetchImpl: FetchLike
+  /** 现在的时刻（毫秒）；单测可注入以验证缓存过期。 */
+  now?: () => number
+}
+
+/** 歌词源提供器。 */
+export interface LyricProvider {
+  /**
+   * 查外部歌词。
+   *
+   * @param source 用哪个源（`off` → 直接返回 `not-found`，**不出网**）。
+   * @param template `source = 'custom'` 时的 URL 模板。
+   * @param query 歌名 / 歌手 / 专辑 / 时长。
+   */
+  fetchExternalLyric(
+    source: LyricSource,
+    template: string,
+    query: ExternalLyricQuery,
+  ): Promise<ExternalLyricResult>
+}
+
+/** 缓存里的一条。 */
+interface CacheEntry {
+  at: number
+  result: ExternalLyricResult
+}
+
+/**
+ * 创建一个歌词源提供器。
+ *
+ * ⚠️ **缓存策略**：
+ * - 成功结果 → 一直留（LRU，上限 64 条）→ 反复切同一首歌**不重复打**外部源；
+ * - 失败结果 → 留 5 分钟 → 连续切歌**不会**把外部源打爆。
+ *
+ * ⚠️ **实例级缓存**（不是模块级）→ 单测之间不会互相污染。
+ */
+export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
+  const now = opts.now ?? ((): number => Date.now())
+  const cache = new Map<string, CacheEntry>()
+
+  /** 缓存的键。 */
+  function cacheKey(source: LyricSource, query: ExternalLyricQuery): string {
+    return [source, query.title, query.artist, query.album, Math.round(query.duration)].join('|')
+  }
+
+  /** 读缓存（过期的失败结果视为没有）。 */
+  function readCache(key: string): ExternalLyricResult | null {
+    const hit = cache.get(key)
+    if (!hit) return null
+    if (hit.result.status === 'ok') {
+      // 成功结果：续命（LRU 语义：命中就挪到末尾）。
+      cache.delete(key)
+      cache.set(key, hit)
+      return hit.result
+    }
+    if (now() - hit.at >= FAILURE_CACHE_TTL_MS) {
+      cache.delete(key)
+      return null
+    }
+    return hit.result
+  }
+
+  /** 写缓存。 */
+  function writeCache(key: string, result: ExternalLyricResult): void {
+    if (result.status === 'ok' && cache.size >= SUCCESS_CACHE_LIMIT) {
+      const oldest = cache.keys().next()
+      if (!oldest.done) cache.delete(oldest.value)
+    }
+    cache.set(key, { at: now(), result })
+  }
+
+  return {
+    async fetchExternalLyric(
+      source: LyricSource,
+      template: string,
+      query: ExternalLyricQuery,
+    ): Promise<ExternalLyricResult> {
+      // ⚠️ `off` = 明确不用外部 → **一次网络请求都不发**。
+      if (source === 'off') return { status: 'not-found' }
+
+      const key = cacheKey(source, query)
+      const cached = readCache(key)
+      if (cached) return cached
+
+      let result: ExternalLyricResult
+      try {
+        if (source === 'netease') {
+          result = await fetchNetease(opts.fetchImpl, query)
+        } else if (source === 'lrclib') {
+          result = await fetchLrclib(opts.fetchImpl, query)
+        } else {
+          result = await fetchCustom(opts.fetchImpl, template, query)
+        }
+      } catch (cause) {
+        result = { status: 'error', message: `连接歌词源失败：${readableError(cause)}` }
+      }
+      writeCache(key, result)
+      return result
+    },
+  }
+}

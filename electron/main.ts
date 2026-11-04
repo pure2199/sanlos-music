@@ -6,7 +6,7 @@ import type { LyricOverlayMessage, PlayerCommand, PlayerStateSnapshot } from '..
 import type { ThemeName } from '../shared/types'
 import { API_PREFIX } from '../shared/constants'
 import { resolveThemeName, themeSpec } from '../shared/themes'
-import { registerAuthIpc, registerPlayerIpc, registerUpdateIpc, PrefsStore } from './ipc'
+import { registerAuthIpc, registerPlayerIpc, registerUpdateIpc, registerLyricIpc, PrefsStore } from './ipc'
 import { TrustedHosts } from './cert'
 import {
   DEFAULT_DOWNLOAD_SUBDIR,
@@ -16,6 +16,7 @@ import {
   type DownloadIndex,
 } from './downloadManager'
 import { createHttpStack } from './http'
+import { createLyricProvider } from './lyricProvider'
 import { registerLocalMedia } from './localMedia'
 import { registerAppSchemes } from './schemes'
 import { FallbackTranscoder } from './fallbackTranscoder'
@@ -531,6 +532,19 @@ if (!isPrimaryInstance) {
           currentVersion: app.getVersion(),
           destDir: path.join(app.getPath('temp'), 'fnmusic-update'),
         }),
+      })
+
+      // 14b. 外部歌词 IPC（Task 32）：NAS 没有歌词时去外部源补一份。
+      //
+      //     ⚠️ **出网走同一个 Chromium 分区栈**（`http.fetch`）——外部歌词源
+      //     **不在 `TrustedHosts` 里** → 证书走 Chromium 默认校验（自签不会被放行）。
+      //     ⚠️ **这个 fetch 是干净的**：不附带 NAS 的 token / Cookie
+      //     → 第三方歌词源看不到 NAS 的任何凭证。
+      //     ⚠️ **渲染层不碰网络**：只报歌名 / 歌手 / 专辑 / 时长，
+      //     地址一律取主进程自己读到的偏好。
+      registerLyricIpc({
+        prefs,
+        provider: createLyricProvider({ fetchImpl: http.fetch }),
       })
 
       // 13b. 启动时按偏好恢复悬浮窗（上次是开着的就接着开）。

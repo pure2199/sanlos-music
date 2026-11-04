@@ -183,6 +183,8 @@ function fakeBridge(): {
     checkUpdate: async () => ({ status: 'not-configured' }),
     downloadUpdate: async () => ({ status: 'error', message: '未实现' }),
     installUpdate: async () => ({ status: 'error', message: '未实现' }),
+    // 外部歌词（Task 32）：本用例不碰它，给个空实现即可。
+    fetchExternalLyric: async () => ({ status: 'not-found' }),
   }
   return {
     bridge,

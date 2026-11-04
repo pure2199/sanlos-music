@@ -28,6 +28,11 @@ import { usePlayerStore } from '../state/playerStore'
 import type { Song } from '../../shared/types'
 import type { LyricOverlayMessage, PlayerBridge, AppPrefs } from '../../shared/playerBridge'
 import { parseLyricEntries } from '../ui/lyrics/parse'
+import {
+  defaultExternalLyricFetcher,
+  loadLyricEntries,
+  type ExternalLyricFetcher,
+} from './lyricSource'
 
 /** 歌词接口的最小子集（便于单测注入假实现）。 */
 export interface LyricOverlayApi {
@@ -88,6 +93,13 @@ export interface LyricOverlayOptions {
   api?: LyricOverlayApi
   /** 播放器 store；不传则用全局 `usePlayerStore`。 */
   store?: LyricOverlayPlayerStore
+  /**
+   * 外部歌词取法（Task 32）。
+   *
+   * ⚠️ **可缺省** → 不查外部（既有单测的行为完全不变）。
+   * ⚠️ 不传时走**默认取法**（IPC 到主进程）；桌面壳里桥存在 → 默认会查。
+   */
+  external?: ExternalLyricFetcher | null
 }
 
 /** 装配结果（供单测断言）。 */
@@ -111,6 +123,14 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
 
   const api: LyricOverlayApi = options.api ?? lyricApi
   const store: LyricOverlayPlayerStore = options.store ?? (usePlayerStore as unknown as LyricOverlayPlayerStore)
+  /**
+   * 外部歌词取法（Task 32）。
+   *
+   * ⚠️ `options.external` 显式给 `null` = **明确不查外部**；
+   *    没给这个键 → 用**默认取法**（IPC 到主进程；单测里没有桥 → `null` → 不查）。
+   */
+  const external: ExternalLyricFetcher | null =
+    options.external === undefined ? defaultExternalLyricFetcher() : options.external
 
   /** 悬浮窗是否可见（关着就不拉歌词、不推进度）。 */
   let enabled = false
@@ -145,13 +165,24 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
 
     const token = (fetchToken += 1)
     try {
-      const entries = await api.list(song.id)
+      // ⚠️ **NAS 优先 → 缺了才查外部**（Task 32）；外部源只回 LRC 文本，
+      //    这里包成条目后仍交给**现有**的 `parseLyricEntries`（解析逻辑一行不改）。
+      const result = await loadLyricEntries(
+        song.id,
+        {
+          title: song.title,
+          artist: song.artist,
+          album: song.album,
+          duration: song.duration,
+        },
+        { api, external: external },
+      )
       // 期间又切了歌 → 这份歌词已经过时，丢弃。
       if (token !== fetchToken) return
       push({
         kind: 'track',
         track: { id: song.id, title: song.title, artist: song.artist },
-        lines: parseLyricEntries(entries ?? []),
+        lines: parseLyricEntries(result.entries),
       })
     } catch {
       if (token !== fetchToken) return

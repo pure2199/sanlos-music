@@ -371,6 +371,28 @@ function sendBinary(res: ServerResponse, bytes: Buffer, contentType = 'applicati
   res.end(bytes)
 }
 
+/**
+ * 发送**纯文本**响应——外部歌词源用（T32）。
+ *
+ * ⚠️ 「自定义歌词 API」约定的是：响应体**就是纯文本 LRC**（不是 JSON、不是信封）。
+ */
+function sendText(res: ServerResponse, text: string, contentType = 'text/plain; charset=utf-8'): void {
+  if (res.headersSent) return
+  const bytes = Buffer.from(text, 'utf8')
+  res.writeHead(200, {
+    'content-type': contentType,
+    'content-length': String(bytes.byteLength),
+  })
+  res.end(bytes)
+}
+
+/**
+ * 外部歌词源的**假 LRC**（T32）。
+ *
+ * ⚠️ 内容要**一眼能认出来** → E2E 才能断言「这行歌词确实来自外部源」。
+ */
+export const MOCK_EXTERNAL_LRC = '[00:01.00]外部歌词源第一行\n[00:02.00]外部歌词源第二行'
+
 /** 造一份自动更新清单（哈希与假安装包一致 → 客户端的 SHA-512 校验能过）。 */
 function buildUpdateManifest(): unknown {
   return {
@@ -943,6 +965,16 @@ export function createMockServer(): MockServer {
     // 免 token 端点：假安装包（**不是真的 PE**——只够跑通「下载 + 哈希校验」）。
     if (method === 'GET' && path === `/update/${MOCK_UPDATE_INSTALLER_NAME}`) {
       sendBinary(res, MOCK_UPDATE_INSTALLER_BYTES)
+      return
+    }
+
+    // 免 token 端点：**外部歌词源**（T32）。
+    //
+    // ⚠️ 它**不是** NAS 接口：没有业务码信封、没有 token，
+    //    响应体**就是纯文本 LRC**（与「自定义歌词 API」的约定一致）。
+    // ⚠️ 用来验「NAS 没歌词 → 外部补齐」这条链路。
+    if (method === 'GET' && path === '/mock-lyric') {
+      sendText(res, MOCK_EXTERNAL_LRC)
       return
     }
 

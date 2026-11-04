@@ -23,6 +23,12 @@ import { create } from 'zustand'
 
 import type { ThemeName } from '../../shared/types'
 import { DEFAULT_THEME, resolveThemeName } from '../../shared/themes'
+import {
+  DEFAULT_LYRIC_SOURCE,
+  normalizeLyricSource,
+  normalizeLyricTemplate,
+  type LyricSource,
+} from '../../shared/lyricProvider'
 import type { CloseBehavior, PlayerBridge } from '../../shared/playerBridge'
 import { applyTheme } from '../theme'
 
@@ -53,6 +59,21 @@ export interface AppPrefsStore {
   lyricOverlayVisible: boolean
   /** 显示 / 隐藏桌面悬浮歌词（乐观应用 + 写回主进程；失败则回滚）。 */
   setLyricOverlayVisible: (visible: boolean) => Promise<void>
+  /**
+   * 外部歌词源（Task 32）：用哪个源。
+   *
+   * ⚠️ `off` = **只用 NAS 自带的歌词**，不查外部。
+   */
+  lyricSource: LyricSource
+  /**
+   * 自定义歌词 API 的 **URL 模板**（`source = 'custom'` 时才用）。
+   *
+   * ⚠️ 占位符：`{title}` `{artist}` `{album}` `{duration}`；
+   *    响应体必须是**纯文本 LRC**。
+   */
+  lyricTemplate: string
+  /** 改外部歌词源（乐观应用 + 写回主进程；失败则回滚）。 */
+  setLyricSource: (source: LyricSource, template?: string) => Promise<void>
 }
 
 /** 应用偏好镜像 store（生产用）。 */
@@ -60,6 +81,8 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
   theme: DEFAULT_THEME,
   closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
   lyricOverlayVisible: false,
+  lyricSource: DEFAULT_LYRIC_SOURCE,
+  lyricTemplate: '',
   error: null,
 
   load: async (): Promise<void> => {
@@ -70,6 +93,8 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         theme: applyTheme(DEFAULT_THEME),
         closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
         lyricOverlayVisible: false,
+        lyricSource: DEFAULT_LYRIC_SOURCE,
+        lyricTemplate: '',
         error: null,
       })
       return
@@ -80,6 +105,8 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         theme: applyTheme(resolveThemeName(prefs.theme)),
         closeBehavior: prefs.closeBehavior === 'quit' ? 'quit' : DEFAULT_CLOSE_BEHAVIOR,
         lyricOverlayVisible: prefs.lyricOverlay?.visible === true,
+        lyricSource: normalizeLyricSource(prefs.lyric?.source),
+        lyricTemplate: normalizeLyricTemplate(prefs.lyric?.template),
         error: null,
       })
     } catch {
@@ -88,6 +115,8 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         theme: applyTheme(DEFAULT_THEME),
         closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
         lyricOverlayVisible: false,
+        lyricSource: DEFAULT_LYRIC_SOURCE,
+        lyricTemplate: '',
         error: null,
       })
     }
@@ -140,6 +169,29 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
       await bridge.setLyricVisible(visible)
     } catch {
       set({ lyricOverlayVisible: previous, error: '悬浮歌词开关失败，已恢复原设置' })
+    }
+  },
+
+  setLyricSource: async (source: LyricSource, template?: string): Promise<void> => {
+    const nextSource = normalizeLyricSource(source)
+    const nextTemplate = normalizeLyricTemplate(template ?? get().lyricTemplate)
+    const previousSource = get().lyricSource
+    const previousTemplate = get().lyricTemplate
+    // 乐观应用：换歌词源必须**即时反馈**（下一首歌就用新源）。
+    set({ lyricSource: nextSource, lyricTemplate: nextTemplate, error: null })
+
+    const bridge = playerBridge()
+    if (!bridge) return
+
+    try {
+      await bridge.setPrefs({ lyric: { source: nextSource, template: nextTemplate } })
+    } catch {
+      // 写回失败 → 回滚（界面不能停在一个「没被记住」的歌词源上）。
+      set({
+        lyricSource: previousSource,
+        lyricTemplate: previousTemplate,
+        error: '歌词源设置保存失败，已恢复原设置',
+      })
     }
   },
 }))

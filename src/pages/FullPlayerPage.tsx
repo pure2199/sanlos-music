@@ -49,6 +49,11 @@ import { coverUrl } from '../components/coverUrl'
 import type { PlayerStoreLike } from '../components/PlayerBar'
 import { QUEUE_ONLY_ONE_HINT, removeSongFromQueue } from '../components/PlayerBar'
 import { usePlayerStore } from '../state/playerStore'
+import {
+  defaultExternalLyricFetcher,
+  loadLyricEntries,
+  type ExternalLyricFetcher,
+} from '../player/lyricSource'
 import { LyricView } from '../ui/lyrics/LyricView'
 import { parseLyricEntries, type LyricLine } from '../ui/lyrics/parse'
 import './full-player.css'
@@ -69,6 +74,12 @@ export interface FullPlayerPageProps {
   store?: PlayerStoreLike
   /** 歌词接口（可注入；缺省用真实的 `lyricApi`）。 */
   lyricApi?: LyricApiLike
+  /**
+   * 外部歌词取法（Task 32；可注入，缺省走 IPC 到主进程）。
+   *
+   * ⚠️ **可缺省** → 没有桥时**不查外部**（既有单测的行为完全不变）。
+   */
+  externalLyric?: ExternalLyricFetcher | null
   /** 关闭回调。 */
   onClose?: () => void
   /** 附加类名。 */
@@ -220,6 +231,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   const {
     store = usePlayerStore,
     lyricApi: api = lyricApi,
+    externalLyric,
     onClose,
     className,
   } = props
@@ -232,6 +244,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   const [tab, setTab] = useState<'lyrics' | 'queue'>('lyrics')
   const [lines, setLines] = useState<LyricLine[]>([])
   const [lyricStatus, setLyricStatus] = useState<LyricStatus>('idle')
+  /** 歌词取不到时的**可读原因**（Task 32：外部源失败要如实说，不能装作「暂无」）。 */
+  const [lyricReason, setLyricReason] = useState<string | null>(null)
   const [tint, setTint] = useState<string | null>(null)
   /** 取色重试次数（失败后延迟重试；见 `MAX_TINT_ATTEMPTS`）。 */
   const [tintAttempt, setTintAttempt] = useState(0)
@@ -239,33 +253,77 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   const songId = current?.id ?? ''
   const coverId = current?.coverId ?? ''
 
+  /**
+   * 匹配外部源要用的信息（**只取标量**）。
+   *
+   * ⚠️ **必须是标量**：播放器每次推进进度都会推新状态，
+   *    若把 `current` 对象本身放进依赖数组 → 歌词会被反复重取。
+   */
+  const songTitle = current?.title ?? ''
+  const songArtist = current?.artist ?? ''
+  const songAlbum = current?.album ?? ''
+  const songDuration = current?.duration ?? 0
+
+  /**
+   * 外部歌词取法（Task 32）。
+   *
+   * ⚠️ 用 `useState` 的**惰性初始化**而不是 `useMemo`：
+   *    `defaultExternalLyricFetcher()` 读的是全局桥，**每次渲染返回新函数**
+   *    → 放进 `useEffect` 的依赖里会让效果每渲染都重跑（无限取词）。
+   *    惰性初始化**只跑一次**，拿到的是稳定引用。
+   *
+   * ⚠️ **显式判 `undefined` 而不是用 `??`**：`null` 意为「**明确不查外部**」，
+   *    而 `??` 会把 `null` 也当成「没给」→ 反而用上默认取法。
+   */
+  const [externalFetcher] = useState<ExternalLyricFetcher | null>(() =>
+    externalLyric === undefined ? defaultExternalLyricFetcher() : externalLyric,
+  )
+
   // --- 歌词：拉取 + 用 Task 12 的入口解析合并 --------------------------------
   useEffect(() => {
     if (!songId) {
       setLines([])
       setLyricStatus('idle')
+      setLyricReason(null)
       return
     }
     let cancelled = false
     setLyricStatus('loading')
     setLines([])
-    api
-      .list(songId)
-      .then((entries) => {
+    setLyricReason(null)
+    // ⚠️ **NAS 优先 → 缺了才查外部**（Task 32）；外部源只回 LRC 文本，
+    //    这里包成条目后仍交给**现有**的 `parseLyricEntries`（解析逻辑一行不改）。
+    loadLyricEntries(
+      songId,
+      { title: songTitle, artist: songArtist, album: songAlbum, duration: songDuration },
+      { api, external: externalFetcher },
+    )
+      .then((result) => {
         if (cancelled) return
-        // ⚠️ 直接用 Task 12 的便利入口（挑原文/翻译 → 各自 offset → 对齐合并）。
-        setLines(parseLyricEntries(entries ?? []))
-        setLyricStatus('ready')
+        setLines(parseLyricEntries(result.entries))
+        setLyricReason(result.reason)
+        // ⚠️ 有歌词 → `ready`；没歌词**且有原因** → `error`（如实显示原因）；
+        //    没歌词**也没原因** → `ready` + 空行 → 界面显示「暂无歌词」。
+        setLyricStatus(result.entries.length > 0 || !result.reason ? 'ready' : 'error')
       })
       .catch(() => {
         if (cancelled) return
         setLines([])
+        setLyricReason(null)
         setLyricStatus('error')
       })
     return () => {
       cancelled = true
     }
-  }, [api, songId])
+  }, [
+    api,
+    songId,
+    externalFetcher,
+    songTitle,
+    songArtist,
+    songAlbum,
+    songDuration,
+  ])
 
   // --- 封面取色：异步、不阻塞首屏、按 coverId 缓存 ----------------------------
   useEffect(() => {
@@ -329,7 +387,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     if (lyricStatus === 'error') {
       return (
         <p className="fnm-fullplayer__error" role="alert">
-          歌词加载失败
+          {/* ⚠️ 有具体原因就显示原因（Task 32：外部歌词源失败要**如实说**）。 */}
+          {lyricReason ?? '歌词加载失败'}
         </p>
       )
     }

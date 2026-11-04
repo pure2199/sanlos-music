@@ -74,6 +74,12 @@ import { API_PREFIX, CODE_OK, RELAY_DOMAIN_SUFFIX } from '../shared/constants'
 import type { AuthSessionInfo, CandidateInfo, ServerInfo } from '../shared/bridge'
 import { sanitizeEqPrefsPayload } from '../shared/eqPrefs'
 import type { FfmpegFallbackResult, FfmpegStatus } from '../shared/ffmpeg'
+import {
+  LYRIC_SOURCES,
+  normalizeLyricSource,
+  type ExternalLyricQuery,
+  type LyricSource,
+} from '../shared/lyricProvider'
 import type {
   AppPrefs,
   CloseBehavior,
@@ -94,6 +100,7 @@ import { probeCandidates } from './probe'
 import { authx } from './sign'
 import { SessionStateError, type SessionManager } from './session'
 import { createHttpStack, type HttpStack } from './http'
+import type { LyricProvider } from './lyricProvider'
 import { validateUpdateBaseUrl, type UpdateController } from './update'
 
 // ---------------------------------------------------------------------------
@@ -744,8 +751,9 @@ export interface PrefsStoreOptions {
  * 1. **偏好文件里绝不能出现凭证**（token / 密码 / deviceId）——
  *    那是 `session.bin`（DPAPI 加密）的职责，两者**不许混**。
  *    本类用**白名单**实现这一点：`write()` 只接受 `theme` / `closeBehavior` /
- *    `windowBounds` / `eq` / `lyricOverlay` / `downloadDir` / `localFirst` 七个键，
- *    其余键**一律丢弃**——渲染进程就算塞进来也写不进去。
+ *    `windowBounds` / `eq` / `lyricOverlay` / `downloadDir` / `localFirst` /
+ *    `playMode` / `update` / `lyric` 这十个键，其余键**一律丢弃**——
+ *    渲染进程就算塞进来也写不进去。
  * 2. 写盘**原子化**：先写 `<file>.tmp` 再 `rename` 覆盖，
  *    避免写到一半崩溃留下截断的偏好文件。
  * 3. 读盘**容错**：文件不存在 / 内容损坏 → 返回默认值，**不抛异常**
@@ -973,6 +981,31 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
         entry.expectedSigner = expectedSigner.trim()
       }
       if (Object.keys(entry).length > 0) out.update = entry
+    }
+  }
+
+  // 外部歌词源偏好（Task 32）：用哪个源 + 自定义 URL 模板。
+  // ⚠️ **源名只认四个合法值**，陌生值整段丢弃（不落盘）。
+  // ⚠️ 模板**只是地址**，不是凭证；但要限长、禁控制字符（`prefs.json` 是可编辑文件）。
+  //    模板的**最终合法性**（https / 占位符 / 无凭证）由主进程用的时候校验
+  //    （`electron/lyricProvider.ts` 的 `validateLyricTemplate`）——那里才有最终判断权。
+  if (record['lyric'] !== undefined) {
+    const lyric = asRecord(record['lyric'])
+    if (lyric) {
+      const entry: NonNullable<AppPrefs['lyric']> = {}
+      const source = lyric['source']
+      if (typeof source === 'string' && (LYRIC_SOURCES as readonly string[]).includes(source)) {
+        entry.source = source as LyricSource
+      }
+      const template = lyric['template']
+      if (
+        typeof template === 'string' &&
+        template.length <= 1024 &&
+        !/[\u0000-\u001f]/.test(template)
+      ) {
+        entry.template = template.trim()
+      }
+      if (Object.keys(entry).length > 0) out.lyric = entry
     }
   }
 
@@ -1296,6 +1329,64 @@ export function registerUpdateIpc(opts: UpdateIpcOptions): void {
     const name = readString(asRecord(arg)?.['name'])
     if (name === '') return { status: 'error', message: '安装参数不合法' }
     return await update.install(name, readUpdatePrefs().expectedSigner)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 外部歌词 IPC（Task 32）
+// ---------------------------------------------------------------------------
+
+/** `registerLyricIpc` 的参数。 */
+export interface LyricIpcOptions {
+  /** `ipcMain` 替身；缺省时惰性取 Electron 的 `ipcMain`。 */
+  ipcMain?: IpcMainEventsLike
+  /** 偏好存储（用哪个源 + 自定义模板都从这里读）。 */
+  prefs: PrefsStore
+  /** 歌词源提供器（真正的逻辑在 `electron/lyricProvider.ts`）。 */
+  provider: LyricProvider
+}
+
+/**
+ * 注册外部歌词 IPC（Task 32）。
+ *
+ * 通道：
+ * - `lyric:fetch`（`handle`）：查外部歌词。
+ *
+ * ⚠️ **渲染进程是不可信输入**：
+ * - 它只能报「歌名 / 歌手 / 专辑 / 时长」这四个**标量**，
+ *   **不能报地址** → 地址一律取**主进程自己读到的偏好**
+ *   （用户自己配的模板除外，且那个模板也要过 `validateLyricTemplate`）；
+ * - 时长是数字，其余是字符串 → 形状不对直接判为「参数不合法」，不外发。
+ *
+ * ⚠️ **渲染层不碰网络**：抓取全在主进程（走干净的 Chromium 分区栈，
+ *    **不附带 NAS 的 token / Cookie**）。
+ */
+export function registerLyricIpc(opts: LyricIpcOptions): void {
+  const ipcMain = opts.ipcMain ?? resolveIpcMainEvents()
+  if (!ipcMain || typeof ipcMain.handle !== 'function') {
+    throw new Error('无法注册歌词 IPC：当前进程没有可用的 ipcMain')
+  }
+  const prefs = opts.prefs
+  const provider = opts.provider
+
+  ipcMain.handle('lyric:fetch', async (_event, arg) => {
+    const record = asRecord(arg)
+    const title = readString(record?.['title']) ?? ''
+    if (title === '') {
+      return { status: 'error', message: '歌词查询参数不合法：缺少歌名' }
+    }
+    const artist = readString(record?.['artist']) ?? ''
+    const album = readString(record?.['album']) ?? ''
+    const duration = readNumberOrUndefined(record?.['duration']) ?? 0
+
+    // ⚠️ 源与模板**一律取主进程读到的偏好**，不用渲染层传来的。
+    const lyric = prefs.read().lyric ?? {}
+    const source = normalizeLyricSource(lyric.source)
+    // ⚠️ `off` = 用户明确不用外部 → **一次请求都不发**。
+    if (source === 'off') return { status: 'not-found' }
+
+    const query: ExternalLyricQuery = { title, artist, album, duration }
+    return await provider.fetchExternalLyric(source, lyric.template ?? '', query)
   })
 }
 

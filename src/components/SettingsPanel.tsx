@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 
 import type { CloseBehavior } from '../../shared/playerBridge'
 import type { FfmpegStatus } from '../../shared/ffmpeg'
+import type { LyricSource } from '../../shared/lyricProvider'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import { totalDownloadedBytes, useDownloadStore } from '../state/downloadStore'
 import { useUpdateStore } from '../state/updateStore'
@@ -121,6 +122,31 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   //
   // ⚠️ **渲染层只发请求**：检查 / 下载 / 启动全在主进程。
   //    「预期的代码签名者」没配 → **不许启动安装器**（界面提前说清楚）。
+  // --- 外部歌词源（Task 32）-------------------------------------------------
+  //
+  // ⚠️ **渲染层不碰网络**：这里只改偏好；抓取全在主进程。
+  // ⚠️ 源与模板都是**草稿**，点「保存」才写回（与「自动更新」那一组同一套交互）。
+  const lyricSource = useAppPrefsStore((state) => state.lyricSource)
+  const lyricTemplate = useAppPrefsStore((state) => state.lyricTemplate)
+  const setLyricSource = useAppPrefsStore((state) => state.setLyricSource)
+
+  /** 歌词源的**输入草稿**。 */
+  const [lyricSourceDraft, setLyricSourceDraft] = useState<LyricSource>(lyricSource)
+  /** 自定义模板的**输入草稿**。 */
+  const [lyricTemplateDraft, setLyricTemplateDraft] = useState(lyricTemplate)
+  useEffect(() => {
+    setLyricSourceDraft(lyricSource)
+    setLyricTemplateDraft(lyricTemplate)
+  }, [lyricSource, lyricTemplate])
+
+  const handleSaveLyricSource = useCallback(() => {
+    void setLyricSource(lyricSourceDraft, lyricTemplateDraft)
+  }, [lyricSourceDraft, lyricTemplateDraft, setLyricSource])
+
+  /** 歌词源已保存（没改动 → 「保存」按钮禁用）。 */
+  const lyricSourceSaved =
+    lyricSourceDraft === lyricSource && lyricTemplateDraft.trim() === lyricTemplate.trim()
+
   const updateBaseUrl = useUpdateStore((state) => state.baseUrl)
   const updateExpectedSigner = useUpdateStore((state) => state.expectedSigner)
   const baseUrlDraft = useUpdateStore((state) => state.baseUrlDraft)
@@ -204,6 +230,61 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           />
           <span>显示悬浮歌词（双行逐字，可拖动 / 点歌跳转）</span>
         </label>
+      </fieldset>
+
+      <fieldset className="fnm-settings__group">
+        <legend className="fnm-settings__legend">歌词来源</legend>
+        <p className="fnm-settings__hint">
+          NAS 自带的歌词**优先**；NAS 没有歌词时，才去外部歌词源补一份。
+        </p>
+        <label className="fnm-settings__option fnm-settings__option--stack">
+          <span>外部歌词源</span>
+          <select
+            className="fnm-settings__input"
+            name="fnm-lyric-source"
+            // ⚠️ **显式 aria-label**：`<label>` 包着 `<select>` 时，
+            //    可访问名会把**所有选项文字**也带进去 → 名字不稳定、没法精确选中
+            //    （与 T30 那个「复选框把曲目数带进名字」是同一个坑）。
+            aria-label="外部歌词源"
+            value={lyricSourceDraft}
+            onChange={(event) => setLyricSourceDraft(event.target.value as LyricSource)}
+          >
+            <option value="netease">网易云音乐（国内实测最快）</option>
+            <option value="lrclib">lrclib.net（开源、免费）</option>
+            <option value="custom">自定义歌词 API（URL 模板）</option>
+            <option value="off">不用外部（只用 NAS）</option>
+          </select>
+        </label>
+        <label className="fnm-settings__option fnm-settings__option--stack">
+          <span>自定义歌词 API 模板</span>
+          <input
+            type="text"
+            className="fnm-settings__input"
+            name="fnm-lyric-template"
+            // ⚠️ 显式 aria-label（同上：别让 `<label>` 的文字拼进名字）。
+            aria-label="自定义歌词 API 模板"
+            value={lyricTemplateDraft}
+            placeholder="https://example.com/lyric?title={title}&artist={artist}&album={album}&duration={duration}"
+            disabled={lyricSourceDraft !== 'custom'}
+            onChange={(event) => setLyricTemplateDraft(event.target.value)}
+          />
+        </label>
+        <div className="fnm-settings__row">
+          <button
+            type="button"
+            className="fnm-settings__button"
+            onClick={handleSaveLyricSource}
+            disabled={lyricSourceSaved}
+          >
+            {/* ⚠️ **名字必须专属**：面板里「自动更新」那一组也有一个「保存」→
+                两个同名按钮会让 `getByRole('button', { name: '保存' })` 命中多个。 */}
+            保存歌词源
+          </button>
+        </div>
+        <p className="fnm-settings__hint">
+          占位符：{'{title}'} {'{artist}'} {'{album}'} {'{duration}'}；
+          地址必须是 https（不许带账号密码）；返回的正文必须是**带时间戳的 LRC**。
+        </p>
       </fieldset>
 
       <fieldset className="fnm-settings__group">

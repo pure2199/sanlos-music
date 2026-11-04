@@ -50,6 +50,7 @@
 
 import type { EqPrefsPayload } from './eqPrefs'
 import type { FfmpegFallbackResult, FfmpegStatus } from './ffmpeg'
+import type { ExternalLyricQuery, ExternalLyricResult, LyricPrefs } from './lyricProvider'
 import type { PlayMode, ThemeName } from './types'
 import type {
   UpdateCheckResult,
@@ -262,6 +263,15 @@ export interface AppPrefs {
    *    与 `session.bin`（凭证）**无关**。
    */
   update?: UpdatePrefs
+  /**
+   * 外部歌词源的偏好（Task 32）。
+   *
+   * ⚠️ **非敏感**：只是「用哪个源」与「自定义 URL 模板」，都是公开信息，
+   *    与 `session.bin`（凭证）**无关**。
+   * ⚠️ **只有合法值才落盘**（主进程白名单）：`prefs.json` 是用户可编辑的文件，
+   *    写进去的陌生值一律丢弃。
+   */
+  lyric?: LyricPrefs
 }
 
 // ---------------------------------------------------------------------------
@@ -454,4 +464,18 @@ export interface PlayerBridge {
    * @param name 已下载的**文件名**（主进程拼到下载目录下面，并复查签名）。
    */
   installUpdate(name: string): Promise<UpdateInstallResult>
+  // -------------------------------------------------------------------------
+  // 外部歌词（Task 32）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **渲染层只发请求、只收结果**：外部歌词的**抓取全在主进程**——
+  //    渲染层既不碰网络，也**不能指定要抓哪个地址**（只报歌名 / 歌手 / 专辑 / 时长）。
+  //
+  // ⚠️ 这个方法**不返回任何凭证**（只回 LRC 文本）。
+  /**
+   * 查外部歌词（`lyric:fetch`）：NAS 没有歌词时**补一份**。
+   *
+   * @param query 歌名 / 歌手 / 专辑 / 时长（**只当匹配线索**，不是地址）。
+   */
+  fetchExternalLyric(query: ExternalLyricQuery): Promise<ExternalLyricResult>
 }
