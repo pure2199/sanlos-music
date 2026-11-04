@@ -33,6 +33,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { assertFreshBuild } from './lib/fresh-build.mjs'
+
 const HERE = dirname(fileURLToPath(import.meta.url))
 const APP_ROOT = resolve(HERE, '..')
 
@@ -49,6 +51,13 @@ if (!FN_USER || !FN_PASS || !FN_SERVER) {
   console.error('用法：FN_USER=... FN_PASS=... [FN_ID=... | FN_SERVER=...] node tools/fn-live-check.mjs')
   process.exit(2)
 }
+
+// ⚠️ **构建新鲜度闸门（T20 引入）**：
+//    活体验检跑的是**磁盘上那份 `dist/`**，不是源码。
+//    T20 曾因为 `dist/` 陈旧，把「拖动定位失败」误判成产品缺陷——
+//    实际上那次跑的根本不是当前代码。产物过期就在这里**硬失败**，
+//    绝不允许「拿旧代码的结论当现在的结论」。
+assertFreshBuild('真机活体验检')
 
 /** 脱敏替换表：敏感值一律换成占位符后再进报告。 */
 const REDACTIONS = [
@@ -347,6 +356,153 @@ try {
       throw new Error(`进度没有推进（仍停在 ${position || '（无）'}）——音频没有真正播起来`)
     }
     return `曲目「${title}」→ 播放条「${barTitle}」｜进度 ${position}`
+  })
+
+  // -- 5a. 拖动进度条定位（Range 分段请求）-----------------------------------
+  //
+  // ⚠️ 这条链路**此前整条都没有被任何测试覆盖过**：
+  //    用户拖进度条 → UI 预览 → 松手提交 → 引擎写 `currentTime`
+  //      → Chromium 对 `fnm://` 发起 **Range 分段请求** → 代理透传 → NAS 回 206。
+  //
+  // ⚠️ **真机独有的断言**是最后那一条「**进度从新位置继续推进**」：
+  //    mock 做不到（mock 的 WAV 从中间字节开始返回时没有文件头，Chromium 的 WAV
+  //    解码器解不了），而真机 NAS **确实支持 Range**（T20 探针实测：206 +
+  //    `content-range`，且**重叠区间字节完全一致**）→ 这条断言是真机才跑得起来的。
+  //
+  // ⚠️ 只往前挪 5 秒：真机走中继，带宽有限（~230 KB/s），挪太远要等很久。
+  await step('拖动进度条定位（Range 分段 → 媒体真的跳到新位置并继续播）', async () => {
+    // 劫持 `currentTime` 的 setter（引擎的 <audio> **从不挂进 DOM**，只能从原型上观测）。
+    // 同时劫持 `src`：用它判断**媒体元素到底存不存在**（引擎懒创建，没建就没有 element）。
+    await window.evaluate(() => {
+      window.__seekWrites = []
+      window.__mediaSrcs = []
+      // ⚠️ **读**也劫持：引擎每帧读一次 `element.currentTime`（`tick` 里）。
+      //    记录最后一次读到的值 → 能**直接**看出「媒体元素本身在不在推进」。
+      //    ⚠️ 这很重要：引擎的进度**也可能是时钟外推**出来的
+      //    （`tick` 里 `mediaTime > 0` 才用媒体值，否则用 `position + 经过的秒数`）
+      //    → **只看界面上的进度条，证明不了音频真的在响**（T18-6 同一类假绿）。
+      window.__ctReads = { last: null, count: 0 }
+      const proto = HTMLMediaElement.prototype
+      const desc = Object.getOwnPropertyDescriptor(proto, 'currentTime')
+      window.__hasCurrentTimeAccessor = Boolean(desc && desc.get && desc.set)
+      if (desc && desc.get && desc.set) {
+        Object.defineProperty(proto, 'currentTime', {
+          configurable: true,
+          get() {
+            const value = desc.get.call(this)
+            window.__ctReads.last = Number(value)
+            window.__ctReads.count += 1
+            return value
+          },
+          set(value) {
+            window.__seekWrites.push(Number(value))
+            desc.set.call(this, value)
+          },
+        })
+      }
+      const srcDesc = Object.getOwnPropertyDescriptor(proto, 'src')
+      if (srcDesc && srcDesc.get && srcDesc.set) {
+        Object.defineProperty(proto, 'src', {
+          configurable: true,
+          get() {
+            return srcDesc.get.call(this)
+          },
+          set(value) {
+            window.__mediaSrcs.push(String(value))
+            srcDesc.set.call(this, value)
+          },
+        })
+      }
+    })
+
+    /** 收集这一步的现场（失败时一并报出来，免得再猜一轮）。 */
+    const diagnose = async () =>
+      await window.evaluate(() => {
+        const slider = document.querySelector('input[aria-label="播放进度"]')
+        return {
+          writes: window.__seekWrites ?? [],
+          hasAccessor: window.__hasCurrentTimeAccessor === true,
+          mediaSrcs: window.__mediaSrcs ?? [],
+          ctReads: window.__ctReads ?? null,
+          sliderCount: document.querySelectorAll('input[aria-label="播放进度"]').length,
+          sliderValue: slider ? slider.value : null,
+          sliderMax: slider ? slider.max : null,
+          sliderDisabled: slider ? slider.disabled : null,
+          position: document.querySelector('[data-testid="player-position"]')?.textContent ?? '',
+        }
+      })
+
+    const slider = window.locator('input[aria-label="播放进度"]')
+    await slider.waitFor({ timeout: 20000 })
+    // 等媒体元素报出时长（进度条才可用）。
+    const enableDeadline = Date.now() + 30000
+    while (Date.now() < enableDeadline) {
+      if ((await slider.getAttribute('disabled')) === null) break
+      await window.waitForTimeout(500)
+    }
+    const max = Number(await slider.getAttribute('max'))
+    if (!Number.isFinite(max) || max <= 0) throw new Error('进度条没有可用时长（媒体没报出 duration）')
+
+    const before = toSeconds(await textOf(window, '[data-testid="player-position"]'))
+
+    // ⚠️ 先确认「**媒体元素本身**」在推进——界面上的进度**也可能是时钟外推**出来的
+    //    （引擎的 `tick` 在 `element.currentTime` 为 0 时用 `position + 经过的秒数`）。
+    //    只看进度条证明不了音频真的在响（T18-6 同一类假绿）。
+    const ctSample = async () => await window.evaluate(() => window.__ctReads?.last ?? null)
+    const ctA = await ctSample()
+    await window.waitForTimeout(2500)
+    const ctB = await ctSample()
+
+    const target = Math.min(before + 5, max - 1)
+    if (target <= 1) throw new Error(`曲目太短（${max}s），没法验拖动定位`)
+
+    // ⚠️ 必须用**原生 setter**：React 给 `<input>` 装的 value 追踪器会把
+    //    `el.value = x` 判成「值没变」→ onChange 不触发 → 这次拖动是假的。
+    await slider.evaluate((el, value) => {
+      const input = el
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      setter.call(input, String(value))
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    }, target)
+    await slider.dispatchEvent('mouseup')
+
+    // -- 断言 1：媒体元素真的被 seek 到目标位置（不是只动了滑块）----------
+    const writeDeadline = Date.now() + 10000
+    let writes = []
+    while (Date.now() < writeDeadline) {
+      writes = await window.evaluate(() => window.__seekWrites ?? [])
+      if (writes.some((v) => Math.abs(v - target) <= 0.5)) break
+      await window.waitForTimeout(300)
+    }
+    if (!writes.some((v) => Math.abs(v - target) <= 0.5)) {
+      const d = await diagnose()
+      throw new Error(
+        `媒体元素没有被 seek 到 ${target}s｜媒体 currentTime 采样 ${ctA}→${ctB}` +
+          `｜现场：${JSON.stringify(d)}`,
+      )
+    }
+
+    // -- 断言 2（真机独有）：**从新位置继续播** -----------------------------
+    //    需要上游支持 Range **且**格式可随机访问；否则 Chromium 会从头播，
+    //    进度会退回 0 附近 → 这里就会红。
+    const posDeadline = Date.now() + 60000
+    let after = 0
+    while (Date.now() < posDeadline) {
+      await window.waitForTimeout(1000)
+      after = toSeconds(await textOf(window, '[data-testid="player-position"]'))
+      if (after >= target - 1) break
+    }
+    if (after < target - 1) {
+      throw new Error(
+        `seek 之后进度没有从新位置继续（目标 ${target}s，实际停在 ${after}s）` +
+          `——上游可能不支持 Range，或该格式不可随机访问`,
+      )
+    }
+    return (
+      `从 ${before}s 拖到 ${target}s｜媒体写入 ${JSON.stringify(writes)}` +
+      `｜媒体 currentTime ${ctA}→${ctB}｜进度继续到 ${after}s`
+    )
   })
 
   // -- 5b. 本地播放（下载到本地 → 走 fnml://）---------------------------------

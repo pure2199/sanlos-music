@@ -657,6 +657,142 @@ describe('mock server 搜索、歌词与音频流', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Range / 206（T20：拖动进度条定位）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 为什么补这一组（审计 P3-9）：
+//    mock 原先**不实现** Range（注释写着「留好扩展位」）→ 「拖动定位」这条链路
+//    在集成层**根本跑不起来**：Chromium 发了 Range，mock 回 200 整段，
+//    客户端拿到的 206 语义永远没被验证过。
+//
+// ⚠️ 这组用例断言的是**字节层面**的事实（切片真的对），
+//    **不是**「浏览器能播」——WAV 从中间字节开始返回时**没有文件头**，
+//    Chromium 的 WAV 解码器解不了（见 e2e/smoke.spec.ts 的分层说明）。
+//    「浏览器层面」的验证由 E2E 用 `currentTime` setter 劫持来做。
+// ---------------------------------------------------------------------------
+
+describe('mock server 的 Range / 206（拖动定位的上游前提）', () => {
+  /** 取一次整段音频（作为切片比对的基准）。 */
+  async function fetchWhole(s: MockServer, token: string): Promise<Buffer> {
+    const r = await fetch(`${s.url}${API}/track/stream?guid=t1`, {
+      headers: { cookie: `music-token=${token}` },
+    })
+    return Buffer.from(await r.arrayBuffer())
+  }
+
+  /** 发一个带 Range 的请求，返回状态码 / 响应头 / body。 */
+  async function fetchRange(
+    s: MockServer,
+    token: string,
+    range: string,
+  ): Promise<{ status: number; headers: Headers; body: Buffer }> {
+    const r = await fetch(`${s.url}${API}/track/stream?guid=t1`, {
+      headers: { cookie: `music-token=${token}`, range },
+    })
+    return { status: r.status, headers: r.headers, body: Buffer.from(await r.arrayBuffer()) }
+  }
+
+  it('没有 Range 头 → 200 整段，但必须带 accept-ranges: bytes', async () => {
+    // ⚠️ 鉴别力：少了 `accept-ranges: bytes`，客户端就**不知道**这个资源可以分段请求
+    //    → 拖动定位在链路上根本无从谈起。
+    const s = createMockServer()
+    const token = await login(s)
+
+    const r = await fetch(`${s.url}${API}/track/stream?guid=t1`, {
+      headers: { cookie: `music-token=${token}` },
+    })
+    expect(r.status).toBe(200)
+    expect(r.headers.get('accept-ranges')).toBe('bytes')
+
+    const buf = Buffer.from(await r.arrayBuffer())
+    expect(buf.length).toBe(Number(r.headers.get('content-length')))
+    s.close()
+  })
+
+  it('Range: bytes=0-99 → 206，content-range 与字节切片都对', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const whole = await fetchWhole(s, token)
+
+    const r = await fetchRange(s, token, 'bytes=0-99')
+    expect(r.status).toBe(206)
+    expect(r.headers.get('accept-ranges')).toBe('bytes')
+    expect(r.headers.get('content-range')).toBe(`bytes 0-99/${whole.length}`)
+    expect(r.headers.get('content-length')).toBe('100')
+    expect(r.body.length).toBe(100)
+    // ⚠️ **字节真的对**：切片必须与整段的前 100 字节逐字节一致。
+    expect(r.body.equals(whole.subarray(0, 100))).toBe(true)
+    s.close()
+  })
+
+  it('Range: bytes=100- → 206，起点真的是第 100 字节', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const whole = await fetchWhole(s, token)
+
+    const r = await fetchRange(s, token, 'bytes=100-')
+    expect(r.status).toBe(206)
+    expect(r.headers.get('content-range')).toBe(`bytes 100-${whole.length - 1}/${whole.length}`)
+    expect(r.body.length).toBe(whole.length - 100)
+    expect(r.body.equals(whole.subarray(100))).toBe(true)
+    s.close()
+  })
+
+  it('Range: bytes=-100（后缀形式）→ 206，取的是**最后** 100 字节', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const whole = await fetchWhole(s, token)
+
+    const r = await fetchRange(s, token, 'bytes=-100')
+    expect(r.status).toBe(206)
+    expect(r.headers.get('content-range')).toBe(
+      `bytes ${whole.length - 100}-${whole.length - 1}/${whole.length}`,
+    )
+    expect(r.body.equals(whole.subarray(whole.length - 100))).toBe(true)
+    s.close()
+  })
+
+  it('Range 的 end 超出总长 → 206，end 被钳到末尾（不是 416）', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const whole = await fetchWhole(s, token)
+
+    const r = await fetchRange(s, token, `bytes=0-${whole.length + 100000}`)
+    expect(r.status).toBe(206)
+    expect(r.headers.get('content-range')).toBe(`bytes 0-${whole.length - 1}/${whole.length}`)
+    expect(r.body.equals(whole)).toBe(true)
+    s.close()
+  })
+
+  it('Range 起点越界 → 416 + content-range: bytes */<总长>', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const whole = await fetchWhole(s, token)
+
+    const r = await fetchRange(s, token, `bytes=${whole.length + 10}-`)
+    expect(r.status).toBe(416)
+    expect(r.headers.get('content-range')).toBe(`bytes */${whole.length}`)
+    expect(r.body.length).toBe(0)
+    s.close()
+  })
+
+  it('非法 Range（多区间 / 空区间）→ 416', async () => {
+    const s = createMockServer()
+    const token = await login(s)
+    const whole = await fetchWhole(s, token)
+
+    // 多区间本 mock 不实现（multipart/byteranges）。
+    const multi = await fetchRange(s, token, 'bytes=0-1,5-6')
+    expect(multi.status).toBe(416)
+    expect(multi.headers.get('content-range')).toBe(`bytes */${whole.length}`)
+
+    const empty = await fetchRange(s, token, 'bytes=-')
+    expect(empty.status).toBe(416)
+    s.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 播放历史（Task 6 补齐的端点）
 // ---------------------------------------------------------------------------
 

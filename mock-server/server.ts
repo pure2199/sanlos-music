@@ -29,7 +29,7 @@
 // 但**条目字段形状未实测**——mock 返回的是占位形状（`guid` + `playTime` + 内嵌 `track`），
 // Task 16 需按真实响应校准。
 
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import {
   API_PREFIX,
@@ -164,6 +164,13 @@ interface RouteCtx {
   body: Record<string, unknown>
   /** 本次请求携带的 token（已通过校验）。 */
   token: string
+  /**
+   * 本次请求的**原始请求头**（小写键名）。
+   *
+   * ⚠️ 加它是为了让 `track/stream` 能读 `Range` 头（拖动定位靠分段请求）。
+   *    其余端点不读它。
+   */
+  headers: IncomingHttpHeaders
 }
 
 /** 路由处理函数。 */
@@ -320,13 +327,23 @@ function sendJson(res: ServerResponse, payload: OkEnvelope<unknown> | ErrEnvelop
 }
 
 /**
- * 运行时合成 WAV（16-bit PCM、单声道、8000 Hz、0.5 秒 440Hz 正弦波）。
+ * 运行时合成 WAV（16-bit PCM、单声道、8000 Hz、**60 秒** 440Hz 正弦波）。
  *
  * WAV 头手工拼接（44 字节 canonical RIFF/WAVE + PCM data chunk），不引入第三方依赖。
+ *
+ * ⚠️ **时长为什么从 0.5 秒改成 60 秒**（T20）：
+ *    曲库里的歌标称 165~240 秒，而真实音频只有 0.5 秒 → 媒体元素的 `durationchange`
+ *    会把时长改成 0.5 秒 → 进度条的最大值也只有 0.5 秒 → **「拖动进度条定位」
+ *    这条链路根本没机会被测**（拖一下歌就结束了）。
+ *    60 秒足够把进度条拖到中段并观察定位结果。
+ *
+ * ⚠️ **结果要缓存**：60 秒 = 48 万个采样点，每次请求都重新合成会白白烧 CPU；
+ *    缓存后只算一次，且 Range 切片有**稳定的字节基准**（测试要靠它比对切片是否正确）。
  */
 function buildWav(): Buffer {
+  if (cachedWav !== null) return cachedWav
   const sampleRate = 8000
-  const seconds = 0.5
+  const seconds = 60
   const frequency = 440
   const samples = Math.round(sampleRate * seconds)
   const dataSize = samples * 2
@@ -351,7 +368,54 @@ function buildWav(): Buffer {
     // 幅度取 0.5，避免削顶失真。
     buf.writeInt16LE(Math.round(value * 32767 * 0.5), 44 + i * 2)
   }
+  cachedWav = buf
   return buf
+}
+
+/**
+ * 合成好的 WAV（**懒加载一次，之后复用**）。
+ *
+ * ⚠️ `null` = 还没合成过（模块级缓存；mock 的音频内容是固定的，不随状态变化）。
+ */
+let cachedWav: Buffer | null = null
+
+/**
+ * 解析 `Range: bytes=…` 请求头。
+ *
+ * ⚠️ **只支持单区间**（`bytes=N-M` / `bytes=N-` / `bytes=-N`）：
+ *    多区间（`bytes=0-1,5-6`）是 multipart/byteranges，本 mock 不实现 → 当作不满足。
+ *
+ * @param header Range 头的原始值（`undefined` = 没有这个头）。
+ * @param size 资源总字节数。
+ * @returns
+ * - `null`：没有 Range 头 → 按整段返回（HTTP 200）。
+ * - `{ start, end }`：合法的**闭区间**（`end` 已钳到 `size - 1`）。
+ * - `'unsatisfiable'`：范围不合法 / 起点越界 → 应答 HTTP 416。
+ */
+function parseByteRange(
+  header: string | undefined,
+  size: number,
+): { start: number; end: number } | 'unsatisfiable' | null {
+  if (header === undefined) return null
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (!match) return 'unsatisfiable'
+  const rawStart = match[1] ?? ''
+  const rawEnd = match[2] ?? ''
+  if (rawStart === '' && rawEnd === '') return 'unsatisfiable'
+
+  // 后缀形式 `bytes=-N`：最后 N 字节。
+  if (rawStart === '') {
+    const suffix = Number(rawEnd)
+    if (!Number.isFinite(suffix) || suffix <= 0) return 'unsatisfiable'
+    return { start: Math.max(0, size - suffix), end: size - 1 }
+  }
+
+  const start = Number(rawStart)
+  if (!Number.isFinite(start) || start >= size) return 'unsatisfiable'
+  if (rawEnd === '') return { start, end: size - 1 }
+  const end = Number(rawEnd)
+  if (!Number.isFinite(end) || end < start) return 'unsatisfiable'
+  return { start, end: Math.min(end, size - 1) }
 }
 
 // ---------------------------------------------------------------------------
@@ -526,20 +590,45 @@ export function createMockServer(): MockServer {
     sendJson(res, ok(paginate(tracks, query)))
   })
 
-  getRoutes.set(`${API_BASE}/track/stream`, ({ res, query }) => {
+  getRoutes.set(`${API_BASE}/track/stream`, ({ res, query, headers }) => {
     const guid = query.get('guid') ?? ''
     if (!songByGuid(guid)) {
       sendJson(res, err(1, '歌曲不存在'))
       return
     }
-    // 本任务不实现 Range / 206（真实 NAS 支持，但属于播放任务的范围）；
-    // 这里只返回整段 WAV，留好扩展位：将来加 Range 只需在此分支前处理 range 头。
     const wav = buildWav()
-    res.writeHead(200, {
+
+    // ⚠️ **Range / 206**（T20）：拖动进度条定位靠分段请求。
+    //    没有 Range 头 → 整段 200（但**必须**带 `accept-ranges: bytes`，
+    //    否则客户端不知道这个资源可以分段请求）。
+    const range = parseByteRange(headers.range, wav.length)
+    if (range === 'unsatisfiable') {
+      res.writeHead(416, {
+        'content-type': 'audio/wav',
+        'content-length': '0',
+        'accept-ranges': 'bytes',
+        'content-range': `bytes */${wav.length}`,
+      })
+      res.end()
+      return
+    }
+    if (range === null) {
+      res.writeHead(200, {
+        'content-type': 'audio/wav',
+        'content-length': String(wav.length),
+        'accept-ranges': 'bytes',
+      })
+      res.end(wav)
+      return
+    }
+    const slice = wav.subarray(range.start, range.end + 1)
+    res.writeHead(206, {
       'content-type': 'audio/wav',
-      'content-length': String(wav.length),
+      'content-length': String(slice.length),
+      'accept-ranges': 'bytes',
+      'content-range': `bytes ${range.start}-${range.end}/${wav.length}`,
     })
-    res.end(wav)
+    res.end(slice)
   })
 
   getRoutes.set(`${API_BASE}/favorite-track/list`, ({ res, query }) => {
@@ -813,7 +902,7 @@ export function createMockServer(): MockServer {
       sendJson(res, err(405, '请求方法不支持'))
       return
     }
-    handler({ res, query, body, token })
+    handler({ res, query, body, token, headers: req.headers })
   }
 
   const requestHandler = (req: IncomingMessage, res: ServerResponse): void => {

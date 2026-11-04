@@ -267,5 +267,139 @@ api-client 原有两条把 99999 当**普通业务码**断言「msg 原样带出
 - 把 App 改回「先 `await logout()` 再切视图」→ 「立刻回登录页」那条**立刻红**；
 - 去掉 LoginPage 的 `sessionLost` 守卫 → 「不调 `restore()`」那条**立刻红**（界面显示成「已连接」）。
 
+---
+
+## 九、T20：拖动进度条定位（Range / 206）—— 从「假设」换成「实测」
+
+### 背景：这条链路**整条都没被任何测试覆盖过**
+
+「拖动进度条定位」由三段组成：
+
+```
+渲染进程（用户拖进度条）
+  → `fnm://` 代理（透传 `Range` 头、原样带回 `206` / `content-range`）
+    → NAS 的 `GET /music/api/v1/track/stream?guid=…`
+```
+
+逐段核对测试覆盖情况（改动前的真实状态）：
+
+| 段 | 状态 |
+|---|---|
+| UI 拖动 → 预览 → 松手提交 | ✅ 有实现、有单测（`PlayerBar.tsx` 的 `pendingSeekRef` 幂等守卫） |
+| `store.seek` → 引擎 `seek` → 写 `currentTime` | ✅ 有单测 |
+| 代理透传 `Range` / 原样带回 `206` | ✅ 有单测，但上游是**手搓的假 `Response`** |
+| **端到端（真打过一个会分段的服务器）** | ❌ **零覆盖** |
+| **浏览器里真的拖一下** | ❌ **零覆盖** |
+| **上游到底支不支持 Range** | ⚠️ **假设**（审计 P3-9 写的是「真实 NAS 支持」，无实测记录支撑） |
+
+审计 P3-9 记的是「mock `track/stream` 不支持 Range/206」——那只是 mock 的缺陷，
+**掩盖了更大的问题：整个「拖动定位」在集成层与真机层都没验过**。
+而 T18 的教训正是「单测绿 ≠ 真能用」（当时只看播放条标题，就漏掉了「媒体根本没播起来」）。
+
+### 修法：分三层，各用各的手段（**不混为一谈**）
+
+| 层 | 手段 | 验什么 | 为什么不能挪到别的层 |
+|---|---|---|---|
+| ① HTTP 层 | mock 支持 `206`；Node 直打 | `Range` 头透传、`206` 原样带回、**字节切片真的对** | ⚠️ WAV 从中间字节开始返回时**没有文件头**，Chromium 的 WAV 解码器**解不了** → 浏览器层验不了字节正确性 |
+| ② 客户端契约层 | E2E 拖进度条 + 劫持 `HTMLMediaElement.prototype.currentTime` 的 setter | 「用户拖了 → 媒体元素**真的**被 seek 到目标位置」 | 不断言「能否从新位置继续播」——那是**上游能力**，不该由 mock 决定 |
+| ③ 上游能力层 | 真机探针 `tools/fn-range-probe.mjs` | **NAS 到底支不支持 Range、分段字节准不准** | mock 是假 NAS，**回答不了**上游能力 |
+
+### 改动
+
+**`mock-server/server.ts`**
+
+- `track/stream` 支持 `Range`：`bytes=N-M` / `bytes=N-` / `bytes=-N`（后缀）→ **`206`** +
+  `content-range: bytes N-M/总长` + `accept-ranges: bytes`；起点越界 → **`416`** + `content-range: bytes */总长`；
+  无 `Range` → **`200`** 整段，但**必须**带 `accept-ranges: bytes`（否则客户端不知道这资源可分段）。
+- WAV 音频从 **0.5 秒加长到 60 秒**并**缓存**：曲库里的歌标称 165~240 秒、而真实音频只有 0.5 秒 →
+  媒体元素的 `durationchange` 会把时长改成 0.5 秒 → 进度条最大值只有 0.5 秒 → **「拖动定位」根本没机会被测**。
+- `RouteCtx` 增加 `headers`（原本拿不到请求头）。
+
+**测试**
+
+| 文件 | 内容 |
+|---|---|
+| `test/mock-server.test.ts`（**+6 条**） | 无 `Range` → 200 + `accept-ranges`；`bytes=0-99` → 206 + `content-range` + **字节等于整段的前 100 字节**；`bytes=100-` → 起点真的是第 100 字节；`bytes=-100` → 取的是**最后** 100 字节；end 越界 → 钳到末尾（不是 416）；起点越界 → 416；多区间 / 空区间 → 416 |
+| `test/proxy-range.test.ts`（**新，3 条**） | **代理 × 真实 mock 的端到端**：`fnm://` 带 `Range` → 上游真回 206 → 状态码 / `content-range` / `accept-ranges` 原样带回 → **body 字节等于整段音频对应的切片**（且**确实不是**整段） |
+| `e2e/smoke.spec.ts`（**+1 条**） | 拖进度条 → 劫持 `currentTime` 的 setter → 断言**媒体元素真的被 seek 到目标位置**（不是只动滑块）；且那个写入值必须 **> 1 秒**（否则「只是重播了一下」也能满足） |
+| `tools/fn-live-check.mjs`（**+1 步**，14 → 15） | 真机拖动定位：断言 ① 媒体被 seek 到目标位置；断言 ② **进度从新位置继续推进**（真机独有：mock 做不到）。**另加构建新鲜度闸门**（见下） |
+| `tools/lib/fresh-build.mjs`（**新**） | 构建新鲜度闸门：产物（`dist/assets/main-*.js` + `dist-electron/main.js`）比源码（`src/` / `shared/` / `electron/`）旧就**硬失败**（退出码 3） |
+| `tools/fn-seek-diag.mjs` / `tools/fn-seek-diag2.mjs`（**新**） | 真机 seek 链路诊断：v1 = 用户路径四个实验；v2 = 读 **React fiber** 的 hook 状态 + 直接调用 fiber 上的 React handler（把「事件没送到」与「handler 跑了但没送达」彻底分开） |
+| `tools/fn-range-probe.mjs`（**新**） | 上游能力探针：NAS 支不支持 `Range`、分段字节准不准、越界行为 |
+
+### 真机实测结论（`tools/fn-range-probe.mjs`，T20 新增）
+
+对真实 NAS（中继 `https://<FN-ID>.fnos.net`）实测 `GET /music/api/v1/track/stream?guid=…`：
+
+| 探针 | 实测结果 |
+|---|---|
+| 不带 `Range` | `200`｜`content-type: audio/mpeg`｜`accept-ranges: bytes`｜`content-length: 1981511` |
+| `Range: bytes=0-1023` | **`206`**｜`content-range: bytes 0-1023/1981511`｜收到 1024 字节 |
+| `Range: bytes=512-1535` | **`206`**｜`content-range: bytes 512-1535/1981511`｜收到 1024 字节 |
+| **重叠区间字节比对**（审计与历史注释都**没有**过的判据） | `bytes=512-1535` 的前 512 字节 **==** `bytes=0-1023` 的后 512 字节 → **完全一致** ✓ |
+| 起点越界（`bytes=1981521-`） | **`416`**｜`content-range: bytes */1981511` |
+
+**结论**：✅ **NAS 支持 Range，且分段字节精确** —— 拖动定位的上游前提**成立**。
+⇒ 客户端的 `fnm://` 代理透传 `Range` + 原样带回 `206`，拖动定位就能真正生效。
+⇒ 顺带把 mock 的 `416` 语义**校准成与真机一致**（`content-range: bytes */总长`）。
+
+⚠️ 此前 `src/api/history.ts` 的注释里有一行「实测：GET `/track/stream` 拿到 **206** 音频」——
+只能证明「**拿到过 206**」，证明不了「**分段的字节是精确的**」；本轮补的就是后者。
+
+### 真机拖动定位：踩到并修掉一个**流程缺陷**（**不是**产品缺陷）
+
+第一次跑真机 15 步时，新增的「拖动进度条定位」那一步**红了**：
+媒体元素的 `currentTime` **一次都没被写过**（劫持 `HTMLMediaElement.prototype.currentTime`
+的 setter 记录写入值 → 写入列表为空），而界面上的预览值会动、也会复位。
+
+排查用 `tools/fn-seek-diag.mjs`（用户路径四个实验）→ `tools/fn-seek-diag2.mjs`（读 React fiber），逐环排除：
+
+| 环 | 怎么验的 | 结果 |
+|---|---|---|
+| ① `onChange` 跑了吗？ | 从 **React fiber** 里读 `PlayerBar` 的 hook 状态（`pendingSeekRef` 是 `useRef` → `memoizedState.current`） | ✅ 跑了：派发 `input/change` 后 `pendingSeekRef.current = 52.5` |
+| ② `commitSeek` 跑了吗？ | 同上 | ✅ 跑了：派发 `mouseup` 后 `pendingSeekRef.current = null`、预览值复位 |
+| ③ 中间抛异常了吗？ | 全程捕获渲染进程的 `pageerror` / `console:error` | ✅ **零**异常（只有 1200+ 条封面 scheme 的 warning） |
+| ④ 组件被重新挂载了吗？ | 给滑块 DOM 节点打标记，看标记还在不在 | ✅ 节点没换 ⇒ 不是重挂载 |
+| ⑤ 那到底是谁的问题？ | **去看产物**：`dist/assets/main-*.js` 里压缩后的 `commitSeek` | ❌ **没有** `getState().seek(...)` |
+
+**真因**：真机跑的是**一份陈旧的 `dist/`** —— 那份产物里压缩后的 `commitSeek` 只有
+`_.current !== null && (_.current = null, x(null))`（清预览值），**没有** `store.getState().seek(pending)`。
+⇒ 「松手」永远只复位预览、**从不真的定位**，而且**全程没有任何报错**。
+
+**为什么 E2E 是过的**：`npm run e2e` = `npm run build && playwright test` —— 它**每次都重建** `dist/`；
+而真机活体验检**直接吃磁盘上那份 `dist/`**。
+⇒ 同一个「拖动定位」，**E2E 测的是新代码、真机测的是旧代码**，两边结论天然对不上。
+
+**修法（两条）**：
+
+1. **重建产物**：`npm run build` 之后重跑真机 → 媒体的 `currentTime` 真的被写成目标值
+   （探针实测 `writes: [52.5]`）并从新位置继续播，**零异常**；
+2. **加闸门**：新增 `tools/lib/fresh-build.mjs`，真机脚本（`fn-live-check.mjs`、`fn-seek-diag2.mjs`）
+   启动前一律检查「产物是否比源码新」，**旧了就以退出码 3 硬失败** ——
+   宁可误报（多跑一次 build），不可漏报（静默测旧代码，正是 T20 踩的坑）。
+
+⚠️ **这条教训比功能本身更值钱**：今后凡是「真机红 / E2E 绿」的矛盾，**先查产物是不是新的**。
+
+### 变异自证（本轮实际跑过，全部红过再改回）
+
+| 变异 | 结果 |
+|---|---|
+| mock 的 `track/stream` 不实现 `Range`（总是 200 整段） | `test/mock-server.test.ts` + `test/proxy-range.test.ts` **8 条立刻红** |
+| 代理的 `FORWARD_REQUEST_HEADERS` 去掉 `range` | `test/proxy-range.test.ts` + `test/proxy.test.ts` **5 条立刻红** |
+| `PlayerBar` 的 `commitSeek` 不再调 `store.getState().seek()` | E2E 的「拖动进度条」那条**立刻红**（滑块动了，媒体没被 seek） |
+
+### 遗留 / 待办
+
+- **真机端到端拖动定位**已进 `fn-live-check`（15 步），但它依赖「首个曲目」——真机曲库顺序会变，
+  若哪天第一首换成**不可随机访问**的格式，该步会红（那是**上游事实**，不是回归）。
+- mock 的音频是 WAV（不可随机访问）→ **E2E 永远只能验客户端契约**，验不了「从新位置继续播」；
+  这条只有真机能验（已进活体验检）。
+- 探针脚本 `tools/fn-range-probe.mjs` 只读，不写任何数据；凭证只从环境变量读，不打印、不落盘。
+- ⚠️ **真机脚本现在会因「产物旧」而拒绝运行**（退出码 3）——这是**故意**的。
+  跑真机前先 `npm run build`。
+- ⚠️ 封面在真机上刷出上千条 `MediaImage src can only be of http/https/data/blob scheme: fnm://…`
+  warning（Electron 的 `<img>` 不接受自定义 scheme）。**不影响播放**，但封面实际没显示出来 ——
+  这是**另一个缺陷**，本轮未纳入范围，留待后续任务。
+
 
 
