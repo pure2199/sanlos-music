@@ -185,6 +185,13 @@ function fakeBridge(): {
     installUpdate: async () => ({ status: 'error', message: '未实现' }),
     // 外部歌词（Task 32）：本用例不碰它，给个空实现即可。
     fetchExternalLyric: async () => ({ status: 'not-found' }),
+    // 本地曲目（T38）：本用例不碰它，给个空实现即可。
+    listLocalTracks: async () => [],
+    pickLocalFiles: async () => [],
+    pickLocalFolder: async () => '',
+    addLocalTracks: async () => [],
+    addLocalFolder: async () => [],
+    removeLocalTrack: async () => [],
   }
   return {
     bridge,

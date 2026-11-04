@@ -33,7 +33,8 @@ import type {
   DownloadTask,
   PlayerBridge,
 } from '../../shared/playerBridge'
-import { localMediaUrl } from '../../shared/localMedia'
+import { localMediaUrl, isLocalTrackId } from '../../shared/localMedia'
+import { parseTrackFileName } from '../../shared/localMeta'
 import { streamUrl } from '../player/format'
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。 */
@@ -301,14 +302,66 @@ export const useDownloadStore = create<DownloadStore>()((set, get) => ({
 }))
 
 /**
+ * 把「已下载条目」映射成 `Song` 形状（T38）。
+ *
+ * ⚠️ **未登录时曲库拿不到** → 歌名 / 歌手只能来自**本地**：
+ * - **新下载**的条目有 `title` / `artist` **快照**（精确值）；
+ * - **老条目**（升级前下的）没有 → 用**文件名反推**兜底
+ *   （形如 `歌手 - 歌名.ext`，**近似值**）。
+ *
+ * ⚠️ `duration` = 0（本地文件没解析标签）→ 播放后由媒体元素补。
+ */
+export function downloadEntryToSong(entry: DownloadEntry): Song {
+  const fallback = parseTrackFileName(entry.file)
+  const title = entry.title && entry.title.length > 0 ? entry.title : fallback.title
+  const artist = entry.artist && entry.artist.length > 0 ? entry.artist : fallback.artist
+  const ext = entry.ext ?? ''
+  return {
+    id: entry.songId,
+    title,
+    artist,
+    artistId: '',
+    album: '',
+    albumId: '',
+    coverId: '',
+    duration: 0,
+    favorite: false,
+    codec: ext,
+    bitrate: 0,
+    sampleRate: 0,
+    bitDepth: 0,
+    year: null,
+    trackNo: null,
+    discNo: null,
+    audioSpec: {
+      bitDepth: null,
+      sampleRate: null,
+      channel: null,
+      bitrate: null,
+      codec: ext || null,
+      container: ext || null,
+      duration: null,
+      format: ext || null,
+      path: entry.file,
+      size: entry.bytes,
+    },
+  }
+}
+
+/**
  * 解析这一曲的**播放地址**（Task 11 的「本地优先播放」）。
  *
  * - 本地有副本 **且** 开关打开 → `fnml://local/track/<id>`（不再走 NAS）；
  * - 否则 → `fnm://srv/track/stream?guid=…`（**与之前完全一致**）。
  *
  * ⚠️ 只看**已下载完成**的条目（`entries`）：正在下载的半成品**绝不能**拿去播。
+ *
+ * ⚠️ **T38：本地曲目（用户自己加进来的文件）直接走 `fnml://`**——
+ *    它**不在下载索引里**（那是 NAS 曲目的副本），也**不该**走 NAS
+ *    （本地文件在 NAS 上根本不存在）。⇒ 与「本地优先」开关**无关**。
  */
 export function resolvePlaybackSource(song: Song): string {
+  if (isLocalTrackId(song.id)) return localMediaUrl(song.id)
   const state = useDownloadStore.getState()
   if (state.localFirst && Object.prototype.hasOwnProperty.call(state.entries, song.id)) {
     return localMediaUrl(song.id)

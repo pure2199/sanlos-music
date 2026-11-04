@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { FnBridge } from '../shared/bridge'
-import type { DownloadTask, LyricOverlayMessage, PlayerBridge, PlayerCommand } from '../shared/playerBridge'
+import type {
+  DownloadTask,
+  LocalLibraryItem,
+  LyricOverlayMessage,
+  PlayerBridge,
+  PlayerCommand,
+} from '../shared/playerBridge'
 
 // 渲染进程与主进程之间的桥。凭证永远不经过这里，只暴露只读的平台信息。
 const api = {
@@ -127,6 +133,19 @@ const fnPlayer: PlayerBridge = {
       ipcRenderer.removeListener('download:changed', listener)
     }
   },
+  // -------------------------------------------------------------------------
+  // 本地曲目（T38）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 渲染进程**不碰文件系统**：它只能让主进程弹对话框、把选中的路径
+  //    交给主进程登记、拿回登记好的清单——**给不出任意路径**。
+  listLocalTracks: () => ipcRenderer.invoke('local:list') as Promise<LocalLibraryItem[]>,
+  pickLocalFiles: () => ipcRenderer.invoke('local:pick-files') as Promise<string[]>,
+  pickLocalFolder: () => ipcRenderer.invoke('local:pick-folder') as Promise<string>,
+  addLocalTracks: (paths) => ipcRenderer.invoke('local:add', paths) as Promise<LocalLibraryItem[]>,
+  addLocalFolder: (folder) =>
+    ipcRenderer.invoke('local:add-folder', folder) as Promise<LocalLibraryItem[]>,
+  removeLocalTrack: (id) => ipcRenderer.invoke('local:remove', id) as Promise<LocalLibraryItem[]>,
   // -------------------------------------------------------------------------
   // FFmpeg 兜底解码（Task 12）
   // -------------------------------------------------------------------------

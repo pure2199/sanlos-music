@@ -19,6 +19,7 @@ import { createHttpStack } from './http'
 import { attachAppShortcuts } from './appShortcuts'
 import { createLyricProvider } from './lyricProvider'
 import { registerLocalMedia } from './localMedia'
+import { LOCAL_LIBRARY_FILE_NAME, LocalLibrary, registerLocalLibraryIpc } from './localLibrary'
 import { registerAppSchemes } from './schemes'
 import { FallbackTranscoder } from './fallbackTranscoder'
 import { createNasOAuthHandlers } from './oauthWindow'
@@ -382,13 +383,28 @@ if (!isPrimaryInstance) {
       //        lookup 改成「**临时产物优先 → 下载索引**」。
       //     ⚠️ 产物在**临时目录**里、**单槽**、**不进**下载索引、**不污染**下载目录；
       //        退出应用时清掉整个临时目录。
+      // 11d. 本地曲目登记表（T38）。
+      //
+      //     ⚠️ **用户自己加进来的本地文件**也走**同一条** `fnml://` 路由——
+      //        渲染进程**只能给一个 id**（`local:<hash>`），路径**只**来自登记表
+      //        → **不新增路由种类 = 不放宽任何安全边界**。
+      //
+      // ⚠️ **必须先于 `fallback` 建**：兜底转码的查找链要用到它。
+      const localLibrary = new LocalLibrary({
+        filePath: path.join(app.getPath('userData'), LOCAL_LIBRARY_FILE_NAME),
+      })
+      void localLibrary.load()
+
       const fallback = new FallbackTranscoder({
-        lookupLocal: (songId) => downloads.localPath(songId),
+        // ⚠️ T38：**本地曲目也要能被兜底转码**（FLAC / APE 等 Chromium 播不了的格式）
+        //    → 查找链是「下载索引 → 本地曲目登记表」。
+        lookupLocal: (songId) => downloads.localPath(songId) ?? localLibrary.localPath(songId),
         tempDir: path.join(app.getPath('userData'), 'fallback'),
       })
 
       registerLocalMedia({
-        lookup: (songId) => fallback.lookup(songId) ?? downloads.localPath(songId),
+        lookup: (songId) =>
+          fallback.lookup(songId) ?? downloads.localPath(songId) ?? localLibrary.localPath(songId),
       })
 
       // 12. 托盘（Task 17）。
@@ -538,6 +554,14 @@ if (!isPrimaryInstance) {
         // FFmpeg 兜底解码（Task 12）：探测与转码全在主进程。
         ffmpeg: fallback,
       })
+
+      // 13a. 本地曲目 IPC（T38）。
+      //
+      //     ⚠️ **渲染进程不碰文件系统**：它只能让主进程弹对话框、
+      //        把选中的路径交给主进程登记、拿回登记好的清单。
+      //     ⚠️ **登记的门槛在主进程**：路径必须真实存在、是普通文件、
+      //        扩展名在白名单里 → 渲染进程给不出「任意路径」。
+      registerLocalLibraryIpc({ library: localLibrary })
 
       // 14. 自动更新 IPC（Task 23）。
       //

@@ -91,6 +91,15 @@ function collectKeys(value: unknown, seen = new Set<unknown>()): string[] {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // ⚠️ T38：会话恢复收敛进 `sessionStore` → `restored` 是**模块级**状态，
+  //    每个用例开头必须复位，否则第二个用例起 `restore()` 会被直接跳过
+  //    （断言「只调用一次」会变成假绿）。
+  useSessionStore.setState({
+    session: DISCONNECTED,
+    connection: null,
+    candidates: [],
+    restored: false,
+  })
   Object.assign(window, { fn: bridge, fnmusic: { platform: 'win32' } })
 
   bridge.restore.mockResolvedValue(DISCONNECTED)

@@ -18,6 +18,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   DEFAULT_DOWNLOAD_SUBDIR,
   DOWNLOAD_INDEX_FILE_NAME,
+  DOWNLOAD_INDEX_VERSION,
   DownloadManager,
   downloadFileName,
   normalizeExtension,
@@ -236,6 +237,61 @@ describe('下载：管理器', () => {
     // 索引**只在成功后**写一次。
     expect(written).toHaveLength(1)
     expect(written[0]?.entries[SONG_ID]).toBeTruthy()
+  })
+
+  // -------------------------------------------------------------------------
+  // T38：元数据快照（未登录时曲库拿不到 → 靠本地这份）
+  // -------------------------------------------------------------------------
+  it('T38：下载完成 → 索引里带 **title / artist 快照**（并落盘）', async () => {
+    const { manager, written } = makeManager(async () =>
+      streamResponse(new Uint8Array([1, 2, 3, 4]), {
+        headers: { 'content-length': '4' },
+      }),
+    )
+
+    manager.start({ songId: SONG_ID, title: '示例歌名', artist: '示例歌手', ext: 'flac' })
+    await tick()
+    await tick()
+    await tick()
+
+    const entry = manager.list().entries[SONG_ID]
+    expect(entry?.title).toBe('示例歌名')
+    expect(entry?.artist).toBe('示例歌手')
+    // ⚠️ 快照也要**落盘**（下次启动、没登录时还能显示曲名）。
+    expect(written[0]?.entries[SONG_ID]?.title).toBe('示例歌名')
+    expect(written[0]?.entries[SONG_ID]?.artist).toBe('示例歌手')
+  })
+
+  it('T38：读索引时**保留**快照；老条目（没有这两个字段）也不报错', async () => {
+    const { manager } = makeManager(async () => streamResponse(new Uint8Array([1])), {
+      index: {
+        version: DOWNLOAD_INDEX_VERSION,
+        entries: {
+          [SONG_ID]: {
+            songId: SONG_ID,
+            file: 'C:\\Music\\示例歌手 - 示例歌名.flac',
+            bytes: 2048,
+            ext: 'flac',
+            downloadedAt: '2026-01-01T00:00:00.000Z',
+            title: '示例歌名',
+            artist: '示例歌手',
+          },
+          legacy: {
+            songId: 'legacy',
+            file: 'C:\\Music\\老歌手 - 老歌名.flac',
+            bytes: 1024,
+            ext: 'flac',
+            downloadedAt: '2026-01-01T00:00:00.000Z',
+          },
+        },
+      },
+    })
+
+    expect(manager.list().entries[SONG_ID]?.title).toBe('示例歌名')
+    expect(manager.list().entries[SONG_ID]?.artist).toBe('示例歌手')
+    // ⚠️ 老条目**没有**快照 → 读回来是 `undefined`，**不是**空串（空串会骗人）。
+    expect(manager.list().entries['legacy']?.title).toBeUndefined()
+    expect(manager.list().entries['legacy']?.artist).toBeUndefined()
   })
 
   it('下载失败：索引里**没有**这一条（半成品绝不登记）', async () => {

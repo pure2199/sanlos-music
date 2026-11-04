@@ -50,10 +50,16 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
     await fixture?.close()
   })
 
-  test('启动 → 渲染出登录页', async () => {
-    await expect(fixture.window.getByRole('heading', { name: '连接飞牛音乐' })).toBeVisible()
-    // 顶栏的曲库导航也必须在（外壳是一体的）。
-    await expect(fixture.window.getByRole('button', { name: '歌曲' })).toBeVisible()
+  test('启动 → 直接进本地音乐页（没登录也能当播放器用）', async () => {
+    // ⚠️ T38：主区**默认**就是本地音乐页（「连接」页要点顶栏的「连接」才进去）。
+    //    ⚠️ 前提被用户显式推翻：未登录时**不再**渲染曲库导航
+    //    （曲库全都需要 NAS，点进去只会一路请求失败）。
+    await expect(fixture.window.getByRole('heading', { name: '本地音乐' })).toBeVisible()
+    // 顶栏只有「连接」+「本地」。
+    await expect(fixture.window.getByRole('button', { name: '连接', exact: true })).toBeVisible()
+    await expect(fixture.window.getByRole('button', { name: '本地', exact: true })).toBeVisible()
+    await expect(fixture.window.getByRole('button', { name: '歌曲', exact: true })).toHaveCount(0)
+    await expect(fixture.window.getByRole('button', { name: '搜索', exact: true })).toHaveCount(0)
   })
 
   // -------------------------------------------------------------------------
@@ -84,7 +90,14 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
     expect(state.menuItems).toBe(0)
     expect(state.menuBarVisible).toBe(false)
 
-    // 2. 真实按一次 Ctrl+V → 地址框里应出现剪贴板内容。
+    // 2. 先进登录页拿地址框。
+    //
+    // ⚠️ T38：未登录时主区**默认**是本地音乐页 → 地址框**不在屏幕上**；
+    //    先点顶栏的「连接」进登录页（**断言一字未改**）。
+    await fixture.window.getByRole('button', { name: '连接', exact: true }).click()
+    await expect(fixture.window.getByRole('heading', { name: '连接飞牛音乐' })).toBeVisible()
+
+    // 3. 真实按一次 Ctrl+V → 地址框里应出现剪贴板内容。
     //
     // ⚠️ **必须先清空**：地址框**预填**了默认地址（`http://192.168.1.2:5666`）
     //    → 不清空的话，粘贴是**追加**在后面的（实测过一次）。
@@ -103,6 +116,24 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
 
     // ⚠️ **口令绝不进 DOM**：登录成功后口令框被清空。
     await expect(fixture.window.locator('#fnm-password')).toHaveValue('')
+  })
+
+  // -------------------------------------------------------------------------
+  // T38：本地音乐页（本地文件 + 已下载）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **鉴别力**：钉的是「本地页**登录后依然在**、两个导入入口都在」。
+  //    真机上手动加一个本地文件 → 「本地文件」分区会出现它
+  //    （那一步要人点对话框，自动化里做不了，这里只验入口与空态）。
+  test('本地音乐页：两个导入入口都在；已登录后曲库导航也还在', async () => {
+    await fixture.window.getByRole('button', { name: '本地', exact: true }).click()
+    await expect(fixture.window.getByRole('heading', { name: '本地音乐' })).toBeVisible()
+    // ⚠️ Playwright 的 `getByRole(name)` 是**子串**匹配 → 「添加文件」会撞上
+    //    「添加文件夹」→ 必须 `exact: true`。
+    await expect(fixture.window.getByRole('button', { name: '添加文件', exact: true })).toBeVisible()
+    await expect(fixture.window.getByRole('button', { name: '添加文件夹', exact: true })).toBeVisible()
+    // ⚠️ 已登录 → 曲库导航回来了（**未登录时是整组不渲染**的）。
+    await expect(fixture.window.getByRole('navigation', { name: '曲库导航' })).toBeVisible()
   })
 
   test('曲库「歌曲」页 → 列出 mock 的歌（fnm:// 代理通）', async () => {

@@ -1,0 +1,110 @@
+/*
+ * 本地音乐页样式（T38）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
+ */
+
+/* 未登录提示条 */
+.fnm-localmusic__notice {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* 工具条 */
+.fnm-localmusic__toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 工具条按钮 */
+.fnm-localmusic__button {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.fnm-localmusic__button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-localmusic__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 工具条说明文字 */
+.fnm-localmusic__hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* 分区（本地文件 / 已下载） */
+.fnm-localmusic__section {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 4px;
+}
+
+/* 分区标题 */
+.fnm-localmusic__section-title {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* 行内「移除」按钮 */
+.fnm-localmusic__remove {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fnm-localmusic__remove:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.fnm-localmusic__remove:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 「去登录」链接式按钮 */
+.fnm-localmusic__link {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.fnm-localmusic__link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}

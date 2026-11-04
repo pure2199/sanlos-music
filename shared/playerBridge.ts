@@ -318,6 +318,19 @@ export interface DownloadEntry {
   ext: string
   /** 下载完成时间（ISO 8601 字符串）。 */
   downloadedAt: string
+  /**
+   * 歌名快照（T38）。
+   *
+   * ⚠️ **可选**：只有本次升级后下载的条目才有；
+   *    老条目没有 → 渲染层用**文件名反推**兜底（近似值）。
+   */
+  title?: string
+  /**
+   * 歌手快照（T38）。
+   *
+   * ⚠️ **可选**：理由同 `title`。
+   */
+  artist?: string
 }
 
 /** 下载任务（进度用；主进程 → 渲染进程推送）。 */
@@ -338,6 +351,33 @@ export interface DownloadTask {
   error: string | null
   /** 完成后的本地绝对路径（未完成时为 `null`）。 */
   file: string | null
+}
+
+// ---------------------------------------------------------------------------
+// 本地曲目（T38）
+// ---------------------------------------------------------------------------
+
+/**
+ * 本地曲目（主进程「本地曲目登记表」里的一条）。
+ *
+ * ⚠️ **明文但非敏感**：只有绝对路径、歌名、歌手、大小——**没有**任何凭证。
+ * ⚠️ **不含**音频标签解析结果：歌名 / 歌手来自**文件名反推**（近似值）。
+ */
+export interface LocalLibraryItem {
+  /** 曲目 id（`local:<hash>`；**只当索引键**用）。 */
+  id: string
+  /** 本地绝对路径。 */
+  path: string
+  /** 歌名（由文件名反推）。 */
+  title: string
+  /** 歌手名（由文件名反推；**可能为空串**）。 */
+  artist: string
+  /** 文件字节数。 */
+  size: number
+  /** 扩展名（不含点，小写）。 */
+  ext: string
+  /** 加入时间（ISO 8601 字符串）。 */
+  addedAt: string
 }
 
 // ---------------------------------------------------------------------------
@@ -426,6 +466,51 @@ export interface PlayerBridge {
   clearDownloads(): Promise<void>
   /** 订阅下载任务变化（`download:changed`，主进程推送）。 */
   onDownloadChange(handler: (tasks: DownloadTask[]) => void): () => void
+  // -------------------------------------------------------------------------
+  // 本地曲目（T38）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 渲染进程**不碰文件系统**：它只能
+  //    ① 让主进程弹对话框选文件 / 文件夹；
+  //    ② 把**选中的路径**交给主进程登记；
+  //    ③ 拿到登记好的曲目清单。
+  //
+  // ⚠️ **登记的门槛在主进程**：路径必须**真实存在**、是**文件**、
+  //    扩展名在**白名单**里 → 渲染进程给不出「任意路径」。
+  /** 读本地曲目清单（`local:list`）。 */
+  listLocalTracks(): Promise<LocalLibraryItem[]>
+  /**
+   * 弹**文件**选择对话框（`local:pick-files`，可多选）。
+   *
+   * @returns 选中的绝对路径；用户取消 → **空数组**。
+   */
+  pickLocalFiles(): Promise<string[]>
+  /**
+   * 弹**文件夹**选择对话框（`local:pick-folder`）。
+   *
+   * @returns 选中的目录绝对路径；用户取消 → **空串**。
+   */
+  pickLocalFolder(): Promise<string>
+  /**
+   * 登记这些路径（`local:add`）——主进程会**逐个校验**再登记。
+   *
+   * @param paths 绝对路径数组（可以为空）。
+   */
+  addLocalTracks(paths: string[]): Promise<LocalLibraryItem[]>
+  /**
+   * 递归扫描这个目录并登记（`local:add-folder`）。
+   *
+   * @param folder 目录绝对路径。
+   */
+  addLocalFolder(folder: string): Promise<LocalLibraryItem[]>
+  /**
+   * 从清单里移除一项（`local:remove`）。
+   *
+   * ⚠️ **只改清单，绝不删用户的音乐文件**。
+   *
+   * @param id 曲目 id。
+   */
+  removeLocalTrack(id: string): Promise<LocalLibraryItem[]>
   // -------------------------------------------------------------------------
   // FFmpeg 兜底解码（Task 12）
   // -------------------------------------------------------------------------

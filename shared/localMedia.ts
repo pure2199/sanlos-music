@@ -13,12 +13,38 @@
 // ---------------------------------------------------------------------------
 // - 歌曲 guid **只当作索引键**（主进程查本地索引），**绝不**参与拼文件路径；
 // - 渲染进程**不能指定落盘路径**：落盘路径由主进程的下载索引决定。
+//
+// ⚠️ T38：本地曲目（用户自己加进来的文件）**走同一条路由**——
+//    渲染进程同样只能给一个 id（`local:<hash>`），路径由主进程的
+//    「本地曲目登记表」决定 ⇒ **不新增路由种类 = 不放宽任何安全边界**。
 
 /** 协议 scheme 名。 */
 export const LOCAL_MEDIA_SCHEME = 'fnml'
 
 /** 唯一允许的虚拟主机名。 */
 export const LOCAL_MEDIA_HOST = 'local'
+
+/**
+ * 本地曲目 id 的前缀（T38）。
+ *
+ * 形状：`local:<sha1(绝对路径) 前 16 位十六进制>`。
+ *
+ * ⚠️ **与 NAS 的 guid 不冲突**：服务端 guid 是 32 位十六进制，没有这个前缀。
+ *    前缀是**本地曲目**的唯一标记（`resolvePlaybackSource` 靠它分流）。
+ */
+export const LOCAL_TRACK_ID_PREFIX = 'local:'
+
+/**
+ * 这个 id 是不是本地曲目（而不是 NAS 的歌曲 guid）。
+ *
+ * @param id 歌曲 id。
+ */
+export function isLocalTrackId(id: string): boolean {
+  if (typeof id !== 'string') return false
+  if (!id.startsWith(LOCAL_TRACK_ID_PREFIX)) return false
+  // ⚠️ 光有前缀**不算**（`local:` 本身是空壳）→ 后面必须有内容。
+  return id.length > LOCAL_TRACK_ID_PREFIX.length
+}
 
 /**
  * 构造某个歌曲的本地媒体地址。

@@ -13,11 +13,14 @@
 //    「六个曲库页两两互斥」用例是它的回归防线。
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
 vi.mock('../src/pages/LoginPage', () => ({
   LoginPage: () => <div data-testid="view-connect">连接页</div>,
+}))
+vi.mock('../src/pages/LocalMusicPage', () => ({
+  LocalMusicPage: () => <div data-testid="view-local">本地音乐页</div>,
 }))
 vi.mock('../src/pages/SearchPage', () => ({
   SearchPage: () => <div data-testid="view-search">搜索页</div>,
@@ -99,11 +102,44 @@ vi.mock('../src/components/ConnectionBadge', () => ({
 }))
 
 import App from '../src/App'
+import { useSessionStore } from '../src/state/sessionStore'
+
+/**
+ * ⚠️ T38：曲库导航（歌曲 / 收藏 / …）**全都需要 NAS**
+ *    → 未登录时**整组不渲染**。
+ *    ⇒ 本文件（测曲库路由）默认按**已登录**设置会话状态；
+ *      未登录那套另见 `test/app-guest-nav.test.tsx`。
+ */
+beforeEach(() => {
+  useSessionStore.setState({
+    session: {
+      connected: true,
+      mode: 'password',
+      username: 'demo',
+      serverLabel: 'example',
+      isRelay: false,
+    },
+    connection: null,
+    candidates: [],
+    restored: true,
+  })
+})
 
 describe('应用外壳的曲库路由', () => {
-  it('默认停在连接页', () => {
+  it('未登录时默认停在**本地音乐页**（T38：没登录也能当播放器用）', () => {
+    // ⚠️ 前提被用户显式推翻：未登录时主区**不再是**连接页，而是本地音乐页。
+    useSessionStore.setState({
+      session: {
+        connected: false,
+        mode: null,
+        username: null,
+        serverLabel: null,
+        isRelay: false,
+      },
+      restored: true,
+    })
     render(<App />)
-    expect(screen.getByTestId('view-connect')).toBeTruthy()
+    expect(screen.getByTestId('view-local')).toBeTruthy()
     expect(screen.queryByTestId('view-search')).toBeNull()
   })
 

@@ -105,10 +105,17 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
   const setSession = useSessionStore((s) => s.setSession)
   const setConnection = useSessionStore((s) => s.setConnection)
   const setStoreCandidates = useSessionStore((s) => s.setCandidates)
+  const restoreSession = useSessionStore((s) => s.restore)
   const setLastServer = useSettingsStore((s) => s.setLastServer)
 
   // -------------------------------------------------------------------------
-  // 启动时恢复一次会话（追加要求 F）
+  // 启动时恢复一次会话（T38：已收敛进 `sessionStore.restore()`）
+  //
+  // ⚠️ **恢复动作归 `sessionStore`**：未登录时主区默认是「本地音乐」页
+  //    → 登录页**根本没挂载** → 恢复得由 App 发起（见 `src/App.tsx`）。
+  //    这里只是**兜底**：万一登录页先挂上（用户手动点了「连接」），
+  //    store 内部会去重（并发共享同一个 Promise + `restored` 闸门），
+  //    **不会**把主进程的会话世代号顶两次。
   //
   // ⚠️ `restore()` 会让主进程的会话世代号 +1，从而作废正在飞行的静默续期，
   //    所以**只在挂载时调一次**——不要放进每次渲染 / 每个 effect / 轮询里。
@@ -126,21 +133,8 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
     if (sessionLost) return
     if (restoreStarted.current) return
     restoreStarted.current = true
-    const bridge = getBridge()
-    if (!bridge) return
-    void (async () => {
-      try {
-        const info = await bridge.restore()
-        setSession(info)
-        if (info.connected) {
-          const connection = await bridge.connectionInfo()
-          setConnection(connection)
-        }
-      } catch {
-        // 恢复失败按「未登录」处理：不阻断界面。
-      }
-    })()
-  }, [setSession, setConnection, sessionLost])
+    void restoreSession()
+  }, [restoreSession, sessionLost])
 
   /**
    * 登录用的服务器基址。

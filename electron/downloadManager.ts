@@ -285,6 +285,10 @@ export class DownloadManager {
           bytes: Number.isFinite(entry.bytes) ? entry.bytes : 0,
           ext: typeof entry.ext === 'string' ? entry.ext : 'bin',
           downloadedAt: typeof entry.downloadedAt === 'string' ? entry.downloadedAt : '',
+          // ⚠️ T38：标题 / 歌手快照是**可选**的——只有本次升级后下载的条目才有。
+          //    老条目没有 → 渲染层用**文件名反推**兜底（近似值）。
+          title: typeof entry.title === 'string' ? entry.title : undefined,
+          artist: typeof entry.artist === 'string' ? entry.artist : undefined,
         }
       }
       return clean
@@ -590,6 +594,10 @@ export class DownloadManager {
       bytes: task.received,
       ext: normalizeExtension(request.ext),
       downloadedAt: new Date().toISOString(),
+      // ⚠️ T38：**元数据快照**——存下来，未登录时也能显示曲名 / 歌手
+      //    （服务端曲库这时拿不到）。老条目没有这两个字段 → 渲染层反推文件名兜底。
+      title: request.title,
+      artist: request.artist,
     }
     this.writeIndex()
     task.status = 'done'

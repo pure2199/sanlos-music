@@ -21,7 +21,7 @@
 // ⚠️ 本文件是 `.ts`（不是 `.tsx`）→ 渲染用 `createElement`，不写 JSX。
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { createElement } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
@@ -42,6 +42,7 @@ import {
 import { SongList } from '../src/components/SongList'
 import { SearchPage, type PlaylistWritebackApi } from '../src/pages/SearchPage'
 import { createLibraryStore, type LibraryApi } from '../src/state/libraryStore'
+import { useSessionStore } from '../src/state/sessionStore'
 import App from '../src/App'
 
 // ---------------------------------------------------------------------------
@@ -891,6 +892,25 @@ describe('歌单详情缓存：刷新语义（I-1）', () => {
 // ---------------------------------------------------------------------------
 
 describe('应用外壳：搜索页接线（要求 I）', () => {
+  /**
+   * ⚠️ T38：顶栏的「搜索」**需要 NAS** → 未登录时**不渲染**。
+   *    ⇒ 这条用例按**已登录**设置会话状态（未登录那套见 `test/app-guest-nav.test.tsx`）。
+   */
+  beforeEach(() => {
+    useSessionStore.setState({
+      session: {
+        connected: true,
+        mode: 'password',
+        username: 'demo',
+        serverLabel: 'example',
+        isRelay: false,
+      },
+      connection: null,
+      candidates: [],
+      restored: true,
+    })
+  })
+
   it('点顶栏的「搜索」进入搜索页；「连接」回到登录页', async () => {
     render(createElement(App))
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 
 import type { Album, Artist, Genre, Song } from '../shared/types'
 import { onAuthLost } from './api/client'
@@ -15,6 +15,7 @@ import { FullPlayerPage } from './pages/FullPlayerPage'
 import { GenresPage } from './pages/GenresPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { LoginPage } from './pages/LoginPage'
+import { LocalMusicPage } from './pages/LocalMusicPage'
 import { PlaylistsPage } from './pages/PlaylistsPage'
 import { SearchPage } from './pages/SearchPage'
 import { SongsPage } from './pages/SongsPage'
@@ -105,6 +106,7 @@ interface DetailTarget {
 /** 主区的视图。 */
 type MainView =
   | 'connect'
+  | 'local'
   | 'search'
   | 'songs'
   | 'favorites'
@@ -142,7 +144,7 @@ function NavButton({ label, active, onSelect }: NavButtonProps): ReactElement {
 
 export default function App() {
   const [fullPlayerOpen, setFullPlayerOpen] = useState(false)
-  const [view, setView] = useState<MainView>('connect')
+  const [view, setView] = useState<MainView>('local')
   /** 当前下钻目标（`null` = 没在下钻）。 */
   const [detail, setDetail] = useState<DetailTarget | null>(null)
   /**
@@ -151,9 +153,53 @@ export default function App() {
    * ⚠️ 设置页是**主区里的一个视图**（不是顶栏下拉的浮层）→ 关闭它要**回到来时的地方**，
    *    否则用户从「收藏」进去、关掉设置后被丢回「歌曲」页。
    */
-  const [viewBeforeSettings, setViewBeforeSettings] = useState<MainView>('connect')
+  const [viewBeforeSettings, setViewBeforeSettings] = useState<MainView>('local')
   /** 会话是否已失效（token 续期也失败）——界面据此回登录页并给出说明。 */
   const [authLost, setAuthLost] = useState(false)
+  /** 是否已登录（T38：**顶栏导航的可见性**靠它）。 */
+  const connected = useSessionStore((s) => s.session.connected)
+  /** 是否已经尝试过恢复会话（T38）。 */
+  const restored = useSessionStore((s) => s.restored)
+  /** 恢复会话的动作（T38：已收敛进 `sessionStore`）。 */
+  const restoreSession = useSessionStore((s) => s.restore)
+
+  // -------------------------------------------------------------------------
+  // 会话恢复（T38：**从 App 发起**，与当前视图无关）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **为什么不能只靠 `LoginPage`**：未登录时主区默认是「本地音乐」页
+  //    → 登录页**根本没挂载** → `restore()` 没人调
+  //    → 应用就不知道自己登录了没有（顶栏导航的可见性全靠这个状态）。
+  //    ⇒ 恢复动作必须**从 App 出发**。
+  //
+  // ⚠️ store 内部**只恢复一次**（并发共享同一个 Promise + `restored` 闸门），
+  //    这里重复调是安全的。
+  useEffect(() => {
+    void restoreSession()
+  }, [restoreSession])
+
+  // -------------------------------------------------------------------------
+  // 启动时若**已经登录** → 自动进「歌曲」页（T38）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **只做一次**（ref 守卫）：用户**手动登录**时**不**跳页——
+  //    停在登录页显示「已连接」，与既有行为一字不差。
+  // ⚠️ **用户已经点过导航就不抢**：启动恢复与用户操作之间有个时间差，
+  //    用户若先点开了「本地」，自动切页不该把他手抢走。
+  const autoNavigated = useRef(false)
+  const userNavigated = useRef(false)
+  useEffect(() => {
+    if (autoNavigated.current) return
+    if (!restored) return
+    autoNavigated.current = true
+    if (connected && !userNavigated.current) setView('songs')
+  }, [connected, restored])
+
+  /** 用户**主动**切视图（记一笔，供上面的自动切页避让）。 */
+  const goTo = useCallback((next: MainView): void => {
+    userNavigated.current = true
+    setView(next)
+  }, [])
 
   // 启动时读一次主进程的偏好（主题 / 关闭窗口的行为）并应用（Task 6 / Task 8）。
   // ⚠️ 偏好的**单一真相源在主进程**（`prefs.json`），这里只是把它读回来。
@@ -273,6 +319,9 @@ export default function App() {
    */
   const renderMainView = (): ReactElement => {
     switch (view) {
+      case 'local':
+        // ⚠️ T38：本地音乐页（**未登录也能用**）——本地文件 + 已下载。
+        return <LocalMusicPage onPlay={handlePlay} onGoToLogin={() => goTo('connect')} />
       case 'search':
         // ⚠️ T18-4：搜索结果里的专辑 / 歌手卡片要能下钻到详情（原来点不动）。
         return (
@@ -339,51 +388,68 @@ export default function App() {
             <NavButton
               label="连接"
               active={view === 'connect'}
-              onSelect={() => setView('connect')}
+              onSelect={() => goTo('connect')}
             />
+            {/*
+             * ⚠️ T38：「本地」**永远可见**（没登录也能当播放器用）；
+             *    「搜索」需要 NAS → **未登录时不渲染**。
+             */}
             <NavButton
-              label="搜索"
-              active={view === 'search'}
-              onSelect={() => setView('search')}
+              label="本地"
+              active={view === 'local'}
+              onSelect={() => goTo('local')}
             />
+            {connected && (
+              <NavButton
+                label="搜索"
+                active={view === 'search'}
+                onSelect={() => goTo('search')}
+              />
+            )}
           </nav>
-          <nav className="fnm-app__nav fnm-app__nav--library" aria-label="曲库导航">
+          {/*
+           * ⚠️ T38：曲库导航（歌曲 / 收藏 / …）**全都需要 NAS**
+           *    → 未登录时**整组不渲染**（点进去只会一路请求失败）。
+           */}
+          {connected && (
+            <nav className="fnm-app__nav fnm-app__nav--library" aria-label="曲库导航">
             <NavButton
               label="歌曲"
               active={view === 'songs'}
-              onSelect={() => setView('songs')}
+              onSelect={() => goTo('songs')}
             />
             <NavButton
               label="收藏"
               active={view === 'favorites'}
-              onSelect={() => setView('favorites')}
+              onSelect={() => goTo('favorites')}
             />
             <NavButton
               label="歌单"
               active={view === 'playlists'}
-              onSelect={() => setView('playlists')}
+              onSelect={() => goTo('playlists')}
             />
             <NavButton
               label="专辑"
               active={view === 'albums'}
-              onSelect={() => setView('albums')}
+              onSelect={() => goTo('albums')}
             />
             <NavButton
               label="歌手"
               active={view === 'artists'}
-              onSelect={() => setView('artists')}
+              onSelect={() => goTo('artists')}
             />
             <NavButton
               label="风格"
               active={view === 'genres'}
-              onSelect={() => setView('genres')}
+              onSelect={() => goTo('genres')}
             />
             <NavButton
               label="最近"
               active={view === 'history'}
-              onSelect={() => setView('history')}
+              onSelect={() => goTo('history')}
             />
-          </nav>
+            </nav>
+          )}
         </div>
         <ThemeSwitcher />
         <div className="app-shell__settings">
