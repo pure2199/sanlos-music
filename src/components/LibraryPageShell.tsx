@@ -23,6 +23,13 @@ export interface LibraryPageShellProps {
   status?: string
   /** 错误信息（有则显示一条错误条）。 */
   error?: string | null
+  /**
+   * **操作**失败的提示（与 `error` 分开）。
+   *
+   * ⚠️ 为什么分开：`error` 的文案是「加载失败：…」——
+   *    收藏写回失败说成「加载失败」是**指错方向**的误导（它俩根因完全不同）。
+   */
+  actionError?: string | null
   /** 是否正在加载。 */
   loading?: boolean
   /** 加载中的提示文案。 */
@@ -38,7 +45,7 @@ export interface LibraryPageShellProps {
  * 三种状态都不该是白屏（控制器追加要求 M）。
  */
 export function LibraryPageShell(props: LibraryPageShellProps): ReactElement {
-  const { title, status, error, loading = false, loadingText, children } = props
+  const { title, status, error, actionError, loading = false, loadingText, children } = props
   return (
     <section className="fnm-page">
       <header className="fnm-page__header">
@@ -49,6 +56,12 @@ export function LibraryPageShell(props: LibraryPageShellProps): ReactElement {
       {error && (
         <p className="fnm-page__error" role="alert">
           {`加载失败：${error}`}
+        </p>
+      )}
+
+      {actionError && (
+        <p className="fnm-page__error" role="alert">
+          {`操作失败：${actionError}`}
         </p>
       )}
 

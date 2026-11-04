@@ -420,6 +420,13 @@ export interface LibraryStore {
    *   （通常是搜索结果自带的 `song.favorite` 字段）。
    */
   isFavorite: (songId: string, fallback: boolean) => boolean
+  /**
+   * 当前环境**是否支持收藏写回**。
+   *
+   * ⚠️ `LibraryApi.setFavorite` 是**可选**的（只读环境没有它）→
+   *    行内收藏按钮据此**禁用**（而不是点了才报错）。
+   */
+  favoriteWritable: boolean
 
   // ---- 详情下钻（Task 4）------------------------------------------------
   //
@@ -674,6 +681,8 @@ export function createLibraryStore(api: LibraryApi = defaultLibraryApi): Library
       // 收藏态（已确认态）——收藏页与搜索页都从这里读（T9）。
       favoriteStates: {},
       favoritesDirty: false,
+      // 只读环境（没有 `api.setFavorite`）→ 行内收藏按钮禁用（T25）。
+      favoriteWritable: typeof api.setFavorite === 'function',
       detailKind: null,
       detailId: null,
       albumDetail: null,

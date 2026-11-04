@@ -5,15 +5,16 @@
 // - 但列表仍然走 `SongList` 的**虚拟滚动**：DOM 节点数与可视区成正比，
 //   收藏涨到几万首也不会铺满 DOM（要求 A / B）。
 //
-// ⚠️ 本页**只读**：不做收藏写回（那是 Task 16）。
+// ⚠️ 本页**现在也支持收藏写回**（T25）：行内有「取消收藏」按钮，
+//    取消后这一首**当场**从列表里消失（见下面 `visible` 的说明）。
 // ---------------------------------------------------------------------------
 
-import { useEffect, type ReactElement } from 'react'
+import { useEffect, useMemo, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
 import { SongList } from '../components/SongList'
-import { useDownloadRowActions } from '../components/DownloadButton'
+import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
@@ -42,32 +43,47 @@ export function FavoritesPage({ api, store, onPlay, onSelect }: FavoritesPagePro
   const resolved = useResolvedLibraryStore(api, store)
   const favorites = useStore(resolved, (s) => s.favorites)
   const loadFavorites = useStore(resolved, (s) => s.loadFavorites)
+  /** 收藏态（单一真相源；写回成功后这里会变成 `false`）。 */
+  const favoriteStates = useStore(resolved, (s) => s.favoriteStates)
 
   useEffect(() => {
     void loadFavorites()
   }, [loadFavorites])
 
-  // 行内下载入口（Task 11）。
-  const renderRowActions = useDownloadRowActions()
+  // 行内操作（Task 25）：收藏按钮 + 下载按钮。
+  const rowActions = useLibraryRowActions(resolved)
+
+  /**
+   * 取消收藏后，这一首**当场**从收藏页消失。
+   *
+   * ⚠️ 为什么要过滤：服务端那份收藏列表是**旧的**（重新拉要等一次请求），
+   *    而用户刚点完「取消收藏」，屏幕上还留着那一首 → 看着像没生效。
+   *    `favoriteStates[id] === false` = **已确认**取消 → 直接从列表里剔掉。
+   */
+  const visible = useMemo(
+    () => favorites.items.filter((song) => favoriteStates[song.id] !== false),
+    [favorites.items, favoriteStates],
+  )
 
   return (
     <LibraryPageShell
       title="收藏"
       error={favorites.error}
+      actionError={rowActions.error}
       loading={favorites.loading}
       loadingText="正在加载收藏…"
     >
       <SongList
-        songs={favorites.items}
+        songs={visible}
         onPlay={onPlay ?? (() => undefined)}
         onSelect={onSelect}
-        total={favorites.total}
+        total={visible.length}
         // 收藏是全量接口：没有「下一页」。
         hasMore={false}
         loading={favorites.loading}
         emptyLabel="暂无收藏"
         ariaLabel="收藏列表"
-        renderRowActions={renderRowActions}
+        renderRowActions={rowActions.render}
       />
     </LibraryPageShell>
   )

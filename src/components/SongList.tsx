@@ -418,11 +418,13 @@ export function SongList(props: SongListProps): ReactElement {
                 <span className="fnm-songlist__title">{song.title}</span>
                 <span className="fnm-songlist__artist">{song.artist}</span>
                 <span className="fnm-songlist__album">{song.album}</span>
-                {song.favorite && (
-                  <span className="fnm-songlist__favorite" role="img" aria-label="已收藏">
-                    ♥
-                  </span>
-                )}
+                {/*
+                  ⚠️ **这里原来有个 ♥ 徽标**（按服务端 `song.favorite` 字段渲染）。
+                  T25 把它**去掉**了 —— 每一行现在都有**行内收藏按钮**，
+                  而按钮显示的是**活的状态**（乐观态 / 已确认态），
+                  徽标显示的却是**服务端的旧值**：取消收藏后两者必然打架。
+                  ⇒ **一个状态只有一个指示器**（这正是本项目反复修的「多个真相源」）。
+                */}
                 {/* ⚠️ 可选的行内操作（Task 16）：不传时**不产生任何 DOM 节点**。 */}
                 {renderRowActions ? renderRowActions(song, index) : null}
                 <span className="fnm-songlist__duration">{formatDuration(song.duration)}</span>

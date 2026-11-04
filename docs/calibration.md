@@ -34,7 +34,9 @@
 | **曲库编码分布** | 含 `alac` 46 首等 → **APE / ALAC 可以走兜底播放** | `tools/fn-codec-census.mjs` |
 | **中继端口** | 中继**只监听标准 HTTPS 端口 443**，**不监听** 5666 / 5667 | `tools/fn-live-check.mjs`（不写端口登录失败 → 写 `:443` 成功） |
 | **专辑详情取法** | `GET /album/detail?guid=<id>`；`data` 是**裸专辑对象**（不是 `{list,total}`）。用 `albumGUID` / `albumGuid` / `albumId` / `id` 一律 `code=100002` | `tools/fn-album-detail-probe.mjs` |
-| **服务端没有写接口** | 17 个候选写端点全是 SPA 兜底 HTML；`stream` **不写**播放历史 → **NAS 历史只读**，客户端「本机记录 + NAS 只读」的设计正确 | `tools/fn-history-probe.mjs` |
+| **服务端不提供播放历史写入端点** | 17 个候选**历史**写端点全是 SPA 兜底 HTML；`stream` **不写**播放历史 → **NAS 历史只读**，客户端「本机记录 + NAS 只读」的设计正确。⚠️ **这条只针对「历史」**——收藏 / 歌单的写端点**是存在的**（见下一行） | `tools/fn-history-probe.mjs` + `tools/fn-writeback-probe.mjs` |
+| **收藏 / 歌单写回可用** | `favorite-track/create` · `favorite-track/delete` → **`{ trackGUID }`**；`playlist/add-track` · `playlist/remove-track` → **`{ guid, trackGUIDs: [id] }`**；`playlist/create` → `{ name }`（**回显 guid**）；`playlist/delete` → `{ guid }`。四个端点**实测真生效**（收藏列表里出现 / 消失、歌单详情里出现 / 消失） | `tools/fn-writeback-probe.mjs` |
+| **曲目对象带 `isFavorite`** | 真实曲目的 16 个字段里**有** `isFavorite`，且**取值可信**（实测：已收藏的 `true`、未收藏的 `false`）→ 行内收藏按钮的初始态可以直接取服务端字段 | `tools/fn-writeback-probe.mjs` |
 | **历史排序依据不暴露** | 条目 `updatedAt` 与 `createdAt` **完全相同且非单调** → 服务端排序依据不可见 → 客户端**按返回顺序**展示 | `tools/fn-history-probe.mjs` |
 | **搜索忽略分页** | `search/{track,album,artist}` **完全忽略** `page`/`size`（`size=5` 也返回全部：占位歌手三 500 首 / 37 专辑 / 2 歌手），第 1、2 页完全重叠 | `tools/fn-calibrate-probe.mjs` |
 | **收藏取全** | `favorite-track/list`：`size=200` → 200 条，`size=500` / `size=2000` → 258 条，`total=258` → 客户端「size=200 分页循环」能取全 | `tools/fn-calibrate-probe.mjs` |
@@ -635,3 +637,56 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
 - 产物当前**未签名** → Windows SmartScreen 会提示「未知发布者」（既有已知限制）；
 - 未实测：真实签名证书下的 `Status` 取值（自签证书可能是 `UnknownError` 而非 `Valid`，
   我们的判定**只看签名者主体**，所以不受影响——但**没有实测过**，标为假设）。
+
+---
+
+## 十三、T25：收藏 / 歌单**写回端点**的真机校准（T25 / T26 的前置）
+
+### 为什么必须先测
+
+`src/api/favorite.ts` 与 `src/api/playlist.ts` 里的写回调用，
+**参数名是照官方 Web 端猜的**，而且**从来没有在真机上跑过**。
+⇒ 客户端里那几个调用**可能是「看着能点、实际报错」的假功能**。
+
+### 探针
+
+新增 `tools/fn-writeback-probe.mjs`（**一次登录、四段结论**）：
+
+| 段 | 回答什么 |
+|---|---|
+| **F** | `favorite-track/create` / `favorite-track/delete` 的参数名；收藏是否**真的生效** |
+| **M** | 曲目对象里**有没有** `isFavorite` 字段（决定行内收藏按钮的初始态能否直接取服务端字段）|
+| **P** | `playlist/add-track` / `playlist/remove-track` 的参数名；加歌 / 移歌是否**真的生效** |
+
+⚠️ **副作用与自清理**：探针会**真的收藏一首歌**、**真的新建一个歌单**并加歌 ——
+结论拿到后**立即取消收藏 / 删除歌单**；任何一步失败都会明确告知**需要手工清理的 id**。
+
+### 实测结论（真机，真实 fnOS）
+
+| 端点 | 请求体 | 实测 |
+|---|---|---|
+| `POST /favorite-track/create` | **`{ trackGUID }`** | ✅ `code=0`，收藏列表里**出现**该曲 |
+| `POST /favorite-track/delete` | **`{ trackGUID }`** | ✅ `code=0`，收藏列表里**消失** |
+| `POST /playlist/add-track` | **`{ guid, trackGUIDs: [id] }`** | ✅ `code=0`，歌单详情里**出现**该曲 |
+| `POST /playlist/remove-track` | **`{ guid, trackGUIDs: [id] }`** | ✅ `code=0`，歌单详情里**消失** |
+| `POST /playlist/create` | `{ name }` | ✅ **回显 `guid`**（T17 已验，本轮复验）|
+| `POST /playlist/delete` | `{ guid }` | ✅ 删除成功，**无残留** |
+
+⇒ **客户端现有的参数名假设全部成立**，一个都不用改。
+   （`src/api/favorite.ts` 与 `src/api/playlist.ts` **本轮未改动**。）
+
+**`isFavorite` 字段**：真实曲目对象的 16 个字段里**有** `isFavorite`，
+且取值**可信**（实测：已收藏的 `true`、未收藏的 `false`；收藏列表里的曲目也是 `true`）
+⇒ 行内收藏按钮的初始态**可以直接取服务端字段**，不必额外拉一次收藏列表。
+
+### 顺带更正一条旧结论
+
+旧表里那行「**服务端没有写接口**」**标题过宽** ——
+它当时只针对「**播放历史**写入」（17 个候选历史写端点全是 SPA 兜底），
+结论本身没错，但标题会被读成「服务端什么都不让写」。
+⇒ 已把标题改成「服务端**不提供播放历史写入**端点」，并补上本节这两行。
+
+### 遗留 / 待办
+
+- **Step G**（收藏 / 歌单跨端同步）：仍需**手机端 App** 配合 → 用户侧。
+- 本探针只验「端点可用 + 参数名」；**写回后服务端收藏列表的排序**未验（客户端不依赖它）。

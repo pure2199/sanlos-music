@@ -599,6 +599,41 @@ try {
     const text = (await hint.textContent())?.trim() ?? ''
     return text
   })
+  // -- 8. 行内收藏（Task 25）-------------------------------------------------
+  //
+  // ⚠️ **自清理**：点**两次**（收藏 → 取消收藏，或取消 → 收藏），
+  //    结束时**回到初始态** —— NAS 上不留任何变化。
+  await step('行内收藏（收藏 → 取消收藏，自清理）', async () => {
+    await navTo('歌曲')
+    await window.waitForTimeout(1500)
+
+    const button = window.locator('[role="option"]').first().getByTestId('fnm-favorite-toggle')
+    await button.waitFor({ timeout: 10000 })
+    const before = (await button.getAttribute('aria-pressed')) ?? 'false'
+
+    // 点一次 → 状态必须翻转（乐观更新：界面**立刻**生效，不等请求回来）。
+    await button.click()
+    await window.waitForTimeout(600)
+    const flipped = (await button.getAttribute('aria-pressed')) ?? 'false'
+    if (flipped === before) {
+      throw new Error(`点收藏后状态没翻转（仍是 ${before}）`)
+    }
+
+    // 再点一次 → 回到初始态（自清理）。
+    await button.click()
+    await window.waitForTimeout(900)
+    const restored = (await button.getAttribute('aria-pressed')) ?? 'false'
+    if (restored !== before) {
+      throw new Error(`没回到初始态（${before} → ${restored}）`)
+    }
+
+    // 写回失败会露出「操作失败」提示条 —— 那就说明收藏**没真生效**。
+    const alert = window.locator('.fnm-page__error[role="alert"]')
+    if ((await alert.count()) > 0) {
+      throw new Error(`出现错误提示：${((await alert.first().textContent()) ?? '').trim()}`)
+    }
+    return `初始=${before} → 翻转=${flipped} → 复原=${restored}`
+  })
 } finally {
   // -- 退出 -----------------------------------------------------------------
   await Promise.race([

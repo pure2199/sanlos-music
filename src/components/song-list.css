@@ -84,8 +84,7 @@
 .fnm-songlist__row[aria-selected='true'] .fnm-songlist__title,
 .fnm-songlist__row[aria-selected='true'] .fnm-songlist__artist,
 .fnm-songlist__row[aria-selected='true'] .fnm-songlist__album,
-.fnm-songlist__row[aria-selected='true'] .fnm-songlist__duration,
-.fnm-songlist__row[aria-selected='true'] .fnm-songlist__favorite {
+.fnm-songlist__row[aria-selected='true'] .fnm-songlist__duration {
   color: var(--accent-text);
 }
 
@@ -127,12 +126,6 @@
 .fnm-songlist__duration {
   flex: 0 0 auto;
   color: var(--text-secondary);
-}
-
-/* 已收藏标记 */
-.fnm-songlist__favorite {
-  flex: 0 0 auto;
-  color: var(--accent);
 }
 
 /* 状态行（「已加载 N / 总共 M」） */

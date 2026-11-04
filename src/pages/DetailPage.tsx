@@ -33,7 +33,7 @@ import { useStore } from 'zustand'
 
 import type { Album, Song } from '../../shared/types'
 import { AlbumCard, CardGrid, CoverImage, formatCount } from '../components/Cards'
-import { useDownloadRowActions } from '../components/DownloadButton'
+import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { PagingNotice } from '../components/PagingNotice'
 import { SongList } from '../components/SongList'
@@ -137,14 +137,15 @@ export function DetailPage(props: DetailPageProps): ReactElement {
     else void resolved.getState().loadGenreSongs(nextPage)
   }, [kind, nextPage, resolved])
 
-  // 行内下载入口（Task 11）。
-  const renderRowActions = useDownloadRowActions()
+  // 行内操作（Task 25）：收藏按钮 + 下载按钮。
+  const rowActions = useLibraryRowActions(resolved)
 
   return (
     <LibraryPageShell
       title={heading}
       status={status}
       error={error}
+      actionError={rowActions.error}
       loading={loading}
       loadingText="正在加载详情…"
     >
@@ -186,7 +187,7 @@ export function DetailPage(props: DetailPageProps): ReactElement {
             onLoadMore={handleLoadMore}
             emptyLabel="暂无曲目"
             ariaLabel="详情曲目列表"
-            renderRowActions={renderRowActions}
+            renderRowActions={rowActions.render}
           />
           {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
           <PagingNotice kind={songsPagedKind} store={resolved} />

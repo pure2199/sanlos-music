@@ -1,0 +1,53 @@
+/* --------------------------------------------------------------------------
+ * 行内收藏按钮（Task 25）
+ * --------------------------------------------------------------------------
+ * 颜色**只用语义变量**（`src/styles/tokens.css`），不出现硬编码色值。
+ *
+ * 状态用属性选择器表达（伪类只能靠样式表）：
+ * - `[aria-pressed='true']` → 已收藏（强调色）；
+ * - `[data-pending='true']` → 写回在途（乐观态已生效、服务端还没确认）。
+ * ------------------------------------------------------------------------ */
+
+.fnm-favorite {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.fnm-favorite:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-favorite:active:not(:disabled) {
+  background: var(--surface-sunken);
+}
+
+.fnm-favorite:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 已收藏 */
+.fnm-favorite[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 写回在途（乐观态已生效、服务端还没确认） */
+.fnm-favorite[data-pending='true'] {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.fnm-favorite:disabled {
+  border-color: var(--border);
+  color: var(--disabled);
+  cursor: not-allowed;
+}

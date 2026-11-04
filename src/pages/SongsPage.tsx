@@ -12,7 +12,7 @@ import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
 import { SongList } from '../components/SongList'
-import { useDownloadRowActions } from '../components/DownloadButton'
+import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { PagingNotice } from '../components/PagingNotice'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
@@ -54,13 +54,14 @@ export function SongsPage({ api, store, onPlay, onSelect }: SongsPageProps): Rea
     void loadSongs(nextPage)
   }, [loadSongs, nextPage])
 
-  // 行内下载入口（Task 11）：复用 `SongList` 已有的 `renderRowActions` 接缝。
-  const renderRowActions = useDownloadRowActions()
+  // 行内操作（Task 25）：收藏按钮 + 下载按钮（复用 `SongList` 已有的 `renderRowActions` 接缝）。
+  const rowActions = useLibraryRowActions(resolved)
 
   return (
     <LibraryPageShell
       title="歌曲"
       error={songs.error}
+      actionError={rowActions.error}
       loading={songs.loading}
       loadingText="正在加载歌曲…"
     >
@@ -74,7 +75,7 @@ export function SongsPage({ api, store, onPlay, onSelect }: SongsPageProps): Rea
         onLoadMore={handleLoadMore}
         emptyLabel="暂无歌曲"
         ariaLabel="歌曲列表"
-        renderRowActions={renderRowActions}
+        renderRowActions={rowActions.render}
       />
       {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
       <PagingNotice kind="songs" store={resolved} />

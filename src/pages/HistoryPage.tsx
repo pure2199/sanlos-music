@@ -25,7 +25,7 @@ import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
 import { LibraryPageShell } from '../components/LibraryPageShell'
-import { useDownloadRowActions } from '../components/DownloadButton'
+import { useLibraryRowActions } from '../components/rowActions'
 import { PagingNotice } from '../components/PagingNotice'
 import { SongList } from '../components/SongList'
 import { useLocalHistory } from '../state/historyStore'
@@ -65,14 +65,15 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
     void loadHistory(nextPage)
   }, [loadHistory, nextPage])
 
-  // 行内下载入口（Task 11）。
-  const renderRowActions = useDownloadRowActions()
+  // 行内操作（Task 25）：收藏按钮 + 下载按钮。
+  const rowActions = useLibraryRowActions(resolved)
 
   return (
     <LibraryPageShell
       title="最近播放"
       status={`NAS 播放历史：已加载 ${history.items.length} / ${history.total}`}
       error={history.error}
+      actionError={rowActions.error}
       loading={history.loading}
       loadingText="正在加载播放历史…"
     >
@@ -86,7 +87,7 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
             total={localItems.length}
             emptyLabel="本机还没有播放记录"
             ariaLabel="本机播放记录"
-            renderRowActions={renderRowActions}
+            renderRowActions={rowActions.render}
           />
         </section>
 
@@ -104,7 +105,7 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
             onLoadMore={handleLoadMore}
             emptyLabel="暂无播放历史"
             ariaLabel="NAS 播放历史"
-            renderRowActions={renderRowActions}
+            renderRowActions={rowActions.render}
           />
           {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
           <PagingNotice kind="history" store={resolved} />

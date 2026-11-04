@@ -264,6 +264,44 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   })
 
   // -------------------------------------------------------------------------
+  // T25：行内收藏（曲库各页 → 收藏写回 → 收藏页）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 这条链路此前**只有搜索页**能用（曲库 / 收藏 / 详情页都没有收藏入口）。
+  //    这里钉的是**整条真实链路**：
+  //    渲染层行内按钮 → store（单一真相源）→ IPC → NAS mock 的
+  //    `favorite-track/create` → 收藏列表真的多出一首。
+  //
+  test('行内收藏：歌曲页收藏一首 → 收藏页里出现它', async () => {
+    await fixture.window.getByRole('button', { name: '歌曲' }).click()
+
+    const list = fixture.window.getByRole('listbox', { name: '歌曲列表' })
+    // ⚠️ **取第二行**：mock 的第一首 fixture 里 `isFavorite: true`
+    //    （fixture 刻意覆盖了 true/false 两种样本）→ 它的按钮本来就是「已收藏」。
+    //    这里要测的是「**收藏**」这个动作 → 得挑一首**没被收藏**的。
+    const row = list.getByRole('option').nth(1)
+    const title = (await row.locator('.fnm-songlist__title').textContent())?.trim() ?? ''
+    expect(title.length).toBeGreaterThan(0)
+
+    const favoriteButton = row.getByTestId('fnm-favorite-toggle')
+    await expect(favoriteButton).toHaveAttribute('aria-pressed', 'false')
+
+    await favoriteButton.click()
+    // 乐观更新：界面**立刻**反映（不等请求回来）。
+    await expect(favoriteButton).toHaveAttribute('aria-pressed', 'true')
+
+    // 收藏页：这一首**真的**出现在收藏列表里（mock 的收藏集合确实变了）。
+    // ⚠️ 必须**限定在导航里**找「收藏」：行内收藏按钮的无障碍名也叫「收藏」
+    //    （`getByRole('button', { name: '收藏' })` 会命中 9 个 → strict mode 报错）。
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '收藏' })
+      .click()
+    const favorites = fixture.window.getByRole('listbox', { name: '收藏列表' })
+    await expect(favorites.getByRole('option').filter({ hasText: title }).first()).toBeVisible()
+  })
+
+  // -------------------------------------------------------------------------
   // T23：自动更新接线（检查 → 下载 → 签名闸）
   // -------------------------------------------------------------------------
   //
