@@ -231,6 +231,39 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   })
 
   // -------------------------------------------------------------------------
+  // T24：播放模式（随机播放）按钮
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 四种模式的**语义**早就实现完整（`src/player/queue.ts` + 单测都有），
+  //    但**播放条上压根没有能点到它的按钮** —— 能力对用户等于不存在。
+  //    这条 E2E 钉的就是「**真的切得到**」：
+  //    点按钮 → store 的 mode 变 → 按钮文案与 `data-mode` 同步。
+  //
+  test('播放模式：点按钮在「顺序 → 随机 → 单曲循环 → 列表循环」之间轮转', async () => {
+    const button = fixture.window.getByTestId('play-mode-button')
+    await expect(button).toBeVisible()
+    await expect(button).toHaveText('顺序播放')
+    await expect(button).toHaveAttribute('data-mode', 'sequence')
+
+    await button.click()
+    await expect(button).toHaveText('随机播放')
+    await expect(button).toHaveAttribute('data-mode', 'shuffle')
+
+    await button.click()
+    await expect(button).toHaveText('单曲循环')
+    await expect(button).toHaveAttribute('data-mode', 'loop-one')
+
+    await button.click()
+    await expect(button).toHaveText('列表循环')
+    await expect(button).toHaveAttribute('data-mode', 'loop-list')
+
+    // 一圈之后回到起点。
+    await button.click()
+    await expect(button).toHaveText('顺序播放')
+    await expect(button).toHaveAttribute('data-mode', 'sequence')
+  })
+
+  // -------------------------------------------------------------------------
   // T23：自动更新接线（检查 → 下载 → 签名闸）
   // -------------------------------------------------------------------------
   //

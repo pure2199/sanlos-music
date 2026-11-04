@@ -47,6 +47,7 @@ import { usePlayerStore, type PlayerStore } from '../state/playerStore'
 import { FALLBACK_LOSSY_NOTE, FALLBACK_PREPARING_MESSAGE } from '../player/format'
 import { CoverImage } from './Cards'
 import { EqPanel } from './EqPanel'
+import { nextPlayMode, playModeLabel } from './playMode'
 import './player-bar.css'
 
 // ---------------------------------------------------------------------------
@@ -216,7 +217,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
   const { store = usePlayerStore, onOpenFullPlayer, className } = props
 
   const state = usePlayerState(store)
-  const { current, isPlaying, position, duration, volume, muted, queue } = state
+  const { current, isPlaying, position, duration, volume, muted, queue, mode } = state
   /** 正在做兜底转码（Task 12）。 */
   const preparing = state.preparing === true
   /** 当前这一曲是兜底产物在播（Task 12）。 */
@@ -278,6 +279,19 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
 
   const handleTogglePlay = useCallback((): void => {
     store.getState().togglePlay()
+  }, [store])
+
+  /**
+   * 切换播放模式（Task 24）：顺序 → 随机 → 单曲循环 → 列表循环 → 顺序。
+   *
+   * ⚠️ **必须走 `playerStore.setMode()`**：它同时做三件事 ——
+   *    `queue.mode`（下一首/上一首的语义）、`engine.setMode()`（媒体会话拿得到）、
+   *    store 的 `mode` 字段（UI 显示）。自己改其中一处就会出现
+   *    「按钮显示随机、实际还是按顺序播」这种半吊子状态。
+   */
+  const handleCycleMode = useCallback((): void => {
+    const currentMode = store.getState().mode
+    store.getState().setMode(nextPlayMode(currentMode))
   }, [store])
 
   // --- 进度条 --------------------------------------------------------------
@@ -469,6 +483,20 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
 
       {/* --- 队列 / EQ / 全屏 --- */}
       <div className="fnm-playerbar__actions">
+        {/* 播放模式（Task 24）：点一下切到下一个模式。
+            ⚠️ 按钮文字就是**当前模式**（不是「模式」两个字）——
+               用户一眼要能看出现在是随机还是顺序。 */}
+        <button
+          type="button"
+          className="fnm-playerbar__button fnm-playerbar__button--mode"
+          onClick={handleCycleMode}
+          data-testid="play-mode-button"
+          data-mode={mode}
+          aria-label={`播放模式：${playModeLabel(mode)}，点击切换`}
+          title={`播放模式：${playModeLabel(mode)}（点击切换）`}
+        >
+          {playModeLabel(mode)}
+        </button>
         <button
           type="button"
           className="fnm-playerbar__button"
