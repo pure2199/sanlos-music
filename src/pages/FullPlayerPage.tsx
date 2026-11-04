@@ -82,14 +82,31 @@ export interface FullPlayerPageProps {
 /** 取色时把封面缩到多少像素见方（越小越快）。 */
 export const COVER_SAMPLE_SIZE = 8
 
-/** 按 `coverId` 缓存的取色结果（`null` = 取不到色）。 */
+/**
+ * 取色失败后**重试**的次数上限（真机踩过的坑，2026-11-04）。
+ *
+ * ⚠️ 封面刚切过来时可能**还没加载好**（中继慢 / 代理首次建连）→ 第一次取色失败
+ *    → 若把失败**缓存**下来，这一首歌**到重启为止都不再取色** → 背景永远是兜底色。
+ * ⇒ 失败**不缓存**，并**有限次重试**。
+ */
+export const MAX_TINT_ATTEMPTS = 3
+
+/** 取色失败后的重试间隔（毫秒）。 */
+export const TINT_RETRY_DELAY_MS = 1500
+
+/**
+ * 按 `coverId` 缓存的取色结果。
+ *
+ * ⚠️ **只缓存成功的结果**（`string`）：失败**不缓存** → 允许重试
+ *    （见 `MAX_TINT_ATTEMPTS`）。
+ */
 const coverColorCache = new Map<string, string | null>()
 
 /**
  * 取色缓存（**按 coverId**）。
  *
  * @param coverId 封面 id。
- * @returns 已缓存的颜色；`undefined` = 从没取过（还没取）；`null` = 取过但取不到。
+ * @returns 已缓存的颜色；`undefined` = 从没取过（还没取或上次失败了）。
  */
 export function getCachedCoverColor(coverId: string): string | null | undefined {
   return coverColorCache.get(coverId)
@@ -216,6 +233,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   const [lines, setLines] = useState<LyricLine[]>([])
   const [lyricStatus, setLyricStatus] = useState<LyricStatus>('idle')
   const [tint, setTint] = useState<string | null>(null)
+  /** 取色重试次数（失败后延迟重试；见 `MAX_TINT_ATTEMPTS`）。 */
+  const [tintAttempt, setTintAttempt] = useState(0)
 
   const songId = current?.id ?? ''
   const coverId = current?.coverId ?? ''
@@ -255,24 +274,39 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
       return
     }
     const cached = coverColorCache.get(coverId)
-    if (cached !== undefined) {
+    if (cached) {
       setTint(cached)
       return
     }
     let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
     // 先用默认背景（不写 --tint → CSS 回落到语义变量），取到色再换。
     setTint(null)
     const url = coverUrlFor(coverId)
     if (!url) return
     void extractCoverColor(url).then((color) => {
-      coverColorCache.set(coverId, color)
       if (cancelled) return
-      setTint(color)
+      if (color) {
+        // ⚠️ **只缓存成功的结果**。
+        coverColorCache.set(coverId, color)
+        setTint(color)
+        return
+      }
+      // ⚠️ **失败不缓存** → 否则一次失败 = 这首歌**到重启为止都不取色**
+      //    （真机踩过：封面刚切过来还没加载好 → 背景就永远停在兜底色）。
+      //    ⇒ 延迟重试（次数有限，别无限刷）。
+      if (tintAttempt < MAX_TINT_ATTEMPTS) {
+        retryTimer = setTimeout(() => {
+          if (cancelled) return
+          setTintAttempt((n) => n + 1)
+        }, TINT_RETRY_DELAY_MS)
+      }
     })
     return () => {
       cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
     }
-  }, [coverId])
+  }, [coverId, tintAttempt])
 
   // --- Esc 关闭 ------------------------------------------------------------
   useEffect(() => {

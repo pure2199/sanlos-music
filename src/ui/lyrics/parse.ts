@@ -188,6 +188,30 @@ function parseRawLines(raw: string, enhanced: boolean): RawEntry[] {
   return entries
 }
 
+/**
+ * 判断两段文本是否**实质相同**（**忽略所有空白**）。
+ *
+ * ⚠️ **为什么需要它**（真机踩过的坑，2026-11-04）：
+ *    实测 NAS 对**同一首歌**返回**两条内容近乎相同**的歌词记录（`source` 不同）。
+ *    客户端按「第一条作原文、其余作翻译」的规则合并 →
+ *    第二条被挂成 `translation` → **同一句歌词在界面上显示两遍**
+ *    （一遍蓝色大字 = 原文，一遍灰色小字 = 翻译；字面完全一样）。
+ *    ⇒ 内容**实质相同**时**不当翻译**（不显示第二遍）。
+ *
+ * ⚠️ **只判「实质相同」**：真的是翻译（内容不同）照常显示。
+ * ⚠️ 两边都为空 → 视为**不相同**（空行没有「重复显示」的问题）。
+ *
+ * @param a 文本一。
+ * @param b 文本二。
+ * @returns 去掉空白后是否相等。
+ */
+export function isSameText(a: string, b: string): boolean {
+  const left = typeof a === 'string' ? a.replace(/\s+/g, '') : ''
+  const right = typeof b === 'string' ? b.replace(/\s+/g, '') : ''
+  if (!left.length || !right.length) return false
+  return left === right
+}
+
 /** 在 `[time, end]` 区间内按词数均匀切分出伪逐字。 */
 function pseudoWords(text: string, time: number, end: number): LyricWord[] {
   const tokens = splitIntoWords(text)
@@ -217,7 +241,8 @@ function assemble(entries: RawEntry[]): LyricLine[] {
   for (const entry of sorted) {
     const last = merged[merged.length - 1]
     if (last && last.time === entry.time) {
-      if (entry.text) {
+      // ⚠️ **内容实质相同的不当翻译**（否则同一句会显示两遍——见 `isSameText`）。
+      if (entry.text && !isSameText(entry.text, last.text)) {
         last.translation = last.translation ? `${last.translation}\n${entry.text}` : entry.text
       }
       continue
@@ -389,7 +414,10 @@ export function attachTranslations(lines: LyricLine[], translationLines: LyricLi
       }
       if (best && bestDiff <= 0.5) matched = best
     }
-    return { ...line, words: [...line.words], translation: matched ? matched.text : '' }
+    // ⚠️ **内容实质相同的不当翻译**（NAS 对同一首歌会返回两条近乎相同的记录，
+    //    直接挂上会让同一句歌词在界面上显示两遍——见 `isSameText`）。
+    const translation = matched && !isSameText(matched.text, line.text) ? matched.text : ''
+    return { ...line, words: [...line.words], translation }
   })
 }
 
@@ -480,11 +508,22 @@ export function parseLyricEntries(entries: LyricEntry[]): LyricLine[] {
     (item) => item && typeof item.content === 'string' && item.content.trim() !== '',
   )
   if (!usable.length) return []
-  const [original, ...translations] = usable
+  const [original, ...rest] = usable
   const originalLines = applyOffset(parseEnhancedLrc(original!.content), original!.offset ?? 0)
-  if (!translations.length) return originalLines
+  // ⚠️ **冗余副本要整条丢掉**（真机踩过的坑，2026-11-04）：
+  //    实测 NAS 对**同一首歌**返回**两条 `source` 不同（1 / 2）但内容逐字相同**的记录
+  //    ——它们是**同一份 LRC 的两份拷贝**，不是「原文 + 翻译」。
+  //    若把第二条当翻译 → **每一句歌词都显示两遍**（一遍大字、一遍小字，字面完全一样）。
+  //    ⇒ 内容（忽略空白）与偏移都相同的条目 → **直接丢弃**。
+  //    ⚠️ 偏移不同的不算副本（偏移后时间线不同，仍是有效翻译）。
+  const translationEntries = rest.filter(
+    (item) =>
+      (item.offset ?? 0) !== (original!.offset ?? 0) ||
+      !isSameText(item.content, original!.content),
+  )
+  if (!translationEntries.length) return originalLines
   const translationLines: LyricLine[] = []
-  for (const item of translations) {
+  for (const item of translationEntries) {
     for (const line of applyOffset(parseEnhancedLrc(item.content), item.offset ?? 0)) {
       translationLines.push(line)
     }

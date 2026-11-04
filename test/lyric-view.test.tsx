@@ -840,9 +840,22 @@ describe('FullPlayerPage：封面取色（要求 F / N）', () => {
 
     render(<FullPlayerPage store={store} lyricApi={api} />)
 
-    await waitFor(() => {
-      expect(getCachedCoverColor('track_abc')).toBeNull()
-    })
+    // ⚠️ **断言前提被推翻**（真机踩过的坑，2026-11-04）：
+    //    原断言是「取色失败 → 缓存 `null`」。
+    //    但那正是 bug：**一次失败就永久缓存** → 封面刚切过来还没加载好时，
+    //    这首歌**到重启为止都不再取色** → 背景永远停在兜底色。
+    //    ⇒ 新行为：失败**不缓存**（`undefined` = 没取成，可重试）。
+    //
+    // ⚠️ **不能直接断言 `toBeUndefined()`** —— 它一开始就是 undefined → 空断言。
+    //    ⇒ 先等**重试真的发生**（第二次取色尝试）→ 证明第一次确实失败了，
+    //    此时缓存里**仍不能**有值（失败不写缓存）。
+    await waitFor(
+      () => {
+        expect(imageSources.length).toBeGreaterThanOrEqual(2)
+      },
+      { timeout: 6000 },
+    )
+    expect(getCachedCoverColor('track_abc')).toBeUndefined()
     const style =
       document.querySelector('[data-testid="full-player"]')?.getAttribute('style') ?? ''
     expect(style).not.toContain('--fnm-fullplayer__tint')

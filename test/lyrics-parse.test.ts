@@ -363,6 +363,64 @@ describe('applyOffset', () => {
 })
 
 describe('parseLyricEntries', () => {
+  // -------------------------------------------------------------------------
+  // T31：冗余副本（真机踩过的坑，2026-11-04）
+  //
+  // ⚠️ 实测 NAS 对**同一首歌**返回**两条 `source` 不同（1 / 2）但内容逐字相同**的记录
+  //    —— 它们是**同一份 LRC 的两份拷贝**，不是「原文 + 翻译」。
+  //    若把第二条当翻译 → **每一句歌词都显示两遍**（一遍大字、一遍小字，字面完全一样）。
+  // -------------------------------------------------------------------------
+
+  it('两条记录**内容完全相同**（冗余副本）→ **不产生翻译行**（不显示两遍）', () => {
+    const content = '[00:10.00]制作人：甲\n[00:20.00]项目总监：乙'
+    const lines = parseLyricEntries([
+      entry({ guid: 'example-guid-1', content }),
+      entry({ guid: 'example-guid-2', content }),
+    ])
+    expect(lines).toHaveLength(2)
+    // ⚠️ **每行都不该有翻译**（否则界面上同一句显示两遍）。
+    expect(lines[0]!.translation).toBe('')
+    expect(lines[1]!.translation).toBe('')
+  })
+
+  it('冗余副本的**内容只差空白** → 仍算副本（不产生翻译行）', () => {
+    const lines = parseLyricEntries([
+      entry({ guid: 'example-guid-1', content: '[00:10.00]甲\n[00:20.00]乙' }),
+      entry({ guid: 'example-guid-2', content: '[00:10.00] 甲 \n[00:20.00] 乙' }),
+    ])
+    expect(lines[0]!.translation).toBe('')
+    expect(lines[1]!.translation).toBe('')
+  })
+
+  it('内容相同但 **offset 不同** → 仍当翻译（时间线不同，不算副本）', () => {
+    const content = '[00:10.00]甲'
+    const lines = parseLyricEntries([
+      entry({ guid: 'example-guid-1', content, offset: 0 }),
+      entry({ guid: 'example-guid-2', content, offset: 1000 }),
+    ])
+    expect(lines).toHaveLength(1)
+    // ⚠️ 偏移后时间戳不同 → 不能当副本丢掉。
+    expect(lines[0]!.text).toBe('甲')
+    expect(lines[0]!.time).toBe(10)
+  })
+
+  it('同一条记录里**同时间戳、内容相同**的兄弟行 → 不当翻译', () => {
+    const lines = parseLyricEntries([
+      entry({ content: '[00:10.00]甲\n[00:10.00]甲' }),
+    ])
+    expect(lines).toHaveLength(1)
+    expect(lines[0]!.translation).toBe('')
+  })
+
+  it('**真翻译**（内容不同）照常挂上（**不得被去重误伤**）', () => {
+    const lines = parseLyricEntries([
+      entry({ guid: 'example-guid-1', content: '[00:10.00]甲' }),
+      entry({ guid: 'example-guid-2', content: '[00:10.00]AAA' }),
+    ])
+    expect(lines[0]!.text).toBe('甲')
+    expect(lines[0]!.translation).toBe('AAA')
+  })
+
   it('两条记录（原文 + 翻译）：翻译挂到对应原文行', () => {
     const lines = parseLyricEntries([
       entry({ guid: 'example-guid-1', content: '[00:10.00]甲\n[00:20.00]乙' }),

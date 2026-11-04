@@ -39,7 +39,17 @@
 
 .fnm-fullplayer__body {
   display: flex;
-  align-items: center;
+  /*
+   * ⚠️ **必须 `stretch`，不能是 `center`**（真机踩过的坑，2026-11-04）：
+   *    `align-items: center` 会让右侧面板的高度 = **内容高度**（而不是 body 高度）
+   *    → 面板里的队列列表**不受高度约束** → 队列一长就**上下溢出** body
+   *    （body 的 `overflow` 默认可见）→ 队列行**盖住右上角的关闭按钮**与
+   *    **底部的播放控件**（真机实测：× 按钮点不到，Playwright 报
+   *    「queue-row 拦截指针事件」）；歌词区同理**挤在顶部**，右半屏大片留白。
+   *    ⇒ `stretch` 让面板撑满 → 队列自己滚动（`.fnm-fullplayer__queue` 有
+   *      `overflow-y: auto` + `min-height: 0`），歌词区填满右半屏。
+   */
+  align-items: stretch;
   gap: 32px;
   flex: 1 1 auto;
   min-height: 0;

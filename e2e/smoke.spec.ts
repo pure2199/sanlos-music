@@ -488,6 +488,48 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   // -------------------------------------------------------------------------
   // T23：自动更新接线（检查 → 下载 → 签名闸）
   // -------------------------------------------------------------------------
+  // T31：布局（真机踩过的坑，2026-11-04）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 这两个缺陷都是**纯 CSS** 的：EQ / 队列面板跑到**屏幕外**（点了没反应），
+  //    全屏页的队列**溢出**盖住关闭按钮。
+  //    ⇒ 这里用**几何断言**（面板必须在视口内）来钉住它们。
+  //
+  test('播放条浮层：EQ 面板与队列面板都**在视口内**（点了要看得见）', async () => {
+    // EQ 面板。
+    await fixture.window.getByRole('button', { name: 'EQ', exact: true }).click()
+    const eq = fixture.window.getByRole('dialog', { name: '均衡器' })
+    await expect(eq).toBeVisible()
+    // ⚠️ **核心断言**：面板必须**在视口内**。
+    //    （原先 `.fnm-playerbar` 没有 `position: relative` → 面板的定位祖先
+    //      是**视口** → `bottom: 100%` 把它顶到屏幕上方之外 →
+    //      DOM 里有面板、屏幕上却什么都看不见。）
+    await expect(eq).toBeInViewport()
+    const eqBox = await eq.boundingBox()
+    expect(eqBox).not.toBeNull()
+    expect(eqBox!.y).toBeGreaterThanOrEqual(0)
+
+    // 关掉，再开队列面板（**同一个根因**，两个入口）。
+    await fixture.window.getByRole('button', { name: 'EQ', exact: true }).click()
+    // ⚠️ 队列按钮的**可访问名是 aria-label「播放队列」**（可见文本才是「队列」）。
+    await fixture.window.getByRole('button', { name: '播放队列' }).click()
+    const queue = fixture.window.getByRole('dialog', { name: '播放队列' })
+    await expect(queue).toBeVisible()
+    await expect(queue).toBeInViewport()
+  })
+
+  test('全屏播放页：能打开、**关闭按钮点得到**、关得掉', async () => {
+    await fixture.window.getByRole('button', { name: /全屏/ }).first().click()
+    const page = fixture.window.getByTestId('full-player')
+    await expect(page).toBeVisible()
+
+    // ⚠️ **关闭按钮必须点得到**：原先队列列表会溢出 body、盖住这个 ×，
+    //    Playwright 会报「queue-row 拦截指针事件」。
+    await fixture.window.getByRole('button', { name: '关闭全屏播放页' }).click()
+    await expect(page).toHaveCount(0)
+  })
+
+  // -------------------------------------------------------------------------
   //
   // ⚠️ **这条链路此前完全没有被任何测试覆盖过**（本项目原来压根没有自动更新）。
   //    它一次跑通了四段：
