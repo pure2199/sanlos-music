@@ -440,6 +440,79 @@ describe('token 失效的续期与重试', () => {
     expect(headerOf(calls[calls.length - 1]!, 'cookie')).toBe('music-token=TK2')
   })
 
+  // ⚠️ **下面两条钉的是「真服务端的真实形状」**（T19-1 用
+  //    `tools/fn-token-expiry-probe.mjs` 在真实 NAS 上实测出来的）。
+  //    原本的单测一律用「HTTP 200 + body 里的 99999」来模拟，
+  //    于是**恰好漏掉了真实服务端的两面**：
+  //      ① token 失效时服务端回的是 **HTTP 401**（不是 200）；
+  //      ② 路径不存在时服务端回的是 **fnOS 的 SPA 兜底页（HTML）**，里面根本没有业务码。
+  //    这两条一旦没钉住，日后有人加一句「`if (!res.ok) throw`」或
+  //    「非 JSON 也当成失效」就会**静默弄坏**续期路径，而单测照样全绿。
+
+  it('真服务端的形状（HTTP 401 + body 里的 99999）照样触发续期并重试', async () => {
+    let loginCount = 0
+    let businessCount = 0
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/user/password-login')) {
+        loginCount += 1
+        return new Response(
+          JSON.stringify({ code: 0, data: { userToken: `TK${loginCount}`, deviceId: 'D' } }),
+          { status: 200 },
+        )
+      }
+      businessCount += 1
+      const body =
+        businessCount === 1
+          ? { code: CODE_TOKEN_EXPIRED, msg: 'INVALID TOKEN' }
+          : { code: 0, data: { list: [] } }
+      // ⚠️ 实测：无效 token → **HTTP 401** + `{ code: 99999, msg: "INVALID TOKEN" }`。
+      //    客户端**不按状态码判定**（`readJson` 不看 status），只读 body 里的业务码。
+      return new Response(JSON.stringify(body), { status: businessCount === 1 ? 401 : 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager()
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
+    const res = await m.request('track/list')
+    expect(res.status).toBe(200)
+    expect((res.json as { code?: number }).code).toBe(0)
+    // 续期一次 + 重试一次
+    expect(loginCount).toBe(2)
+    expect(businessCount).toBe(2)
+    expect(m.state.token).toBe('TK2')
+  })
+
+  it('响应不是 JSON（fnOS 的 SPA 兜底页）时**不**触发续期', async () => {
+    let loginCount = 0
+    let businessCount = 0
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/user/password-login')) {
+        loginCount += 1
+        return new Response(
+          JSON.stringify({ code: 0, data: { userToken: `TK${loginCount}`, deviceId: 'D' } }),
+          { status: 200 },
+        )
+      }
+      businessCount += 1
+      // ⚠️ 实测：对**不存在的端点**，服务端回的是 fnOS 的 SPA 兜底页（HTML / 200），
+      //    里面**没有**业务码 → 绝不能当成「token 失效」，
+      //    否则会白白续期一次再重试一遍（用户看到的是莫名其妙的一次重新登录）。
+      return new Response('<!doctype html><html><body>fnOS</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager()
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
+    const res = await m.request('track/list')
+    expect(res.json).toBeNull()
+    // ⚠️ **没有**触发续期：只有 body 里是 99999 才续期。
+    expect(loginCount).toBe(1)
+    expect(businessCount).toBe(1)
+  })
+
   it('续期后仍是 99999 时只重试一次并原样返回（不无限重试）', async () => {
     let loginCount = 0
     let businessCount = 0
