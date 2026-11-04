@@ -490,6 +490,16 @@ export class PlayerEngine implements PlayerEngineLike {
   private volumeValue = 1
   private modeValue: PlayMode = 'sequence'
   private errorMessage: string | null = null
+  /**
+   * **缓冲中**（界面显示「缓冲中…」）。
+   *
+   * ⚠️ **这不是错误**（T37）：媒体元素的 `stalled` / `waiting` 只是
+   *    「数据一时没到」的**瞬时提示**——播放通常会**自行恢复**。
+   *    早先把它写进 `errorMessage` → 界面挂一条**红字**（`role="alert"`），
+   *    而**音乐其实照放**；更糟的是**没人清它** → 红字一直挂到用户切歌。
+   *    ⇒ 现在它是**独立状态**：数据到了（`playing` / `canplay`）自动清除。
+   */
+  private buffering = false
   /** 兜底转码进行中（界面显示「正在转换…」）。 */
   private preparing = false
   /** 当前这一曲是不是**兜底产物**在播（界面据此注明「音质有损」）。 */
@@ -535,6 +545,7 @@ export class PlayerEngine implements PlayerEngineLike {
       mode: this.modeValue,
       muted: false,
       error: this.errorMessage,
+      buffering: this.buffering,
       preparing: this.preparing,
       fallbackActive: this.fallbackActive,
     }
@@ -677,6 +688,7 @@ export class PlayerEngine implements PlayerEngineLike {
 
     this.errorMessage = null
     this.preparing = false
+    this.buffering = false
     this.fallbackActive = viaFallback
     this.currentSong = song
     this.positionSec = 0
@@ -961,12 +973,19 @@ export class PlayerEngine implements PlayerEngineLike {
       }],
       ['pause', () => {
         this.playing = false
+        // ⚠️ 用户主动暂停 → 不是「缓冲」，把提示收掉（否则暂停着还显示「缓冲中…」）。
+        this.setBuffering(false)
         this.stopTicking()
         this.emit()
       }],
       ['ended', () => this.handleEnded()],
       ['error', (event) => this.handleMediaError(event)],
+      // ⚠️ T37：`stalled` / `waiting` 是**瞬时**提示，**不是错误**（详见 `handleStalled`）。
       ['stalled', () => this.handleStalled()],
+      ['waiting', () => this.handleWaiting()],
+      // 数据到了 → 缓冲提示自动消失。
+      ['playing', () => this.handleResumed()],
+      ['canplay', () => this.handleResumed()],
       ['emptied', () => this.handleLoadCycleStart()],
       ['loadstart', () => this.handleLoadCycleStart()],
       ['abort', () => this.handleAbort()],
@@ -1001,6 +1020,7 @@ export class PlayerEngine implements PlayerEngineLike {
   /** `ended`：本曲播完，通知订阅者（由 store 决定下一首）。 */
   private handleEnded(): void {
     this.playing = false
+    this.buffering = false
     this.stopTicking()
     if (this.durationSec > 0) this.positionSec = this.durationSec
     this.emit()
@@ -1020,13 +1040,48 @@ export class PlayerEngine implements PlayerEngineLike {
     const info = describeMediaError(code)
     this.errorMessage = info.message
     this.playing = false
+    // ⚠️ **真出错了** → 缓冲提示收掉（错误优先，界面只显示一条）。
+    this.buffering = false
     this.stopTicking()
     this.emit()
   }
 
-  /** `stalled` 事件：加载停滞（网络类）。 */
+  /**
+   * `stalled` 事件：**加载停滞**（网络类）。
+   *
+   * ⚠️ **T37：这不是错误**。按 HTML 规范，`stalled` 只是
+   *    「浏览器在取数据，但数据一时没到」的**瞬时提示**——播放通常会自行恢复。
+   *    早先这里写的是 `errorMessage`（红字 + `role="alert"`），
+   *    而**音乐其实照放**；且**没人清它** → 红字一直挂到用户切歌。
+   *    ⇒ 现在只标记「缓冲中」，由 `playing` / `canplay` 自动清除。
+   */
   private handleStalled(): void {
-    this.errorMessage = '音频加载停滞：网络较慢或连接中断'
+    this.setBuffering(true)
+  }
+
+  /**
+   * `waiting` 事件：播放因**下一帧还没到**而暂停（典型的缓冲）。
+   *
+   * ⚠️ 同样是**瞬时**状态，不是错误（见 `handleStalled`）。
+   */
+  private handleWaiting(): void {
+    this.setBuffering(true)
+  }
+
+  /**
+   * `playing` / `canplay` 事件：数据到了 → **缓冲结束**。
+   *
+   * ⚠️ 这一步是 T37 的关键：缓冲提示必须**能自己消失**，
+   *    否则就退化成「粘在界面上的红字」。
+   */
+  private handleResumed(): void {
+    this.setBuffering(false)
+  }
+
+  /** 设置「缓冲中」状态（只在**真的变了**时才发通知，避免每帧空转）。 */
+  private setBuffering(buffering: boolean): void {
+    if (this.buffering === buffering) return
+    this.buffering = buffering
     this.emit()
   }
 
@@ -1038,6 +1093,8 @@ export class PlayerEngine implements PlayerEngineLike {
    */
   private handleLoadCycleStart(): void {
     this.selfInitiatedLoad = false
+    // ⚠️ 新一轮加载 → 上一轮的「缓冲中」提示作废（否则会挂着旧提示）。
+    this.buffering = false
   }
 
   /**
@@ -1062,6 +1119,7 @@ export class PlayerEngine implements PlayerEngineLike {
     if (this.selfInitiatedLoad) return
     this.errorMessage = '音频加载被中止'
     this.playing = false
+    this.buffering = false
     this.stopTicking()
     this.emit()
   }

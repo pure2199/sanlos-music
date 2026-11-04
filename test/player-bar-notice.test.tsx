@@ -3,7 +3,11 @@ import { render, screen } from '@testing-library/react'
 
 import { PlayerBar, type PlayerStoreLike } from '../src/components/PlayerBar'
 import type { PlayerStore } from '../src/state/playerStore'
-import { FALLBACK_LOSSY_NOTE, FALLBACK_PREPARING_MESSAGE } from '../src/player/format'
+import {
+  BUFFERING_MESSAGE,
+  FALLBACK_LOSSY_NOTE,
+  FALLBACK_PREPARING_MESSAGE,
+} from '../src/player/format'
 import type { Song } from '../shared/types'
 
 // ---------------------------------------------------------------------------
@@ -52,6 +56,7 @@ function fakeStore(overrides: Partial<PlayerStore> = {}): PlayerStoreLike {
     mode: 'sequence',
     muted: false,
     error: null,
+    buffering: false,
     preparing: false,
     fallbackActive: false,
     ...overrides,
@@ -95,5 +100,40 @@ describe('播放条提示行', () => {
     const notice = screen.getByTestId('player-notice')
     expect(notice.textContent).toBe(FALLBACK_LOSSY_NOTE)
     expect(notice.textContent).toContain('有损')
+  })
+
+  // -------------------------------------------------------------------------
+  // T37：缓冲中（**不是错误**）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 慢网 / 中继带宽有限时媒体元素会发 `stalled` / `waiting`——那是**瞬时提示**，
+  //    音乐其实照放。早先把它当错误 → 界面挂**红字**（`role="alert"`）。
+  //    ⇒ 现在是**灰字**（`role="status"`），数据到了自动消失。
+  it('缓冲中 → 显示「缓冲中…」（role=status，**不**当错误报红）', () => {
+    render(<PlayerBar store={fakeStore({ buffering: true })} />)
+    const notice = screen.getByTestId('player-notice')
+    expect(notice.textContent).toBe(BUFFERING_MESSAGE)
+    // ⚠️ **不能**是 `alert`（`alert` = 红色 + 立刻播报）——那是给真错误用的。
+    expect(notice.getAttribute('role')).toBe('status')
+  })
+
+  it('错误优先于「缓冲中」（真出错时只显示错误）', () => {
+    render(<PlayerBar store={fakeStore({ buffering: true, error: '出错了' })} />)
+    const notice = screen.getByTestId('player-notice')
+    expect(notice.textContent).toBe('出错了')
+    expect(notice.getAttribute('role')).toBe('alert')
+  })
+
+  it('「缓冲中」优先于「音质有损」（用户此刻在等数据，先说在等）', () => {
+    render(<PlayerBar store={fakeStore({ buffering: true, fallbackActive: true })} />)
+    const notice = screen.getByTestId('player-notice')
+    expect(notice.textContent).toBe(BUFFERING_MESSAGE)
+    expect(notice.getAttribute('role')).toBe('status')
+  })
+
+  it('「正在转换…」优先于「缓冲中」（两者同时出现时显示转换）', () => {
+    render(<PlayerBar store={fakeStore({ buffering: true, preparing: true })} />)
+    const notice = screen.getByTestId('player-notice')
+    expect(notice.textContent).toBe(FALLBACK_PREPARING_MESSAGE)
   })
 })

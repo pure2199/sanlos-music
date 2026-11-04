@@ -222,6 +222,16 @@ export interface PlayerState {
   /** 播放错误信息。 */
   error?: string | null
   /**
+   * 是否**缓冲中**（T37）。
+   *
+   * ⚠️ **这不是错误**：媒体元素的 `stalled` / `waiting` 只是「数据一时没到」的
+   *    **瞬时提示**——播放通常会自行恢复。界面据此显示**灰字**「缓冲中…」，
+   *    数据到了自动消失；**不许**当成错误报红。
+   *
+   * ⚠️ **可选**：没在缓冲时是 `false` / `undefined`。
+   */
+  buffering?: boolean
+  /**
    * 是否正在做**兜底转码**（Task 12）。
    *
    * ⚠️ **可选**：没走兜底时是 `false` / `undefined`。

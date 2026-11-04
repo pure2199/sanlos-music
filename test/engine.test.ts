@@ -275,11 +275,69 @@ describe('PlayerEngine：error 三类语义', () => {
     expect(engine.state.error).toContain('网络')
   })
 
-  it('网络/加载错误：stalled 事件也写入可读错误', () => {
+  // ⚠️ **前提被用户明确推翻**（T37）→ 本断言**改写**为**新行为**。
+  //    旧断言是「stalled 事件也写入可读错误」。
+  //    为什么推翻：按 HTML 规范，`stalled` 只是「浏览器在取数据，但数据一时没到」的
+  //    **瞬时提示**——播放通常**自行恢复**。把它当错误 → 界面挂**红字**，
+  //    而**音乐其实照放**；更糟的是**没人清它** → 红字一直挂到用户切歌。
+  //    ⇒ 新行为：`stalled` 只标记「缓冲中」，**不写错误**。
+  it('**stalled 不是错误**：只标记「缓冲中」，**不写错误**（音乐照放，不该报红）', () => {
     const { engine, element } = createEngine()
     engine.play(song('a'))
     element.emit('stalled', { target: element })
-    expect(engine.state.error).toBeTruthy()
+    expect(engine.state.error).toBeNull()
+    expect(engine.state.buffering).toBe(true)
+    // ⚠️ 播放**没有被停掉**（`stalled` 不代表失败）。
+    expect(engine.state.isPlaying).toBe(true)
+  })
+
+  it('缓冲中 → **playing 之后自动清除**（提示不许粘在界面上）', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    element.emit('stalled', { target: element })
+    expect(engine.state.buffering).toBe(true)
+
+    element.emit('playing', { target: element })
+    expect(engine.state.buffering).toBe(false)
+  })
+
+  it('缓冲中 → **canplay** 也清除（数据到了就该收提示）', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    element.emit('waiting', { target: element })
+    expect(engine.state.buffering).toBe(true)
+
+    element.emit('canplay', { target: element })
+    expect(engine.state.buffering).toBe(false)
+  })
+
+  it('`waiting`（缓冲）同样**不是错误**', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    element.emit('waiting', { target: element })
+    expect(engine.state.error).toBeNull()
+    expect(engine.state.buffering).toBe(true)
+  })
+
+  it('缓冲中 → **真出错时错误优先**（缓冲提示收掉，不与错误打架）', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    element.emit('stalled', { target: element })
+    expect(engine.state.buffering).toBe(true)
+
+    element.emit('error', { target: { error: { code: 2 } } })
+    expect(engine.state.error).toContain('网络')
+    expect(engine.state.buffering).toBe(false)
+  })
+
+  it('缓冲中 → **暂停**时提示收掉（用户主动暂停不是「在等数据」）', () => {
+    const { engine, element } = createEngine()
+    engine.play(song('a'))
+    element.emit('stalled', { target: element })
+    expect(engine.state.buffering).toBe(true)
+
+    element.emit('pause', { target: element })
+    expect(engine.state.buffering).toBe(false)
   })
 
   it('错误文案不含任何凭证', () => {

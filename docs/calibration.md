@@ -1230,3 +1230,129 @@ File / Edit / View / Window / Help —— 看着像"没做完的开发工具"，
   （全屏播放页是应用内的「全屏」按钮）。
 - ⚠️ **真机肉眼复验未做**：菜单栏消失、托盘菜单仍在、F12 能开控制台 —— 目前只有
   **主进程断言 + 真实粘贴**这两层自动化保证。
+## 二十、T37：「音频加载停滞」**误报成红色错误**（真缺陷，已修）
+
+- 日期：2026-11-05
+- 状态：**完成**
+
+### 用户提问
+
+> 「音频加载停滞：网络较慢或连接中断」—— 这是 BUG 吗？
+
+⇒ **是 BUG**，而且是**两个缺陷叠在一起**。
+
+### 根因（一）：把 `stalled`（瞬时提示）当成了**错误**
+
+HTML 规范里，`stalled` 的定义是：
+
+> The user agent is **trying to fetch data** but the data is **not arriving for some period of time**.
+
+它是「**正在取数据、数据一时没到**」的**瞬时提示**——**播放通常会自行恢复**。
+
+而 `src/player/engine.ts` 原来这么写：
+
+```ts
+private handleStalled(): void {
+  this.errorMessage = '音频加载停滞：网络较慢或连接中断'
+  this.emit()
+}
+```
+
+⇒ 播放条第三行变成**红字**（`role="alert"` = `var(--danger)`），
+**而音乐其实照放**（`playing` 仍是 `true`）→ 用户以为坏了，其实没坏。
+
+### 根因（二）：这个错误**没人清** → 一直挂着
+
+媒体事件绑定表里**没有** `playing` / `canplay` / `waiting` 处理器，
+`errorMessage` 只在**换歌**（`startPlayback`）时才会被清
+→ 那条红字**一直挂到用户切歌**，哪怕网络早就恢复了、这歌正放得好好的。
+
+### 为什么这台机器上**几乎每首歌开头都会中一次**
+
+音频走 `fnm://` → 主进程代理 → NAS；**公网中继带宽实测只有约 230KB/s**，
+首字节等待很容易超过 Chromium 的 `stalled` 阈值。
+
+⚠️ **不是代理把流吃掉了**：代理是**流式**的（`upstream.body` 直接作为响应体，
+`Range` / `206` 原样透传，`electron/proxy.ts` 的 `proxyBinary`）→ 慢是**链路**慢，不是实现错。
+
+### 用户拍板
+
+| 决策点 | 结论 |
+|---|---|
+| 卡顿时显示什么 | **灰字「缓冲中…」**，数据到了**自动消失**（`role="status"`，不播报、不报红） |
+| 真错误 | 仍然**红字 + `role="alert"`**，且**优先于**缓冲提示 |
+
+### 做法
+
+1. **引擎**新增独立状态 `buffering`（**不是** `errorMessage`）：
+   - `stalled` / `waiting` → `buffering = true`；
+   - `playing` / `canplay` → `buffering = false`（**自动消失**的关键）；
+   - `pause` / `ended` / `error` / `abort` / 换歌 / 新一轮加载 → 一律清掉。
+2. **状态链路**：`PlayerState.buffering` → store → 播放条。
+   ⚠️ **顺带补了一个覆盖缺口**：此前**没有任何测试**盯「引擎 → store」这条同步
+   （`error` / `preparing` / `fallbackActive` 都是直接抄进 store 的，抄错了没人拦）
+   → 新增 `test/player-store-state.test.tsx`。
+3. **界面**：提示行优先级 **错误 > 正在转换 > 缓冲中 > 音质有损**。
+   ⚠️ 「缓冲中」排在「音质有损」**前面**：用户此刻在等数据，先说「在等」更贴近当下
+   （缓冲结束后有损说明会回来）。CSS **不用改**：`role="status"` 本来就是灰字，
+   只有 `role="alert"` 才是红色。
+
+### 踩坑一：既有那条断言的**前提被用户明确推翻** → 必须改写，不能删
+
+`test/engine.test.ts` 里原有：
+
+```ts
+it('网络/加载错误：stalled 事件也写入可读错误', () => { ... expect(engine.state.error).toBeTruthy() })
+```
+
+它的**前提正是这次要修的错**（把 `stalled` 当错误）→ 按纪律**改写**为**新行为断言**，
+并保留「原来那条也测过东西」的意图（网络类错误仍有文案）：
+
+- 「**stalled 不是错误**：只标记「缓冲中」，**不写错误**（音乐照放，不该报红）」；
+- 「缓冲中 → **playing 之后自动清除**（提示不许粘在界面上）」；
+- 「缓冲中 → **canplay** 也清除」「`waiting` 同样不是错误」；
+- 「缓冲中 → **真出错时错误优先**」「缓冲中 → **暂停**时提示收掉」。
+
+（`error` 事件那条「错误码 2 写入网络类文案」**一字未改** → 真错误仍然有文案。）
+
+### 踩坑二：`role="status"` 才是灰字
+
+播放条提示行的 CSS 是 `.fnm-playerbar__notice { color: var(--text-secondary) }`
++ `[role='alert'] { color: var(--danger) }` → **只要不是 `alert`，就是灰的**，
+CSS 一个字都不用改。⚠️ 但**别**为了「醒目」把缓冲提示也做成 `alert`——
+那正是这次要消除的「误报成红色错误」。
+
+### 改动文件
+
+| 文件 | 内容 |
+|---|---|
+| `src/player/engine.ts` | 新增 `buffering` 状态；`stalled` / `waiting` → 缓冲中；`playing` / `canplay` → 自动清除；暂停 / 结束 / 出错 / 中止 / 换歌 / 新一轮加载 → 一律清掉 |
+| `src/player/format.ts` | 新增 `BUFFERING_MESSAGE` |
+| `shared/types.ts` | `PlayerState` 加 `buffering?: boolean` |
+| `src/state/playerStore.ts` | store 加 `buffering`（初始 `false`）+ 引擎 → store 同步 |
+| `src/components/PlayerBar.tsx` | 提示行优先级：错误 > 正在转换 > **缓冲中** > 音质有损 |
+| `test/engine.test.ts` | 既有那条**前提被推翻** → **改写**为 6 条新行为断言 |
+| `test/player-bar-notice.test.tsx` | **新增** 4 条（缓冲中显示灰字 / 错误优先 / 缓冲优先于有损 / 转换优先于缓冲） |
+| `test/player-store-state.test.tsx` | **新增** 4 条（补上「引擎 → store」这条**一直没人盯**的链路） |
+| `docs/calibration.md` / `docs/changelog.md` / `README.md` | 同步 |
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1532 passed / 65 files**；`playwright test` **20 passed**。
+- 本轮改动文件 **U+FFFD = 0**；行尾保持原样、无 BOM。
+- **变异自证（三处全部先红后复原，sha256 回基线）**：
+  1. 让 `handleStalled` 写回 `errorMessage`（退回旧行为）
+     → 「**stalled 不是错误**」**红**；
+  2. 去掉 `playing` 监听（提示不自动消失）
+     → 「缓冲中 → **playing 之后自动清除**」**红**；
+  3. 去掉 store 同步里的 `buffering` → 「**缓冲中**会同步进 store」**红**。
+
+### 遗留 / 待办
+
+- ⚠️ **真机复验未做**：需要一条**真的慢**的链路才能看到「缓冲中…」——
+  本机走的是 LAN（`192.168.1.2:5666`），不容易触发；**公网中继**下才会频繁出现。
+  目前只有自动化三层（引擎 / store / 界面）保证；
+- **中继带宽**（实测约 230KB/s）本身是**上游**问题，不是客户端缺陷；
+- `waiting` / `stalled` 在**极端**情况下（连接真的断了）也会先给缓冲提示、
+  稍后才由 `error` 事件报真错误 → 中间那几秒用户看到的是「缓冲中…」而不是红字，
+  这是**正确**的（数据没来 ≠ 已经失败）。

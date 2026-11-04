@@ -163,6 +163,16 @@ export const FALLBACK_PREPARING_MESSAGE = '正在转换音频（首次播放需�
 export const FALLBACK_LOSSY_NOTE = '兜底播放使用 Opus 转码（音质有损，原始文件不变）'
 
 /**
+ * **缓冲中**的提示（T37）。
+ *
+ * ⚠️ **这不是错误**：媒体元素的 `stalled` / `waiting` 只是「数据一时没到」的**瞬时提示**
+ *    ——播放通常会**自行恢复**。早先把它当错误上报 → 界面挂一条**红字**，
+ *    而**音乐其实照放**（慢网时几乎每首歌开头都会中一次）。
+ *    ⇒ 现在它是一条 `role="status"` 的**灰字**，数据到了自动消失。
+ */
+export const BUFFERING_MESSAGE = '缓冲中…（网络较慢，正在等待数据）'
+
+/**
  * 从歌曲里取扩展名 / 容器名。
  *
  * `Song` 没有 `ext` 字段；能拿到的只有 `audioSpec.format`（实测服务端给的是

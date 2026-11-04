@@ -44,7 +44,7 @@ import {
 
 import type { Song } from '../../shared/types'
 import { usePlayerStore, type PlayerStore } from '../state/playerStore'
-import { FALLBACK_LOSSY_NOTE, FALLBACK_PREPARING_MESSAGE } from '../player/format'
+import { BUFFERING_MESSAGE, FALLBACK_LOSSY_NOTE, FALLBACK_PREPARING_MESSAGE } from '../player/format'
 import { CoverImage } from './Cards'
 import { EqPanel } from './EqPanel'
 import { nextPlayMode, playModeLabel } from './playMode'
@@ -225,19 +225,31 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
   /** 播放错误（可为空串）。 */
   const errorText = typeof state.error === 'string' ? state.error : ''
   /**
+   * **缓冲中**（T37）。
+   *
+   * ⚠️ **这不是错误**：慢网 / 中继带宽有限时，媒体元素会发 `stalled` / `waiting`
+   *    ——那是「数据一时没到」的**瞬时提示**，音乐其实照放。
+   *    ⇒ 这里只给一条**灰字**（`role="status"`），数据到了自动消失。
+   */
+  const buffering = state.buffering === true
+  /**
    * 提示行（歌名 / 歌手下面的第三行，Task 12）。
    *
-   * ⚠️ **优先级**：错误 > 正在转码 > 兜底有损说明。
+   * ⚠️ **优先级**：错误 > 正在转码 > **缓冲中** > 兜底有损说明。
    *    错误用 `role="alert"`（立刻播报），其余用 `role="status"`（不打扰）。
+   *    ⚠️ 「缓冲中」排在「兜底有损」**前面**：用户此刻在等数据，
+   *    先告诉他「在等」比先讲音质更贴近当下（缓冲结束后有损说明会回来）。
    */
   const noticeText =
     errorText.length > 0
       ? errorText
       : preparing
         ? FALLBACK_PREPARING_MESSAGE
-        : fallbackActive
-          ? FALLBACK_LOSSY_NOTE
-          : ''
+        : buffering
+          ? BUFFERING_MESSAGE
+          : fallbackActive
+            ? FALLBACK_LOSSY_NOTE
+            : ''
 
   /** 拖动进度条时的预览值（`null` = 没在拖动）。 */
   const [dragValue, setDragValue] = useState<number | null>(null)

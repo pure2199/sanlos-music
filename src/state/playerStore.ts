@@ -75,6 +75,8 @@ export interface PlayerStore {
   muted?: boolean
   /** 播放错误信息。 */
   error?: string | null
+  /** 是否**缓冲中**（T37；界面显示灰字「缓冲中…」，**不是**错误）。 */
+  buffering?: boolean
   /** 是否正在做兜底转码（Task 12）。 */
   preparing?: boolean
   /** 当前这一曲是不是兜底产物在播（Task 12；界面据此注明「音质有损」）。 */
@@ -283,6 +285,8 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
     mode: 'sequence',
     muted: false,
     error: null,
+    /** T37：初始**不**在缓冲（界面按 `=== true` 判断）。 */
+    buffering: false,
 
     // --- EQ 的初始状态 ---
     eqPresetKey: initialEq.presetKey,
@@ -537,6 +541,7 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       volume: state.volume,
       muted: state.muted ?? false,
       error: state.error ?? null,
+      buffering: state.buffering ?? false,
       preparing: state.preparing ?? false,
       fallbackActive: state.fallbackActive ?? false,
     })
