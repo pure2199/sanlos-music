@@ -9,6 +9,14 @@
 // - `setPositionState` 的 `position` 必须在 `duration` 之内；
 // - `dispose()` 把**全部** handler 卸掉（`setActionHandler(action, null)`）。
 //
+// ⚠️ **T21 改写了「封面」这一条的前提**（不是削弱断言，是换了被钉住的行为）：
+//    旧行为 = 直接把 `fnm://…` 塞进 `metadata.artwork`；
+//    新行为 = **artwork 的 src 必须是 Chromium 认得的 `data:` URL**
+//    （Chromium 的媒体会话图片加载器只认 http/https/data/blob，
+//      `fnm://` 会被拒 → Windows 侧不显示专辑图）。
+//    ⇒ 下面「封面 URL 仍由 coverUrl() 拼装」这条**继续成立**（唯一拼装点不变），
+//      但拼出来的地址是**去取字节**用的，不是 artwork 的 src。
+//
 // ⚠️ 测试里一律用占位数据（「歌一」「示例歌手」…），
 //    **不写真实 FN ID / 账号 / 口令 / 真实歌曲名**。
 // ---------------------------------------------------------------------------
@@ -19,6 +27,9 @@ import {
   createMediaSession,
   installMediaSession,
   toSnapshot,
+  bytesToDataUrl,
+  dataUrlMime,
+  fetchArtworkDataUrl,
   MEDIA_ARTWORK_SIZE,
   type MediaMetadataLike,
   type MediaSessionLike,
@@ -112,6 +123,15 @@ function metadataRecorder(): {
   }
 }
 
+/**
+ * 让挂起的 Promise 链跑完（微任务 + 一个宏任务）。
+ *
+ * ⚠️ 封面取回是**异步**的（取字节 → `data:` URL），断言前必须让它落地。
+ */
+async function flush(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 0))
+}
+
 /** 假播放器桥（记录推送与命令）。 */
 function fakeBridge(): {
   bridge: PlayerBridge
@@ -188,6 +208,95 @@ afterEach(() => {
 })
 
 // ---------------------------------------------------------------------------
+// 封面字节 → data: URL（T21）
+// ---------------------------------------------------------------------------
+
+describe('bytesToDataUrl / dataUrlMime', () => {
+  it('字节 → data: URL（base64，能原样还原）', () => {
+    const bytes = new Uint8Array([1, 2, 3, 250])
+    const url = bytesToDataUrl(bytes, 'image/png')
+    expect(url.startsWith('data:image/png;base64,')).toBe(true)
+    const b64 = url.slice('data:image/png;base64,'.length)
+    expect(atob(b64)).toBe(String.fromCharCode(1, 2, 3, 250))
+  })
+
+  it('字节很多时也不爆栈（分块编码）', () => {
+    const bytes = new Uint8Array(200_000).fill(7)
+    const url = bytesToDataUrl(bytes)
+    expect(url.length).toBeGreaterThan(100_000)
+    expect(url.startsWith('data:image/jpeg;base64,')).toBe(true)
+  })
+
+  it('dataUrlMime：从 data: URL 取 MIME；不是 data: 就 undefined', () => {
+    expect(dataUrlMime('data:image/webp;base64,AAA')).toBe('image/webp')
+    expect(dataUrlMime('fnm://srv/static/cover?coverId=x')).toBeUndefined()
+    expect(dataUrlMime('data:image/png')).toBeUndefined()
+  })
+})
+
+describe('fetchArtworkDataUrl（默认实现：渲染层自取）', () => {
+  /** 临时替换 `globalThis.fetch`，返回一个假响应。 */
+  async function withFetch(
+    impl: () => Promise<unknown>,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    const original = globalThis.fetch
+    globalThis.fetch = impl as unknown as typeof fetch
+    try {
+      await run()
+    } finally {
+      globalThis.fetch = original
+    }
+  }
+
+  it('把封面字节转成 data: URL（**不是**把 fnm:// 原样交出去）', async () => {
+    await withFetch(
+      async () => ({
+        ok: true,
+        blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }),
+      }),
+      async () => {
+        const url = await fetchArtworkDataUrl('fnm://srv/static/cover?coverId=x')
+        expect(url?.startsWith('data:image/jpeg;base64,')).toBe(true)
+        expect(url?.startsWith('fnm://')).toBe(false)
+      },
+    )
+  })
+
+  it('HTTP 非 2xx 时返回 null（不抛）', async () => {
+    await withFetch(
+      async () => ({ ok: false, blob: async () => new Blob([]) }),
+      async () => {
+        expect(await fetchArtworkDataUrl('fnm://srv/static/cover?coverId=x')).toBeNull()
+      },
+    )
+  })
+
+  it('请求抛异常时返回 null（不能因此影响播放）', async () => {
+    await withFetch(
+      async () => {
+        throw new Error('网络炸了')
+      },
+      async () => {
+        expect(await fetchArtworkDataUrl('fnm://srv/static/cover?coverId=x')).toBeNull()
+      },
+    )
+  })
+
+  it('空字节返回 null', async () => {
+    await withFetch(
+      async () => ({
+        ok: true,
+        blob: async () => new Blob([], { type: 'image/jpeg' }),
+      }),
+      async () => {
+        expect(await fetchArtworkDataUrl('fnm://srv/static/cover?coverId=x')).toBeNull()
+      },
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
 // createMediaSession
 // ---------------------------------------------------------------------------
 
@@ -206,19 +315,169 @@ describe('createMediaSession 元数据', () => {
     expect(session.metadata).toBe(meta)
   })
 
-  it('封面走 coverUrl(coverId, size)（唯一拼装点）', () => {
+  it('封面 URL 仍由 coverUrl() 拼装，但**不直接**塞进 artwork（Chromium 不认 fnm://）', async () => {
     const session = fakeMediaSession()
     const recorder = metadataRecorder()
-    const controller = createMediaSession({ session, createMetadata: recorder.create })
+    /** 被请求过的封面 URL（用来验证「唯一拼装点」没被绕过）。 */
+    const requested: string[] = []
+    const controller = createMediaSession({
+      session,
+      createMetadata: recorder.create,
+      fetchArtwork: async (url) => {
+        requested.push(url)
+        return 'data:image/jpeg;base64,AAAA'
+      },
+    })
 
     controller.update(state())
+    await flush()
 
-    const artwork = recorder.made[0]?.artwork ?? []
+    // ① 封面 URL 仍然走 `coverUrl()`（**全项目唯一拼装点**不变）。
+    expect(requested.length).toBe(1)
+    expect(requested[0]?.startsWith('fnm://srv/')).toBe(true)
+    expect(requested[0]).toContain('coverId=track_abc')
+    expect(requested[0]).toContain(`size=${MEDIA_ARTWORK_SIZE}`)
+
+    // ② artwork 的 src 是 **data: URL**，**不是** `fnm://`
+    //    （Chromium 的媒体会话图片加载器只认 http/https/data/blob）。
+    const artwork = recorder.made[recorder.made.length - 1]?.artwork ?? []
     expect(artwork.length).toBe(1)
-    const src = artwork[0]?.src ?? ''
-    expect(src.startsWith('fnm://srv/')).toBe(true)
-    expect(src).toContain('coverId=track_abc')
-    expect(src).toContain(`size=${MEDIA_ARTWORK_SIZE}`)
+    expect(artwork[0]?.src.startsWith('data:image/')).toBe(true)
+    expect(artwork[0]?.src.startsWith('fnm://')).toBe(false)
+    expect(artwork[0]?.type).toBe('image/jpeg')
+
+    // ③ **任何一版**元数据都不得出现过 `fnm://` 的 artwork。
+    for (const made of recorder.made) {
+      for (const item of made.artwork ?? []) {
+        expect(item.src.startsWith('fnm://')).toBe(false)
+      }
+    }
+  })
+
+  it('封面字节还没到时：先出元数据（无 artwork），字节到了再补一次', async () => {
+    const session = fakeMediaSession()
+    const recorder = metadataRecorder()
+    /** 手动控制封面请求何时返回（用数组收集 resolver，避免 TS 把 `let` 收窄成 `never`）。 */
+    const pending: Array<(value: string | null) => void> = []
+    const controller = createMediaSession({
+      session,
+      createMetadata: recorder.create,
+      fetchArtwork: () => new Promise((resolve) => { pending.push(resolve) }),
+    })
+
+    controller.update(state())
+    await flush()
+
+    // 封面还在路上：标题等元数据**已经可用**，artwork 暂时为空。
+    const first = recorder.made[0]
+    expect(first?.title).toBe('歌一')
+    expect(first?.artwork).toEqual([])
+
+    pending[0]?.('data:image/jpeg;base64,ZZZZ')
+    await flush()
+
+    const last = recorder.made[recorder.made.length - 1]
+    expect(last?.artwork?.[0]?.src).toBe('data:image/jpeg;base64,ZZZZ')
+  })
+
+  it('封面取不到（返回 null）时：元数据照常设置，不崩、不报错', async () => {
+    const session = fakeMediaSession()
+    const recorder = metadataRecorder()
+    const controller = createMediaSession({
+      session,
+      createMetadata: recorder.create,
+      fetchArtwork: async () => null,
+    })
+
+    controller.update(state())
+    await flush()
+
+    expect(session.metadata).not.toBeNull()
+    const last = recorder.made[recorder.made.length - 1]
+    expect(last?.title).toBe('歌一')
+    expect(last?.artwork).toEqual([])
+  })
+
+  it('封面请求抛异常时：不影响播放（元数据照常，artwork 为空）', async () => {
+    const session = fakeMediaSession()
+    const recorder = metadataRecorder()
+    const controller = createMediaSession({
+      session,
+      createMetadata: recorder.create,
+      fetchArtwork: async () => {
+        throw new Error('取封面炸了')
+      },
+    })
+
+    controller.update(state())
+    await flush()
+
+    expect(session.metadata).not.toBeNull()
+    const last = recorder.made[recorder.made.length - 1]
+    expect(last?.title).toBe('歌一')
+    expect(last?.artwork).toEqual([])
+  })
+
+  it('换歌后：旧封面回来不能盖掉新歌的封面', async () => {
+    const session = fakeMediaSession()
+    const recorder = metadataRecorder()
+    /** 手动控制每个封面请求何时返回。 */
+    const pending: Array<(value: string | null) => void> = []
+    const controller = createMediaSession({
+      session,
+      createMetadata: recorder.create,
+      fetchArtwork: () => new Promise((resolve) => { pending.push(resolve) }),
+    })
+
+    controller.update(state({ current: track({ id: 'song-1', coverId: 'track_1' }) }))
+    await flush()
+    expect(pending.length).toBe(1)
+
+    // 换歌 → 新歌的封面请求也发出去。
+    controller.update(state({ current: track({ id: 'song-2', title: '歌二', coverId: 'track_2' }) }))
+    await flush()
+    expect(pending.length).toBe(2)
+
+    // ⚠️ **旧封面这时才回来** —— 必须被丢弃，不能盖到新歌头上。
+    pending[0]?.('data:image/jpeg;base64,OLD')
+    await flush()
+    const afterOld = recorder.made[recorder.made.length - 1]
+    expect(afterOld?.title).toBe('歌二')
+    for (const item of afterOld?.artwork ?? []) {
+      expect(item.src).not.toContain('OLD')
+    }
+
+    // 新封面回来 → 生效。
+    pending[1]?.('data:image/jpeg;base64,NEW')
+    await flush()
+    const afterNew = recorder.made[recorder.made.length - 1]
+    expect(afterNew?.artwork?.[0]?.src).toContain('NEW')
+  })
+
+  it('同一首歌反复推状态（进度在变）：封面只取一次', async () => {
+    const session = fakeMediaSession()
+    const recorder = metadataRecorder()
+    let calls = 0
+    const controller = createMediaSession({
+      session,
+      createMetadata: recorder.create,
+      fetchArtwork: async () => {
+        calls += 1
+        return 'data:image/jpeg;base64,AAAA'
+      },
+    })
+
+    controller.update(state())
+    await flush()
+    controller.update(state({ position: 10 }))
+    await flush()
+    controller.update(state({ position: 20 }))
+    await flush()
+
+    expect(calls).toBe(1)
+    // 缓存命中：后续的元数据**直接**带上封面（不必等异步）。
+    const last = recorder.made[recorder.made.length - 1]
+    expect(last?.artwork?.[0]?.src).toBe('data:image/jpeg;base64,AAAA')
   })
 
   it('没有封面时不挂 artwork', () => {

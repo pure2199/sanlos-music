@@ -397,9 +397,91 @@ api-client 原有两条把 99999 当**普通业务码**断言「msg 原样带出
 - 探针脚本 `tools/fn-range-probe.mjs` 只读，不写任何数据；凭证只从环境变量读，不打印、不落盘。
 - ⚠️ **真机脚本现在会因「产物旧」而拒绝运行**（退出码 3）——这是**故意**的。
   跑真机前先 `npm run build`。
-- ⚠️ 封面在真机上刷出上千条 `MediaImage src can only be of http/https/data/blob scheme: fnm://…`
-  warning（Electron 的 `<img>` 不接受自定义 scheme）。**不影响播放**，但封面实际没显示出来 ——
-  这是**另一个缺陷**，本轮未纳入范围，留待后续任务。
+- ⚠️ **真机上封面刷出上千条 `MediaImage src can only be of http/https/data/blob scheme: fnm://…`
+  warning**。
+  ⚠️ **T21 复核后更正**：这条 warning **不是**「应用内封面不显示」——
+  实测（`tools/fn-cover-probe.mjs`）应用内 `<img src="fnm://…">` **能正常解码**
+  （第一张 `naturalWidth = 200`），因为 `<img>` 走的是**另一条**图片加载器。
+  真正被拒的是 **`navigator.mediaSession.metadata.artwork`**（Windows 快速设置 / SMTC 的专辑图），
+  Chromium 的**媒体会话**图片加载器只认 `http/https/data/blob`。
+  ⇒ 详见第十节（T21）；T21 修完后这条 warning 已降到 **0 条**。
 
 
 
+
+## 十、T21：Windows 媒体会话（SMTC）的专辑图 —— 从「看不见」到「有图」
+
+### 背景：T20 留下的一条 warning，指向的**不是**它看起来指向的东西
+
+T20 的真机活体验检刷出上千条：
+
+```
+MediaImage src can only be of http/https/data/blob scheme: fnm://srv/static/cover?coverId=album_…&size=160
+```
+
+当时记的是「封面没显示出来」。**这是误判** —— T21 用新探针 `tools/fn-cover-probe.mjs` 量过：
+
+| 测什么 | 实测 |
+|---|---|
+| 应用内 `<img src="fnm://…">` | 942 个 `<img>`；第一张 `complete=true`、`naturalWidth=200` → **解码成功** ✓ |
+| 渲染层 `fetch('fnm://…')` | `200`｜`image/jpeg`｜8684 字节 ✓ |
+| 字节转 `blob:` 后解码 | 200×200 ✓ |
+| 那批 warning 的来源 | **`navigator.mediaSession.metadata.artwork`**（`size=160`，与 `MEDIA_ARTWORK_SIZE` 一致） |
+
+⇒ **`<img>` 与媒体会话 artwork 走的是两条不同的图片加载器**：
+
+- `<img>` 能吃 `fnm://`（协议已注册 `standard + supportFetchAPI + corsEnabled`）→ **应用内封面是好的**；
+- **媒体会话**的封面只认 `http/https/data/blob` → `fnm://` 被拒 → **Windows 快速设置 / SMTC / 锁屏的专辑图是空的**。
+
+⚠️ 教训：「同一个 URL 在一个地方能用、在另一个地方不能用」时，**别把结论扩大到全部** ——
+先量清楚「是哪一条加载器」再说。
+
+### 修法（用户拍板：方案 A —— 渲染层自取字节转 `data:` URL）
+
+```
+渲染层 fetch('fnm://srv/static/cover?coverId=…&size=160')
+  → bytes → base64 → data:image/jpeg;base64,…
+    → navigator.mediaSession.metadata.artwork[0].src
+```
+
+- **不碰主进程、不加 IPC、不改协议注册** —— 渲染层本来就能 `fetch('fnm://')`（实测 200）；
+- `data:` URL 在渲染进程与浏览器进程两侧都能解，**不需要**改 CSP（`img-src` 已放行 `data:`）；
+- 封面字节走的仍是**同一条 `fnm://` 出网代理**，凭证边界不变。
+
+### 改动
+
+| 文件 | 内容 |
+|---|---|
+| `src/player/mediaSession.ts` | 新增 `bytesToDataUrl()` / `dataUrlMime()` / `fetchArtworkDataUrl()`（默认实现）；`MediaSessionDeps` 新增可注入端口 `fetchArtwork`；元数据改成**两段式**：先出标题等元数据（artwork 暂空），封面字节到了再补一次；带 LRU 缓存（16 条）+ **换歌令牌**守卫（旧的封面回来不许盖掉新歌） |
+| `test/media-session.test.ts` | **改写 1 条**（旧断言钉的是「artwork 里塞 `fnm://`」—— 本任务明确推翻了该前提）+ **新增 9 条** |
+| `tools/fn-cover-probe.mjs`（新） | 真机探针：量应用内封面实况、渲染层 fetch、blob 解码、媒体会话 artwork 的 scheme、那条 warning 的条数 |
+
+### 真机实测（`tools/fn-cover-probe.mjs`，T21 新增）
+
+| 探针 | 修复前 | 修复后 |
+|---|---|---|
+| 媒体会话 artwork 的 scheme | `fnm` | **`data`**（`data:image/jpeg;base64,/9j/4AAQS…`，`sizes=160x160`，`type=image/jpeg`） |
+| `MediaImage src can only be …` 警告 | 上千条 | **0 条** |
+| 应用内封面 | `naturalWidth=200`（本来就是好的） | `naturalWidth=200`（无回归） |
+
+### 变异自证（本轮实际跑过，全部红过再改回）
+
+| 变异 | 结果 |
+|---|---|
+| `fetchArtworkDataUrl` 不做 `data:` 转换（原样交出 `fnm://` = 旧行为） | 「默认实现」那条 **立刻红** |
+| 去掉换歌守卫（旧的封面回来盖掉新歌） | 「换歌后：旧封面回来不能盖掉新歌」那条 **立刻红** |
+| 去掉封面缓存（每次都重新取） | 「同一首歌反复推状态：封面只取一次」那条 **立刻红** |
+
+### 遗留 / 待办
+
+- Windows 侧「专辑图真的显示出来了」**只能由用户肉眼确认**（SMTC 在系统 UI 里，脚本够不着）；
+  脚本能证明的是「artwork 是 Chromium 认得的 `data:` URL」+「那条警告为 0」。
+- 封面字节现在**取两次**（托盘在主进程取一次、媒体会话在渲染层取一次，各约 9 KB）。
+  用户拍板选了方案 A（不新增 IPC）；若日后在意流量，可改成「主进程把已缓存的字节给渲染层」。
+- `MEDIA_ARTWORK_SIZE = 160` 的**真实 NAS 取值仍未校准**（审计 Step K）—— 与托盘一致，等联调校准。
+- ⚠️ **新发现（T21 顺带查出，既有缺陷、非本轮回归）：曲库网格的「封面请求风暴」**。
+  实测：打开专辑页会挂载约 **942** 张卡片 → 约 **942 个** `static/cover` 请求（约 8 MB）
+  → 公共中继 `<FN-ID>.fnos.net` 扛不住时**大面积 502**，界面上大片封面空白。
+  佐证：T21 前后各跑一次真机，一次 901 条 502、一次 0 条；502 全是 `size=200`（应用内卡片封面），
+  发生在**播放之前**（专辑页第 5 步），与 T21 改的 `size=160`（媒体会话封面，第 12 步才发生）无关。
+  ⇒ 待办（下一任务候选）：真正懒加载 / 限制并发 / 只请求可见区域的封面。
