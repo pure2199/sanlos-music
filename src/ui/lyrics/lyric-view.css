@@ -88,6 +88,51 @@
   font-weight: 600;
 }
 
+/* --------------------------------------------------------------------------
+ * 全量模式（歌词舞台）
+ * -------------------------------------------------------------------------- */
+
+/*
+ * ⚠️ **所有行等高槽位**：当前行只是**字号更大**、**槽位不变**
+ *    → 当前行推进时**整份列表不跳动**（否则长歌每唱一句整屏都抖一下）。
+ *    槽位值必须与 `LYRIC_ALL_LINE_HEIGHT` 一致。
+ */
+.fnm-lyricview--all .fnm-lyricview__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--fnm-lyricview__line-top, 0px);
+  height: 60px;
+  line-height: 40px;
+  font-size: 15px;
+}
+
+/*
+ * 当前行：放大 + 加粗。
+ * ⚠️ **槽位高度不变**（仍是 60px）—— 变的是**字号**，不是**行占的位置**。
+ */
+.fnm-lyricview--all .fnm-lyricview__line--active {
+  height: 60px;
+  line-height: 40px;
+  font-size: 20px;
+}
+
+/*
+ * 歌词**比可视区矮**时居中（短歌不至于孤零零挂在顶上）；
+ * **比可视区高**时贴顶（`safe` 关键字：普通 `center` 会让溢出内容的顶部**够不着**）。
+ * ⚠️ 不支持 `safe` 的引擎会整条丢弃这条声明 → 退回 `normal`（贴顶）→ 仍然正确。
+ */
+.fnm-lyricview--all {
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+}
+
+/* ⚠️ 别让 flex 把画布**压扁**（会毁掉行内绝对定位）。 */
+.fnm-lyricview--all .fnm-lyricview__canvas {
+  flex: 0 0 auto;
+}
+
 /* 可点的歌词行（给了 onSeek 才是 <button>）。 */
 .fnm-lyricview__line--clickable {
   width: 100%;

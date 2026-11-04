@@ -597,6 +597,36 @@ describe('缓存与开关', () => {
     expect(calls).toHaveLength(2)
   })
 
+  it('自定义源**改了模板** → 不再命中旧缓存（换源要**立刻**生效）', async () => {
+    // ⚠️ **同一个歌 + 同一个源，但模板不同 = 完全不同的接口**
+    //    （可以指向另一个词源、另一种返回格式）→ 模板必须进缓存键。
+    //    （T34 的 E2E 实测撞过：同一首歌、只换模板 → 拿回来的仍是**旧模板**的结果。）
+    const { fetchImpl, calls } = makeFetch([
+      { match: 'first.example.com', body: '[00:01.00]第一版歌词' },
+      { match: 'second.example.com', body: '[00:01.00]第二版歌词' },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+
+    const first = await provider.fetchExternalLyric(
+      'custom',
+      'https://first.example.com/lyric?title={title}&artist={artist}',
+      QUERY,
+    )
+    const second = await provider.fetchExternalLyric(
+      'custom',
+      'https://second.example.com/lyric?title={title}&artist={artist}',
+      QUERY,
+    )
+
+    // ⚠️ **两次都要真的发请求**（改模板 = 换一个接口，不能拿旧的）。
+    expect(calls).toHaveLength(2)
+    expect(first.status).toBe('ok')
+    expect(second.status).toBe('ok')
+    if (first.status !== 'ok' || second.status !== 'ok') return
+    expect(first.original).toContain('第一版歌词')
+    expect(second.original).toContain('第二版歌词')
+  })
+
   it('网络异常 → `error` + 可读原因（**不抛异常**）', async () => {
     const provider = createLyricProvider({
       fetchImpl: async () => {

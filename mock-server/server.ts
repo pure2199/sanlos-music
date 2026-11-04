@@ -393,6 +393,23 @@ function sendText(res: ServerResponse, text: string, contentType = 'text/plain; 
  */
 export const MOCK_EXTERNAL_LRC = '[00:01.00]外部歌词源第一行\n[00:02.00]外部歌词源第二行'
 
+/**
+ * 外部歌词源的**长版假 LRC**（T34）：30 行，每行 2 秒。
+ *
+ * ⚠️ **为什么要另开一个端点**（而不是把 `/mock-lyric` 改长）：
+ *    - 真实歌曲的歌词动辄**几十上百行**；`/mock-lyric` 只有 2 行 →
+ *      全屏歌词的「歌词舞台」（**所有行都在场** + 随播放**滚动跟随**）
+ *      在 2 行下**根本无从验证**：内容不够高 → 舞台不会滚动 → 「滚动跟随」是条空断言；
+ *    - `/mock-lyric` 的长度被 T32 的 E2E 用例依赖（它断言「第一行」在场）→
+ *      改它会动到**别的任务**的用例环境。
+ *    ⇒ **原端点一字不改**，另给一个长版。
+ */
+export const MOCK_EXTERNAL_LRC_LONG = Array.from(
+  { length: 30 },
+  (_, index) =>
+    `[00:${String(1 + index * 2).padStart(2, '0')}.00]长歌词第${index + 1}行`,
+).join('\n')
+
 /** 造一份自动更新清单（哈希与假安装包一致 → 客户端的 SHA-512 校验能过）。 */
 function buildUpdateManifest(): unknown {
   return {
@@ -975,6 +992,11 @@ export function createMockServer(): MockServer {
     // ⚠️ 用来验「NAS 没歌词 → 外部补齐」这条链路。
     if (method === 'GET' && path === '/mock-lyric') {
       sendText(res, MOCK_EXTERNAL_LRC)
+      return
+    }
+    // 免 token 端点：**长版**外部歌词（T34）——验「歌词舞台」的滚动跟随。
+    if (method === 'GET' && path === '/mock-lyric-long') {
+      sendText(res, MOCK_EXTERNAL_LRC_LONG)
       return
     }
 

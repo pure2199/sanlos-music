@@ -3,6 +3,25 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { launchApp, login, type AppFixture } from './helpers/app'
+import { LYRICS, SONGS } from '../mock-server/fixtures'
+
+/**
+ * 一首 **NAS 没有歌词** 的歌（→ 歌词只能靠**外部源**补齐）。
+ *
+ * ⚠️ 从 mock 的 fixture 里**取**，不写死歌名 → mock 改了数据，这条用例不会悄悄失效。
+ */
+const SONG_WITHOUT_NAS_LYRIC = SONGS.find((song) => !LYRICS.has(song.guid))!
+
+/**
+ * 用来「先把当前曲目换掉」的那首（与目标歌不同即可）。
+ *
+ * ⚠️ **为什么需要它**：mock 的音频只有 **60 秒** → 整组 E2E 跑下来早就放完了 →
+ *    引擎收到 `ended` 会**自动切队列里的下一首** → 当前曲目在断言前就变了
+ *    （实测：想播 t2，断言时当前曲目已是 t3 → 歌词是 t3 的 NAS 歌词 → 行数对不上）。
+ *    ⇒ 先播**另一首**（保证「切歌」= 一次全新加载），
+ *    再播目标歌 → 目标歌一定是**从头加载**的 → 位置归零，不会被自动切走。
+ */
+const OTHER_SONG = SONGS.find((song) => song.guid !== SONG_WITHOUT_NAS_LYRIC.guid)!
 
 // ---------------------------------------------------------------------------
 // Task 13：E2E 冒烟
@@ -639,6 +658,180 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
       // ⚠️ **先关掉全屏页**：它是**全屏浮层** → **盖住顶栏** → 点不到「设置」。
       await fixture.window.getByRole('button', { name: '关闭全屏播放页' }).click()
       await expect(fixture.window.getByTestId('full-player')).toHaveCount(0)
+      await fixture.window.getByRole('button', { name: '设置' }).click()
+      await expect(settingsDialog).toBeVisible()
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // T34：全屏歌词 = 「歌词舞台」（**所有**歌词行都在场 + 当前行放大 + 随播放滚动）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **用户诉求**：「全屏歌词应该显示**所有**歌词」。
+  //
+  // ⚠️ **为什么 mock 要另给一条「长歌词」**：
+  //    真实歌曲的歌词动辄**几十上百行**；mock 原有的歌词只有 2~3 行 →
+  //    内容不够高 → 舞台**不会滚动** → 「滚动跟随」就是条**空断言**（假绿）。
+  //    ⇒ 用 mock 新增的 `/mock-lyric-long`（30 行，每 2 秒一句）。
+  //
+  // ⚠️ **每条断言各自的鉴别力**（缺一条就有一类回归抓不住）：
+  // - 「30 行全在 DOM」：`single` 只渲染当前行附近 ±3 行（最多 7 行）、
+  //   `double` 恰好 2 行 → 一旦退回这两档，这条立刻红；
+  // - 「相邻两行 y 间距 = 60px」：这是**真实布局**（jsdom 量不到），
+  //   也是「所有行等高槽位」这个设计承诺的证据；
+  // - 「当前行字号更大」：证明 `--all` 的 CSS **真的生效**了
+  //   （jsdom 没有 CSS → 这条只能在 E2E 里验）；
+  // - 「舞台 scrollTop > 0」+「当前行在视口内」：证明**滚动跟随**真的在滚。
+  //
+  test('全屏播放页：所有歌词行都在场、当前行放大、随播放滚动（歌词舞台）', async () => {
+    // ⚠️ **需要时才登录**：整组跑时前面那条用例已登录（会话还在）；
+    //    单独跑这条（`-g`）时还没登录 → 登录表单在，才登录。
+    const addressField = fixture.window.locator('#fnm-address')
+    const needLogin = await addressField
+      .waitFor({ state: 'visible', timeout: 5000 })
+      .then(() => true)
+      .catch(() => false)
+    if (needLogin) {
+      await login(fixture.window, fixture.mock.url)
+    }
+
+    // --- 1. 设置：歌词来源 = 自定义 → 指向 mock 的**长**歌词端点 --------------
+    //
+    // ⚠️ **「设置」按钮是开关**：面板可能已经开着（上一条用例开着）→
+    //    再点一次会**关掉**它 → 后面就找不到「歌词来源」那一组了。
+    //    ⇒ 先看面板在不在，不在才点。
+    const settingsDialog = fixture.window.getByRole('dialog', { name: '设置' })
+    const wasOpen = (await settingsDialog.count()) > 0
+    if (!wasOpen) {
+      await fixture.window.getByRole('button', { name: '设置' }).click()
+      await expect(settingsDialog).toBeVisible()
+    }
+    const group = fixture.window.getByRole('group', { name: '歌词来源' })
+    await group.getByRole('combobox', { name: '外部歌词源' }).selectOption('custom')
+    await group
+      .getByRole('textbox', { name: '自定义歌词 API 模板' })
+      .fill(
+        `${fixture.mock.url}/mock-lyric-long?title={title}&artist={artist}&album={album}&duration={duration}`,
+      )
+    await group.getByRole('button', { name: '保存歌词源' }).click()
+
+    // ⚠️ **关掉设置面板**：它盖在顶栏上 → 会**拦截**播放条按钮的指针事件。
+    //    （不管之前开没开，填完之后它一定是开着的 → **总是**关掉。）
+    await fixture.window.getByRole('button', { name: '设置' }).click()
+    await expect(settingsDialog).toHaveCount(0)
+
+    // --- 2. 播一首 **NAS 没有歌词** 的歌（→ 歌词只能靠外部源补齐） ----------------
+    //
+    // ⚠️ **必须按「歌名」定位，不能按行号**：歌曲列表是**虚拟列表**
+    //    （只渲染可视窗口）→ 行号会随窗口漂移。
+    //    ⚠️ **实测踩过**：想播第 2 行（t2），双击却落到了**隔壁那行**（t3）
+    //    → 播的是 t3 → 歌词是 t3 的 NAS 歌词 → 「30 行」断言数到 3 行。
+    //    ⇒ 按歌名找行（内容定位 → 窗口漂移也不受影响），
+    //    并在双击后**核对播放条**，让「点错行」当场暴露而不是 20 秒后才红。
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌曲' })
+      .click()
+    const list = fixture.window.getByRole('listbox', { name: '歌曲列表' })
+    const targetRow = list
+      .getByRole('option')
+      .filter({ hasText: SONG_WITHOUT_NAS_LYRIC.title })
+      .first()
+    await expect(targetRow).toBeVisible()
+
+    // ⚠️ **先播另一首**：把当前曲目换掉 → 下面那次双击才是「一次全新加载」。
+    const otherRow = list.getByRole('option').filter({ hasText: OTHER_SONG.title }).first()
+    await expect(otherRow).toBeVisible()
+    await otherRow.dblclick()
+    await expect(fixture.window.locator('.fnm-playerbar__title')).toHaveText(OTHER_SONG.title)
+
+    // 现在播目标那首（**NAS 没有歌词** → 歌词只能靠外部源补齐）。
+    await targetRow.dblclick()
+    await expect(fixture.window.locator('.fnm-playerbar__title')).toHaveText(
+      SONG_WITHOUT_NAS_LYRIC.title,
+    )
+
+    // --- 3. 拖到靠后 → 当前行落在很靠后的位置 → 舞台**必须**滚动才看得见它 ----
+    //
+    // ⚠️ **为什么必须拖**：不拖的话刚开播（t≈0）→ 当前行在**最上面**
+    //    → 「当前行在视口内」是**恒真**的 → 假绿。
+    //
+    // ⚠️ **为什么只拖到 40%**：mock 的音频只有 **60 秒**，拖到太靠后会很快放完
+    //    → 播完**自动切下一首** → 当前行被换掉 → 断言变得不可预期。
+    //    40% ≈ 24s → 当前行在第 11 行左右（往后还有 36 秒余量）。
+    const slider = fixture.window.getByRole('slider', { name: '播放进度' })
+    await expect(slider).toBeEnabled()
+    await expect
+      .poll(async () => Number(await slider.getAttribute('max')), { timeout: 15000 })
+      .toBeGreaterThan(1)
+    const max = Number(await slider.getAttribute('max'))
+    const target = Math.round(max * 0.4 * 10) / 10
+
+    // ⚠️ **必须用原生 setter**：React 给 `<input>` 的 `value` 装了「变更追踪器」，
+    //    直接 `el.value = x` 会被当成「值没变」→ onChange **不触发** → 拖动是假的。
+    await slider.evaluate((el, value) => {
+      const input = el as HTMLInputElement
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      if (!setter) throw new Error('拿不到 value 的原生 setter')
+      setter.call(input, String(value))
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    }, target)
+    // 松手 → 提交预览位置（组件的语义是「松手才真正 seek」）。
+    await slider.dispatchEvent('mouseup')
+
+    // --- 4. 开全屏页 ----------------------------------------------------------
+    await fixture.window.getByRole('button', { name: /全屏/ }).first().click()
+    const page = fixture.window.getByTestId('full-player')
+    await expect(page).toBeVisible()
+
+    const stage = page.locator('.fnm-lyricview--all')
+    await expect(stage).toHaveCount(1)
+
+    // --- 5. 断言 --------------------------------------------------------------
+    // ⚠️ **所有 30 行都在场**（`single` 最多 7 行 / `double` 恰好 2 行）。
+    const lines = stage.locator('.fnm-lyricview__line')
+    await expect(lines).toHaveCount(30)
+
+    // 等「当前行」真的推进到靠后（seek 生效 + 播放推进要一点时间）。
+    await expect
+      .poll(async () => Number(await stage.getAttribute('data-active-index')), { timeout: 15000 })
+      .toBeGreaterThan(5)
+
+    // 真实几何：相邻两行的 y 间距**恒为 60px**（等高槽位 → 换行时列表不跳动）。
+    const tops = await lines.evaluateAll((elements) =>
+      elements.map((element) => (element as HTMLElement).getBoundingClientRect().top),
+    )
+    for (let index = 1; index < tops.length; index += 1) {
+      expect(tops[index]! - tops[index - 1]!).toBeCloseTo(60, 0)
+    }
+
+    // 当前行：字号更大（CSS 真的生效了）。
+    const active = stage.locator('.fnm-lyricview__line--active')
+    await expect(active).toHaveCount(1)
+    const activeFont = await active.evaluate((el) => getComputedStyle(el).fontSize)
+    const otherFont = await stage
+      .locator('.fnm-lyricview__line:not(.fnm-lyricview__line--active)')
+      .first()
+      .evaluate((el) => getComputedStyle(el).fontSize)
+    expect(Number.parseFloat(activeFont)).toBeGreaterThan(Number.parseFloat(otherFont))
+
+    // 舞台能滚，且**已经滚到**当前行（滚动跟随）。
+    const geometry = await stage.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+    }))
+    expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight)
+    expect(geometry.scrollTop).toBeGreaterThan(0)
+
+    // 当前行**滚进了视口**（跟着播放走）。
+    await expect(active).toBeInViewport()
+
+    // --- 6. 复原状态（后面的用例假定「设置面板是开着的」）--------------------
+    await fixture.window.getByRole('button', { name: '关闭全屏播放页' }).click()
+    await expect(page).toHaveCount(0)
+    if (wasOpen) {
       await fixture.window.getByRole('button', { name: '设置' }).click()
       await expect(settingsDialog).toBeVisible()
     }

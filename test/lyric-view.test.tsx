@@ -718,7 +718,10 @@ describe('FullPlayerPage：歌词（要求 C / K）', () => {
     expect(await screen.findByText('暂无歌词')).toBeTruthy()
   })
 
-  it('有歌词时用 Task 12 的 parseLyricEntries 解析并渲染（双行模式）', async () => {
+  // ⚠️ T34：全屏页的歌词从「双行模式」改成了「**全量模式**（歌词舞台）」——
+  //    前提被用户明确推翻（诉求是「全屏歌词显示**所有**歌词」）。
+  //    ⚠️ **断言一字未改**（下面两行照旧），只把标题里的模式名改成事实。
+  it('有歌词时用 Task 12 的 parseLyricEntries 解析并渲染（全量模式 / 歌词舞台）', async () => {
     const store = createPlayerStore(new FakeEngine())
     store.getState().playTrack(makeSong(1))
     const api = {

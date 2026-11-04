@@ -669,8 +669,20 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
   const cache = new Map<string, CacheEntry>()
 
   /** 缓存的键。 */
-  function cacheKey(source: LyricSource, query: ExternalLyricQuery): string {
-    return [source, query.title, query.artist, query.album, Math.round(query.duration)].join('|')
+  function cacheKey(source: LyricSource, query: ExternalLyricQuery, template: string): string {
+    // ⚠️ **自定义源必须把「模板」算进键里**（T34 修）：
+    //    同一个源、同一个歌，但**模板不同**就是**完全不同的接口**
+    //    （可以指向另一个词源、另一种返回格式）→ 不算进键里的话，
+    //    用户在设置里换了模板/换了源，**拿到的还是上一个源的旧歌词**
+    //    （E2E 实测撞过：同一首歌、只换模板 → 拿回来的仍是旧模板的结果）。
+    return [
+      source,
+      source === 'custom' ? template : '',
+      query.title,
+      query.artist,
+      query.album,
+      Math.round(query.duration),
+    ].join('|')
   }
 
   /** 读缓存（过期的失败结果视为没有）。 */
@@ -708,7 +720,7 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
       // ⚠️ `off` = 明确不用外部 → **一次网络请求都不发**。
       if (source === 'off') return { status: 'not-found' }
 
-      const key = cacheKey(source, query)
+      const key = cacheKey(source, query, template)
       const cached = readCache(key)
       if (cached) return cached
 

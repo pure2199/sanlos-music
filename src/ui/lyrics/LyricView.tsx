@@ -1,10 +1,13 @@
 // ---------------------------------------------------------------------------
 // 歌词视图（Task 15）
+// ---------------------------------------------------------------------------
 //
-// 两种模式：
+// 三种模式：
 // - `single`：**当前行居中放大**，逐行滚动（只渲染当前行附近的若干行）；
 // - `double`：**两行同时在场** —— 上一行保持在原位走满（走满后停在全满态），
-//   下一行在原位开始走，**整页走完才一起换行**；两行字号一致等粗。
+//   下一行在原位开始走，**整页走完才一起换行**；两行字号一致等粗；
+// - `all`（**歌词舞台**，T34）：**所有歌词行都在场**，当前行放大并逐字高亮，
+//   随播放**自动滚动跟随**。
 //
 // ---------------------------------------------------------------------------
 // 分工（控制器追加要求 A）
@@ -25,11 +28,12 @@
 //
 // 真正动态、**CSS 表达不了**的少数几个值走 CSS 自定义属性（内联）：
 // - `--fnm-lyricview__canvas-height`：画布总高度（随歌词行数变化）；
-// - `--fnm-lyricview__line-top`：单行模式下某一行的纵向位置（随行号变化）。
+// - `--fnm-lyricview__line-top`：单行 / 全量模式下某一行的纵向位置（随行号变化）。
 // ---------------------------------------------------------------------------
 
 import {
   Fragment,
+  memo,
   useEffect,
   useMemo,
   useRef,
@@ -56,6 +60,18 @@ export const LYRIC_WINDOW_RADIUS = 3
 /** 量不到可视区高度时的兜底值（jsdom 里 `getBoundingClientRect()` 一律返回 0）。 */
 export const LYRIC_FALLBACK_VIEWPORT_HEIGHT = 400
 
+/**
+ * 全量模式（`mode="all"`）下每行的**固定槽位高度**（像素）。
+ *
+ * ⚠️ **所有行等高**：当前行只是**字号更大**，**槽位不变**
+ *    → 当前行往前推进时**整份列表不会上下跳**。
+ *    （若当前行更高、后面的行就得下移 → 长歌每唱一句整屏都抖一下。）
+ *
+ * ⚠️ 这个值**必须与 `lyric-view.css` 里 `.fnm-lyricview--all` 的槽位一致**
+ *    —— 与 `LYRIC_LINE_HEIGHT` / CSS 的 `line-height` 是同一套纪律。
+ */
+export const LYRIC_ALL_LINE_HEIGHT = 60
+
 /** 允许写 CSS 自定义属性的 style 对象。 */
 type CssVars = CSSProperties & Record<`--${string}`, string | number | undefined>
 
@@ -71,8 +87,13 @@ export interface LyricViewProps {
   currentTime: number
   /** 点击某一行时回调（秒）—— 给了才会让歌词行可点。 */
   onSeek?: (t: number) => void
-  /** 呈现模式：单行（当前行居中放大）/ 双行（两行同时在场）。 */
-  mode: 'single' | 'double'
+  /**
+   * 呈现模式：
+   * - `single`：单行（当前行居中放大，**窗口裁剪**——只渲染当前行附近若干行）；
+   * - `double`：双行（两行同时在场）；
+   * - `all`：全量（**歌词舞台**——所有歌词行都在场，当前行放大并逐字高亮，随播放滚动跟随）。
+   */
+  mode: 'single' | 'double' | 'all'
   /** 单行模式下当前行上下各渲染几行（缺省 `LYRIC_WINDOW_RADIUS`）。 */
   windowRadius?: number
   /** 没有歌词时的文案。 */
@@ -164,7 +185,8 @@ function isWordHighlighted(progress: LyricWordProgress | null, wordIndex: number
  *
  * - `single`：当前行**居中放大**，逐行滚动；只渲染当前行附近的若干行
  *   （真实歌词动辄成百上千行，**绝不**把整份歌词塞进 DOM）；
- * - `double`：两行同时在场，推进逻辑来自 `computeDoubleLineState`（纯函数）。
+ * - `double`：两行同时在场，推进逻辑来自 `computeDoubleLineState`（纯函数）；
+ * - `all`：**整份歌词都在场**（歌词舞台），当前行放大并逐字高亮，随播放滚动跟随。
  *
  * 没有歌词时显示可读的空态（**不白屏、不崩**）。
  */
@@ -201,7 +223,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
     return () => observer.disconnect()
   }, [])
 
-  // 当前行（单行模式用；双行模式由纯函数给出「上一行 / 下一行」）。
+  // 当前行（单行 / 全量模式用；双行模式由纯函数给出「上一行 / 下一行」）。
   const activeIndex = useMemo(
     () => (safeLines.length ? findActiveLine(safeLines, time) : -1),
     [safeLines, time],
@@ -215,9 +237,17 @@ export function LyricView(props: LyricViewProps): ReactElement {
 
   const effectiveViewport = viewportHeight > 0 ? viewportHeight : LYRIC_FALLBACK_VIEWPORT_HEIGHT
 
-  // 单行模式：当前行居中 → 目标滚动位置。
+  // 目标滚动位置：**当前行居中**。
+  // - `single`：行高分两种（普通行 / 当前行更高 → 后续行要下移）；
+  // - `all`：**所有行等高槽位**（当前行只改字号、不改槽位）→ 滚动量与行号线性对应。
   const targetScrollTop = useMemo(() => {
-    if (mode !== 'single' || activeIndex < 0) return 0
+    if (activeIndex < 0) return 0
+    if (mode === 'all') {
+      const total = safeLines.length * LYRIC_ALL_LINE_HEIGHT
+      const center = activeIndex * LYRIC_ALL_LINE_HEIGHT + LYRIC_ALL_LINE_HEIGHT / 2 - effectiveViewport / 2
+      return Math.min(Math.max(center, 0), Math.max(0, total - effectiveViewport))
+    }
+    if (mode !== 'single') return 0
     const extra = LYRIC_ACTIVE_LINE_HEIGHT - LYRIC_LINE_HEIGHT
     const total = safeLines.length * LYRIC_LINE_HEIGHT + extra
     const center = activeIndex * LYRIC_LINE_HEIGHT + LYRIC_ACTIVE_LINE_HEIGHT / 2 - effectiveViewport / 2
@@ -290,6 +320,70 @@ export function LyricView(props: LyricViewProps): ReactElement {
   }
 
   // -----------------------------------------------------------------------
+  // 全量模式（歌词舞台）
+  // -----------------------------------------------------------------------
+  //
+  // ⚠️ **为什么要单独一档**：用户要「全屏歌词显示**所有**歌词」。
+  //    `single` 是**窗口裁剪**（只渲染当前行附近若干行）、`double` 只在场两行
+  //    → 两者都满足不了「全部可见」。
+  //
+  // ⚠️ **所有行等高槽位**（`LYRIC_ALL_LINE_HEIGHT`）：当前行只是**字号更大**，
+  //    **槽位不变** → 当前行推进时**整份列表不跳动**。
+  //
+  // ⚠️ **翻译只给当前行看**：每行都挂翻译 → 每行都被撑高 / 叠字，
+  //    且**槽位等高**的前提就破了。
+  if (mode === 'all') {
+    //
+    // ⚠️ **没有活跃行**时的翻译落点：播放位置还在**第一句歌词之前**时
+    //    `findActiveLine` 返回 `-1` → 若翻译只跟活跃行走，**整屏一条翻译都不显示**
+    //    （用户看到的是「只有原文」的半成品）。
+    //    → 翻译**回落到第一行**（还没唱到的那句），全程始终**只有一行**带翻译
+    //    → 「槽位等高」的前提依然成立。
+    const translationIndex = activeIndex >= 0 ? activeIndex : 0
+
+    const rows: ReactElement[] = []
+    for (let index = 0; index < safeLines.length; index += 1) {
+      const line = safeLines[index]
+      if (!line) continue
+      const isActive = index === activeIndex
+      rows.push(
+        <AllLyricLine
+          key={index}
+          line={line}
+          index={index}
+          active={isActive}
+          progress={isActive ? computeLineProgress(line, time) : null}
+          onSeek={onSeek}
+          showTranslation={index === translationIndex}
+        />,
+      )
+    }
+
+    return (
+      <div
+        className={`${classes} fnm-lyricview--all`}
+        data-testid="lyric-view"
+        data-active-index={activeIndex}
+        role="list"
+        aria-label="歌词"
+        ref={viewportRef}
+        data-scroll-top={targetScrollTop}
+      >
+        <div
+          className="fnm-lyricview__canvas"
+          style={
+            {
+              '--fnm-lyricview__canvas-height': `${safeLines.length * LYRIC_ALL_LINE_HEIGHT}px`,
+            } as CssVars
+          }
+        >
+          {rows}
+        </div>
+      </div>
+    )
+  }
+
+  // -----------------------------------------------------------------------
   // 双行模式
   // -----------------------------------------------------------------------
   const state = doubleState!
@@ -346,6 +440,13 @@ interface RenderLineOptions {
   onSeek?: (t: number) => void
   slot?: 'previous' | 'next'
   style?: CssVars
+  /**
+   * 要不要渲染翻译副行。
+   *
+   * ⚠️ 缺省 **true**（`single` / `double` 的既有行为**一字不改**）；
+   *    全量模式只给**当前行**传 `true`（没有当前行时**回落到第一行**，见 `AllLyricLine`）。
+   */
+  showTranslation?: boolean
 }
 
 /**
@@ -400,8 +501,9 @@ function renderLine(options: RenderLineOptions): ReactElement {
   if (onSeek) classNames.push('fnm-lyricview__line--clickable')
 
   // 翻译：有才渲染（**不渲染空的第二行**）。
+  const showTranslation = options.showTranslation ?? true
   const translation = typeof line.translation === 'string' ? line.translation.trim() : ''
-  const translationNode = translation ? (
+  const translationNode = showTranslation && translation ? (
     // ⚠️ **必须有 `key`**（F15-04）：翻译节点是「行元素」的**数组子节点**，
     //    没有 key → React 报 "Each child in a list should have a unique key prop"。
     <span key="translation" className="fnm-lyricview__translation" data-testid="lyric-translation">
@@ -446,3 +548,37 @@ function renderLine(options: RenderLineOptions): ReactElement {
     </button>
   )
 }
+
+// ---------------------------------------------------------------------------
+// 全量模式的一行（memo 化）
+// ---------------------------------------------------------------------------
+
+/**
+ * 全量模式的一行歌词（**memo 化**）。
+ *
+ * ⚠️ **为什么要 memo**：全量模式把**整份歌词**（真实歌可达上千行）渲染进 DOM，
+ *    而 `currentTime` **每帧都在变** → 不 memo 的话每次时间推进都要重建上千个元素
+ *    （长歌上就是明显的卡顿）。
+ *    memo 之后：**只有当前行**（`progress` 变）会重渲染，其余行直接跳过。
+ *
+ * ⚠️ **样式对象在这里现算**（不作为 prop 传进来）：作为 prop 传 → 每次渲染都是
+ *    **新对象** → memo 的浅比较永远不相等 → 形同没 memo。
+ */
+const AllLyricLine = memo(function AllLyricLine(props: {
+  line: LyricLine
+  index: number
+  active: boolean
+  progress: LyricWordProgress | null
+  onSeek?: (t: number) => void
+  showTranslation: boolean
+}): ReactElement {
+  return renderLine({
+    line: props.line,
+    index: props.index,
+    progress: props.progress,
+    active: props.active,
+    onSeek: props.onSeek,
+    showTranslation: props.showTranslation,
+    style: { '--fnm-lyricview__line-top': `${props.index * LYRIC_ALL_LINE_HEIGHT}px` },
+  })
+})

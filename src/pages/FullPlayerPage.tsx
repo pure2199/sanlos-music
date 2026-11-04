@@ -396,7 +396,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
       <LyricView
         lines={lines}
         currentTime={position}
-        mode="double"
+        mode="all"
         emptyLabel="暂无歌词"
       />
     )
