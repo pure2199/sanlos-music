@@ -36,6 +36,8 @@ import {
   type PlaylistWritebackApi,
 } from '../api/playlist'
 import { CardGrid, PlaylistCard } from '../components/Cards'
+import { BatchDownloadBar } from '../components/BatchDownloadBar'
+import { useBatchSelection } from '../components/batchSelection'
 import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { PagingNotice } from '../components/PagingNotice'
@@ -199,6 +201,9 @@ export function PlaylistsPage({
   // 行内操作（Task 25）：收藏按钮 + 下载按钮。
   const rowActions = useLibraryRowActions(resolved)
 
+  // 批量下载（T27）：切歌单要**清空选中**（否则会下载上一张列表的歌）。
+  const batch = useBatchSelection(playlistSongs.items, playlistId ?? '', onSelect)
+
   return (
     <LibraryPageShell
       title="歌单"
@@ -267,10 +272,13 @@ export function PlaylistsPage({
                   </button>
                 )}
               </div>
+              {/* 批量下载（T27）：选中后在这里排队下载。 */}
+              <BatchDownloadBar songs={batch.selectedSongs} onClear={batch.clear} />
               <SongList
                 songs={playlistSongs.items}
                 onPlay={onPlay ?? (() => undefined)}
-                onSelect={onSelect}
+                onSelect={batch.onSelect}
+                selectedIds={batch.selectedIds}
                 total={playlistSongs.total}
                 hasMore={playlistSongs.hasMore}
                 loading={playlistSongs.loading}

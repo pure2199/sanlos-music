@@ -72,6 +72,20 @@ export function downloadExtension(song: {
   return 'bin'
 }
 
+/**
+ * 批量下载的结果（**如实汇报**，不夸大）。
+ *
+ * ⚠️ `queued` / `skipped` / `failed` 三者之和 = 提交的曲目数。
+ */
+export interface BatchDownloadResult {
+  /** 成功排进下载队列的曲目数。 */
+  queued: number
+  /** 跳过的曲目数（**已在本地**或**已在队列 / 下载中**）。 */
+  skipped: number
+  /** 启动失败（连请求都没发出去）的曲目数。 */
+  failed: number
+}
+
 /** 下载状态镜像 store 的形状。 */
 export interface DownloadStore {
   /** 已下载完成的曲目（`songId → 条目`）。 */
@@ -88,6 +102,16 @@ export interface DownloadStore {
   load: () => Promise<void>
   /** 下载一首歌。 */
   start: (song: Song) => Promise<void>
+  /**
+   * 批量下载（**串行**入队）。
+   *
+   * ⚠️ **不会并发下载**：主进程的 `DownloadManager` 本身就是**串行队列**
+   *    （一次只下一个）——这里只是把 N 首**依次排进队列**，不抢中继带宽。
+   *
+   * ⚠️ **幂等**：**已在本地**的、**已在队列 / 下载中**的会被**跳过**
+   *    （主进程那侧也是幂等的，这里先跳一层，汇报才准）。
+   */
+  startMany: (songs: Song[]) => Promise<BatchDownloadResult>
   /** 取消下载。 */
   cancel: (songId: string) => Promise<void>
   /** 清空本地下载。 */
@@ -163,6 +187,61 @@ export const useDownloadStore = create<DownloadStore>()((set, get) => ({
     } catch {
       set({ error: '下载启动失败' })
     }
+  },
+
+  startMany: async (songs: Song[]): Promise<BatchDownloadResult> => {
+    const bridge = playerBridge()
+    if (!bridge) {
+      set({ error: '当前环境不支持下载' })
+      return { queued: 0, skipped: 0, failed: songs.length }
+    }
+    let queued = 0
+    let skipped = 0
+    let failed = 0
+    // ⚠️ 同一批里重复出现的 id 只算一次（选中项理论上不重复，防一手）。
+    const handled = new Set<string>()
+    for (const song of songs) {
+      if (!song || typeof song.id !== 'string' || song.id.length === 0) {
+        failed += 1
+        continue
+      }
+      if (handled.has(song.id)) {
+        skipped += 1
+        continue
+      }
+      handled.add(song.id)
+      const state = get()
+      // ⚠️ **幂等跳过**：
+      //    ① 已在本地（`entries`）→ 再下一遍是浪费；
+      //    ② 已在队列 / 下载中（`tasks`）→ 主进程那侧也是幂等的，
+      //       这里先跳一层，汇报的「排队 / 跳过」才准。
+      if (Object.prototype.hasOwnProperty.call(state.entries, song.id)) {
+        skipped += 1
+        continue
+      }
+      const task = state.tasks[song.id]
+      if (task && (task.status === 'pending' || task.status === 'running')) {
+        skipped += 1
+        continue
+      }
+      const request: DownloadRequest = {
+        songId: song.id,
+        title: song.title,
+        artist: song.artist,
+        ext: downloadExtension(song),
+      }
+      try {
+        // ⚠️ `startDownload` 是 **invoke**：主进程**立刻入队**并返回，
+        //    **不等下载完成**（下载在主进程里串行跑）→ 这里不会卡住。
+        await bridge.startDownload(request)
+        queued += 1
+      } catch {
+        // ⚠️ 单首失败**不影响其余**（批量操作不该被一首拖垮）。
+        failed += 1
+      }
+    }
+    set({ error: failed > 0 ? `${failed} 首下载启动失败` : null })
+    return { queued, skipped, failed }
   },
 
   cancel: async (songId: string): Promise<void> => {

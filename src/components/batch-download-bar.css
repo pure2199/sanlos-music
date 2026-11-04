@@ -1,0 +1,104 @@
+/* ---------------------------------------------------------------------------
+ * 批量下载工具条（T27）
+ * ---------------------------------------------------------------------------
+ * 颜色**只用语义变量**（`src/styles/tokens.css`），两套主题自动跟随。
+ * 类名 BEM，`fnm-` 前缀。
+ * ------------------------------------------------------------------------- */
+
+.fnm-batchdownload {
+  box-sizing: border-box;
+  display: flex;
+  /*
+   * ⚠️ **高度恒定 + 不换行 + 不溢出**（T27 踩过的真缺陷）：
+   *    工具条一旦在「第一次单击」时**改变高度**，整个列表就会上下位移
+   *    → 用户的**第二击落在别的行上** → 浏览器不再派发 `dblclick`
+   *    → **双击播放直接失效**。
+   *    ⇒ 高度写死一行、内容不换行、消息超出用省略号。
+   */
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  /*
+   * ⚠️ **必须 `flex: 0 0 auto`**：页面外壳（`.fnm-page`）是**纵向 flex 容器**，
+   *    flex item 默认 `flex-shrink: 1` → 空间不够时**被压扁**。
+   *    实测（E2E 量到的几何）：写死的 `height: 36px` 被压成 **2.45px**，
+   *    按钮被 `overflow: hidden` 裁掉 → **点不到**（Playwright 报
+   *    「容器拦截了指针事件」）。⇒ 不伸缩、不收缩，高度才是真的 36px。
+   */
+  flex: 0 0 auto;
+  height: 36px;
+  overflow: hidden;
+  padding: 0 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-raised);
+}
+
+.fnm-batchdownload__hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fnm-batchdownload__count {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fnm-batchdownload__action {
+  padding: 4px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.fnm-batchdownload__action:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.fnm-batchdownload__action:disabled {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.fnm-batchdownload__clear {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.fnm-batchdownload__clear:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-batchdownload__clear:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.fnm-batchdownload__message {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}

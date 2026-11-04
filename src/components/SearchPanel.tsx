@@ -254,6 +254,14 @@ export interface SearchPanelProps {
    */
   onSelect?: (ids: string[]) => void
   /**
+   * 选中歌曲变化时回调（**歌曲对象**，不是 id）。
+   *
+   * ⚠️ **可选**（T27）：批量下载要的是歌曲本身（标题 / 歌手 / 扩展名），
+   *    而 `onSelect` 只给 id → 调用方拿不到歌曲。
+   *    不传 → 行为一字不变（只是少一次回调）。
+   */
+  onSelectSongs?: (songs: Song[]) => void
+  /**
    * 受控模式下的选中项（id 数组）。
    *
    * ⚠️ **可选**：不传 → 选中态由 `SongList` 内部自管（既有行为，一字不变）。
@@ -288,6 +296,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
     onOpenAlbum,
     onOpenArtist,
     onSelect,
+    onSelectSongs,
     selectedIds,
     store,
     debounceMs = SEARCH_DEBOUNCE_MS,
@@ -462,6 +471,27 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
     [effectiveTracks, onPlay],
   )
 
+  /**
+   * 选中变化 → 原样抛给 `onSelect`，并（可选）把**歌曲对象**抛给 `onSelectSongs`。
+   *
+   * ⚠️ `onSelect` 的**既有语义不变**（同样的 ids、同样的时机）。
+   */
+  const handleSelect = useCallback(
+    (ids: string[]): void => {
+      onSelect?.(ids)
+      if (!onSelectSongs) return
+      const byId = new Map<string, Song>()
+      for (const song of effectiveTracks) byId.set(song.id, song)
+      const picked: Song[] = []
+      for (const id of ids) {
+        const song = byId.get(id)
+        if (song) picked.push(song)
+      }
+      onSelectSongs(picked)
+    },
+    [effectiveTracks, onSelect, onSelectSongs],
+  )
+
   /** 行内操作：收藏按钮（乐观更新 + 串行化写回）+ 下载按钮（Task 11）。 */
   const renderRowActions = useCallback(
     (song: Song): ReactNode => {
@@ -554,7 +584,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
         <SongList
           songs={effectiveTracks}
           onPlay={handlePlay}
-          onSelect={onSelect}
+          onSelect={handleSelect}
           selectedIds={selectedIds}
           total={state.tracks.total}
           emptyLabel="没有找到歌曲"

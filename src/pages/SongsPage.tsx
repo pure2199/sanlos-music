@@ -11,6 +11,8 @@ import { useCallback, useEffect, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
+import { BatchDownloadBar } from '../components/BatchDownloadBar'
+import { useBatchSelection } from '../components/batchSelection'
 import { SongList } from '../components/SongList'
 import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
@@ -57,6 +59,9 @@ export function SongsPage({ api, store, onPlay, onSelect }: SongsPageProps): Rea
   // 行内操作（Task 25）：收藏按钮 + 下载按钮（复用 `SongList` 已有的 `renderRowActions` 接缝）。
   const rowActions = useLibraryRowActions(resolved)
 
+  // 批量下载（T27）：选中态**提到页面**（受控）→ 顶部才画得出「已选 N 首」。
+  const batch = useBatchSelection(songs.items, 'songs', onSelect)
+
   return (
     <LibraryPageShell
       title="歌曲"
@@ -65,10 +70,12 @@ export function SongsPage({ api, store, onPlay, onSelect }: SongsPageProps): Rea
       loading={songs.loading}
       loadingText="正在加载歌曲…"
     >
+      <BatchDownloadBar songs={batch.selectedSongs} onClear={batch.clear} />
       <SongList
         songs={songs.items}
         onPlay={onPlay ?? (() => undefined)}
-        onSelect={onSelect}
+        onSelect={batch.onSelect}
+        selectedIds={batch.selectedIds}
         total={songs.total}
         hasMore={songs.hasMore}
         loading={songs.loading}

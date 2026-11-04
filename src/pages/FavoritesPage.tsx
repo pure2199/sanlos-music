@@ -13,6 +13,8 @@ import { useEffect, useMemo, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
+import { BatchDownloadBar } from '../components/BatchDownloadBar'
+import { useBatchSelection } from '../components/batchSelection'
 import { SongList } from '../components/SongList'
 import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
@@ -65,6 +67,9 @@ export function FavoritesPage({ api, store, onPlay, onSelect }: FavoritesPagePro
     [favorites.items, favoriteStates],
   )
 
+  // 批量下载（T27）：选中态提到页面（受控）。
+  const batch = useBatchSelection(visible, 'favorites', onSelect)
+
   return (
     <LibraryPageShell
       title="收藏"
@@ -73,10 +78,12 @@ export function FavoritesPage({ api, store, onPlay, onSelect }: FavoritesPagePro
       loading={favorites.loading}
       loadingText="正在加载收藏…"
     >
+      <BatchDownloadBar songs={batch.selectedSongs} onClear={batch.clear} />
       <SongList
         songs={visible}
         onPlay={onPlay ?? (() => undefined)}
-        onSelect={onSelect}
+        onSelect={batch.onSelect}
+        selectedIds={batch.selectedIds}
         total={visible.length}
         // 收藏是全量接口：没有「下一页」。
         hasMore={false}

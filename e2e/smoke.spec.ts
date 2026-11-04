@@ -327,6 +327,38 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   })
 
   // -------------------------------------------------------------------------
+  // T27：批量下载
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 此前只能**逐首**点行内的「下载」按钮；而 `SongList` 早就有多选接缝
+  //    （Ctrl / Shift 点选）→ 用户选好一整批，却只能一首一首点。
+  //
+  // ⚠️ 这一条会**真的下载**（mock 的假音频）→ 下载目录已被 `helpers/app.ts`
+  //    预置到**临时目录**（绝不能往用户真实的「我的音乐」里写）。
+  //
+  test('批量下载：Ctrl 多选两首 → 工具条出现 → 点「下载所选」排队两首', async () => {
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌曲' })
+      .click()
+
+    const list = fixture.window.getByRole('listbox', { name: '歌曲列表' })
+    const rows = list.getByRole('option')
+    await expect(rows.first()).toBeVisible()
+
+    // Ctrl + 单击 = 切换该行的选中态（多选）。
+    await rows.nth(0).click({ modifiers: ['ControlOrMeta'] })
+    await rows.nth(1).click({ modifiers: ['ControlOrMeta'] })
+
+    // 工具条出现，并如实写明选了几首。
+    await expect(fixture.window.getByText('已选 2 首')).toBeVisible()
+
+    // 点「下载所选」→ 两首都排进队列（主进程串行下载，不并发）。
+    await fixture.window.getByRole('button', { name: '下载所选 2 首' }).click()
+    await expect(fixture.window.getByRole('status').filter({ hasText: '已排队下载 2 首' })).toBeVisible()
+  })
+
+  // -------------------------------------------------------------------------
   // T23：自动更新接线（检查 → 下载 → 签名闸）
   // -------------------------------------------------------------------------
   //

@@ -1,5 +1,5 @@
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -81,6 +81,19 @@ function stringEnv(source: NodeJS.ProcessEnv): Record<string, string> {
 export async function launchApp(): Promise<AppFixture> {
   const mock = createMockServer()
   const userDataDir = mkdtempSync(join(tmpdir(), 'fnmusic-e2e-'))
+
+  // ⚠️ **下载目录预置到临时目录**（T27 批量下载会真的下文件）。
+  //    默认的下载目录是「我的音乐\飞牛音乐」—— 那是**用户真实的数据目录**，
+  //    E2E 往那里写文件 = 污染用户机器（而且删不干净）。
+  //    ⇒ 启动前先把 `prefs.json` 写好（`<userData>/prefs.json`，
+  //      主进程启动时读它 → `resolveDownloadDir()` 直接用它）。
+  const downloadDir = join(userDataDir, 'downloads')
+  mkdirSync(downloadDir, { recursive: true })
+  writeFileSync(
+    join(userDataDir, 'prefs.json'),
+    JSON.stringify({ version: 1, prefs: { downloadDir } }),
+    'utf8',
+  )
 
   let app: ElectronApplication
   try {

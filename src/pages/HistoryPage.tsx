@@ -20,10 +20,12 @@
 //    样式住在同目录的 `history-page.css`。
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
+import { BatchDownloadBar } from '../components/BatchDownloadBar'
+import { useBatchSelection } from '../components/batchSelection'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { useLibraryRowActions } from '../components/rowActions'
 import { PagingNotice } from '../components/PagingNotice'
@@ -68,6 +70,11 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
   // 行内操作（Task 25）：收藏按钮 + 下载按钮。
   const rowActions = useLibraryRowActions(resolved)
 
+  // 批量下载（T27）：本页有**两段**列表（本机记录 + NAS 历史），
+  // 但它们是**同一份页面级选中态** → 工具条画在整页上方。
+  const pageSongs = useMemo(() => [...localItems, ...history.items], [history.items, localItems])
+  const batch = useBatchSelection(pageSongs, 'history')
+
   return (
     <LibraryPageShell
       title="最近播放"
@@ -77,6 +84,7 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
       loading={history.loading}
       loadingText="正在加载播放历史…"
     >
+      <BatchDownloadBar songs={batch.selectedSongs} onClear={batch.clear} />
       <div className="fnm-history">
         <section className="fnm-history__section">
           <h2 className="fnm-history__section-title">本机播放记录</h2>
@@ -84,6 +92,8 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
           <SongList
             songs={localItems}
             onPlay={onPlay ?? (() => undefined)}
+            onSelect={batch.onSelect}
+            selectedIds={batch.selectedIds}
             total={localItems.length}
             emptyLabel="本机还没有播放记录"
             ariaLabel="本机播放记录"
@@ -99,6 +109,8 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
           <SongList
             songs={history.items}
             onPlay={onPlay ?? (() => undefined)}
+            onSelect={batch.onSelect}
+            selectedIds={batch.selectedIds}
             total={history.total}
             hasMore={history.hasMore}
             loading={history.loading}

@@ -30,6 +30,7 @@ import { useStore } from 'zustand'
 
 import type { Album, Artist, Playlist, Song } from '../../shared/types'
 import { defaultPlaylistWritebackApi, type PlaylistWritebackApi } from '../api/playlist'
+import { BatchDownloadBar } from '../components/BatchDownloadBar'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import {
   SearchPanel,
@@ -108,6 +109,8 @@ export function SearchPage(props: SearchPageProps): ReactElement {
   const [error, setError] = useState<string | null>(null)
   /** 搜索结果里选中的歌曲 id。 */
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  /** 搜索结果里选中的**歌曲**（T27 批量下载用；歌曲对象住在 `SearchPanel` 内部）。 */
+  const [selectedSongs, setSelectedSongs] = useState<Song[]>([])
 
   /** 拉歌单列表（**全量**接口）；返回拉到的列表（新建后要按名字找回）。 */
   const loadPlaylists = useCallback(async (): Promise<Playlist[]> => {
@@ -279,9 +282,15 @@ export function SearchPage(props: SearchPageProps): ReactElement {
           onOpenAlbum={onOpenAlbum}
           onOpenArtist={onOpenArtist}
           onSelect={handleSelect}
+          onSelectSongs={setSelectedSongs}
           selectedIds={selectedIds}
           store={resolved}
         />
+
+        {/* --- 批量下载（T27）--- */}
+        {/* ⚠️ **不给 onClear**：搜索页的选中态同时被「加入歌单」用，
+            单独清掉「下载用的那份」会让高亮与实际选中对不上。 */}
+        <BatchDownloadBar songs={selectedSongs} />
 
         {/* --- 歌单写回 --- */}
         <section className="fnm-searchpage__playlists" aria-label="歌单写回">

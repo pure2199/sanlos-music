@@ -33,6 +33,8 @@ import { useStore } from 'zustand'
 
 import type { Album, Song } from '../../shared/types'
 import { AlbumCard, CardGrid, CoverImage, formatCount } from '../components/Cards'
+import { BatchDownloadBar } from '../components/BatchDownloadBar'
+import { useBatchSelection } from '../components/batchSelection'
 import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { PagingNotice } from '../components/PagingNotice'
@@ -140,6 +142,9 @@ export function DetailPage(props: DetailPageProps): ReactElement {
   // 行内操作（Task 25）：收藏按钮 + 下载按钮。
   const rowActions = useLibraryRowActions(resolved)
 
+  // 批量下载（T27）：换下钻目标（专辑 → 歌手）要**清空选中**。
+  const batch = useBatchSelection(songs.items, `${kind}:${entityId}`)
+
   return (
     <LibraryPageShell
       title={heading}
@@ -178,9 +183,12 @@ export function DetailPage(props: DetailPageProps): ReactElement {
 
         <section className="fnm-detail__section">
           <h2 className="fnm-detail__section-title">曲目</h2>
+          <BatchDownloadBar songs={batch.selectedSongs} onClear={batch.clear} />
           <SongList
             songs={songs.items}
             onPlay={onPlay ?? (() => undefined)}
+            onSelect={batch.onSelect}
+            selectedIds={batch.selectedIds}
             total={songs.total}
             hasMore={songs.hasMore}
             loading={songs.loading}
