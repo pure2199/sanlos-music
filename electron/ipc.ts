@@ -87,7 +87,7 @@ import type {
   PlayerStateSnapshot,
   WindowBounds,
 } from '../shared/playerBridge'
-import type { ConnectionInfo, ConnectionKind, ThemeName } from '../shared/types'
+import type { ConnectionInfo, ConnectionKind, PlayMode, ThemeName } from '../shared/types'
 import { buildCandidates, fetchConnectionParams, hostOf, normalizeBase } from './connection'
 import { TrustedHosts } from './cert'
 import { probeCandidates } from './probe'
@@ -847,6 +847,14 @@ const THEME_NAMES: readonly ThemeName[] = ['apple', 'fluent']
 /** 合法的「关闭窗口」行为。 */
 const CLOSE_BEHAVIORS: readonly CloseBehavior[] = ['hide', 'quit']
 
+/**
+ * 合法的播放模式（T29）。
+ *
+ * ⚠️ `prefs.json` 是**用户可编辑的文件** → 陌生值一律丢弃（不落盘），
+ *    渲染进程读回来时按「顺序播放」处理。
+ */
+const PLAY_MODES: readonly PlayMode[] = ['sequence', 'shuffle', 'loop-one', 'loop-list']
+
 /** 取数字（非有限值 / 非数字 → `undefined`）。 */
 function readNumberOrUndefined(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
@@ -930,6 +938,12 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
   // ⚠️ `localFirst` 是**布尔**：`undefined` = 用默认值（开启）。
   if (typeof record['localFirst'] === 'boolean') {
     out.localFirst = record['localFirst']
+  }
+
+  // 播放模式（T29）：**只认四个合法值**，陌生值整段丢弃（不落盘）。
+  const playMode = record['playMode']
+  if (typeof playMode === 'string' && (PLAY_MODES as readonly string[]).includes(playMode)) {
+    out.playMode = playMode as PlayMode
   }
 
   // 自动更新偏好（Task 23）：更新服务器地址 + 预期的代码签名者。

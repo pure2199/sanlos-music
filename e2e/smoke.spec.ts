@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { launchApp, login, type AppFixture } from './helpers/app'
 
@@ -455,5 +457,56 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
 
     // ⚠️ **核心断言**：签名没过 → 不许启动安装器（自动更新 = 远程代码执行）。
     await expect(fixture.window.getByRole('button', { name: '启动安装' })).toBeDisabled()
+  })
+
+  // -------------------------------------------------------------------------
+  // T29：播放模式持久化（切模式 → **重启应用** → 模式还在）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 此前播放模式**只活在内存里** —— 重启就回到「顺序播放」。
+  //
+  // ⚠️ **这条用例必须放在最后**：它要**重启应用**（关掉 Electron 再起一个），
+  //    而前面的用例共用同一个已登录的实例 —— 重启会打断它们。
+  //
+  // ⚠️ 重启必须**复用同一个 userData 目录**（偏好就在里面）
+  //    与**同一个 mock**（登录地址不变）。
+  //
+  test('播放模式持久化：切到「随机播放」→ 重启应用 → 仍是「随机播放」', async () => {
+    // ⚠️ **先关掉设置面板**：上一条用例（T23）把它打开了，
+    //    而它**盖在顶栏上** → 会**拦截**播放条按钮的指针事件（点不到）。
+    await fixture.window.getByRole('button', { name: '设置' }).click()
+    await expect(fixture.window.getByRole('dialog', { name: '设置' })).toHaveCount(0)
+
+    // 前面的 T24 用例把模式转回「顺序播放」了 → 这里点一次到「随机播放」。
+    const button = fixture.window.getByTestId('play-mode-button')
+    await expect(button).toHaveAttribute('data-mode', 'sequence')
+    await button.click()
+    await expect(button).toHaveAttribute('data-mode', 'shuffle')
+
+    // 落盘是**异步**的（IPC → 主进程 → 文件）→ 等它写完再重启。
+    // ⚠️ 断言 `prefs.json` 里真的有它 —— 这也顺带钉住了「主进程白名单放行合法值」。
+    const prefsPath = join(fixture.userDataDir, 'prefs.json')
+    await expect
+      .poll(() => readFileSync(prefsPath, 'utf8'), { timeout: 10000 })
+      .toContain('shuffle')
+
+    // 关掉应用（**保留** mock 与 userData 目录）→ 用同样的目录重启。
+    await fixture.closeApp()
+    const restarted = await launchApp({
+      mock: fixture.mock,
+      userDataDir: fixture.userDataDir,
+    })
+    try {
+      // ⚠️ **不用重新登录**：同一个 userData 目录里 `session.bin` 还有**有效的 token**
+      //    → 应用启动后**自动登录**，直接进主界面（根本没有 `#fnm-address` 输入框）。
+      //    这也顺带说明「重启后自动续用会话」这条既有能力是好的。
+      await expect(restarted.window.getByTestId('play-mode-button')).toHaveAttribute(
+        'data-mode',
+        'shuffle',
+      )
+    } finally {
+      // 只关这个新实例；**别动** mock 与 userData 目录（fixture 的 close 会收尾）。
+      await restarted.closeApp()
+    }
   })
 })

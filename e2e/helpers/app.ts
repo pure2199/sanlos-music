@@ -1,5 +1,5 @@
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -57,6 +57,32 @@ export interface AppFixture {
   userDataDir: string
   /** 关闭应用并清理临时目录。 */
   close: () => Promise<void>
+  /**
+   * **只**关闭 Electron 进程（保留 mock server 与 userData 目录）。
+   *
+   * ⚠️ T29 用它做「重启应用」：偏好（`prefs.json`）必须留在**同一个目录**里，
+   *    否则重启后读回的是一份**空偏好** → 断言「模式还在」就成了假阳性。
+   */
+  closeApp: () => Promise<void>
+}
+
+/**
+ * `launchApp` 的可选参数（**复用**已有的 mock / userData 目录）。
+ */
+export interface LaunchAppOptions {
+  /**
+   * 复用已有的 mock server（不新建、**也不关闭**）。
+   *
+   * ⚠️ 重启应用时**必须**复用同一个 mock：换 mock 就换了端口，
+   *    登录地址也跟着变，而这条链路要验的是「偏好还在」，不是「换个服务器也能用」。
+   */
+  mock?: MockServer
+  /**
+   * 复用已有的 userData 目录（不新建、**也不删除**）。
+   *
+   * ⚠️ 必须复用同一个目录：`prefs.json`（播放模式等偏好）就在里面。
+   */
+  userDataDir?: string
 }
 
 /**
@@ -78,22 +104,33 @@ function stringEnv(source: NodeJS.ProcessEnv): Record<string, string> {
  *
  * @returns 应用夹具；调用方**必须**在结束时调 `close()`。
  */
-export async function launchApp(): Promise<AppFixture> {
-  const mock = createMockServer()
-  const userDataDir = mkdtempSync(join(tmpdir(), 'fnmusic-e2e-'))
+export async function launchApp(opts?: LaunchAppOptions): Promise<AppFixture> {
+  // ⚠️ **复用时不新建、不关闭**（T29 的「重启应用」要靠它）。
+  const ownsMock = !opts?.mock
+  const mock = opts?.mock ?? createMockServer()
+  const ownsUserDataDir = !opts?.userDataDir
+  const userDataDir = opts?.userDataDir ?? mkdtempSync(join(tmpdir(), 'fnmusic-e2e-'))
 
   // ⚠️ **下载目录预置到临时目录**（T27 批量下载会真的下文件）。
   //    默认的下载目录是「我的音乐\飞牛音乐」—— 那是**用户真实的数据目录**，
   //    E2E 往那里写文件 = 污染用户机器（而且删不干净）。
   //    ⇒ 启动前先把 `prefs.json` 写好（`<userData>/prefs.json`，
   //      主进程启动时读它 → `resolveDownloadDir()` 直接用它）。
-  const downloadDir = join(userDataDir, 'downloads')
-  mkdirSync(downloadDir, { recursive: true })
-  writeFileSync(
-    join(userDataDir, 'prefs.json'),
-    JSON.stringify({ version: 1, prefs: { downloadDir } }),
-    'utf8',
-  )
+  //
+  // ⚠️ **复用 userData 时绝不能覆盖 `prefs.json`**（T29）：
+  //    覆盖写会把**已存下来的偏好**（播放模式等）**抹掉**
+  //    → 「重启后模式还在」这条断言就变成了假阳性。
+  //    ⇒ 只在文件**不存在**时才写。
+  const prefsPath = join(userDataDir, 'prefs.json')
+  if (!existsSync(prefsPath)) {
+    const downloadDir = join(userDataDir, 'downloads')
+    mkdirSync(downloadDir, { recursive: true })
+    writeFileSync(
+      prefsPath,
+      JSON.stringify({ version: 1, prefs: { downloadDir } }),
+      'utf8',
+    )
+  }
 
   let app: ElectronApplication
   try {
@@ -104,24 +141,35 @@ export async function launchApp(): Promise<AppFixture> {
       env: stringEnv(process.env),
     })
   } catch (err) {
-    await mock.close()
-    rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3 })
+    // ⚠️ **只关自己创建的**（复用来的 mock 不能关）。
+    if (ownsMock) await mock.close()
+    if (ownsUserDataDir) {
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3 })
+    }
     throw err
   }
 
   const window = await app.firstWindow()
 
+  /** 只关 Electron 进程（保留 mock 与 userData 目录）。 */
+  const closeApp = async (): Promise<void> => {
+    await quitApp(app)
+  }
+
   const close = async (): Promise<void> => {
     await quitApp(app)
-    await mock.close()
-    try {
-      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3 })
-    } catch {
-      // 清理失败不掩盖测试结果（Electron 可能还攥着几个句柄）。
+    // ⚠️ **只关/删自己创建的**（复用来的不能动）。
+    if (ownsMock) await mock.close()
+    if (ownsUserDataDir) {
+      try {
+        rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3 })
+      } catch {
+        // 清理失败不掩盖测试结果（Electron 可能还攥着几个句柄）。
+      }
     }
   }
 
-  return { app, window, mock, userDataDir, close }
+  return { app, window, mock, userDataDir, close, closeApp }
 }
 
 /**

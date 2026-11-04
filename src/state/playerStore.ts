@@ -43,6 +43,11 @@ import {
 } from '../player/eq'
 import { Queue } from '../player/queue'
 import { eqPrefsPort } from '../player/eqPrefsBridge'
+import {
+  normalizePlayMode,
+  type PlayModePrefsPort,
+} from '../player/playModePrefs'
+import { playModePrefsPort } from '../player/playModePrefsBridge'
 import { prepareFallbackSource } from '../player/fallback'
 import { resolvePlaybackSource } from './downloadStore'
 
@@ -144,6 +149,12 @@ export interface PlayerStoreOptions {
    *    不给端口时 EQ 设置**只在本次运行内有效**（不崩、不静默写盘）。
    */
   eqPrefs?: EqPrefsPort
+  /**
+   * 播放模式的持久化端口（T29，**可选**）。
+   *
+   * ⚠️ 不给端口时播放模式**只在本次运行内有效**（不崩、不静默写盘）。
+   */
+  playModePrefs?: PlayModePrefsPort
 }
 
 /**
@@ -212,6 +223,54 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       .catch(() => {
         // ⚠️ 偏好写失败**不影响播放**（偏好不是关键路径）。
       })
+  }
+
+  // --- 播放模式的持久化（T29）------------------------------------------------
+  //
+  // ⚠️ **用户动过模式**的标志：`load()` 是异步的，用户可能在它回来**之前**
+  //    就切了模式 → 那时读回的旧值**不能覆盖**用户刚选的那个。
+  let modeTouched = false
+
+  /**
+   * 把播放模式写出去（**可注入**：主进程的 `prefs:set`）。
+   *
+   * ⚠️ 偏好文件里**绝不会有凭证**——这里只有一个模式名。
+   */
+  const persistPlayMode = (mode: PlayMode): void => {
+    const port = options?.playModePrefs
+    if (!port) return
+    void Promise.resolve()
+      .then(() => port.save(mode))
+      .catch(() => {
+        // ⚠️ 偏好写失败**不影响播放**（偏好不是关键路径）。
+      })
+  }
+
+  /**
+   * 启动时把上次用的模式读回来。
+   *
+   * ⚠️ **必须三处同步**：`state.mode`（界面显示）、`queue.mode`（**下一首怎么走**）、
+   *    `engine.setMode`（引擎自己也要知道）——
+   *    只改 `state.mode` 会造成「界面写着随机播放、实际按顺序播」的**假状态**。
+   *
+   * ⚠️ **读回失败 / 没设置过** → 保持默认的「顺序播放」，不报错、不崩。
+   */
+  const restorePlayMode = async (): Promise<void> => {
+    const port = options?.playModePrefs
+    if (!port) return
+    try {
+      const loaded = await port.load()
+      if (loaded === null || loaded === undefined) return
+      // ⚠️ **外部数据不可信**：陌生值压成「顺序播放」。
+      const next = normalizePlayMode(loaded)
+      // ⚠️ 用户**已经动过**模式 → 读回的旧值作废（不能覆盖用户的选择）。
+      if (modeTouched) return
+      queue.mode = next
+      engine.setMode?.(next)
+      store.setState({ mode: next })
+    } catch {
+      // ⚠️ 读偏好失败**不影响播放**（保持默认「顺序播放」）。
+    }
   }
 
   const store = create<PlayerStore>()((set, get) => ({
@@ -307,9 +366,15 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
     },
 
     setMode: (mode) => {
-      queue.mode = mode
-      engine.setMode?.(mode)
-      set({ mode })
+      // ⚠️ **先记「用户动过」**：启动时的 `load()` 是异步的，
+      //    用户可能在它回来**之前**就切了模式 —— 那时读回的旧值
+      //    **不能覆盖**用户刚选的那个（见下面 `restorePlayMode`）。
+      modeTouched = true
+      const next = normalizePlayMode(mode)
+      queue.mode = next
+      engine.setMode?.(next)
+      set({ mode: next })
+      persistPlayMode(next)
     },
 
     // --- EQ 动作（Task 21）-------------------------------------------------
@@ -459,6 +524,9 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       })
   }
 
+  // 播放模式：启动时读回上次用的那个（T29）。
+  void restorePlayMode()
+
   // 引擎的状态变化 → store（`current` / 队列 / 模式由 store 自己管，这里只同步传输层字段）。
   engine.onStateChange((state: PlayerState) => {
     store.setState({
@@ -505,5 +573,9 @@ export const usePlayerStore = createPlayerStore(
   }),
   {
     eqPrefs: eqPrefsPort,
+    // ⚠️ **注入播放模式偏好端口**（T29）：播放模式要能**跨重启**保留，
+    //    就必须真的接上主进程的 `prefs:get` / `prefs:set`。
+    //    没有桥的环境（浏览器 / 单元测试）里自动降级为 no-op。
+    playModePrefs: playModePrefsPort,
   },
 )
