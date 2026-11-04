@@ -39,3 +39,125 @@
   font-size: 13px;
   color: var(--text-secondary);
 }
+
+/* --------------------------------------------------------------------------
+ * 新建 / 删除歌单（T26）
+ * -------------------------------------------------------------------------- */
+
+/* 新建歌单：名字输入 + 按钮（并排一行） */
+.fnm-playlists__create {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.fnm-playlists__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.fnm-playlists__name:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-playlists__name:disabled {
+  color: var(--disabled);
+}
+
+.fnm-playlists__create-button {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-playlists__create-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-playlists__create-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-playlists__create-button:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+/* 删除歌单的工具条 */
+.fnm-playlists__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.fnm-playlists__delete {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-playlists__delete:hover:not(:disabled) {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.fnm-playlists__delete:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-playlists__delete:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+/* 取消删除（两步确认的第二步旁边） */
+.fnm-playlists__cancel-delete {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-playlists__cancel-delete:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 写回成功的提示 */
+.fnm-playlists__message {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--accent);
+}

@@ -302,6 +302,31 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   })
 
   // -------------------------------------------------------------------------
+  // T26：歌单页新建歌单
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 此前「新建歌单」只做在**搜索页**的写回区里 → 「歌单」页上一个建单入口都没有，
+  //    而 mock 的账号**一个歌单都没有** → 用户打开歌单页只会看到「暂无歌单」。
+  //
+  test('歌单页：新建一个歌单 → 立刻出现在歌单列表里', async () => {
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌单' })
+      .click()
+
+    await fixture.window.getByPlaceholder('新歌单名称').fill('E2E 新建歌单')
+    await fixture.window.getByRole('button', { name: '新建歌单' }).click()
+
+    // 新歌单**真的**出现在歌单列表里（mock 的歌单集合变了）。
+    // ⚠️ 必须**限定在歌单列表里**找：成功提示里也含这个名字（`getByText` 会命中 2 个）。
+    // ⚠️ 歌单网格的 role 是 `list`（**不是** `listbox` —— 那是歌曲列表用的）。
+    await expect(
+      fixture.window.getByRole('list', { name: '歌单列表' }).getByText('E2E 新建歌单'),
+    ).toBeVisible()
+    await expect(fixture.window.getByRole('status').filter({ hasText: '已创建' })).toBeVisible()
+  })
+
+  // -------------------------------------------------------------------------
   // T23：自动更新接线（检查 → 下载 → 签名闸）
   // -------------------------------------------------------------------------
   //

@@ -86,3 +86,41 @@ export const playlistApi = {
     })
   },
 }
+
+// ---------------------------------------------------------------------------
+// 歌单写回（页面层用的接口集合）
+// ---------------------------------------------------------------------------
+
+/**
+ * 歌单写回用到的接口集合。
+ *
+ * ⚠️ **为什么放在 API 层而不是页面层**：T26 要让**歌单页**也能新建 / 删除歌单，
+ *    而 T16 把这个接口集合定义在 `src/pages/SearchPage.tsx` 里 ——
+ *    页面 import 页面是**反向依赖**（仓库约定：组件层不许 import 页面层）。
+ *    ⇒ 挪到 API 层，页面与页面共用同一份定义。
+ *
+ * ⚠️ `SearchPage.tsx` **继续原样导出**这个类型 → 既有测试的 import 不用改。
+ */
+export interface PlaylistWritebackApi {
+  /** 歌单列表（**全量**接口）。 */
+  list: () => Promise<Playlist[]>
+  /** 新建歌单（返回新歌单的 guid；服务端不回显时是**空串**）。 */
+  create: (name: string) => Promise<string>
+  /** 把歌曲加入歌单。 */
+  addTracks: (playlistId: string, songIds: string[]) => Promise<void>
+  /** 把歌曲移出歌单。 */
+  removeTracks: (playlistId: string, songIds: string[]) => Promise<void>
+  /**
+   * 删除歌单（**可选**：只读环境没有它 → 页面把「删除歌单」按钮禁用）。
+   */
+  remove?: (playlistId: string) => Promise<void>
+}
+
+/** 默认实现：走本模块的真实实现。 */
+export const defaultPlaylistWritebackApi: PlaylistWritebackApi = {
+  list: () => playlistApi.list(),
+  create: (name) => playlistApi.create(name),
+  addTracks: (playlistId, songIds) => playlistApi.addTracks(playlistId, songIds),
+  removeTracks: (playlistId, songIds) => playlistApi.removeTracks(playlistId, songIds),
+  remove: (playlistId) => playlistApi.remove(playlistId),
+}

@@ -29,7 +29,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Album, Artist, Playlist, Song } from '../../shared/types'
-import { playlistApi } from '../api/playlist'
+import { defaultPlaylistWritebackApi, type PlaylistWritebackApi } from '../api/playlist'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import {
   SearchPanel,
@@ -43,25 +43,15 @@ import './search-page.css'
 // 歌单写回接口（可注入，便于测试）
 // ---------------------------------------------------------------------------
 
-/** 歌单写回用到的接口集合。 */
-export interface PlaylistWritebackApi {
-  /** 歌单列表（**全量**接口）。 */
-  list: () => Promise<Playlist[]>
-  /** 新建歌单（返回新歌单的 guid；服务端不回显时是**空串**）。 */
-  create: (name: string) => Promise<string>
-  /** 把歌曲加入歌单。 */
-  addTracks: (playlistId: string, songIds: string[]) => Promise<void>
-  /** 把歌曲移出歌单。 */
-  removeTracks: (playlistId: string, songIds: string[]) => Promise<void>
-}
-
-/** 默认实现：走 `src/api/playlist.ts` 的真实实现。 */
-export const defaultPlaylistWritebackApi: PlaylistWritebackApi = {
-  list: () => playlistApi.list(),
-  create: (name) => playlistApi.create(name),
-  addTracks: (playlistId, songIds) => playlistApi.addTracks(playlistId, songIds),
-  removeTracks: (playlistId, songIds) => playlistApi.removeTracks(playlistId, songIds),
-}
+/**
+ * 歌单写回用到的接口集合。
+ *
+ * ⚠️ **实现已搬到 `src/api/playlist.ts`**（T26）：歌单页也要用同一份写回接口，
+ *    而「页面 import 页面」是**反向依赖**（仓库约定：组件层不许 import 页面层）。
+ *    这里**继续原样导出** → 既有导入路径（`test/favorite-writeback.test.ts`）不用改。
+ */
+export type { PlaylistWritebackApi }
+export { defaultPlaylistWritebackApi }
 
 /** 把异常变成可读的文案。 */
 function describeError(err: unknown): string {
