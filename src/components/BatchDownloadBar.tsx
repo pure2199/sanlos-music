@@ -28,7 +28,7 @@
 //
 // ---------------------------------------------------------------------------
 
-import { useCallback, useState, type ReactElement } from 'react'
+import { useCallback, useState, type ReactElement, type ReactNode } from 'react'
 
 import type { Song } from '../../shared/types'
 import { useDownloadStore, type BatchDownloadResult } from '../state/downloadStore'
@@ -40,6 +40,12 @@ export interface BatchDownloadBarProps {
   songs: Song[]
   /** 清空选中（可选）。 */
   onClear?: () => void
+  /**
+   * 额外的批量操作（**可选插槽**，T28 的「加入歌单」走这里）。
+   *
+   * ⚠️ **纯增量**：不传 → DOM 一字不变（既有页面的渲染结果不变）。
+   */
+  extra?: ReactNode
 }
 
 /**
@@ -83,7 +89,11 @@ export function describeBatchResult(
  *    ⇒ 工具条**一直在那儿**、**高度恒定**，列表顶部的位置才不会变。
  *    顺带还有个好处：**多选这件事变得可发现**（提示语告诉用户怎么多选）。
  */
-export function BatchDownloadBar({ songs, onClear }: BatchDownloadBarProps): ReactElement {
+export function BatchDownloadBar({
+  songs,
+  onClear,
+  extra,
+}: BatchDownloadBarProps): ReactElement {
   const startMany = useDownloadStore((state) => state.startMany)
   /** 在途（按钮禁用，防重复点击）。 */
   const [busy, setBusy] = useState(false)
@@ -108,8 +118,21 @@ export function BatchDownloadBar({ songs, onClear }: BatchDownloadBarProps): Rea
   return (
     <div className="fnm-batchdownload" data-testid="fnm-batch-download-bar">
       {count > 0 ? (
+        <span className="fnm-batchdownload__count">已选 {count} 首</span>
+      ) : (
+        // ⚠️ 提示语里**不能**出现「已选 N 首」——否则 E2E / 单测会把它当成计数。
+        <span className="fnm-batchdownload__hint">Ctrl / Shift 多选后可批量下载</span>
+      )}
+      {/*
+       * ⚠️ **额外的批量操作（可选插槽）必须挂在「已选 / 提示」之外**：
+       *    插槽里的控件（T28 的「加入歌单」）在**写回成功后会清空选中**
+       *    —— 若插槽跟着「已选 N 首」那个分支一起被卸载，
+       *    组件的内部状态（含**成功提示**）就一起没了
+       *    （E2E 实测：写回成功了，提示却一闪而过 → 断言「已把 N 首加入歌单」找不到）。
+       */}
+      {extra}
+      {count > 0 && (
         <>
-          <span className="fnm-batchdownload__count">已选 {count} 首</span>
           <button
             type="button"
             className="fnm-batchdownload__action"
@@ -131,9 +154,6 @@ export function BatchDownloadBar({ songs, onClear }: BatchDownloadBarProps): Rea
             </button>
           )}
         </>
-      ) : (
-        // ⚠️ 提示语里**不能**出现「已选 N 首」——否则 E2E / 单测会把它当成计数。
-        <span className="fnm-batchdownload__hint">Ctrl / Shift 多选后可批量下载</span>
       )}
       {message && (
         <p className="fnm-batchdownload__message" role="status">

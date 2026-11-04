@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
+import { AddToPlaylist } from '../components/AddToPlaylist'
 import { BatchDownloadBar } from '../components/BatchDownloadBar'
 import { useBatchSelection } from '../components/batchSelection'
 import { LibraryPageShell } from '../components/LibraryPageShell'
@@ -31,6 +32,7 @@ import { useLibraryRowActions } from '../components/rowActions'
 import { PagingNotice } from '../components/PagingNotice'
 import { SongList } from '../components/SongList'
 import { useLocalHistory } from '../state/historyStore'
+import { defaultPlaylistWritebackApi, type PlaylistWritebackApi } from '../api/playlist'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 import './history-page.css'
 
@@ -40,6 +42,8 @@ export interface HistoryPageProps {
   api?: LibraryApi
   /** 注入的 store。 */
   store?: LibraryStoreApi
+  /** 注入的歌单写回接口（测试用假实现；不传则走真实实现）。 */
+  playlistApi?: PlaylistWritebackApi
   /**
    * 双击歌曲时回调（整队口径：第三个参数是**当前列表已加载的整队**）。
    *
@@ -49,7 +53,12 @@ export interface HistoryPageProps {
 }
 
 /** 最近播放页。 */
-export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElement {
+export function HistoryPage({
+  api,
+  store,
+  playlistApi = defaultPlaylistWritebackApi,
+  onPlay,
+}: HistoryPageProps): ReactElement {
   const resolved = useResolvedLibraryStore(api, store)
   const history = useStore(resolved, (s) => s.history)
   const loadHistory = useStore(resolved, (s) => s.loadHistory)
@@ -84,7 +93,18 @@ export function HistoryPage({ api, store, onPlay }: HistoryPageProps): ReactElem
       loading={history.loading}
       loadingText="正在加载播放历史…"
     >
-      <BatchDownloadBar songs={batch.selectedSongs} onClear={batch.clear} />
+      <BatchDownloadBar
+        songs={batch.selectedSongs}
+        onClear={batch.clear}
+        extra={
+          <AddToPlaylist
+            songs={batch.selectedSongs}
+            playlistApi={playlistApi}
+            store={resolved}
+            onAdded={batch.clear}
+          />
+        }
+      />
       <div className="fnm-history">
         <section className="fnm-history__section">
           <h2 className="fnm-history__section-title">本机播放记录</h2>

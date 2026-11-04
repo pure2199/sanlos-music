@@ -11,12 +11,14 @@ import { useCallback, useEffect, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
+import { AddToPlaylist } from '../components/AddToPlaylist'
 import { BatchDownloadBar } from '../components/BatchDownloadBar'
 import { useBatchSelection } from '../components/batchSelection'
 import { SongList } from '../components/SongList'
 import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { PagingNotice } from '../components/PagingNotice'
+import { defaultPlaylistWritebackApi, type PlaylistWritebackApi } from '../api/playlist'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
 /** `SongsPage` 的属性。 */
@@ -25,6 +27,8 @@ export interface SongsPageProps {
   api?: LibraryApi
   /** 注入的 store。 */
   store?: LibraryStoreApi
+  /** 注入的歌单写回接口（测试用假实现；不传则走真实实现）。 */
+  playlistApi?: PlaylistWritebackApi
   /**
    * 双击歌曲时回调。
    *
@@ -40,7 +44,13 @@ export interface SongsPageProps {
 }
 
 /** 歌曲页。 */
-export function SongsPage({ api, store, onPlay, onSelect }: SongsPageProps): ReactElement {
+export function SongsPage({
+  api,
+  store,
+  playlistApi = defaultPlaylistWritebackApi,
+  onPlay,
+  onSelect,
+}: SongsPageProps): ReactElement {
   const resolved = useResolvedLibraryStore(api, store)
   const songs = useStore(resolved, (s) => s.songs)
   const loadSongs = useStore(resolved, (s) => s.loadSongs)
@@ -70,7 +80,18 @@ export function SongsPage({ api, store, onPlay, onSelect }: SongsPageProps): Rea
       loading={songs.loading}
       loadingText="正在加载歌曲…"
     >
-      <BatchDownloadBar songs={batch.selectedSongs} onClear={batch.clear} />
+      <BatchDownloadBar
+        songs={batch.selectedSongs}
+        onClear={batch.clear}
+        extra={
+          <AddToPlaylist
+            songs={batch.selectedSongs}
+            playlistApi={playlistApi}
+            store={resolved}
+            onAdded={batch.clear}
+          />
+        }
+      />
       <SongList
         songs={songs.items}
         onPlay={onPlay ?? (() => undefined)}

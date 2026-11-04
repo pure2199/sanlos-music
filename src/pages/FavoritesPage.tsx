@@ -13,11 +13,13 @@ import { useEffect, useMemo, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Song } from '../../shared/types'
+import { AddToPlaylist } from '../components/AddToPlaylist'
 import { BatchDownloadBar } from '../components/BatchDownloadBar'
 import { useBatchSelection } from '../components/batchSelection'
 import { SongList } from '../components/SongList'
 import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
+import { defaultPlaylistWritebackApi, type PlaylistWritebackApi } from '../api/playlist'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 
 /** `FavoritesPage` 的属性。 */
@@ -26,6 +28,8 @@ export interface FavoritesPageProps {
   api?: LibraryApi
   /** 注入的 store。 */
   store?: LibraryStoreApi
+  /** 注入的歌单写回接口（测试用假实现；不传则走真实实现）。 */
+  playlistApi?: PlaylistWritebackApi
   /**
    * 双击歌曲时回调。
    *
@@ -41,7 +45,13 @@ export interface FavoritesPageProps {
 }
 
 /** 收藏页。 */
-export function FavoritesPage({ api, store, onPlay, onSelect }: FavoritesPageProps): ReactElement {
+export function FavoritesPage({
+  api,
+  store,
+  playlistApi = defaultPlaylistWritebackApi,
+  onPlay,
+  onSelect,
+}: FavoritesPageProps): ReactElement {
   const resolved = useResolvedLibraryStore(api, store)
   const favorites = useStore(resolved, (s) => s.favorites)
   const loadFavorites = useStore(resolved, (s) => s.loadFavorites)
@@ -78,7 +88,18 @@ export function FavoritesPage({ api, store, onPlay, onSelect }: FavoritesPagePro
       loading={favorites.loading}
       loadingText="正在加载收藏…"
     >
-      <BatchDownloadBar songs={batch.selectedSongs} onClear={batch.clear} />
+      <BatchDownloadBar
+        songs={batch.selectedSongs}
+        onClear={batch.clear}
+        extra={
+          <AddToPlaylist
+            songs={batch.selectedSongs}
+            playlistApi={playlistApi}
+            store={resolved}
+            onAdded={batch.clear}
+          />
+        }
+      />
       <SongList
         songs={visible}
         onPlay={onPlay ?? (() => undefined)}

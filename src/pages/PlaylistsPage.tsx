@@ -36,6 +36,7 @@ import {
   type PlaylistWritebackApi,
 } from '../api/playlist'
 import { CardGrid, PlaylistCard } from '../components/Cards'
+import { AddToPlaylist } from '../components/AddToPlaylist'
 import { BatchDownloadBar } from '../components/BatchDownloadBar'
 import { useBatchSelection } from '../components/batchSelection'
 import { useLibraryRowActions } from '../components/rowActions'
@@ -273,7 +274,18 @@ export function PlaylistsPage({
                 )}
               </div>
               {/* 批量下载（T27）：选中后在这里排队下载。 */}
-              <BatchDownloadBar songs={batch.selectedSongs} onClear={batch.clear} />
+              <BatchDownloadBar
+                songs={batch.selectedSongs}
+                onClear={batch.clear}
+                extra={
+                  <AddToPlaylist
+                    songs={batch.selectedSongs}
+                    playlistApi={playlistApi}
+                    store={resolved}
+                    onAdded={batch.clear}
+                  />
+                }
+              />
               <SongList
                 songs={playlistSongs.items}
                 onPlay={onPlay ?? (() => undefined)}

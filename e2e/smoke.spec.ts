@@ -359,6 +359,67 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   })
 
   // -------------------------------------------------------------------------
+  // T28：从曲库页把选中的歌加进歌单
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 此前「加歌进歌单」**只在搜索页**有入口 —— 在曲库里选好一整批歌，却无处可加。
+  //    写回端点 T25 已真机校准（`playlist/add-track` → `{ guid, trackGUIDs }`）。
+  //
+  // ⚠️ 这条用例断言的是**真的写回去了**：加完之后去歌单页看详情，
+  //    那两首**真的在歌单里**（不是只看一句成功提示）。
+  //
+  test('曲库页：多选两首 → 加入歌单 → 歌单详情里真的多了这两首', async () => {
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌曲' })
+      .click()
+
+    // ⚠️ **先切走再切回**：上一条用例在同一页选过两首，而页面**不会重挂载**
+    //    → 选中态还留着 → 这里的 Ctrl 单击会把它**切掉**。
+    //    切走再切回 = 页面重新挂载 → 选中态归零（这本身就是该有的行为）。
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '专辑' })
+      .click()
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌曲' })
+      .click()
+
+    const list = fixture.window.getByRole('listbox', { name: '歌曲列表' })
+    const rows = list.getByRole('option')
+    await expect(rows.first()).toBeVisible()
+
+    const firstTitle = (await rows.nth(0).locator('.fnm-songlist__title').textContent())?.trim() ?? ''
+    const secondTitle = (await rows.nth(1).locator('.fnm-songlist__title').textContent())?.trim() ?? ''
+
+    // Ctrl + 单击 = 多选。
+    await rows.nth(0).click({ modifiers: ['ControlOrMeta'] })
+    await rows.nth(1).click({ modifiers: ['ControlOrMeta'] })
+    await expect(fixture.window.getByText('已选 2 首')).toBeVisible()
+
+    // 「加入歌单」→ 浮层面板展开 → 选歌单 → 加入。
+    await fixture.window.getByTestId('fnm-add-to-playlist-button').click()
+    const panel = fixture.window.getByRole('group', { name: '加入歌单' })
+    await expect(panel).toBeVisible()
+    await panel.getByRole('combobox').selectOption({ label: 'E2E 新建歌单' })
+    await panel.getByRole('button', { name: '加入' }).click()
+    await expect(
+      fixture.window.getByRole('status').filter({ hasText: '已把 2 首加入歌单' }),
+    ).toBeVisible()
+
+    // 真的加进去了：到歌单页看详情。
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌单' })
+      .click()
+    await fixture.window.getByRole('list', { name: '歌单列表' }).getByText('E2E 新建歌单').click()
+    const detail = fixture.window.getByRole('listbox', { name: '歌单歌曲列表' })
+    await expect(detail.getByText(firstTitle)).toBeVisible()
+    await expect(detail.getByText(secondTitle)).toBeVisible()
+  })
+
+  // -------------------------------------------------------------------------
   // T23：自动更新接线（检查 → 下载 → 签名闸）
   // -------------------------------------------------------------------------
   //

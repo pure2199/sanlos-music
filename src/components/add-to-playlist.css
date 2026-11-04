@@ -1,0 +1,138 @@
+/* ---------------------------------------------------------------------------
+ * 「加入歌单」控件（T28）
+ * ---------------------------------------------------------------------------
+ * 颜色**只用语义变量**（`src/styles/tokens.css`），两套主题自动跟随。
+ * 类名 BEM，`fnm-` 前缀。
+ *
+ * ⚠️ **面板是浮层**（absolute）——它**不能**占文档流：
+ *    展开成行会改变工具条高度 → 整个列表位移 → 用户的第二击落空
+ *    → 浏览器不再派发 `dblclick` → **双击播放失效**（T27 踩过这个坑）。
+ * ------------------------------------------------------------------------- */
+
+.fnm-addtoplaylist {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.fnm-addtoplaylist__open {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.fnm-addtoplaylist__open:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-addtoplaylist__open:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+/* 浮层面板：绝对定位 → 不占文档流 → 工具条高度恒定。 */
+.fnm-addtoplaylist__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 15;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 280px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-raised);
+  box-shadow: 0 6px 18px var(--shadow);
+}
+
+.fnm-addtoplaylist__loading,
+.fnm-addtoplaylist__empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fnm-addtoplaylist__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fnm-addtoplaylist__label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fnm-addtoplaylist__select {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fnm-addtoplaylist__confirm {
+  padding: 4px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.fnm-addtoplaylist__confirm:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.fnm-addtoplaylist__confirm:disabled {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.fnm-addtoplaylist__cancel {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.fnm-addtoplaylist__cancel:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-addtoplaylist__message {
+  flex: 1 1 100%;
+  color: var(--success);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fnm-addtoplaylist__error {
+  flex: 1 1 100%;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 18px;
+}

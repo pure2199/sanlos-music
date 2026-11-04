@@ -9,7 +9,7 @@
   box-sizing: border-box;
   display: flex;
   /*
-   * ⚠️ **高度恒定 + 不换行 + 不溢出**（T27 踩过的真缺陷）：
+   * ⚠️ **高度恒定 + 不换行**（T27 踩过的真缺陷）：
    *    工具条一旦在「第一次单击」时**改变高度**，整个列表就会上下位移
    *    → 用户的**第二击落在别的行上** → 浏览器不再派发 `dblclick`
    *    → **双击播放直接失效**。
@@ -27,7 +27,12 @@
    */
   flex: 0 0 auto;
   height: 36px;
-  overflow: hidden;
+  /*
+   * ⚠️ **不能 `overflow: hidden`**：T28 的「加入歌单」面板是**绝对定位的浮层**
+   *    （挂在工具条内部）→ 被裁掉就**永远点不到**。
+   *    高度恒定靠 `height` + `nowrap` + 消息的省略号，不靠裁剪。
+   */
+  overflow: visible;
   padding: 0 12px;
   margin-bottom: 8px;
   border: 1px solid var(--border);
