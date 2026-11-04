@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 
 import type { Album, Artist, Genre, Song } from '../shared/types'
+import { onAuthLost } from './api/client'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { formatCount } from './components/Cards'
 import { PlayerBar } from './components/PlayerBar'
@@ -17,9 +18,11 @@ import { LoginPage } from './pages/LoginPage'
 import { PlaylistsPage } from './pages/PlaylistsPage'
 import { SearchPage } from './pages/SearchPage'
 import { SongsPage } from './pages/SongsPage'
+import { getBridge } from './lib/bridge'
 import type { DetailKind } from './state/libraryStore'
 import { useAppPrefsStore } from './state/appPrefsStore'
 import { usePlayerStore } from './state/playerStore'
+import { useSessionStore } from './state/sessionStore'
 import './styles/app-shell.css'
 import './styles/tokens.css'
 
@@ -142,12 +145,38 @@ export default function App() {
   const [detail, setDetail] = useState<DetailTarget | null>(null)
   /** 设置面板是否展开（Task 8）。 */
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** 会话是否已失效（token 续期也失败）——界面据此回登录页并给出说明。 */
+  const [authLost, setAuthLost] = useState(false)
 
   // 启动时读一次主进程的偏好（主题 / 关闭窗口的行为）并应用（Task 6 / Task 8）。
   // ⚠️ 偏好的**单一真相源在主进程**（`prefs.json`），这里只是把它读回来。
   useEffect(() => {
     void useAppPrefsStore.getState().load()
   }, [])
+
+  // -------------------------------------------------------------------------
+  // 会话失效 → 回登录页（规格 §5.4）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **主进程已经静默续期过一次了**：业务码 99999 透到渲染进程，
+  //    意味着**续期也失败**（口令改了 / 中继不通）。
+  //    这时必须把用户送回登录页，否则界面会停在「已登录、但每个请求都失败」的死状态。
+  //
+  // ⚠️ **立刻切视图，不等 `logout()`**：登出要先通知服务端，
+  //    网络不通时可能挂住十几秒 —— 用户必须**马上**看到「登录已失效」。
+  //    主进程那边的会话清理放在后台做（失败也无妨：下次启动若又读回那个死 token，
+  //    第一个请求会再次触发这条路径，自愈）。
+  useEffect(
+    () =>
+      onAuthLost(() => {
+        setAuthLost(true)
+        useSessionStore.getState().reset()
+        setDetail(null)
+        setView('connect')
+        void Promise.resolve(getBridge()?.logout()).catch(() => undefined)
+      }),
+    [],
+  )
 
   /**
    * 整队播放：**四页共用这一个入口**。
@@ -255,10 +284,18 @@ export default function App() {
             onOpenAlbum={handleOpenAlbum}
           />
         ) : (
-          <LoginPage />
+          <LoginPage
+            notice={authLost ? '登录已失效，请重新登录。' : undefined}
+            sessionLost={authLost}
+          />
         )
       default:
-        return <LoginPage />
+        return (
+          <LoginPage
+            notice={authLost ? '登录已失效，请重新登录。' : undefined}
+            sessionLost={authLost}
+          />
+        )
     }
   }
 

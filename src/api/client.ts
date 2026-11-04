@@ -14,7 +14,7 @@
 // 依赖约束：只用浏览器 API（`fetch` / `URLSearchParams` / `Response`），
 // 不得引入 Node 内置模块或 Electron API（`src/` 会被打进渲染进程的 ESM bundle）。
 
-import { CODE_OK } from '../../shared/constants'
+import { CODE_OK, CODE_TOKEN_EXPIRED } from '../../shared/constants'
 import type { Album, Artist, AudioSpec, Genre, Playlist, Song } from '../../shared/types'
 import type {
   LyricEntry,
@@ -67,6 +67,53 @@ export class ApiError extends Error {
     super(msg)
     this.name = 'ApiError'
     this.code = code
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 会话失效（token 续期失败）
+// ---------------------------------------------------------------------------
+
+/**
+ * 「会话已失效」的订阅者。
+ *
+ * ⚠️ **为什么渲染进程要管这件事**：
+ *    主进程收到业务码 99999 时会**先静默续期一次**再重试；
+ *    只有**续期也失败**（口令改了 / 中继不通）时，99999 才会**透到渲染进程**。
+ *    这时必须按规格 §5.4「派发 `auth-lost` 事件回到登录页」处理，
+ *    否则用户会卡在「已登录、但每个请求都失败」的死状态里。
+ */
+type AuthLostListener = () => void
+
+const authLostListeners = new Set<AuthLostListener>()
+
+/** 本段失效**是否已经通知过**（去重）。 */
+let authLostNotified = false
+
+/**
+ * 订阅「会话失效」事件；返回退订函数。
+ *
+ * ⚠️ **同一段失效只通知一次**：失效期间可能有多个并发请求同时拿到 99999，
+ *    逐个通知会让上层重复清会话、重复切页。
+ *    一次**成功**的请求说明会话又可用了 → 重新武装（下一段失效照常通知）。
+ */
+export function onAuthLost(listener: AuthLostListener): () => void {
+  authLostListeners.add(listener)
+  return () => {
+    authLostListeners.delete(listener)
+  }
+}
+
+/** 通知「会话已失效」（同一段只通知一次）。 */
+function notifyAuthLost(): void {
+  if (authLostNotified) return
+  authLostNotified = true
+  for (const listener of [...authLostListeners]) {
+    try {
+      listener()
+    } catch {
+      /* 监听器出错**不许**影响请求本身 */
+    }
   }
 }
 
@@ -326,9 +373,21 @@ export async function apiCall<T>(path: string, opts: ApiCallOptions = {}): Promi
     throw new Error('响应不是预期信封')
   }
   if (parsed.code !== CODE_OK) {
+    // ⚠️ **99999 = 身份凭据已失效**。
+    //    主进程收到 99999 时会**先静默续期一次**再重试；只有**续期也失败**
+    //    （口令改了 / 中继不通）时，99999 才会透到渲染进程。
+    //    这时按规格 §5.4「派发 auth-lost 事件回到登录页」处理，
+    //    并且把服务端那句英文的「INVALID TOKEN」换成**人话**。
+    if (parsed.code === CODE_TOKEN_EXPIRED) {
+      notifyAuthLost()
+      throw new ApiError('登录已失效，请重新登录', parsed.code)
+    }
     const message = str(parsed.msg) ?? ''
     throw new ApiError(message.length > 0 ? message : `请求失败（code=${parsed.code}）`, parsed.code)
   }
+  // ⚠️ 一次**成功**的请求说明会话又可用了 → **重新武装**「会话失效」通知
+  //    （下一段失效照常通知，不会被这次成功「吃掉」）。
+  authLostNotified = false
   if (!res.ok) {
     // 业务码是 0 但 HTTP 非 2xx：信封不可信，按 HTTP 异常处理。
     throw new Error(`服务器响应异常（HTTP ${res.status}）`)

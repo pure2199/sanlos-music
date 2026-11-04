@@ -67,7 +67,28 @@ function candidateStatus(candidate: CandidateInfo): 'unreachable' | 'note' | 'ok
   return candidate.error ? 'note' : 'ok'
 }
 
-export function LoginPage(): ReactElement {  const [target, setTarget] = useState<TargetMode>('address')
+/** 登录页的属性。 */
+export interface LoginPageProps {
+  /**
+   * 顶部的**说明**（不是表单错误）。
+   *
+   * ⚠️ 用于「登录已失效，请重新登录」这类**由应用自己**给出的说明；
+   *    表单校验错误走组件自己的 `error` 状态（`role="alert"`），两者**分开**：
+   *    说明是 `role="status"`（不抢焦点、不打断屏幕阅读器）。
+   */
+  notice?: string
+  /**
+   * 会话**已失效**（token 续期也失败）。
+   *
+   * ⚠️ 为 true 时**跳过启动时的 `restore()`**：会话已经确认是死的，
+   *    再去恢复它只会把 `session.bin` 里那个失效的 token 读回来，
+   *    于是界面又显示成「已连接」——用户根本看不到登录表单。
+   */
+  sessionLost?: boolean
+}
+
+export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}): ReactElement {
+  const [target, setTarget] = useState<TargetMode>('address')
   const [method, setMethod] = useState<LoginMethod>('password')
   const [address, setAddress] = useState<string>(DEFAULT_ADDRESS)
   const [fnId, setFnId] = useState('')
@@ -100,6 +121,9 @@ export function LoginPage(): ReactElement {  const [target, setTarget] = useStat
   // -------------------------------------------------------------------------
   const restoreStarted = useRef(false)
   useEffect(() => {
+    // ⚠️ **会话已失效时不要 restore()**：那个 token 已经确认是死的，
+    //    恢复它只会把界面又变成「已连接」，用户根本看不到登录表单。
+    if (sessionLost) return
     if (restoreStarted.current) return
     restoreStarted.current = true
     const bridge = getBridge()
@@ -116,7 +140,7 @@ export function LoginPage(): ReactElement {  const [target, setTarget] = useStat
         // 恢复失败按「未登录」处理：不阻断界面。
       }
     })()
-  }, [setSession, setConnection])
+  }, [setSession, setConnection, sessionLost])
 
   /**
    * 登录用的服务器基址。
@@ -477,6 +501,12 @@ export function LoginPage(): ReactElement {  const [target, setTarget] = useStat
                 />
               </div>
             </div>
+          )}
+
+          {notice && (
+            <p className="fnm-login__notice" role="status">
+              {notice}
+            </p>
           )}
 
           {error && (

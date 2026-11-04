@@ -729,3 +729,44 @@ describe('ConnectionBadge', () => {
     expect(screen.getByText('http://192.168.1.20:5666')).toBeTruthy()
   })
 })
+
+// ---------------------------------------------------------------------------
+// 会话失效的说明（T19-3）
+// ---------------------------------------------------------------------------
+
+describe('LoginPage 会话失效说明', () => {
+  it('notice 属性 → 显示说明（role=status）', async () => {
+    render(<LoginPage notice="登录已失效，请重新登录。" />)
+
+    const notice = await screen.findByRole('status')
+    expect(notice.textContent).toContain('登录已失效，请重新登录。')
+    // ⚠️ 说明**不是**错误：不该同时冒出 role="alert" 的错误位。
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('没有 notice 时不渲染说明位', async () => {
+    render(<LoginPage />)
+    await screen.findByRole('button', { name: '登录' })
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('sessionLost → **不调 restore()**（不把死 token 读回来又显示「已连接」）', async () => {
+    // ⚠️ 鉴别力：restore() 恢复出一个**已连接**会话 → 若实现仍然 restore，
+    //    界面会显示「已连接」，用户根本看不到登录表单。
+    bridge.restore.mockResolvedValue({
+      connected: true,
+      mode: 'password',
+      username: 'demo',
+      serverLabel: '192.168.1.20:5666',
+      isRelay: false,
+    } satisfies AuthSessionInfo)
+
+    render(<LoginPage notice="登录已失效，请重新登录。" sessionLost />)
+
+    // 登录表单必须在
+    expect(await screen.findByRole('button', { name: '登录' })).toBeTruthy()
+    expect(screen.queryByText('已连接')).toBeNull()
+    // ⚠️ 而且**根本没去恢复**那个已经失效的会话
+    expect(bridge.restore).not.toHaveBeenCalled()
+  })
+})

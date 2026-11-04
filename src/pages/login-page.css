@@ -252,3 +252,14 @@
   color: var(--danger);
   font-size: 13px;
 }
+
+/* 「会话已失效」这类**说明**（不是错误）：用警告色，和表单错误区分开。 */
+.fnm-login__notice {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: var(--warning-surface);
+  color: var(--warning);
+  font-size: 13px;
+}

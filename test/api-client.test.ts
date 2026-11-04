@@ -10,6 +10,7 @@ import {
   mapSong,
   normalizePageNumber,
   normalizePageSize,
+  onAuthLost,
   toIsoTimestamp,
 } from '../src/api/client'
 import { libraryApi } from '../src/api/library'
@@ -145,8 +146,11 @@ describe('apiCall', () => {
   })
 
   it('code 非 0 抛出带 code 的错误', async () => {
-    stubEnvelopeFetch({ code: 99999, msg: 'expired' })
-    await expect(apiCall('/album/list')).rejects.toThrow(/expired/)
+    // ⚠️ **刻意不用 99999**：那个码有**特殊语义**（token 失效 → 消息换成人话 +
+    //    触发「会话失效」通知 → 回登录页，规格 §5.4），有专门的一条用例钉住。
+    //    这里测的是**普通**业务错误：「服务端 msg 原样带出去」。
+    stubEnvelopeFetch({ code: 100002, msg: 'invalid arguments' })
+    await expect(apiCall('/album/list')).rejects.toThrow(/invalid arguments/)
   })
 
   it('走 fnm:// 协议前缀', async () => {
@@ -156,11 +160,26 @@ describe('apiCall', () => {
   })
 
   it('业务错误抛的是 ApiError，带上服务端 msg 与 code', async () => {
-    stubEnvelopeFetch({ code: 99999, msg: 'invalid token' })
+    // ⚠️ 同上：用**普通**业务码来钉「ApiError 带上服务端 msg 与 code」这条契约。
+    stubEnvelopeFetch({ code: 100002, msg: 'invalid arguments' })
     const error = await apiCall('/album/list').catch((cause: unknown) => cause)
     expect(error).toBeInstanceOf(ApiError)
+    expect((error as ApiError).code).toBe(100002)
+    expect((error as ApiError).message).toContain('invalid arguments')
+  })
+
+  it('code 99999（token 失效）→ 消息换成人话，并触发「会话失效」通知', async () => {
+    const seen: number[] = []
+    const off = onAuthLost(() => seen.push(1))
+    stubEnvelopeFetch({ code: 99999, msg: 'INVALID TOKEN' })
+    const error = await apiCall('/album/list').catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(ApiError)
+    // ⚠️ 业务码**原样保留**（上层靠它判断），只是消息换成用户看得懂的话。
     expect((error as ApiError).code).toBe(99999)
-    expect((error as ApiError).message).toContain('invalid token')
+    expect((error as ApiError).message).toBe('登录已失效，请重新登录')
+    // ⚠️ 必须通知「会话失效」→ 外壳回登录页（规格 §5.4）。
+    expect(seen).toHaveLength(1)
+    off()
   })
 
   it('业务码非 0 且服务端没给 msg 时消息里仍有 code', async () => {
