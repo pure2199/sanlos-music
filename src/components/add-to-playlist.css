@@ -68,6 +68,67 @@
   gap: 6px;
 }
 
+/* 搜索框（T30）：歌单多了以后光靠滚动找不动。 */
+.fnm-addtoplaylist__search {
+  flex: 1 1 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 复选列表（T30）：多选歌单。 */
+.fnm-addtoplaylist__list {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  /* ⚠️ 歌单多的时候列表自己滚动，**不**把面板撑高（面板是浮层，
+   *    撑高会盖住下面的列表 → 点不到）。 */
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.fnm-addtoplaylist__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.fnm-addtoplaylist__option:hover {
+  background: var(--surface-sunken);
+}
+
+.fnm-addtoplaylist__checkbox {
+  margin: 0;
+  cursor: pointer;
+}
+
+.fnm-addtoplaylist__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fnm-addtoplaylist__count {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
 .fnm-addtoplaylist__label {
   color: var(--text-secondary);
   font-size: 12px;

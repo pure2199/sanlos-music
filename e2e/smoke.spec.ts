@@ -400,12 +400,13 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
     await rows.nth(1).click({ modifiers: ['ControlOrMeta'] })
     await expect(fixture.window.getByText('已选 2 首')).toBeVisible()
 
-    // 「加入歌单」→ 浮层面板展开 → 选歌单 → 加入。
+    // 「加入歌单」→ 浮层面板展开 → 勾选歌单 → 加入。
     await fixture.window.getByTestId('fnm-add-to-playlist-button').click()
     const panel = fixture.window.getByRole('group', { name: '加入歌单' })
     await expect(panel).toBeVisible()
-    await panel.getByRole('combobox').selectOption({ label: 'E2E 新建歌单' })
-    await panel.getByRole('button', { name: '加入' }).click()
+    // ⚠️ T30：面板从「单选下拉」改成「复选列表」→ 勾选而不是 selectOption。
+    await panel.getByRole('checkbox', { name: 'E2E 新建歌单' }).check()
+    await panel.getByRole('button', { name: '加入', exact: true }).click()
     await expect(
       fixture.window.getByRole('status').filter({ hasText: '已把 2 首加入歌单' }),
     ).toBeVisible()
@@ -419,6 +420,69 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
     const detail = fixture.window.getByRole('listbox', { name: '歌单歌曲列表' })
     await expect(detail.getByText(firstTitle)).toBeVisible()
     await expect(detail.getByText(secondTitle)).toBeVisible()
+  })
+
+  // -------------------------------------------------------------------------
+  // T30：多选歌单（勾两个 → **两个歌单里都真的有**）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 服务端端点 `playlist/add-track` 是**单目标**的 → 多歌单 = **循环写回**。
+  //    这条用例钉的是「**两个都加上**」，不是只看一句成功提示。
+  //
+  test('曲库页：多选两首 → 勾**两个**歌单 → 两个歌单里都真的有这两首', async () => {
+    // ⚠️ **先切走再切回**：上一条用例在同一页选过歌，页面**不会重挂载**
+    //    → 选中态还留着 → 这里的 Ctrl 单击会把它**切掉**。
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '专辑' })
+      .click()
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌曲' })
+      .click()
+
+    const list = fixture.window.getByRole('listbox', { name: '歌曲列表' })
+    const rows = list.getByRole('option')
+    await expect(rows.first()).toBeVisible()
+    const firstTitle = (await rows.nth(0).locator('.fnm-songlist__title').textContent())?.trim() ?? ''
+
+    await rows.nth(0).click({ modifiers: ['ControlOrMeta'] })
+    await expect(fixture.window.getByText('已选 1 首')).toBeVisible()
+
+    await fixture.window.getByTestId('fnm-add-to-playlist-button').click()
+    const panel = fixture.window.getByRole('group', { name: '加入歌单' })
+    await expect(panel).toBeVisible()
+
+    // ⚠️ **先建两个歌单**（mock 自带的歌单名是占位的，这里用面板里现有的两个）。
+    const checkboxes = panel.getByRole('checkbox')
+    const total = await checkboxes.count()
+    expect(total).toBeGreaterThanOrEqual(2)
+    const firstName = await checkboxes.nth(0).getAttribute('aria-label')
+    const secondName = await checkboxes.nth(1).getAttribute('aria-label')
+
+    await checkboxes.nth(0).check()
+    await checkboxes.nth(1).check()
+    await panel.getByRole('button', { name: '加入 2 个歌单' }).click()
+    await expect(
+      fixture.window.getByRole('status').filter({ hasText: '已把 1 首加入歌单' }),
+    ).toBeVisible()
+
+    // 真的加进去了：两个歌单都要有。
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌单' })
+      .click()
+    const playlists = fixture.window.getByRole('list', { name: '歌单列表' })
+    for (const name of [firstName, secondName]) {
+      await playlists.getByText(name ?? '').click()
+      const detail = fixture.window.getByRole('listbox', { name: '歌单歌曲列表' })
+      await expect(detail.getByText(firstTitle)).toBeVisible()
+      // 切回歌单列表（看下一个）。
+      await fixture.window
+        .getByRole('navigation', { name: '曲库导航' })
+        .getByRole('button', { name: '歌单' })
+        .click()
+    }
   })
 
   // -------------------------------------------------------------------------
