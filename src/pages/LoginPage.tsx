@@ -332,7 +332,7 @@ export function LoginPage(): ReactElement {  const [target, setTarget] = useStat
               />
               <p className="fnm-login__hint">
                 未填写端口时按协议自动补默认端口：HTTP {DEFAULT_HTTP_PORT} / HTTPS{' '}
-                {DEFAULT_HTTPS_PORT}
+                {DEFAULT_HTTPS_PORT}（FN 中继域名除外，中继走标准 HTTPS 端口）
               </p>
               <button
                 type="button"

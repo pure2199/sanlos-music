@@ -20,6 +20,7 @@ import type { DownloadEntry, DownloadTask, PlayerBridge } from '../shared/player
 import { localMediaUrl } from '../shared/localMedia'
 import {
   downloadExtension,
+  installDownloadStore,
   resolvePlaybackSource,
   totalDownloadedBytes,
   useDownloadStore,
@@ -178,6 +179,89 @@ describe('下载：本地优先播放', () => {
 // ---------------------------------------------------------------------------
 
 describe('下载：状态镜像', () => {
+  // ⚠️ T18-5（真机实测）：主进程推来的 `download:changed` **只含 `tasks`**，
+  //    不含 `entries`；而「已下载」徽标与「本地优先播放」**都只看 `entries`**。
+  //    → 任务变成 `done` 时必须**重新拉一次索引**，
+  //    否则下载完成的按钮会退回「下载」，本地优先播放也一直不生效。
+  it('任务变成 done 时会重新拉索引（entries 随之更新 → 本地优先生效）', async () => {
+    // ⚠️ 用**数组**持有回调：TS 会把「在回调里赋值、外层再调用」的 `let` 收窄成 `never`。
+    const handlers: Array<(tasks: DownloadTask[]) => void> = []
+    let entries: Record<string, DownloadEntry> = {}
+    let listCalls = 0
+    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = {
+      ...fakeBridge().bridge,
+      listDownloads: async () => {
+        listCalls += 1
+        return { entries, tasks: [] as DownloadTask[], dir: 'C:\\Music' }
+      },
+      onDownloadChange: (h: (tasks: DownloadTask[]) => void) => {
+        handlers.push(h)
+        return () => undefined
+      },
+    } as unknown as PlayerBridge
+
+    const dispose = installDownloadStore()
+    await waitFor(() => expect(listCalls).toBeGreaterThan(0))
+    const callsBefore = listCalls
+
+    // 下载完成：主进程推来 `done`，此时索引里已经写入了条目。
+    entries = { [SONG_ID]: ENTRY }
+    handlers[0]?.([
+      {
+        songId: SONG_ID,
+        title: '示例歌名',
+        artist: '示例歌手',
+        status: 'done',
+        received: ENTRY.bytes,
+        total: ENTRY.bytes,
+        error: null,
+        file: ENTRY.file,
+      },
+    ])
+
+    await waitFor(() => expect(useDownloadStore.getState().entries[SONG_ID]).toBeTruthy())
+    expect(listCalls).toBeGreaterThan(callsBefore)
+    // 本地优先播放随之生效（不再走 NAS 流）。
+    expect(resolvePlaybackSource(SONG)).toBe(localMediaUrl(SONG_ID))
+    dispose()
+  })
+
+  it('下载完成后行内按钮显示「本地」（不是退回「下载」）', async () => {
+    const handlers: Array<(tasks: DownloadTask[]) => void> = []
+    let entries: Record<string, DownloadEntry> = {}
+    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = {
+      ...fakeBridge().bridge,
+      listDownloads: async () => ({ entries, tasks: [] as DownloadTask[], dir: 'C:\\Music' }),
+      onDownloadChange: (h: (tasks: DownloadTask[]) => void) => {
+        handlers.push(h)
+        return () => undefined
+      },
+    } as unknown as PlayerBridge
+
+    const dispose = installDownloadStore()
+    render(<DownloadButton song={SONG} />)
+    expect(screen.getByTestId('fnm-download-button').getAttribute('data-status')).toBe('idle')
+
+    entries = { [SONG_ID]: ENTRY }
+    handlers[0]?.([
+      {
+        songId: SONG_ID,
+        title: '示例歌名',
+        artist: '示例歌手',
+        status: 'done',
+        received: ENTRY.bytes,
+        total: ENTRY.bytes,
+        error: null,
+        file: ENTRY.file,
+      },
+    ])
+
+    await waitFor(() =>
+      expect(screen.getByTestId('fnm-download-button').getAttribute('data-status')).toBe('done'),
+    )
+    dispose()
+  })
+
   it('load：读回索引、任务、目录与「本地优先」开关', async () => {
     const task: DownloadTask = {
       songId: SONG_ID,

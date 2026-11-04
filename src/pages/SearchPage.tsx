@@ -28,7 +28,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
-import type { Playlist, Song } from '../../shared/types'
+import type { Album, Artist, Playlist, Song } from '../../shared/types'
 import { playlistApi } from '../api/playlist'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import {
@@ -84,6 +84,10 @@ export interface SearchPageProps {
   store?: LibraryStoreApi
   /** 双击歌曲时回调。 */
   onPlay?: (song: Song, index: number, list: Song[]) => void
+  /** 点专辑卡片时回调（下钻到专辑详情）。⚠️ T18-4：搜索结果里的专辑卡片原来点不动。 */
+  onOpenAlbum?: (album: Album) => void
+  /** 点歌手卡片时回调（下钻到歌手详情）。⚠️ T18-4。 */
+  onOpenArtist?: (artist: Artist) => void
   /** 选中歌曲变化时回调。 */
   onSelect?: (ids: string[]) => void
 }
@@ -95,6 +99,8 @@ export function SearchPage(props: SearchPageProps): ReactElement {
     playlistApi: playlistWriteback = defaultPlaylistWritebackApi,
     store,
     onPlay,
+    onOpenAlbum,
+    onOpenArtist,
     onSelect,
   } = props
 
@@ -280,6 +286,8 @@ export function SearchPage(props: SearchPageProps): ReactElement {
         <SearchPanel
           api={api}
           onPlay={onPlay}
+          onOpenAlbum={onOpenAlbum}
+          onOpenArtist={onOpenArtist}
           onSelect={handleSelect}
           selectedIds={selectedIds}
           store={resolved}

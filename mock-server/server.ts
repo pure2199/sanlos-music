@@ -473,9 +473,18 @@ export function createMockServer(): MockServer {
     sendJson(res, ok(paginate(ALBUMS, query)))
   })
 
+  // ⚠️ **与真实 NAS 对齐（T18-3 真机实测）**：
+  //    - 参数名是 `guid`（真实服务端用 `albumGUID` 会返回 `code=100002` invalid arguments）；
+  //    - 响应 `data` 是**专辑对象本身**，不是 `{ list, total }` 列表信封。
+  //    mock 必须与真实服务端同形，否则 E2E 测不出取法错误。
   getRoutes.set(`${API_BASE}/album/detail`, ({ res, query }) => {
-    const guid = query.get('albumGUID') ?? ''
-    sendJson(res, ok(paginate(ALBUMS.filter((a) => a.guid === guid), query)))
+    const guid = query.get('guid') ?? ''
+    const album = ALBUMS.find((a) => a.guid === guid)
+    if (!album) {
+      sendJson(res, err(100002, 'invalid arguments'))
+      return
+    }
+    sendJson(res, ok(album))
   })
 
   getRoutes.set(`${API_BASE}/album/artist-detail/list`, ({ res, query }) => {

@@ -536,7 +536,8 @@ describe('各 API 方法的端点与参数', () => {
     {
       name: 'libraryApi.album',
       call: () => libraryApi.album('al1'),
-      urls: ['fnm://srv/album/detail?albumGUID=al1'],
+      // ⚠️ T18-3：真实服务端的参数名是 `guid`（用 `albumGUID` 会返回 code=100002）。
+      urls: ['fnm://srv/album/detail?guid=al1'],
       method: 'GET',
     },
     {

@@ -1,4 +1,4 @@
-import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT } from '../../shared/constants'
+import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, RELAY_DOMAIN_SUFFIX } from '../../shared/constants'
 
 // ---------------------------------------------------------------------------
 // 服务器地址处理（Task 10b 修订轮 / 复审轮）
@@ -15,6 +15,11 @@ import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT } from '../../shared/constants'
 // 2. **显式写了端口的地址原样保留**（`nas.local:1234` 用 1234，不改成 5666）。
 // 3. **落盘前必须剥掉 userinfo**（`user:pw@host`）——口令绝不进 localStorage，
 //    **且与有没有协议无关**（`user:pw@host:5666` 同样要剥）。
+//
+// ⚠️ 第四条规则（T18-1，真机实测补上）
+// 4. **中继域名（`<fnId>.fnos.net`）不补默认端口**：中继只监听标准 HTTPS 端口（443），
+//    **不监听** fnOS 音乐服务的 5666 / 5667——补了默认端口就一定连不上。
+//    顺带把协议归一到 HTTPS（中继只提供 HTTPS）。
 // ---------------------------------------------------------------------------
 
 /** 形如 `scheme://` 的协议前缀（带捕获组，取协议名）。 */
@@ -76,10 +81,41 @@ function hasExplicitPort(authority: string): boolean {
 }
 
 /**
+ * 取 authority 里的 host（去掉 userinfo、端口、IPv6 方括号）。
+ *
+ * ⚠️ 与 `electron/cert.ts` 的 `normalizeHost` 同语义，但**渲染进程不能 import
+ *    `electron/` 下的模块**（那会把 Node 依赖打进渲染 bundle），所以这里独立实现。
+ */
+function hostOfAuthority(authority: string): string {
+  const at = authority.lastIndexOf('@')
+  const hostPart = at === -1 ? authority : authority.slice(at + 1)
+  // IPv6 字面量：`[::1]` → `::1`。
+  if (hostPart.startsWith('[')) {
+    const close = hostPart.indexOf(']')
+    return close === -1 ? '' : hostPart.slice(1, close).toLowerCase()
+  }
+  const colon = hostPart.indexOf(':')
+  return (colon === -1 ? hostPart : hostPart.slice(0, colon)).toLowerCase()
+}
+
+/**
+ * 判定 host 是否是 **FN 中继域名**（`<fnId>.fnos.net`）。
+ *
+ * 真机实测：中继只监听标准 HTTPS 端口（443），
+ * **不监听** fnOS 音乐服务的 5666 / 5667。
+ */
+function isRelayHost(authority: string): boolean {
+  const host = hostOfAuthority(authority)
+  return host.length > 0 && host.endsWith(RELAY_DOMAIN_SUFFIX)
+}
+
+/**
  * 给「用户输入的地址」补默认端口。
  *
  * - 没有显式端口 → 补协议（缺省 `http://`）与该协议的默认端口
  *   （http → `DEFAULT_HTTP_PORT`，https → `DEFAULT_HTTPS_PORT`）；
+ * - **中继域名（`<fnId>.fnos.net`）例外**：中继只听 443 → **不补端口**，
+ *   并把协议归一到 `https`（用户写 `http://` 也能连上）；
  * - 有显式端口 → **原样返回**（端口一个字符都不改，协议也不改）；
  * - 非 http/https 协议 → 原样返回（主进程会给出「地址无效」的可读错误）。
  *
@@ -95,6 +131,10 @@ export function withDefaultPort(input: string): string {
 
   // ⚠️ 显式端口 → 原样保留（`http://x:80` 的 80 不能被规范化掉，也不能被改成 5666）。
   if (hasExplicitPort(authority)) return trimmed
+
+  // ⚠️ 中继域名：**不补默认端口**（T18-1 真机实测：补了 5667 就连不上），
+  //    协议按 HTTPS 处理（中继只提供 HTTPS）。
+  if (isRelayHost(authority)) return `https://${authority}${tail}`
 
   const port = protocol === 'https' ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT
   // 端口追加在 authority 末尾 —— userinfo（`user:pw@host`）在 '@' 之前，不会被误伤。

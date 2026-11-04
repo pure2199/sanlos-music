@@ -8,11 +8,19 @@
       - script-src/style-src 需要 'unsafe-inline'：vite dev server 会注入 react-refresh 内联脚本，
         渲染进程也会使用内联样式；
       - img-src / media-src 允许 fnm:、blob:、data:、http(s):，供后续任务加载封面、HLS 与音频流；
+      - ⚠️ **media-src 必须同时放行 `fnml:`**（本地媒体 scheme）——漏了它，Chromium 的
+        URL 安全检查会**直接拒绝** `<audio src="fnml://local/track/…">`
+        （MediaError code 4「Media load rejected by URL safety check」），
+        对外表现是「该音频无法播放：当前内核不支持该格式」——
+        于是**下载到本地 / 本地优先播放 / FFmpeg 兜底产物**会**全部**播不了，
+        而单测与 HTTP 探针都发现不了（只有真机起 Electron 才暴露）。
+        ⇒ 新增自定义 scheme 时，**CSP 必须与 `electron/schemes.ts` 的注册表同步**
+        （回归测试见 `test/csp-media-src.test.ts`）。
       - connect-src 允许 fnm: 与 http(s):（直连 NAS），并显式放行 dev server 的 HMR WebSocket。
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: fnm: http: https:; media-src 'self' data: blob: fnm: http: https:; font-src 'self' data:; connect-src 'self' data: blob: fnm: http: https: ws://127.0.0.1:5173 ws://localhost:5173; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: fnm: http: https:; media-src 'self' data: blob: fnm: fnml: http: https:; font-src 'self' data:; connect-src 'self' data: blob: fnm: http: https: ws://127.0.0.1:5173 ws://localhost:5173; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
     />
     <title>飞牛音乐</title>
   </head>

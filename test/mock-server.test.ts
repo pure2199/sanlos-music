@@ -426,16 +426,22 @@ describe('mock server 列表信封与分页', () => {
 // ---------------------------------------------------------------------------
 
 describe('mock server 曲库查询', () => {
-  it('/album/detail 返回单条列表，/track/album-detail/list 返回该专辑曲目', async () => {
+  it('/album/detail 按 guid 返回裸专辑对象，/track/album-detail/list 返回该专辑曲目', async () => {
     const s = createMockServer()
     const token = await login(s)
-    const album = await getJson(s, `${API}/album/detail?albumGUID=al1`, token)
-    expect(album.data.list.length).toBe(1)
-    expect(album.data.list[0].guid).toBe('al1')
+    // ⚠️ T18-3：与真实 NAS 对齐——参数名是 `guid`，响应是**裸专辑对象**（不是列表信封）。
+    const album = await getJson(s, `${API}/album/detail?guid=al1`, token)
+    expect(album.data.guid).toBe('al1')
+    expect(album.data.name).toBe('示例专辑一')
+    // 曲目端点用的仍是 `albumGUID`（那个参数名是对的）。
     const tracks = await getJson(s, `${API}/track/album-detail/list?albumGUID=al1`, token)
     expect(tracks.data.total).toBe(4)
-    const missing = await getJson(s, `${API}/album/detail?albumGUID=nope`, token)
-    expect(missing.data.list).toEqual([])
+    // 旧参数名与真实服务端一致地报「invalid arguments」。
+    const wrong = await getJson(s, `${API}/album/detail?albumGUID=al1`, token)
+    expect(wrong.code).toBe(100002)
+    // 查不到的 guid 同样是 invalid arguments。
+    const missing = await getJson(s, `${API}/album/detail?guid=nope`, token)
+    expect(missing.code).toBe(100002)
     s.close()
   })
 
@@ -783,7 +789,8 @@ describe('mock server 端点清单', () => {
     const getPaths = [
       '/user/me',
       '/album/list',
-      '/album/detail',
+      // ⚠️ T18-3：专辑详情要带 `guid`（真实服务端只认这个参数名）。
+      '/album/detail?guid=al1',
       '/album/artist-detail/list',
       '/track/list',
       '/track/album-detail/list',

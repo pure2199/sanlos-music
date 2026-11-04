@@ -21,6 +21,34 @@ import {
 } from './client'
 import type { Page, RawAlbum, RawArtist, RawGenre, RawPage, RawSong } from './types'
 
+/** 是否是普通对象（数组与 null 都不算）。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * 从专辑详情响应里取出专辑对象。
+ *
+ * ⚠️ **实测（T18-3）服务端返回的是裸专辑对象**（`data` 直接是专辑本身），
+ *    不是 `{ list, total }` 列表信封。
+ *
+ * 这里**同时兼容两种形状**：
+ * - 裸对象（实测）：直接当专辑用；
+ * - 列表信封（服务端若哪天改回去）：取 `list` 的第一条。
+ *
+ * 兼容不是为了「防未来」，而是为了让这段代码**读起来是自洽的**：
+ * 拿不准形状时，两种都能解，而不是默默返回空。
+ */
+function extractAlbum(data: unknown): RawAlbum | null {
+  if (!isRecord(data)) return null
+  const list = data['list']
+  if (Array.isArray(list)) {
+    const first = list[0]
+    return isRecord(first) ? (first as unknown as RawAlbum) : null
+  }
+  return typeof data['guid'] === 'string' ? (data as unknown as RawAlbum) : null
+}
+
 /** 曲库相关接口。 */
 export const libraryApi = {
   /**
@@ -45,18 +73,19 @@ export const libraryApi = {
   /**
    * 专辑详情。
    *
-   * 服务端的详情端点也用列表信封返回（`{ list: [专辑], total: 1 }`），
-   * 这里取第一条；查不到返回 `null`。
+   * ⚠️ **实测（T18-3 真机校准）**：这个端点的参数名与其它端点**不一样**：
+   *   - 参数名是 **`guid`**（不是 `albumGUID`）——用 `albumGUID` / `albumGuid` /
+   *     `albumId` / `id` 全部返回 `code=100002`（invalid arguments）；
+   *   - 响应 `data` 是**专辑对象本身**，**不是** `{ list, total }` 列表信封。
+   *     （对照：`/track/album-detail/list` 用的是 `albumGUID`，那个才是对的。）
    *
-   * ⚠️ **该返回形状未实测**（客户端按「列表信封 + 取 `list[0]`」处理），
-   *    真实响应校准项见联调清单 **Step J**。
+   * 所以这里**不能**走 `normalizePage`（它只认 `{ list, total }`，套上去会得到空列表）。
+   * 查不到返回 `null`。
    */
   async album(id: string): Promise<Album | null> {
-    const raw = normalizePage<RawAlbum>(
-      await apiCall<RawPage<RawAlbum>>('/album/detail', { query: { albumGUID: id } }),
-    )
-    const first = raw.list[0]
-    return first ? mapAlbum(first) : null
+    const data = await apiCall<unknown>('/album/detail', { query: { guid: id } })
+    const raw = extractAlbum(data)
+    return raw ? mapAlbum(raw) : null
   },
 
   /** 某专辑下的歌曲（分页）。 */

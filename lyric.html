@@ -9,10 +9,12 @@
       CSP 与主窗口**同款**（本窗口不联网、不加载远程资源）：
       - script-src/style-src 的 'unsafe-inline'：vite dev server 会注入 react-refresh 内联脚本；
       - 页面底色必须是透明的（`lyric-window.css`），窗口本身也是 transparent。
+      - ⚠️ media-src 与主窗口**保持同款**（含 `fnml:`）——两个页面的 CSP 必须同步，
+        否则会出现「主窗口能播、悬浮歌词窗口不能播」这种极难查的不一致。
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: fnm: http: https:; media-src 'self' data: blob: fnm: http: https:; font-src 'self' data:; connect-src 'self' data: blob: fnm: http: https: ws://127.0.0.1:5173 ws://localhost:5173; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: fnm: http: https:; media-src 'self' data: blob: fnm: fnml: http: https:; font-src 'self' data:; connect-src 'self' data: blob: fnm: http: https: ws://127.0.0.1:5173 ws://localhost:5173; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
     />
     <title>飞牛音乐 · 悬浮歌词</title>
   </head>

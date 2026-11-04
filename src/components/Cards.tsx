@@ -375,7 +375,13 @@ export function CardGrid<T>(props: CardGridProps<T>): ReactElement {
                 data-index={index}
                 style={{
                   top: row * rowHeight,
-                  left: `calc(${(column * 100) / columns}% / ${columns})`,
+                  // ⚠️ **这里只能除一次**（真机实测 T18-2）：
+                  //   原写法 `calc(${(column * 100) / columns}% / ${columns})` 在 JS 里除了一次、
+                  //   CSS 里又除了一次 → 实际除以 `columns²`（6 列时除以 36 而不是 6），
+                  //   于是**所有卡片叠在左侧 1/6 区域**、互相遮挡、点不中（专辑 / 歌手 / 风格 / 歌单 /
+                  //   搜索结果五个页面全废）。
+                  //   正确写法：列序号乘以 100%，**只在 CSS 里除一次**列数。
+                  left: `calc(${column * 100}% / ${columns})`,
                   width: `calc(100% / ${columns})`,
                 }}
               >

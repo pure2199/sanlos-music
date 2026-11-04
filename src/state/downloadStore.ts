@@ -249,7 +249,18 @@ export function installDownloadStore(): () => void {
   const bridge = playerBridge()
   if (!bridge) return () => undefined
   const unsubscribe = bridge.onDownloadChange((tasks) => {
+    const previous = useDownloadStore.getState().tasks
     useDownloadStore.setState({ tasks: toTaskMap(tasks) })
+    // ⚠️ T18-5（真机实测）：主进程只推 `tasks`，**不推 `entries`**；
+    //    而「已下载」徽标（`DownloadButton` 的 `entry` 分支）与
+    //    「本地优先播放」（`resolvePlaybackSource`）**都只看 `entries`**。
+    //    → 任务完成时必须**重新拉一次本地索引**，否则：
+    //      ① 下载完成的按钮会退回「下载」（用户看不到「已下载」）；
+    //      ② 本地优先播放在本次会话内一直不生效（歌明明在本地，却还走 NAS 流）。
+    const justFinished = tasks.some(
+      (task) => task.status === 'done' && previous[task.songId]?.status !== 'done',
+    )
+    if (justFinished) void useDownloadStore.getState().load()
   })
   void useDownloadStore.getState().load()
   return unsubscribe

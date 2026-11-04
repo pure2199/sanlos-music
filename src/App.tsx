@@ -218,7 +218,14 @@ export default function App() {
   const renderMainView = (): ReactElement => {
     switch (view) {
       case 'search':
-        return <SearchPage onPlay={handlePlay} />
+        // ⚠️ T18-4：搜索结果里的专辑 / 歌手卡片要能下钻到详情（原来点不动）。
+        return (
+          <SearchPage
+            onPlay={handlePlay}
+            onOpenAlbum={handleOpenAlbum}
+            onOpenArtist={handleOpenArtist}
+          />
+        )
       case 'songs':
         return <SongsPage onPlay={handlePlay} />
       case 'favorites':

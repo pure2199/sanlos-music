@@ -494,6 +494,34 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
     expect(cardTitles).toEqual(['示例专辑', '示例歌手'])
   })
 
+  // ⚠️ T18-4（真机实测）：搜索结果里的**专辑 / 歌手卡片原来点不动**
+  //    （`renderItem` 没有把 `onOpen` 传给卡片）——卡片渲染出来却是死的。
+  it('搜索结果里的专辑 / 歌手卡片能下钻（点了会回调）', async () => {
+    const api = makeSearchApi({
+      query: vi.fn(async () => ({
+        tracks: { list: [], total: 0 },
+        albums: { list: [ALBUM], total: 1 },
+        artists: { list: [ARTIST], total: 1 },
+      })),
+    })
+    const onOpenAlbum = vi.fn()
+    const onOpenArtist = vi.fn()
+    render(
+      createElement(SearchPanel, { api, onOpenAlbum, onOpenArtist, debounceMs: 0 }),
+    )
+    await typeKeyword('甲')
+
+    // 专辑卡片：标题就是专辑名。
+    const albumTitle = await screen.findByText('示例专辑')
+    fireEvent.click(albumTitle)
+    expect(onOpenAlbum).toHaveBeenCalledWith(ALBUM)
+
+    // 歌手卡片：标题就是歌手名。
+    const artistTitle = await screen.findByText('示例歌手')
+    fireEvent.click(artistTitle)
+    expect(onOpenArtist).toHaveBeenCalledWith(ARTIST)
+  })
+
   it('搜索空结果显示「没有找到」（不是空白）', async () => {
     const api = makeSearchApi()
     render(createElement(SearchPanel, { api, debounceMs: 0 }))

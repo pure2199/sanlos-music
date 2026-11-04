@@ -372,6 +372,15 @@ export interface SearchPanelProps {
   /** 双击歌曲时回调（`list` 是当前搜索结果，便于整队入队）。 */
   onPlay?: (song: Song, index: number, list: Song[]) => void
   /**
+   * 点专辑卡片时回调（下钻到专辑详情）。
+   *
+   * ⚠️ **T18-4**：搜索结果里的专辑 / 歌手卡片原来**没有**这个出口，
+   *    卡片渲染出来却点不动（真机实测：搜索「十年一刻」点专辑卡片毫无反应）。
+   */
+  onOpenAlbum?: (album: Album) => void
+  /** 点歌手卡片时回调（下钻到歌手详情）。⚠️ 同 `onOpenAlbum`（T18-4）。 */
+  onOpenArtist?: (artist: Artist) => void
+  /**
    * 选中歌曲变化时回调（id 数组，按搜索结果顺序）。
    *
    * ⚠️ 与 `selectedIds` 是一对：**同时**给 → 本组件进入**受控**模式
@@ -410,6 +419,8 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
   const {
     api = defaultSearchPanelApi,
     onPlay,
+    onOpenAlbum,
+    onOpenArtist,
     onSelect,
     selectedIds,
     store,
@@ -718,7 +729,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
         <CardGrid
           items={state.albums.items}
           keyOf={(album) => album.id}
-          renderItem={(album) => <AlbumCard album={album} />}
+          renderItem={(album) => <AlbumCard album={album} onOpen={onOpenAlbum} />}
           hasMore={false}
           loading={state.albums.loading}
           emptyLabel="没有找到专辑"
@@ -748,7 +759,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
         <CardGrid
           items={state.artists.items}
           keyOf={(artist) => artist.id}
-          renderItem={(artist) => <ArtistCard artist={artist} />}
+          renderItem={(artist) => <ArtistCard artist={artist} onOpen={onOpenArtist} />}
           hasMore={false}
           loading={state.artists.loading}
           emptyLabel="没有找到歌手"
