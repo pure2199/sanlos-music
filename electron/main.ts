@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session as electronSession } from 'electron'
+import { app, BrowserWindow, Menu, session as electronSession } from 'electron'
 import path from 'node:path'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 
@@ -16,6 +16,7 @@ import {
   type DownloadIndex,
 } from './downloadManager'
 import { createHttpStack } from './http'
+import { attachAppShortcuts } from './appShortcuts'
 import { createLyricProvider } from './lyricProvider'
 import { registerLocalMedia } from './localMedia'
 import { registerAppSchemes } from './schemes'
@@ -188,6 +189,17 @@ if (!isPrimaryInstance) {
         height: 800,
       })
 
+      // 2b. **去掉默认菜单栏**（T36）。
+      //
+      //     ⚠️ Windows 上 Electron 会自动挂一排默认菜单（File / Edit / View /
+      //        Window / Help）→ 看起来像"没做完的开发工具"，不像一个**完整软件**。
+      //     ⇒ 应用菜单置空（**全局**：主窗口 / 悬浮歌词窗 / 授权窗一起生效）。
+      //
+      //     ⚠️ **代价**：默认菜单同时绑着**编辑快捷键**（Ctrl+C / Ctrl+V）→
+      //     菜单一去掉，**粘贴就没了** → 用 `attachClipboardShortcuts()` 手工接回来
+      //     （见 `electron/editShortcuts.ts`）。
+      Menu.setApplicationMenu(null)
+
       const win = new BrowserWindow({
         width: boundsOptions.width,
         height: boundsOptions.height,
@@ -202,6 +214,10 @@ if (!isPrimaryInstance) {
         },
       })
       mainWindow = win
+
+      // ⚠️ T36：菜单栏没了 → **Ctrl+V 粘贴 / F12 开发者工具**得自己接回来
+      //    （否则登录框粘不了口令、调试也打不开控制台）。
+      attachAppShortcuts(win.webContents)
 
       /** 按主题设置窗口底色（避免启动 / 切主题瞬间的白闪）。 */
       const applyWindowTheme = (theme: ThemeName): void => {
@@ -434,6 +450,9 @@ if (!isPrimaryInstance) {
         // 所有工作区都可见（含全屏）。
         win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
         lyricWindow = win
+
+        // ⚠️ T36：菜单栏没了 → **Ctrl+C / Ctrl+V** 自己接回来（悬浮歌词也可复制）。
+        attachAppShortcuts(win.webContents)
 
         // 位置尺寸记忆（与主窗口同一套机制：`electron/windowBounds.ts`）。
         const lyricBoundsSaver = createBoundsSaver({

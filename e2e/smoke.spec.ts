@@ -56,6 +56,45 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
     await expect(fixture.window.getByRole('button', { name: '歌曲' })).toBeVisible()
   })
 
+  // -------------------------------------------------------------------------
+  // T36：默认菜单栏已去掉，且**输入框仍能 Ctrl+V 粘贴**
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **必须排在「登录」之前**：菜单栏去掉后要验「粘贴还能用」→
+  //    就得有一个**可见的输入框**（登录页的地址框）；登录后登录页就没了。
+  //
+  // ⚠️ **断言的是「菜单真的没了」**：菜单栏是**原生**的，不在 DOM 里 →
+  //    Playwright 的 DOM 查询**测不到**；只能问**主进程**
+  //    （`Menu.getApplicationMenu()` / `win.isMenuBarVisible()`）。
+  //
+  // ⚠️ **顺带钉住「去掉菜单没把粘贴弄丢」**：Electron 的默认菜单同时绑着
+  //    编辑快捷键 → 菜单一去掉，**Ctrl+V 就没了** → 登录框粘不了口令。
+  test('默认菜单栏已去掉，且**输入框仍能 Ctrl+V 粘贴**', async () => {
+    // 1. 主进程里**没有**应用菜单了
+    //    （Electron 的默认菜单有 5 项：File / Edit / View / Window / Help）。
+    const state = await fixture.app.evaluate(({ BrowserWindow, Menu }) => {
+      const menu = Menu.getApplicationMenu()
+      const win = BrowserWindow.getAllWindows()[0]
+      return {
+        menuItems: menu ? menu.items.length : 0,
+        menuBarVisible:
+          win && typeof win.isMenuBarVisible === 'function' ? win.isMenuBarVisible() : null,
+      }
+    })
+    expect(state.menuItems).toBe(0)
+    expect(state.menuBarVisible).toBe(false)
+
+    // 2. 真实按一次 Ctrl+V → 地址框里应出现剪贴板内容。
+    //
+    // ⚠️ **必须先清空**：地址框**预填**了默认地址（`http://192.168.1.2:5666`）
+    //    → 不清空的话，粘贴是**追加**在后面的（实测过一次）。
+    await fixture.app.evaluate(({ clipboard }, text) => clipboard.writeText(text), '粘贴测试')
+    await fixture.window.locator('#fnm-address').fill('')
+    await fixture.window.locator('#fnm-address').click()
+    await fixture.window.keyboard.press('Control+V')
+    await expect(fixture.window.locator('#fnm-address')).toHaveValue('粘贴测试')
+  })
+
   test('登录 mock NAS → 显示「已连接」', async () => {
     await login(fixture.window, fixture.mock.url)
 

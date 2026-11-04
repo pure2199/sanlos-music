@@ -1154,3 +1154,79 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
 - **窄窗口**：左栏固定 190px，窗口很窄时右栏会被挤窄（`min-width: 0` 保证不溢出）；
 - **主题开关仍在顶栏**：没有搬进设置页（用户拍板：不重复加功能）；
 - 真机肉眼复验（设置页的排版在真实窗口尺寸下的观感）**尚未做**。
+## 十九、T36：去掉 Windows 上的默认菜单栏（File / Edit / View / Window / Help）
+
+- 日期：2026-11-05
+- 状态：已完成
+- 设计规格：无（改动很小，直接在 `docs/calibration.md` 记录）
+
+### 用户反馈
+
+> 「可以去掉这些吗？像一个完整年软件」（配图：Electron 默认菜单栏）
+
+⇒ 那是 **Electron 的默认应用菜单**：项目**从没配置过菜单**，Windows 上 Electron 就自动挂上
+File / Edit / View / Window / Help —— 看着像"没做完的开发工具"，不像一个**完整软件**。
+
+### 做法
+
+1. **主进程 `Menu.setApplicationMenu(null)`**（`app.whenReady()` 之后、创建窗口之前）
+   → **全局**生效：主窗口 / 桌面悬浮歌词窗 / NAS 授权窗一起没有菜单栏。
+2. ⚠️ **代价**：Electron 的默认菜单**同时绑着一批快捷键** → 菜单一去掉，
+   **Ctrl+V 粘贴**与 **Ctrl+Shift+I / F12 开发者工具**跟着消失
+   → 新增 `electron/appShortcuts.ts`，用 `webContents.on('before-input-event')` **手工接回来**：
+   - `Ctrl+C` → `webContents.copy()`
+   - `Ctrl+V` → `webContents.paste()`
+   - `F12` / `Ctrl+Shift+I` → `webContents.openDevTools()`
+3. ⚠️ **只接这三个，别的一律不拦**：Ctrl+X / Ctrl+A / Ctrl+Z 是 **Blink 自己的编辑命令**
+   （不依赖菜单 accelerator）→ 交给渲染进程。
+   **尤其不能拦 Ctrl+A**：Electron 的 `webContents.selectAll()` 是「选中**整个页面**」
+   → 拦了会让输入框里的 Ctrl+A 变成"选中整页"，**比不处理更糟**。
+4. 托盘菜单**不受影响**（它是自己 `Menu.buildFromTemplate` 出来的上下文菜单，与应用菜单无关）。
+
+### 踩坑一：菜单栏是**原生的**，Playwright 的 DOM 查询**测不到**
+
+菜单栏不在 web contents 里 → `getByRole` / `locator` 一律查不到。
+⇒ E2E 只能问**主进程**：`Menu.getApplicationMenu()`（默认菜单有 5 项）与
+`win.isMenuBarVisible()`。前者顺带能**干净地红**（5 ≠ 0），后者是布尔断言。
+
+### 踩坑二：E2E 里粘贴是**追加**，不是替换
+
+登录页的地址框**预填**了默认地址 `http://192.168.1.2:5666`
+→ 第一次跑 `toHaveValue('粘贴测试')` **红了**，但 DOM 里实际是
+`http://192.168.1.2:5666粘贴测试` → **粘贴其实是成功的**，只是插在了光标处。
+⇒ 用例改成：**先 `fill('')` 清空**，再按 Ctrl+V，再断言**恰好等于**粘贴内容。
+
+### 踩坑三：授权窗的 `webContents` 接口是「宽松」的
+
+`electron/oauthWindow.ts` 的接缝写的是
+`on(channel: string, listener: (...args: unknown[]) => void)`
+→ 与 `appShortcuts` 要求的精确签名**对不上**（TS 报 TS2345）。
+⇒ 不去改别人的接口，而是在 `appShortcuts.ts` 里加一个
+`adaptLooseWebContents()` **在收窄处一次**，调用点保持干净。
+
+### 改动文件
+
+| 文件 | 内容 |
+|---|---|
+| `electron/appShortcuts.ts` | **新增**：快捷键识别纯函数 + 接线函数 + 宽松 `webContents` 适配（**不 import electron** → 可直接单测） |
+| `electron/main.ts` | `Menu.setApplicationMenu(null)`；主窗口 + 悬浮歌词窗接快捷键 |
+| `electron/oauthWindow.ts` | 授权窗接快捷键；`WebContentsLike` 补 `copy?` / `paste?` / `openDevTools?`（**可选** → 不动既有测试替身） |
+| `test/app-shortcuts.test.ts` | **新增** 13 条（识别 + 接线 + 不抢 Ctrl+A + 开发者工具） |
+| `e2e/smoke.spec.ts` | **新增** 1 条（菜单没了 + **真实** Ctrl+V 粘贴），排在「登录」**之前**（要有一个可见输入框） |
+| `docs/calibration.md` / `docs/changelog.md` / `README.md` | 同步 |
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1519 passed / 64 files**；`playwright test` **20 passed**。
+- 本轮改动文件 **U+FFFD = 0**；行尾保持原样、无 BOM。
+- **变异自证**（见台账）：去掉 `Menu.setApplicationMenu(null)` → E2E「菜单没了」**红**；
+  让 `resolveShortcut` 不认 Ctrl+V → 单测 + E2E 粘贴**红**。
+
+### 遗留 / 待办
+
+- **默认 Electron 图标**仍未换（`build/icon.ico` 未提供）→ 任务栏 / 托盘还是 Electron 图标，
+  这也是「像个完整软件」欠缺的一角；
+- **快捷键里没有 Ctrl+Q（退出）**：托盘菜单里有「退出」，够用；发布版也没绑 F11 全屏
+  （全屏播放页是应用内的「全屏」按钮）。
+- ⚠️ **真机肉眼复验未做**：菜单栏消失、托盘菜单仍在、F12 能开控制台 —— 目前只有
+  **主进程断言 + 真实粘贴**这两层自动化保证。

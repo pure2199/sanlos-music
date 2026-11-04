@@ -47,6 +47,7 @@ import {
   RELAY_DOMAIN_SUFFIX,
 } from '../shared/constants'
 import { hostOf, normalizeBase } from './connection'
+import { attachAppShortcuts, adaptLooseWebContents } from './appShortcuts'
 import { TrustedHosts } from './cert'
 import type { ElectronSessionLike, HttpStack } from './http'
 import { authx } from './sign'
@@ -63,6 +64,24 @@ export interface WebContentsLike {
   on(channel: string, listener: (...args: unknown[]) => void): void
   /** 加载授权地址。 */
   loadURL(url: string): Promise<void>
+  /**
+   * 复制当前选区（T36：菜单栏去掉后，编辑快捷键要自己接回来）。
+   *
+   * ⚠️ **可选**：单测里的替身没有这两个方法 → 缺了就**不接管**该动作。
+   */
+  copy?(): void
+  /**
+   * 把剪贴板内容粘到聚焦元素（T36）。
+   *
+   * ⚠️ **可选**：同上。
+   */
+  paste?(): void
+  /**
+   * 打开开发者工具（T36：菜单栏去掉后，F12 快捷键要自己接回来）。
+   *
+   * ⚠️ **可选**：同上。
+   */
+  openDevTools?(): void
 }
 
 /** 授权窗口的最小接口。 */
@@ -508,6 +527,10 @@ export async function runOAuthWindowWith(
       sandbox: true,
     },
   })
+
+  // ⚠️ T36：菜单栏去掉后，**Ctrl+V 粘贴**得自己接回来
+  //    （授权页是 NAS 的账号密码表单，用户很可能要粘贴）。
+  attachAppShortcuts(adaptLooseWebContents(win.webContents))
 
   return await new Promise<string>((resolve, reject) => {
     let settled = false
