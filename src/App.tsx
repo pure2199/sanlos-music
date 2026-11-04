@@ -113,6 +113,7 @@ type MainView =
   | 'artists'
   | 'genres'
   | 'history'
+  | 'settings'
   | 'detail'
 
 /** 顶栏导航按钮。 */
@@ -144,8 +145,13 @@ export default function App() {
   const [view, setView] = useState<MainView>('connect')
   /** 当前下钻目标（`null` = 没在下钻）。 */
   const [detail, setDetail] = useState<DetailTarget | null>(null)
-  /** 设置面板是否展开（Task 8）。 */
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  /**
+   * 打开设置页之前的主区视图（T35）。
+   *
+   * ⚠️ 设置页是**主区里的一个视图**（不是顶栏下拉的浮层）→ 关闭它要**回到来时的地方**，
+   *    否则用户从「收藏」进去、关掉设置后被丢回「歌曲」页。
+   */
+  const [viewBeforeSettings, setViewBeforeSettings] = useState<MainView>('connect')
   /** 会话是否已失效（token 续期也失败）——界面据此回登录页并给出说明。 */
   const [authLost, setAuthLost] = useState(false)
 
@@ -239,6 +245,26 @@ export default function App() {
     setDetail(null)
   }, [detail])
 
+  // ---- 设置页（T35）------------------------------------------------------
+  //
+  // ⚠️ 设置页是**主区里的一个视图**（不是顶栏下拉的浮层）→ 顶栏**不会被遮挡**，
+  //    开着的时候别的顶栏按钮照样点得到（这正是旧浮层的毛病）。
+  //
+  // ⚠️ 打开前先**记住来时的视图** → 关闭时回到原处；
+  //    否则用户从「收藏」进去、关掉设置后会被丢回「连接」页。
+
+  /** 打开设置页（记录来时的视图）。 */
+  const openSettings = useCallback((): void => {
+    // ⚠️ 已经在设置页里时**不要**把「设置页自己」记成来处 → 关闭会原地打转。
+    setViewBeforeSettings((before) => (view === 'settings' ? before : view))
+    setView('settings')
+  }, [view])
+
+  /** 关闭设置页 → 回到打开它之前的主区视图。 */
+  const closeSettings = useCallback((): void => {
+    setView(viewBeforeSettings)
+  }, [viewBeforeSettings])
+
   /**
    * 主区内容：**任一时刻只渲染一个视图**（不是把页面堆在一起）。
    *
@@ -272,6 +298,10 @@ export default function App() {
         // ⚠️ 最近播放分两段：**本机记录**（本地）+ **NAS 历史**（只读）——
         //    服务端没有可用的上报端点（实测），详见 `src/pages/HistoryPage.tsx`。
         return <HistoryPage onPlay={handlePlay} />
+      case 'settings':
+        // ⚠️ T35：设置页是**主区里的整页**（左侧分类 + 右侧内容），
+        //    **不再盖住顶栏**；「关闭设置」回到 `viewBeforeSettings`。
+        return <SettingsPanel onClose={closeSettings} />
       case 'detail':
         return detail ? (
           <DetailPage
@@ -360,13 +390,13 @@ export default function App() {
           <button
             type="button"
             className="fnm-app__nav-button"
-            onClick={() => setSettingsOpen((open) => !open)}
-            aria-expanded={settingsOpen}
+            // ⚠️ T35：设置页是**主区里的一个视图** → 这颗按钮变成「进入 / 退出设置页」。
+            onClick={() => (view === 'settings' ? closeSettings() : openSettings())}
+            aria-expanded={view === 'settings'}
             aria-label="设置"
           >
             设置
           </button>
-          {settingsOpen && <SettingsPanel />}
         </div>
         <ConnectionBadge />
       </header>

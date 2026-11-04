@@ -1,57 +1,150 @@
 /*
- * 设置面板样式（Task 8）。
+ * 设置页样式（T35；原为「设置面板」Task 8）。
  *
  * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
  *    圆角也走令牌（`--radius-panel`）——两套主题形状不同。
+ *
+ * ---------------------------------------------------------------------------
+ * 为什么不是「顶栏下拉的窄浮层」（2026-11-05 用户反馈「设置页做得不对」）
+ * ---------------------------------------------------------------------------
+ *
+ * 浮层只有 294px 宽，却要塞 6 组设置 → 结果是：
+ * - 说明文字被折成 2～4 行（「占位符：…」那段折成 4 行）；
+ * - 输入框里的示例 URL **被截断**（看不见后半段）；
+ * - 下半截（FFmpeg / 自动更新）**掉到视口外**，得在小窄条里滚动；
+ * - 它**盖住顶栏** → 开着的时候别的顶栏按钮点不到。
+ *
+ * ⇒ 现在是**主区里的整页**：左侧分类导航（固定宽）+ 右侧内容（**宽内容列**）。
+ *    内容列 ≈ 900px → 说明文字一行放得下；输入框限宽 560px（不让它无限拉长）。
  */
 
+/* --------------------------------------------------------------------------
+ * 页面根容器：左导航 + 右内容
+ * -------------------------------------------------------------------------- */
+
 .fnm-settings {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  z-index: 30;
+  /*
+   * ⚠️ **撑满主区**：主区 `.app-shell__main` 是 flex 列容器 →
+   *    这里必须 `flex: 1 1 auto` + `min-height: 0` + `height: 100%`
+   *    （与曲库页面外壳 `.fnm-page` 同一套，否则高度百分比解析不出来）。
+   */
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  color: var(--text-primary);
+}
+
+/* --------------------------------------------------------------------------
+ * 左侧分类导航
+ * -------------------------------------------------------------------------- */
+
+.fnm-settings__nav {
+  flex: 0 0 190px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  min-width: 260px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--surface-raised);
-  box-shadow: 0 8px 24px var(--shadow);
-  /*
-   * ⚠️ **限高 + 内部滚动**（T23 加「自动更新」分组之后）：
-   *    面板内容已经比窗口高，不限高的话**下半部分会掉到窗口外**——
-   *    看得见却点不到（`position: absolute` 的面板不受文档滚动影响）。
-   *    96px ≈ 顶栏高度 + 一点余量。
-   */
-  max-height: calc(100vh - 96px);
+  gap: 2px;
+  padding: 18px 12px;
+  border-right: 1px solid var(--border);
   overflow-y: auto;
 }
 
-/* 面板标题 */
+/* 页面标题 */
 .fnm-settings__title {
-  margin: 0;
-  font-size: 14px;
+  margin: 0 0 10px;
+  padding: 0 8px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-/* 一组设置 */
+/* 一个分类项 */
+.fnm-settings__nav-item {
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fnm-settings__nav-item:hover {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.fnm-settings__nav-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* 当前分类 */
+.fnm-settings__nav-item[aria-current='page'] {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+/* 关闭按钮（贴在导航底部） */
+.fnm-settings__close {
+  margin-top: auto;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fnm-settings__close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-settings__close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* --------------------------------------------------------------------------
+ * 右侧内容区
+ * -------------------------------------------------------------------------- */
+
+.fnm-settings__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 22px 32px 40px;
+  overflow-y: auto;
+}
+
+/* --------------------------------------------------------------------------
+ * 一组设置
+ * -------------------------------------------------------------------------- */
+
 .fnm-settings__group {
-  margin: 0;
+  margin: 0 0 28px;
   padding: 0;
   border: none;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+  max-width: 900px;
 }
 
-/* 组标题 */
+/* 组标题：当成**小标题**（加粗 + 下方分隔线），别再是灰色小字 */
 .fnm-settings__legend {
-  padding: 0;
-  font-size: 12px;
-  color: var(--text-secondary);
+  width: 100%;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 /* 一个选项 */
@@ -72,40 +165,51 @@
 /* 说明文案 */
 .fnm-settings__hint {
   margin: 0;
+  max-width: 860px;
   font-size: 12px;
+  line-height: 20px;
   color: var(--text-secondary);
 }
 
 /* 保存失败的提示 */
 .fnm-settings__error {
-  margin: 0;
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
   font-size: 12px;
   color: var(--danger);
 }
 
-/* --- 本地下载（Task 11）------------------------------------------------- */
+/* --- 竖排选项（标签在上、控件在下） ------------------------------------ */
 
-/* 竖排选项（标签在上、控件在下） */
 .fnm-settings__option--stack {
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  gap: 6px;
+  max-width: 560px;
 }
 
-/* 目录输入框 */
+/* 输入框 / 下拉框 */
 .fnm-settings__input {
-  padding: 4px 8px;
+  padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
   color: var(--text-primary);
-  font-size: 12px;
-  line-height: 18px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .fnm-settings__input:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+}
+
+.fnm-settings__input:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
 }
 
 /* 一行按钮 */
@@ -116,13 +220,14 @@
 
 /* 面板内按钮 */
 .fnm-settings__button {
-  padding: 4px 10px;
+  padding: 6px 14px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 18px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
   cursor: pointer;
 }
 

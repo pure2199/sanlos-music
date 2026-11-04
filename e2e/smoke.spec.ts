@@ -559,8 +559,16 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   //    → 「启动安装」必须**禁用**（不许装未签名的包）。
   //
   test('自动更新：检查到新版本 → 下载校验通过 → 签名不过就不许安装', async () => {
-    // 打开设置面板。
-    await fixture.window.getByRole('button', { name: '设置' }).click()
+    // 打开设置页 → 切到「更新」分类。
+    //
+    // ⚠️ T35：设置页是**主区里的整页**（左侧分类 + 右侧内容）→
+    //    「自动更新」那一组在「更新」这一档里，**默认不显示** → 必须先切过去。
+    // ⚠️ `name` 默认是**子串**匹配 → 「设置」会同时命中「关闭设置」→ 必须 exact。
+    await fixture.window.getByRole('button', { name: '设置', exact: true }).click()
+    await fixture.window
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '更新', exact: true })
+      .click()
 
     // 填更新服务器地址（mock 的回环地址：http 只允许回环）与预期签名者。
     await fixture.window
@@ -614,15 +622,20 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
 
     // 设置：歌词来源 = 自定义模板 → 指向 mock 的外部歌词端点。
     //
-    // ⚠️ **「设置」按钮是开关**：上一条用例（T23 自动更新）已经**开着**设置面板
-    //    → 再点一次会**关掉**它 → 后面就找不到「歌词来源」那一组了。
-    //    ⇒ 先看面板在不在，不在才点。
-    const settingsDialog = fixture.window.getByRole('dialog', { name: '设置' })
-    const wasOpen = (await settingsDialog.count()) > 0
-    if (!wasOpen) {
-      await fixture.window.getByRole('button', { name: '设置' }).click()
-      await expect(settingsDialog).toBeVisible()
+    // ⚠️ T35：设置页改成**主区里的整页**（左侧分类 + 右侧内容）→
+    //    「歌词来源」在「歌词」这一档里，**默认不显示** → 要先切过去。
+    // ⚠️ 「设置」按钮现在是「进入 / 退出设置页」：上一条用例（T23 自动更新）
+    //    已经开着设置页 → 再点一次会**退出去** → 后面就找不到设置页了。
+    //    ⇒ 先看设置页在不在，不在才点。
+    const settingsPage = fixture.window.getByRole('region', { name: '设置' })
+    if ((await settingsPage.count()) === 0) {
+      await fixture.window.getByRole('button', { name: '设置', exact: true }).click()
     }
+    await expect(settingsPage).toBeVisible()
+    await fixture.window
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '歌词', exact: true })
+      .click()
     const group = fixture.window.getByRole('group', { name: '歌词来源' })
     await group.getByRole('combobox', { name: '外部歌词源' }).selectOption('custom')
     await group
@@ -632,11 +645,10 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
       )
     await group.getByRole('button', { name: '保存歌词源' }).click()
 
-    // ⚠️ **关掉设置面板**：它盖在顶栏上 → 会**拦截**播放条按钮的指针事件（点不到全屏按钮）。
-    if (wasOpen) {
-      await fixture.window.getByRole('button', { name: '设置' }).click()
-      await expect(settingsDialog).toHaveCount(0)
-    }
+    // ⚠️ **不再需要「关掉设置面板」这一步**（T35 改写，前提已被推翻）：
+    //    旧浮层**盖住顶栏** → 会**拦截**播放条按钮的指针事件（点不到全屏按钮）；
+    //    设置页现在是**主区里的一个视图** → **不遮挡**顶栏与播放条。
+    //    （下面的「曲库导航 → 歌曲」那一步会自然把主区切走，设置页随之关闭。）
 
     // 播 `t2`（mock 里**没有**它的歌词 → 必须靠外部源补齐）。
     await fixture.window
@@ -652,15 +664,13 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
     await expect(page).toBeVisible()
     await expect(page.getByText('外部歌词源第一行')).toBeVisible()
 
-    // ⚠️ **复原设置面板的状态**：后面那条用例（T29 重启）假定它是**开着**的
-    //    → 它会点「设置」来关掉面板。我这里进来时它是开着的 → 原样还回去。
-    if (wasOpen) {
-      // ⚠️ **先关掉全屏页**：它是**全屏浮层** → **盖住顶栏** → 点不到「设置」。
-      await fixture.window.getByRole('button', { name: '关闭全屏播放页' }).click()
-      await expect(fixture.window.getByTestId('full-player')).toHaveCount(0)
-      await fixture.window.getByRole('button', { name: '设置' }).click()
-      await expect(settingsDialog).toBeVisible()
-    }
+    // ⚠️ **收尾**：全屏页是**全屏浮层** → **盖住顶栏** → 下一条用例点不到顶栏按钮
+    //    → 必须关掉。
+    //    ⚠️ 旧代码顺带在这里「复原设置面板开着」的状态 —— **不再需要**：
+    //    T35 起设置页是主区里的一个视图，T29 那条用例会**自己打开**它，
+    //    不再依赖「进来时它开着」这个前提。
+    await fixture.window.getByRole('button', { name: '关闭全屏播放页' }).click()
+    await expect(fixture.window.getByTestId('full-player')).toHaveCount(0)
   })
 
   // -------------------------------------------------------------------------
@@ -697,15 +707,20 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
 
     // --- 1. 设置：歌词来源 = 自定义 → 指向 mock 的**长**歌词端点 --------------
     //
-    // ⚠️ **「设置」按钮是开关**：面板可能已经开着（上一条用例开着）→
-    //    再点一次会**关掉**它 → 后面就找不到「歌词来源」那一组了。
-    //    ⇒ 先看面板在不在，不在才点。
-    const settingsDialog = fixture.window.getByRole('dialog', { name: '设置' })
-    const wasOpen = (await settingsDialog.count()) > 0
-    if (!wasOpen) {
-      await fixture.window.getByRole('button', { name: '设置' }).click()
-      await expect(settingsDialog).toBeVisible()
+    // ⚠️ T35：设置页改成**主区里的整页**（左侧分类 + 右侧内容）→
+    //    「歌词来源」在「歌词」这一档里，**默认不显示** → 要先切过去。
+    // ⚠️ 「设置」按钮是「进入 / 退出设置页」：设置页可能已经开着
+    //    → 再点一次会**退出去** → 后面就找不到「歌词来源」那一组了。
+    //    ⇒ 先看设置页在不在，不在才点。
+    const settingsPage = fixture.window.getByRole('region', { name: '设置' })
+    if ((await settingsPage.count()) === 0) {
+      await fixture.window.getByRole('button', { name: '设置', exact: true }).click()
     }
+    await expect(settingsPage).toBeVisible()
+    await fixture.window
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '歌词', exact: true })
+      .click()
     const group = fixture.window.getByRole('group', { name: '歌词来源' })
     await group.getByRole('combobox', { name: '外部歌词源' }).selectOption('custom')
     await group
@@ -715,10 +730,10 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
       )
     await group.getByRole('button', { name: '保存歌词源' }).click()
 
-    // ⚠️ **关掉设置面板**：它盖在顶栏上 → 会**拦截**播放条按钮的指针事件。
-    //    （不管之前开没开，填完之后它一定是开着的 → **总是**关掉。）
-    await fixture.window.getByRole('button', { name: '设置' }).click()
-    await expect(settingsDialog).toHaveCount(0)
+    // ⚠️ **退出设置页**：填完之后设置页一定是开着的 → 点顶栏「设置」退出去。
+    //    （顺带钉住「设置」按钮是「进入 / 退出」的开关，不是单开。）
+    await fixture.window.getByRole('button', { name: '设置', exact: true }).click()
+    await expect(settingsPage).toHaveCount(0)
 
     // --- 2. 播一首 **NAS 没有歌词** 的歌（→ 歌词只能靠外部源补齐） ----------------
     //
@@ -828,13 +843,78 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
     // 当前行**滚进了视口**（跟着播放走）。
     await expect(active).toBeInViewport()
 
-    // --- 6. 复原状态（后面的用例假定「设置面板是开着的」）--------------------
+    // --- 6. 收尾：关掉全屏页（全屏浮层 → 盖住顶栏）---------------------------
+    //
+    // ⚠️ 旧代码顺带「复原设置面板开着」—— **不再需要**：
+    //    T35 起设置页是主区里的一个视图，T29 那条用例会**自己打开**它，
+    //    不再依赖「进来时它开着」这个前提。
     await fixture.window.getByRole('button', { name: '关闭全屏播放页' }).click()
     await expect(page).toHaveCount(0)
-    if (wasOpen) {
-      await fixture.window.getByRole('button', { name: '设置' }).click()
-      await expect(settingsDialog).toBeVisible()
+  })
+
+  // -------------------------------------------------------------------------
+  // T35：设置页 = **主区里的整页**（左侧分类 + 右侧内容）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 钉的是用户 2026-11-05 反馈「设置页做得不对」的**反面**：
+  //    旧设置面板只有 **294px 宽**、而且**盖住顶栏** →
+  //    说明文字折成 2～4 行、示例 URL 被截断、下半截掉到视口外、别的顶栏按钮点不到。
+  //    ⇒ 现在断言：① 设置页是**整页**（宽度接近主区）；
+  //      ② 几何上**在顶栏下方**（不遮挡顶栏）；
+  //      ③ 左侧五个分类可切换，且**一次只显示一类**；
+  //      ④ 开着设置页时顶栏与播放条**照样点得到**；
+  //      ⑤ 关掉后**回到来时的视图**（不是被丢回「连接」页）。
+  //
+  // ⚠️ 这条**必须排在「重启应用」那条之前**（重启会打断共用实例）。
+  test('设置页：整页 + 左侧分类 + 不遮挡顶栏 + 关掉回到原视图', async () => {
+    // 先去「歌曲」页 —— 后面要验「关掉设置页回到**来时的地方**」。
+    await fixture.window
+      .getByRole('navigation', { name: '曲库导航' })
+      .getByRole('button', { name: '歌曲' })
+      .click()
+    await expect(fixture.window.getByRole('listbox', { name: '歌曲列表' })).toBeVisible()
+
+    // 打开设置页。
+    await fixture.window.getByRole('button', { name: '设置', exact: true }).click()
+    const settingsPage = fixture.window.getByRole('region', { name: '设置' })
+    await expect(settingsPage).toBeVisible()
+
+    // --- 1. 几何：设置页是**整页**，且**不盖住顶栏** --------------------------
+    const mainBox = await fixture.window.locator('.app-shell__main').boundingBox()
+    const topBarBox = await fixture.window.locator('.app-shell__topbar').boundingBox()
+    const settingsBox = await settingsPage.boundingBox()
+    expect(mainBox).not.toBeNull()
+    expect(topBarBox).not.toBeNull()
+    expect(settingsBox).not.toBeNull()
+    // 宽度 ≥ 主区的 80%（旧浮层只有 294px ≈ 主区的 1/4 → 这里必红）。
+    expect(settingsBox!.width).toBeGreaterThanOrEqual(mainBox!.width * 0.8)
+    // ⚠️ **不盖住顶栏**：设置页的上边缘在顶栏下边缘**之下**。
+    expect(settingsBox!.y).toBeGreaterThanOrEqual(topBarBox!.y + topBarBox!.height)
+
+    // --- 2. 左侧五个分类；切换后**只显示当前那一类** --------------------------
+    const nav = fixture.window.getByRole('navigation', { name: '设置分类' })
+    for (const label of ['通用', '歌词', '下载', '解码', '更新']) {
+      await expect(nav.getByRole('button', { name: label, exact: true })).toBeVisible()
     }
+    await nav.getByRole('button', { name: '歌词', exact: true }).click()
+    await expect(fixture.window.getByRole('group', { name: '歌词来源' })).toBeVisible()
+    await expect(fixture.window.getByRole('group', { name: '关闭窗口时' })).toHaveCount(0)
+    await nav.getByRole('button', { name: '解码', exact: true }).click()
+    await expect(fixture.window.getByRole('group', { name: 'FFmpeg 兜底解码' })).toBeVisible()
+
+    // --- 3. 开着设置页时，**顶栏照样点得到**（旧浮层会把顶栏盖住）------------
+    await fixture.window.getByRole('button', { name: '设置', exact: true }).click()
+    await expect(settingsPage).toHaveCount(0)
+
+    // --- 4. 回到**来时的视图**（歌曲页），不是被丢回「连接」页 -----------------
+    await expect(fixture.window.getByRole('listbox', { name: '歌曲列表' })).toBeVisible()
+
+    // --- 5. 页内的「关闭设置」按钮同样能退出（不必非得回顶栏）----------------
+    await fixture.window.getByRole('button', { name: '设置', exact: true }).click()
+    await expect(settingsPage).toBeVisible()
+    await nav.getByRole('button', { name: '关闭设置' }).click()
+    await expect(settingsPage).toHaveCount(0)
+    await expect(fixture.window.getByRole('listbox', { name: '歌曲列表' })).toBeVisible()
   })
 
   // -------------------------------------------------------------------------
@@ -848,14 +928,21 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   //    与**同一个 mock**（登录地址不变）。
   //
   test('播放模式持久化：切到「随机播放」→ 重启应用 → 仍是「随机播放」', async () => {
-    // ⚠️ **先关掉设置面板**：上一条用例（T23）把它打开了，
-    //    而它**盖在顶栏上** → 会**拦截**播放条按钮的指针事件（点不到）。
-    await fixture.window.getByRole('button', { name: '设置' }).click()
-    await expect(fixture.window.getByRole('dialog', { name: '设置' })).toHaveCount(0)
+    // ⚠️ **T35 改写（前提已被推翻）**：旧代码在这里「先关掉设置面板」，
+    //    因为旧浮层**盖住顶栏** → 会**拦截**播放条按钮的指针事件（点不到）。
+    //    T35 起设置页是**主区里的整页** → **不再遮挡**播放条
+    //    → 不再需要关它；反而**开着设置页**来点播放模式按钮，
+    //      把「开着也点得到」这条**新行为**钉死（旧浮层在这里必红）。
+    const settingsPage = fixture.window.getByRole('region', { name: '设置' })
+    if ((await settingsPage.count()) === 0) {
+      await fixture.window.getByRole('button', { name: '设置', exact: true }).click()
+    }
+    await expect(settingsPage).toBeVisible()
 
     // 前面的 T24 用例把模式转回「顺序播放」了 → 这里点一次到「随机播放」。
     const button = fixture.window.getByTestId('play-mode-button')
     await expect(button).toHaveAttribute('data-mode', 'sequence')
+    // ⚠️ 这一句在旧浮层下会被**拦截**（浮层盖住播放条）→ 现在必须点得到。
     await button.click()
     await expect(button).toHaveAttribute('data-mode', 'shuffle')
 

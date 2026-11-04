@@ -59,6 +59,18 @@ function saveButton(): HTMLButtonElement {
   return within(group).getByRole('button', { name: '保存歌词源' }) as HTMLButtonElement
 }
 
+/**
+ * 渲染设置页并**切到「歌词」分类**（T35）。
+ *
+ * ⚠️ 设置页改成了「左侧分类 + 右侧内容」（T35）→ 「歌词来源」那一组
+ *    **默认不渲染**（默认停在「通用」）→ 用例要先点左侧的「歌词」。
+ *    ⚠️ **断言一条没改**，只多这一步操作。
+ */
+function renderLyricSettings(): void {
+  render(<SettingsPanel />)
+  fireEvent.click(screen.getByRole('button', { name: '歌词' }))
+}
+
 beforeEach(() => {
   useAppPrefsStore.setState({
     theme: 'apple',
@@ -76,7 +88,7 @@ afterEach(() => {
 describe('设置面板：歌词来源', () => {
   it('渲染出「歌词来源」这一组，且**默认选中内置源**', () => {
     installBridge()
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     expect(screen.getByText('歌词来源')).toBeTruthy()
     expect(sourceSelect().value).toBe(DEFAULT_LYRIC_SOURCE)
@@ -87,7 +99,7 @@ describe('设置面板：歌词来源', () => {
   //    旧断言是 `['netease', 'lrclib', 'custom', 'off']`（四个选项）。
   it('**五个**选项都在（网易云 / lrclib / **QQ 音乐** / 自定义 / 不用外部）', () => {
     installBridge()
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     const values = Array.from(sourceSelect().options).map((option) => option.value)
     expect(values).toEqual(['netease', 'lrclib', 'qq', 'custom', 'off'])
@@ -95,7 +107,7 @@ describe('设置面板：歌词来源', () => {
 
   it('选「QQ 音乐」→ **模板输入框仍禁用**（只有自定义才要填模板）', () => {
     installBridge()
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     fireEvent.change(sourceSelect(), { target: { value: 'qq' } })
 
@@ -104,7 +116,7 @@ describe('设置面板：歌词来源', () => {
 
   it('选「QQ 音乐」→ 保存 → 写回 `source: "qq"`', async () => {
     const { setPrefs } = installBridge()
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     fireEvent.change(sourceSelect(), { target: { value: 'qq' } })
     fireEvent.click(saveButton())
@@ -117,14 +129,14 @@ describe('设置面板：歌词来源', () => {
 
   it('没选「自定义」时 → **模板输入框是禁用的**（选了也没地方填）', () => {
     installBridge()
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     expect(templateInput().disabled).toBe(true)
   })
 
   it('选「自定义」→ 模板输入框**可用**', () => {
     installBridge()
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     fireEvent.change(sourceSelect(), { target: { value: 'custom' } })
 
@@ -133,7 +145,7 @@ describe('设置面板：歌词来源', () => {
 
   it('改源 + 填模板 → 点「保存」→ **写回主进程**（lyric 键）', async () => {
     const { setPrefs } = installBridge()
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     fireEvent.change(sourceSelect(), { target: { value: 'custom' } })
     fireEvent.change(templateInput(), {
@@ -156,7 +168,7 @@ describe('设置面板：歌词来源', () => {
   it('只换源、不填模板 → 也能保存（模板保持原值）', async () => {
     const { setPrefs } = installBridge()
     useAppPrefsStore.setState({ lyricTemplate: 'https://example.com/{title}' })
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     fireEvent.change(sourceSelect(), { target: { value: 'off' } })
     fireEvent.click(saveButton())
@@ -172,7 +184,7 @@ describe('设置面板：歌词来源', () => {
     installBridge({
       setPrefs: vi.fn(async () => Promise.reject(new Error('写盘失败'))),
     })
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     fireEvent.change(sourceSelect(), { target: { value: 'off' } })
     fireEvent.click(saveButton())
@@ -184,13 +196,13 @@ describe('设置面板：歌词来源', () => {
 
   it('没有改动时「保存」按钮**禁用**（别让用户空点）', () => {
     installBridge()
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     expect((saveButton() as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('没有桥时不崩：设置只在本地生效', async () => {
-    render(<SettingsPanel />)
+    renderLyricSettings()
 
     fireEvent.change(sourceSelect(), { target: { value: 'off' } })
     fireEvent.click(saveButton())

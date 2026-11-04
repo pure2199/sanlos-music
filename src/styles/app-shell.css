@@ -113,13 +113,13 @@
 }
 
 /*
- * 设置入口（Task 8）
+ * 设置入口（Task 8；T35 改成整页设置）
  *
- * ⚠️ `position: relative` 是**锚点**：设置面板（`SettingsPanel`）用
- *    `position: absolute` 挂在按钮正下方（样式在 `settings-panel.css`）。
+ * ⚠️ 这里**只放入口按钮**：T35 起设置页是**主区里的一个视图**
+ *    （左侧分类 + 右侧内容，样式在 `settings-panel.css`），
+ *    **不再是挂在按钮下方的浮层** → 这里不再需要 `position: relative` 锚点。
  */
 .app-shell__settings {
-  position: relative;
   display: flex;
   align-items: center;
 }
@@ -152,6 +152,18 @@
 
 /* 当前所在的入口 */
 .fnm-app__nav-button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/*
+ * 正在打开的入口（T35：设置页 = 主区里的一个视图）
+ *
+ * ⚠️ 设置按钮不是 `aria-pressed` 型（它不是「切换」而是「进入某视图」），
+ *    所以用 `aria-expanded` 表示「设置页开着」→ 高亮样式单独写一条。
+ */
+.fnm-app__nav-button[aria-expanded='true'] {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-text);

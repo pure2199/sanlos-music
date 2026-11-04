@@ -1,18 +1,28 @@
 // ---------------------------------------------------------------------------
-// 设置面板（Task 8）
+// 设置页（T35；原为「设置面板」Task 8）
 // ---------------------------------------------------------------------------
 //
-// 目前只有一项：**「关闭窗口时」的行为**。
+// ⚠️ **为什么从「顶栏下拉的浮层」改成「整页」**（用户 2026-11-05 反馈「设置页做得不对」）：
+//    浮层只有 294px 宽，却塞了 6 组设置 → 说明文字被折成 2～4 行、输入框里的
+//    示例 URL 被截断、下半截（FFmpeg / 自动更新）掉到视口外只能在小窄条里滚动，
+//    而且它**盖住顶栏** → 开着的时候别的顶栏按钮点不到。
+//    ⇒ 现在是**主区里的整页**：左侧分类导航 + 右侧内容（内容列宽 ≈ 900px，
+//      说明文字一行放得下），顶栏**不再被遮挡**，点「设置」或「关闭设置」都能退出。
 //
-// ⚠️ 这一项**此前没有 UI**（`prefs.closeBehavior` 早就写进 `prefs.json`、
-//    主进程也早就消费它，但用户改不了）——审计报表 P1 的「偏好有键无 UI」。
+// ⚠️ **只改呈现，不改数据模型**：`prefs.json` 的键、IPC、偏好白名单**一字未动**；
+//    每一项的控件、名字、草稿/保存语义都保持原样。
 //
-// ⚠️ 偏好的**单一真相源 = 主进程 `prefs.json`**：本面板只经
-//    `useAppPrefsStore` 读写，不碰偏好文件本身。
+// ---------------------------------------------------------------------------
+// 偏好的单一真相源
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 偏好的**单一真相源 = 主进程 `prefs.json`**：本页只经 `useAppPrefsStore`
+//    读写，不碰偏好文件本身。
 //
 // ---------------------------------------------------------------------------
 // 样式约定
 // ---------------------------------------------------------------------------
+//
 // ⚠️ 颜色**只用 CSS 语义变量**（`src/styles/tokens.css`），
 //    样式住在同目录的 `settings-panel.css`。
 // ---------------------------------------------------------------------------
@@ -29,15 +39,32 @@ import { detectFfmpegStatus, hasFfmpegSupport } from '../player/fallback'
 import { formatBytes } from './DownloadButton'
 import './settings-panel.css'
 
+/** 设置页的分类。 */
+export type SettingsCategory = 'general' | 'lyrics' | 'download' | 'decoder' | 'update'
+
+/** 左侧分类导航的条目（顺序 = 显示顺序）。 */
+const CATEGORIES: { id: SettingsCategory; label: string }[] = [
+  { id: 'general', label: '通用' },
+  { id: 'lyrics', label: '歌词' },
+  { id: 'download', label: '下载' },
+  { id: 'decoder', label: '解码' },
+  { id: 'update', label: '更新' },
+]
+
 /** `SettingsPanel` 的属性。 */
 export interface SettingsPanelProps {
   /** 附加类名。 */
   className?: string
+  /** 「关闭设置」回调（不传就没有关闭按钮）。 */
+  onClose?: () => void
 }
 
-/** 设置面板。 */
+/** 设置页。 */
 export function SettingsPanel(props: SettingsPanelProps): ReactElement {
-  const { className } = props
+  const { className, onClose } = props
+  /** 当前分类（左侧导航选中哪一档，右侧就显示哪一组）。 */
+  const [category, setCategory] = useState<SettingsCategory>('general')
+
   const closeBehavior = useAppPrefsStore((state) => state.closeBehavior)
   const setCloseBehavior = useAppPrefsStore((state) => state.setCloseBehavior)
   const lyricOverlayVisible = useAppPrefsStore((state) => state.lyricOverlayVisible)
@@ -192,291 +219,329 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const rootClass = className ? `fnm-settings ${className}` : 'fnm-settings'
 
   return (
-    <section className={rootClass} role="dialog" aria-label="设置">
-      <h2 className="fnm-settings__title">设置</h2>
-
-      <fieldset className="fnm-settings__group">
-        <legend className="fnm-settings__legend">关闭窗口时</legend>
-        <label className="fnm-settings__option">
-          <input
-            type="radio"
-            name="fnm-close-behavior"
-            value="hide"
-            checked={closeBehavior === 'hide'}
-            onChange={() => handleChange('hide')}
-          />
-          <span>隐藏窗口（播放继续）</span>
-        </label>
-        <label className="fnm-settings__option">
-          <input
-            type="radio"
-            name="fnm-close-behavior"
-            value="quit"
-            checked={closeBehavior === 'quit'}
-            onChange={() => handleChange('quit')}
-          />
-          <span>直接退出应用</span>
-        </label>
-      </fieldset>
-
-      <fieldset className="fnm-settings__group">
-        <legend className="fnm-settings__legend">桌面悬浮歌词</legend>
-        <label className="fnm-settings__option">
-          <input
-            type="checkbox"
-            name="fnm-lyric-overlay"
-            checked={lyricOverlayVisible}
-            onChange={(event) => handleToggleLyricOverlay(event.target.checked)}
-          />
-          <span>显示悬浮歌词（双行逐字，可拖动 / 点歌跳转）</span>
-        </label>
-      </fieldset>
-
-      <fieldset className="fnm-settings__group">
-        <legend className="fnm-settings__legend">歌词来源</legend>
-        <p className="fnm-settings__hint">
-          NAS 自带的歌词**优先**；NAS 没有歌词时，才去外部歌词源补一份。
-        </p>
-        <label className="fnm-settings__option fnm-settings__option--stack">
-          <span>外部歌词源</span>
-          <select
-            className="fnm-settings__input"
-            name="fnm-lyric-source"
-            // ⚠️ **显式 aria-label**：`<label>` 包着 `<select>` 时，
-            //    可访问名会把**所有选项文字**也带进去 → 名字不稳定、没法精确选中
-            //    （与 T30 那个「复选框把曲目数带进名字」是同一个坑）。
-            aria-label="外部歌词源"
-            value={lyricSourceDraft}
-            onChange={(event) => setLyricSourceDraft(event.target.value as LyricSource)}
-          >
-            <option value="netease">网易云音乐（国内实测最快）</option>
-            <option value="lrclib">lrclib.net（开源、免费）</option>
-            <option value="qq">QQ 音乐（Lyricify 同款词源）</option>
-            <option value="custom">自定义歌词 API（URL 模板）</option>
-            <option value="off">不用外部（只用 NAS）</option>
-          </select>
-        </label>
-        <label className="fnm-settings__option fnm-settings__option--stack">
-          <span>自定义歌词 API 模板</span>
-          <input
-            type="text"
-            className="fnm-settings__input"
-            name="fnm-lyric-template"
-            // ⚠️ 显式 aria-label（同上：别让 `<label>` 的文字拼进名字）。
-            aria-label="自定义歌词 API 模板"
-            value={lyricTemplateDraft}
-            placeholder="https://example.com/lyric?title={title}&artist={artist}&album={album}&duration={duration}"
-            disabled={lyricSourceDraft !== 'custom'}
-            onChange={(event) => setLyricTemplateDraft(event.target.value)}
-          />
-        </label>
-        <div className="fnm-settings__row">
+    <section className={rootClass} role="region" aria-label="设置">
+      {/* --- 左侧：分类导航 --------------------------------------------- */}
+      <nav className="fnm-settings__nav" aria-label="设置分类">
+        <h1 className="fnm-settings__title">设置</h1>
+        {CATEGORIES.map((item) => (
           <button
+            key={item.id}
             type="button"
-            className="fnm-settings__button"
-            onClick={handleSaveLyricSource}
-            disabled={lyricSourceSaved}
+            className="fnm-settings__nav-item"
+            // ⚠️ `aria-current="page"` 标明「当前这一档」——屏幕阅读器靠它播报。
+            aria-current={category === item.id ? 'page' : undefined}
+            onClick={() => setCategory(item.id)}
           >
-            {/* ⚠️ **名字必须专属**：面板里「自动更新」那一组也有一个「保存」→
-                两个同名按钮会让 `getByRole('button', { name: '保存' })` 命中多个。 */}
-            保存歌词源
+            {item.label}
           </button>
-        </div>
-        <p className="fnm-settings__hint">
-          占位符：{'{title}'} {'{artist}'} {'{album}'} {'{duration}'}；
-          地址必须是 https（不许带账号密码）；返回的正文必须是**带时间戳的 LRC**。
-        </p>
-      </fieldset>
+        ))}
+        {onClose && (
+          <button type="button" className="fnm-settings__close" onClick={onClose}>
+            关闭设置
+          </button>
+        )}
+      </nav>
 
-      <fieldset className="fnm-settings__group">
-        <legend className="fnm-settings__legend">本地下载</legend>
-        <label className="fnm-settings__option">
-          <input
-            type="checkbox"
-            name="fnm-local-first"
-            checked={localFirst}
-            onChange={(event) => handleToggleLocalFirst(event.target.checked)}
-          />
-          <span>本地优先播放（本地有副本就播本地，不再走 NAS）</span>
-        </label>
-        <label className="fnm-settings__option fnm-settings__option--stack">
-          <span>下载目录</span>
-          <input
-            type="text"
-            className="fnm-settings__input"
-            name="fnm-download-dir"
-            value={dirDraft}
-            placeholder="默认：我的音乐\飞牛音乐"
-            onChange={(event) => setDirDraft(event.target.value)}
-          />
-        </label>
-        <div className="fnm-settings__row">
-          <button
-            type="button"
-            className="fnm-settings__button"
-            onClick={handleSaveDir}
-            disabled={dirDraft.trim() === dir.trim()}
-          >
-            保存目录
-          </button>
-          <button
-            type="button"
-            className="fnm-settings__button fnm-settings__button--danger"
-            onClick={handleClearDownloads}
-            disabled={downloadedCount === 0}
-          >
-            清空本地下载
-          </button>
-        </div>
-        <p className="fnm-settings__hint">
-          已下载 {downloadedCount} 首，占用 {formatBytes(downloadedBytes)}。
-        </p>
-        {downloadError && (
+      {/* --- 右侧：当前分类的内容 --------------------------------------- */}
+      <div className="fnm-settings__content">
+        {/* ⚠️ **偏好的错误横幅永远在最上面**：某一类设置写回失败时，
+            用户可能正停在别的分类上 → 错误不能被藏起来。 */}
+        {error && (
           <p className="fnm-settings__error" role="alert">
-            {downloadError}
+            {error}
           </p>
         )}
-      </fieldset>
 
-      <fieldset className="fnm-settings__group">
-        <legend className="fnm-settings__legend">FFmpeg 兜底解码</legend>
-        <p className="fnm-settings__hint" data-testid="ffmpeg-status">
-          {ffmpeg.available
-            ? `已检测到 FFmpeg：${ffmpeg.version || ffmpeg.path}`
-            : '未检测到 FFmpeg。'}
-        </p>
-        <p className="fnm-settings__hint">
-          APE / ALAC / DSF 等格式 Chromium 解不了：把歌曲下载到本地后，客户端会用 FFmpeg
-          转码成 Opus 播放（音质有损，原始文件不变）。
-        </p>
-        {!ffmpeg.available && (
-          <p className="fnm-settings__hint">
-            安装方式：<code>winget install Gyan.FFmpeg</code>，装完后点「重新检测」。
-          </p>
+        {category === 'general' && (
+          <>
+            <fieldset className="fnm-settings__group">
+              <legend className="fnm-settings__legend">关闭窗口时</legend>
+              <label className="fnm-settings__option">
+                <input
+                  type="radio"
+                  name="fnm-close-behavior"
+                  value="hide"
+                  checked={closeBehavior === 'hide'}
+                  onChange={() => handleChange('hide')}
+                />
+                <span>隐藏窗口（播放继续）</span>
+              </label>
+              <label className="fnm-settings__option">
+                <input
+                  type="radio"
+                  name="fnm-close-behavior"
+                  value="quit"
+                  checked={closeBehavior === 'quit'}
+                  onChange={() => handleChange('quit')}
+                />
+                <span>直接退出应用</span>
+              </label>
+            </fieldset>
+            <p className="fnm-settings__hint">窗口位置与尺寸会自动记住，下次启动时恢复。</p>
+          </>
         )}
-        <div className="fnm-settings__row">
-          <button
-            type="button"
-            className="fnm-settings__button"
-            onClick={refreshFfmpeg}
-            disabled={ffmpegChecking}
-          >
-            {ffmpegChecking ? '检测中…' : '重新检测'}
-          </button>
-        </div>
-      </fieldset>
 
-      <fieldset className="fnm-settings__group">
-        <legend className="fnm-settings__legend">自动更新</legend>
-        <label className="fnm-settings__option fnm-settings__option--stack">
-          <span>更新服务器地址</span>
-          <input
-            type="text"
-            className="fnm-settings__input"
-            name="fnm-update-base-url"
-            value={baseUrlDraft}
-            placeholder="https://updates.example.com/fnmusic"
-            onChange={(event) => setBaseUrlDraft(event.target.value)}
-          />
-        </label>
-        <label className="fnm-settings__option fnm-settings__option--stack">
-          <span>预期的代码签名者</span>
-          <input
-            type="text"
-            className="fnm-settings__input"
-            name="fnm-update-signer"
-            value={signerDraft}
-            placeholder="CN=你的证书主体名"
-            onChange={(event) => setSignerDraft(event.target.value)}
-          />
-        </label>
-        <div className="fnm-settings__row">
-          <button
-            type="button"
-            className="fnm-settings__button"
-            onClick={handleSaveUpdate}
-            disabled={updateSaved}
-          >
-            保存
-          </button>
-          <button
-            type="button"
-            className="fnm-settings__button"
-            onClick={handleCheckUpdate}
-            disabled={updateBusy}
-          >
-            {updateStatus === 'checking' ? '检查中…' : '检查更新'}
-          </button>
-        </div>
-        {updateResult?.status === 'up-to-date' && (
-          <p className="fnm-settings__hint" data-testid="update-latest">
-            {`已是最新版本（${updateResult.current}）。`}
-          </p>
-        )}
-        {updateResult?.status === 'not-configured' && (
-          <p className="fnm-settings__hint" data-testid="update-not-configured">
-            还没填「更新服务器地址」，无法检查更新。
-          </p>
-        )}
-        {updateResult?.status === 'available' && (
-          <p className="fnm-settings__hint" data-testid="update-available">
-            {`发现新版本 ${updateResult.manifest.version}${
-              updateResult.manifest.notes ? `：${updateResult.manifest.notes}` : ''
-            }`}
-          </p>
-        )}
-        {updateDownload?.status === 'ok' && (
-          <p className="fnm-settings__hint" data-testid="update-downloaded">
-            {`安装包已下载（${formatBytes(updateDownload.bytes)}）。${
-              updateDownload.signature.ok
-                ? '签名校验通过。'
-                : `签名校验未通过：${updateDownload.signature.reason ?? '未知原因'}——不允许安装。`
-            }`}
-          </p>
-        )}
-        {updateResult?.status === 'available' && (
-          <div className="fnm-settings__row">
-            <button
-              type="button"
-              className="fnm-settings__button"
-              onClick={handleDownloadUpdate}
-              disabled={updateBusy}
-            >
-              {updateStatus === 'downloading' ? '下载中…' : '下载更新'}
-            </button>
-            <button
-              type="button"
-              className="fnm-settings__button"
-              onClick={handleInstallUpdate}
-              disabled={updateBusy || !signatureOk}
-              title={
-                signatureOk
-                  ? '启动安装器'
-                  : '需要先下载，且签名校验通过（未配置预期签名者时不允许安装）'
-              }
-            >
-              {updateStatus === 'installing' ? '启动中…' : '启动安装'}
-            </button>
-          </div>
-        )}
-        {updateError && (
-          <p className="fnm-settings__error" role="alert">
-            {updateError}
-          </p>
-        )}
-        <p className="fnm-settings__hint">
-          安装包必须带代码签名，且签名者与「预期的代码签名者」一致才会被启动；
-          未配置预期签名者时只允许下载，不允许安装。
-        </p>
-      </fieldset>
+        {category === 'lyrics' && (
+          <>
+            <fieldset className="fnm-settings__group">
+              <legend className="fnm-settings__legend">桌面悬浮歌词</legend>
+              <label className="fnm-settings__option">
+                <input
+                  type="checkbox"
+                  name="fnm-lyric-overlay"
+                  checked={lyricOverlayVisible}
+                  onChange={(event) => handleToggleLyricOverlay(event.target.checked)}
+                />
+                <span>显示悬浮歌词（双行逐字，可拖动 / 点歌跳转）</span>
+              </label>
+            </fieldset>
 
-      <p className="fnm-settings__hint">窗口位置与尺寸会自动记住，下次启动时恢复。</p>
+            <fieldset className="fnm-settings__group">
+              <legend className="fnm-settings__legend">歌词来源</legend>
+              <p className="fnm-settings__hint">
+                NAS 自带的歌词**优先**；NAS 没有歌词时，才去外部歌词源补一份。
+              </p>
+              <label className="fnm-settings__option fnm-settings__option--stack">
+                <span>外部歌词源</span>
+                <select
+                  className="fnm-settings__input"
+                  name="fnm-lyric-source"
+                  // ⚠️ **显式 aria-label**：`<label>` 包着 `<select>` 时，
+                  //    可访问名会把**所有选项文字**也带进去 → 名字不稳定、没法精确选中
+                  //    （与 T30 那个「复选框把曲目数带进名字」是同一个坑）。
+                  aria-label="外部歌词源"
+                  value={lyricSourceDraft}
+                  onChange={(event) => setLyricSourceDraft(event.target.value as LyricSource)}
+                >
+                  <option value="netease">网易云音乐（国内实测最快）</option>
+                  <option value="lrclib">lrclib.net（开源、免费）</option>
+                  <option value="qq">QQ 音乐（Lyricify 同款词源）</option>
+                  <option value="custom">自定义歌词 API（URL 模板）</option>
+                  <option value="off">不用外部（只用 NAS）</option>
+                </select>
+              </label>
+              <label className="fnm-settings__option fnm-settings__option--stack">
+                <span>自定义歌词 API 模板</span>
+                <input
+                  type="text"
+                  className="fnm-settings__input"
+                  name="fnm-lyric-template"
+                  // ⚠️ 显式 aria-label（同上：别让 `<label>` 的文字拼进名字）。
+                  aria-label="自定义歌词 API 模板"
+                  value={lyricTemplateDraft}
+                  placeholder="https://example.com/lyric?title={title}&artist={artist}&album={album}&duration={duration}"
+                  disabled={lyricSourceDraft !== 'custom'}
+                  onChange={(event) => setLyricTemplateDraft(event.target.value)}
+                />
+              </label>
+              <div className="fnm-settings__row">
+                <button
+                  type="button"
+                  className="fnm-settings__button"
+                  onClick={handleSaveLyricSource}
+                  disabled={lyricSourceSaved}
+                >
+                  {/* ⚠️ **名字必须专属**：面板里「自动更新」那一组也有一个「保存」→
+                      两个同名按钮会让 `getByRole('button', { name: '保存' })` 命中多个。 */}
+                  保存歌词源
+                </button>
+              </div>
+              <p className="fnm-settings__hint">
+                占位符：{'{title}'} {'{artist}'} {'{album}'} {'{duration}'}；
+                地址必须是 https（不许带账号密码）；返回的正文必须是**带时间戳的 LRC**。
+              </p>
+            </fieldset>
+          </>
+        )}
 
-      {error && (
-        <p className="fnm-settings__error" role="alert">
-          {error}
-        </p>
-      )}
+        {category === 'download' && (
+          <fieldset className="fnm-settings__group">
+            <legend className="fnm-settings__legend">本地下载</legend>
+            <label className="fnm-settings__option">
+              <input
+                type="checkbox"
+                name="fnm-local-first"
+                checked={localFirst}
+                onChange={(event) => handleToggleLocalFirst(event.target.checked)}
+              />
+              <span>本地优先播放（本地有副本就播本地，不再走 NAS）</span>
+            </label>
+            <label className="fnm-settings__option fnm-settings__option--stack">
+              <span>下载目录</span>
+              <input
+                type="text"
+                className="fnm-settings__input"
+                name="fnm-download-dir"
+                value={dirDraft}
+                placeholder="默认：我的音乐\飞牛音乐"
+                onChange={(event) => setDirDraft(event.target.value)}
+              />
+            </label>
+            <div className="fnm-settings__row">
+              <button
+                type="button"
+                className="fnm-settings__button"
+                onClick={handleSaveDir}
+                disabled={dirDraft.trim() === dir.trim()}
+              >
+                保存目录
+              </button>
+              <button
+                type="button"
+                className="fnm-settings__button fnm-settings__button--danger"
+                onClick={handleClearDownloads}
+                disabled={downloadedCount === 0}
+              >
+                清空本地下载
+              </button>
+            </div>
+            <p className="fnm-settings__hint">
+              已下载 {downloadedCount} 首，占用 {formatBytes(downloadedBytes)}。
+            </p>
+            {downloadError && (
+              <p className="fnm-settings__error" role="alert">
+                {downloadError}
+              </p>
+            )}
+          </fieldset>
+        )}
+
+        {category === 'decoder' && (
+          <fieldset className="fnm-settings__group">
+            <legend className="fnm-settings__legend">FFmpeg 兜底解码</legend>
+            <p className="fnm-settings__hint" data-testid="ffmpeg-status">
+              {ffmpeg.available
+                ? `已检测到 FFmpeg：${ffmpeg.version || ffmpeg.path}`
+                : '未检测到 FFmpeg。'}
+            </p>
+            <p className="fnm-settings__hint">
+              APE / ALAC / DSF 等格式 Chromium 解不了：把歌曲下载到本地后，客户端会用 FFmpeg
+              转码成 Opus 播放（音质有损，原始文件不变）。
+            </p>
+            {!ffmpeg.available && (
+              <p className="fnm-settings__hint">
+                安装方式：<code>winget install Gyan.FFmpeg</code>，装完后点「重新检测」。
+              </p>
+            )}
+            <div className="fnm-settings__row">
+              <button
+                type="button"
+                className="fnm-settings__button"
+                onClick={refreshFfmpeg}
+                disabled={ffmpegChecking}
+              >
+                {ffmpegChecking ? '检测中…' : '重新检测'}
+              </button>
+            </div>
+          </fieldset>
+        )}
+
+        {category === 'update' && (
+          <fieldset className="fnm-settings__group">
+            <legend className="fnm-settings__legend">自动更新</legend>
+            <label className="fnm-settings__option fnm-settings__option--stack">
+              <span>更新服务器地址</span>
+              <input
+                type="text"
+                className="fnm-settings__input"
+                name="fnm-update-base-url"
+                value={baseUrlDraft}
+                placeholder="https://updates.example.com/fnmusic"
+                onChange={(event) => setBaseUrlDraft(event.target.value)}
+              />
+            </label>
+            <label className="fnm-settings__option fnm-settings__option--stack">
+              <span>预期的代码签名者</span>
+              <input
+                type="text"
+                className="fnm-settings__input"
+                name="fnm-update-signer"
+                value={signerDraft}
+                placeholder="CN=你的证书主体名"
+                onChange={(event) => setSignerDraft(event.target.value)}
+              />
+            </label>
+            <div className="fnm-settings__row">
+              <button
+                type="button"
+                className="fnm-settings__button"
+                onClick={handleSaveUpdate}
+                disabled={updateSaved}
+              >
+                保存
+              </button>
+              <button
+                type="button"
+                className="fnm-settings__button"
+                onClick={handleCheckUpdate}
+                disabled={updateBusy}
+              >
+                {updateStatus === 'checking' ? '检查中…' : '检查更新'}
+              </button>
+            </div>
+            {updateResult?.status === 'up-to-date' && (
+              <p className="fnm-settings__hint" data-testid="update-latest">
+                {`已是最新版本（${updateResult.current}）。`}
+              </p>
+            )}
+            {updateResult?.status === 'not-configured' && (
+              <p className="fnm-settings__hint" data-testid="update-not-configured">
+                还没填「更新服务器地址」，无法检查更新。
+              </p>
+            )}
+            {updateResult?.status === 'available' && (
+              <p className="fnm-settings__hint" data-testid="update-available">
+                {`发现新版本 ${updateResult.manifest.version}${
+                  updateResult.manifest.notes ? `：${updateResult.manifest.notes}` : ''
+                }`}
+              </p>
+            )}
+            {updateDownload?.status === 'ok' && (
+              <p className="fnm-settings__hint" data-testid="update-downloaded">
+                {`安装包已下载（${formatBytes(updateDownload.bytes)}）。${
+                  updateDownload.signature.ok
+                    ? '签名校验通过。'
+                    : `签名校验未通过：${updateDownload.signature.reason ?? '未知原因'}——不允许安装。`
+                }`}
+              </p>
+            )}
+            {updateResult?.status === 'available' && (
+              <div className="fnm-settings__row">
+                <button
+                  type="button"
+                  className="fnm-settings__button"
+                  onClick={handleDownloadUpdate}
+                  disabled={updateBusy}
+                >
+                  {updateStatus === 'downloading' ? '下载中…' : '下载更新'}
+                </button>
+                <button
+                  type="button"
+                  className="fnm-settings__button"
+                  onClick={handleInstallUpdate}
+                  disabled={updateBusy || !signatureOk}
+                  title={
+                    signatureOk
+                      ? '启动安装器'
+                      : '需要先下载，且签名校验通过（未配置预期签名者时不允许安装）'
+                  }
+                >
+                  {updateStatus === 'installing' ? '启动中…' : '启动安装'}
+                </button>
+              </div>
+            )}
+            {updateError && (
+              <p className="fnm-settings__error" role="alert">
+                {updateError}
+              </p>
+            )}
+            <p className="fnm-settings__hint">
+              安装包必须带代码签名，且签名者与「预期的代码签名者」一致才会被启动；
+              未配置预期签名者时只允许下载，不允许安装。
+            </p>
+          </fieldset>
+        )}
+      </div>
     </section>
   )
 }
