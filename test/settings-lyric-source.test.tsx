@@ -83,12 +83,36 @@ describe('设置面板：歌词来源', () => {
     expect(DEFAULT_LYRIC_SOURCE).toBe('netease')
   })
 
-  it('四个选项都在（含「不用外部」与「自定义」）', () => {
+  // ⚠️ **前提已被推翻**（T33：用户批准新增「QQ 音乐」内置源）→ 本断言改写为**新行为**。
+  //    旧断言是 `['netease', 'lrclib', 'custom', 'off']`（四个选项）。
+  it('**五个**选项都在（网易云 / lrclib / **QQ 音乐** / 自定义 / 不用外部）', () => {
     installBridge()
     render(<SettingsPanel />)
 
     const values = Array.from(sourceSelect().options).map((option) => option.value)
-    expect(values).toEqual(['netease', 'lrclib', 'custom', 'off'])
+    expect(values).toEqual(['netease', 'lrclib', 'qq', 'custom', 'off'])
+  })
+
+  it('选「QQ 音乐」→ **模板输入框仍禁用**（只有自定义才要填模板）', () => {
+    installBridge()
+    render(<SettingsPanel />)
+
+    fireEvent.change(sourceSelect(), { target: { value: 'qq' } })
+
+    expect(templateInput().disabled).toBe(true)
+  })
+
+  it('选「QQ 音乐」→ 保存 → 写回 `source: "qq"`', async () => {
+    const { setPrefs } = installBridge()
+    render(<SettingsPanel />)
+
+    fireEvent.change(sourceSelect(), { target: { value: 'qq' } })
+    fireEvent.click(saveButton())
+
+    await waitFor(() =>
+      expect(setPrefs).toHaveBeenCalledWith({ lyric: { source: 'qq', template: '' } }),
+    )
+    expect(useAppPrefsStore.getState().lyricSource).toBe('qq')
   })
 
   it('没选「自定义」时 → **模板输入框是禁用的**（选了也没地方填）', () => {

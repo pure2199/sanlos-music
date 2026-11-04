@@ -31,7 +31,7 @@
 // |-------------------|------------------|--------------------|----------|
 // | 网易云（默认）    | 200，18–235ms    | 200，31–41ms，带时间戳 | 10/10 全绿 |
 // | lrclib.net（备选）| 200，366–1300ms  | —                  | **偶发 503** |
-// | QQ 音乐           | 200，**2.2s**    | 200，65ms          | 通（太慢，不内置）|
+// | QQ 音乐（T33）    | 200，**814ms**   | 200，**70ms**，明文 LRC + 翻译 | 通（内置备选）|
 //
 // ⚠️ 网易云 / QQ 都是**非官方**公开 Web 接口：没有 SLA、条款上属灰色、接口可能变更。
 //    ⇒ **不押注一家**：默认网易云（国内最快），内置 lrclib 可切，
@@ -60,6 +60,12 @@ const LRCLIB_GET_URL = 'https://lrclib.net/api/get'
 
 /** lrclib 的模糊搜索接口。 */
 const LRCLIB_SEARCH_URL = 'https://lrclib.net/api/search'
+
+/** QQ 音乐搜索接口（公开 Web 接口，**非官方**）。 */
+const QQ_SEARCH_URL = 'https://c.y.qq.com/soso/fcgi-bin/client_search_cp'
+
+/** QQ 音乐歌词接口（公开 Web 接口，**非官方**；返回**明文** LRC + 翻译）。 */
+const QQ_LYRIC_URL = 'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg'
 
 /**
  * 时长容差（**秒**）。
@@ -100,6 +106,46 @@ function readString(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const text = value.trim()
   return text === '' ? null : text
+}
+
+/**
+ * 剥掉搜索结果里的 **HTML 高亮标签**。
+ *
+ * ⚠️ QQ 音乐会把命中的关键词包在 `<em>` 里（实测 `albumname_hilight` 是
+ *    `<em>占位曲目五</em>`）→ 不剥掉就**永远匹配不上**查询的歌名。
+ *
+ * @param text 原始文本。
+ * @returns 去掉标签并 trim 后的文本。
+ */
+export function stripHighlightTags(text: string): string {
+  return text.replace(/<[^>]*>/g, '').trim()
+}
+
+/**
+ * 尽力把一段文本**还原**成 LRC（base64 兜底）。
+ *
+ * ⚠️ QQ 的 `nobase64=1` 实测返回**明文**；但万一哪天它失效、开始返回 base64，
+ *    明文就会被当成「不是 LRC」→ 白白丢一份**能用的**歌词。
+ *    → 这里做一次兜底解码（base64 → UTF-8）。
+ *
+ * ⚠️ 只用 **Web API**（`atob` + `TextDecoder`），不碰 Node 专属全局 →
+ *    本模块哪天被渲染层复用也不会炸。
+ *
+ * @param text 原始文本。
+ * @returns 解码后的文本；不是 base64 或解码失败时**原样返回**。
+ */
+export function decodeMaybeBase64(text: string): string {
+  const trimmed = text.trim()
+  // base64 只可能由这些字符组成；明文 LRC 一定含 `[` / `:` → 会被这里挡住。
+  if (trimmed === '' || !/^[A-Za-z0-9+/=\s]+$/.test(trimmed)) return text
+  try {
+    const binary = atob(trimmed)
+    const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0))
+    const decoded = new TextDecoder('utf-8').decode(bytes)
+    return decoded.includes('[') ? decoded : text
+  } catch {
+    return text
+  }
 }
 
 /** 回环主机（本地自测用的歌词源）。 */
@@ -412,6 +458,141 @@ async function fetchLrclib(
 }
 
 // ---------------------------------------------------------------------------
+// QQ 音乐适配器（T33）
+// ---------------------------------------------------------------------------
+//
+// Lyricify（Fusion）**没有**可供第三方调用的公开歌词 API：它的「歌词源」是**客户端
+// 内置**的，而官方开源库 `WXRIW/Lyricify-Lyrics-Helper`（Apache-2.0）的**访问凭据表**
+// 写明——QQ 音乐 / 网易云 / 酷狗 / 汽水 / LRCLIB **免凭据**，Apple Music / Musixmatch /
+// Spotify 才要 token。
+//
+// ⇒ 本适配器接的是**与 Lyricify 同款的免凭据词源**，**不需要任何账号 / token**。
+//
+// ⚠️ 端点选择的坑（2026-11-04 本机真打）：
+// - `client_search_cv` / `song.fcg` / `search_client_cp` → **404 已下线**；
+// - `u.y.qq.com` 的 `music.search.SearchCgiService` → `code: 500001`；
+// - `u.y.qq.com` 的 `DoSearchForQQMusicDesktop` → 200 但**列表为空**；
+// - ✅ 唯一可用：`c.y.qq.com/soso/fcgi-bin/client_search_cp`（200 / 814ms）。
+//
+// ⚠️ QQ 的歌词是**明文 LRC**（带 base64 时也只是**传输编码**，**不是加密**）
+//    → **零解密成本**；但该端点**不返回 `qrc`** → **拿不到逐字**（逐字在
+//    `u.y.qq.com` 的 `PlayLyricInfo`，`qrc` 是**密文**）。
+//
+// ⚠️ **歌词端点强制要求 `Referer`**（**搜索端点不要求**）：带 → `retcode=0`；
+//    不带 → **`retcode=-1310`**、歌词长度 0 → **静默失败**（HTTP 仍是 200）。
+//    ⇒ 那个 `referer` 头是**必需的**。已在**真实 Electron 主进程**里验过：
+//    `session.fetch` **会保留** `Referer`（不带 → `retcode=-1310`）。
+
+/** QQ 音乐搜索结果里的一首歌。 */
+interface QqSong {
+  songmid?: unknown
+  songname?: unknown
+  albumname?: unknown
+  interval?: unknown
+  singer?: unknown
+}
+
+/** 把 QQ 音乐的搜索结果读成候选列表。 */
+function readQqCandidates(payload: unknown): Candidate[] {
+  const root = asRecord(payload)
+  const data = asRecord(root?.['data'])
+  const song = asRecord(data?.['song'])
+  const list = song?.['list']
+  if (!Array.isArray(list)) return []
+  const out: Candidate[] = []
+  for (const raw of list) {
+    const item = asRecord(raw) as QqSong | null
+    if (!item) continue
+    const id = readString(item.songmid)
+    // ⚠️ 歌名可能带 `<em>` 高亮标签 → **必须剥掉**，否则永远匹配不上。
+    const title = typeof item.songname === 'string' ? stripHighlightTags(item.songname) : ''
+    if (!id || !title) continue
+    const singers = Array.isArray(item.singer) ? item.singer : []
+    const names: string[] = []
+    for (const entry of singers) {
+      const name = readString(asRecord(entry)?.['name'])
+      if (name) names.push(name)
+    }
+    // ⚠️ QQ 的 `interval` 是**秒**（实测《占位曲目五》= 256，对应 4:16）
+    //    → 与 `pickCandidate` 的口径**一致**，**不需要**除以 1000。
+    const duration =
+      typeof item.interval === 'number' && Number.isFinite(item.interval) ? item.interval : 0
+    out.push({ id, title, artist: names.join(','), duration })
+  }
+  return out
+}
+
+/**
+ * 走 QQ 音乐取歌词。
+ *
+ * ⚠️ **原文与翻译分两个字段**（`lyric` / `trans`）→ 与网易云同构，
+ *    渲染层自动出双语。
+ */
+async function fetchQq(
+  fetchImpl: FetchLike,
+  query: ExternalLyricQuery,
+): Promise<ExternalLyricResult> {
+  const keyword = [query.title, query.artist].filter((part) => part.trim() !== '').join(' ')
+  const searchUrl = `${QQ_SEARCH_URL}?p=1&n=10&format=json&w=${encodeURIComponent(keyword)}`
+  const searchRes = await fetchImpl(searchUrl, {
+    headers: {
+      accept: 'application/json',
+      referer: 'https://y.qq.com/',
+      'user-agent': USER_AGENT,
+    },
+  })
+  if (!searchRes.ok) {
+    return { status: 'error', message: `QQ 音乐搜索返回 ${searchRes.status}` }
+  }
+  const searchText = await searchRes.text()
+  let searchPayload: unknown
+  try {
+    searchPayload = JSON.parse(searchText) as unknown
+  } catch {
+    return { status: 'error', message: 'QQ 音乐搜索返回的不是 JSON' }
+  }
+  const candidate = pickCandidate(readQqCandidates(searchPayload), query)
+  if (!candidate) return { status: 'not-found' }
+
+  const lyricRes = await fetchImpl(
+    `${QQ_LYRIC_URL}?songmid=${encodeURIComponent(candidate.id)}&format=json&nobase64=1`,
+    {
+      headers: {
+        accept: 'application/json',
+        referer: 'https://y.qq.com/',
+        'user-agent': USER_AGENT,
+      },
+    },
+  )
+  if (!lyricRes.ok) {
+    return { status: 'error', message: `QQ 音乐歌词返回 ${lyricRes.status}` }
+  }
+  const lyricText = await lyricRes.text()
+  let lyricPayload: { retcode?: unknown; lyric?: unknown; trans?: unknown }
+  try {
+    lyricPayload = JSON.parse(lyricText) as { retcode?: unknown; lyric?: unknown; trans?: unknown }
+  } catch {
+    return { status: 'error', message: 'QQ 音乐歌词返回的不是 JSON' }
+  }
+  // ⚠️ **`retcode` 非 0 = 源本身报错**（实测 `-1310` = 缺少 `Referer` → HTTP 仍是 **200**，
+  //    但歌词长度 0 → **静默失败**）。此时**如实报「源不可用」**，别报「确实没有」，
+  //    否则用户会以为这首歌就是没歌词。
+  const retcode = typeof lyricPayload.retcode === 'number' ? lyricPayload.retcode : 0
+  if (retcode !== 0) {
+    return { status: 'error', message: `QQ 音乐歌词返回错误码 ${retcode}` }
+  }
+  const original = decodeMaybeBase64(
+    typeof lyricPayload.lyric === 'string' ? lyricPayload.lyric : '',
+  )
+  const translation = decodeMaybeBase64(
+    typeof lyricPayload.trans === 'string' ? lyricPayload.trans : '',
+  )
+  // ⚠️ 纯文本歌词（没有时间戳）交给解析器会得到**空数组** → 如实报「没找到」。
+  if (!looksLikeLrc(original)) return { status: 'not-found' }
+  return { status: 'ok', source: 'qq', original, translation }
+}
+
+// ---------------------------------------------------------------------------
 // 自定义模板适配器
 // ---------------------------------------------------------------------------
 
@@ -537,6 +718,8 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
           result = await fetchNetease(opts.fetchImpl, query)
         } else if (source === 'lrclib') {
           result = await fetchLrclib(opts.fetchImpl, query)
+        } else if (source === 'qq') {
+          result = await fetchQq(opts.fetchImpl, query)
         } else {
           result = await fetchCustom(opts.fetchImpl, template, query)
         }

@@ -135,8 +135,14 @@ const QQ_LYRIC_URL = 'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg'
   2. `pickCandidate(...)`（**复用**既有纯函数，顺序：歌名 → 歌手 → 时长 ±3s）；
   3. 歌词：`?songmid=<mid>&format=json&nobase64=1`；
   4. 原文 = `lyric`，翻译 = `trans`；
+  4.1 ⚠️ **`retcode` 非 0 → `error`**（实测 `-1310` = 缺 `Referer` → HTTP 仍是 200 但歌词长度 0
+      → **静默失败**；必须如实报「源不可用」，**别**报「确实没有」）；
   5. `looksLikeLrc(original)` 不通过 → `not-found`（**不是** error）；
   6. 返回 `{ status:'ok', source:'qq', original, translation }`。
+
+⚠️ **歌词端点强制要求 `Referer`**（**搜索端点不要求**）：带 → `retcode=0`；不带 → **`retcode=-1310`**、
+歌词长度 0 → **静默失败**。已在**真实 Electron 主进程**验过：`session.fetch` **会保留** `Referer`
+（不带 → `retcode=-1310`）→ Chromium 网络栈不会把它当受限头丢掉。
 
 dispatch 增分支：
 
@@ -210,7 +216,8 @@ dispatch 增分支：
 6. **变异自证**（每处先红后复原，sha256 回基线）：
    - M1：去掉 `stripHighlightTags` → 带 `<em>` 的用例必须红；
    - M2：把 QQ 的 `interval` 当**毫秒**（除以 1000）→ 时长挑选用例必须红；
-   - M3：去掉 `looksLikeLrc` 校验 → 「不是 LRC → not-found」用例必须红。
+   - M3：去掉 `looksLikeLrc` 校验 → 「不是 LRC → not-found」用例必须红；
+   - M4：去掉 `retcode` 校验 → 「`retcode` 非 0 → `error`」用例必须红。
 7. **既有测试一条不删、断言不削弱**。
 8. 文档同步：`docs/calibration.md`（实测数据表）、`README.md`、changelog。
 

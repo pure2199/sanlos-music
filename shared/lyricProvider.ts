@@ -35,9 +35,11 @@
  * - `off`：**不查外部**，只用 NAS 自带的歌词；
  * - `netease`：网易云音乐的公开 Web 接口（**非官方**，实测国内最快）；
  * - `lrclib`：`lrclib.net`（开源、官方、免费；实测偶发 503）；
+ * - `qq`：QQ 音乐的公开 Web 接口（**非官方**；与 Lyricify 同款词源；
+ *   明文 LRC + 翻译，**无逐字**）；
  * - `custom`：用户自己配的 **URL 模板**（返回**纯文本 LRC**）。
  */
-export type LyricSource = 'off' | 'netease' | 'lrclib' | 'custom'
+export type LyricSource = 'off' | 'netease' | 'lrclib' | 'qq' | 'custom'
 
 /**
  * 歌词来源偏好（落在主进程 `prefs.json` 的 `lyric` 键下）。
@@ -110,7 +112,7 @@ export type ExternalLyricResult =
 // ---------------------------------------------------------------------------
 
 /** 合法的歌词源（**白名单**）。 */
-export const LYRIC_SOURCES: readonly LyricSource[] = ['off', 'netease', 'lrclib', 'custom']
+export const LYRIC_SOURCES: readonly LyricSource[] = ['off', 'netease', 'lrclib', 'qq', 'custom']
 
 /**
  * 默认的歌词源。

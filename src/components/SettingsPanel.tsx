@@ -251,6 +251,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           >
             <option value="netease">网易云音乐（国内实测最快）</option>
             <option value="lrclib">lrclib.net（开源、免费）</option>
+            <option value="qq">QQ 音乐（Lyricify 同款词源）</option>
             <option value="custom">自定义歌词 API（URL 模板）</option>
             <option value="off">不用外部（只用 NAS）</option>
           </select>

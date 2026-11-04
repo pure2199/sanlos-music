@@ -24,10 +24,12 @@ import { DEFAULT_LYRIC_SOURCE } from '../shared/lyricProvider'
 import type { AppPrefs } from '../shared/playerBridge'
 import {
   createLyricProvider,
+  decodeMaybeBase64,
   DURATION_TOLERANCE_SECONDS,
   looksLikeLrc,
   pickCandidate,
   renderLyricTemplate,
+  stripHighlightTags,
   validateLyricTemplate,
   type LyricProvider,
 } from '../electron/lyricProvider'
@@ -285,6 +287,223 @@ describe('lrclib 适配器', () => {
     const provider = createLyricProvider({ fetchImpl })
     const result = await provider.fetchExternalLyric('lrclib', '', QUERY)
     expect(result.status).toBe('not-found')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 高亮标签与 base64 兜底（T33）
+// ---------------------------------------------------------------------------
+
+describe('stripHighlightTags', () => {
+  it('剥掉 `<em>` 高亮标签并 trim', () => {
+    expect(stripHighlightTags('<em>占位歌名</em>')).toBe('占位歌名')
+    expect(stripHighlightTags('  占位歌名  ')).toBe('占位歌名')
+    expect(stripHighlightTags('占位<b>歌名</b>')).toBe('占位歌名')
+  })
+})
+
+describe('decodeMaybeBase64', () => {
+  it('base64 → 还原成明文 LRC', () => {
+    expect(decodeMaybeBase64(btoa('[00:10.00]hello'))).toBe('[00:10.00]hello')
+  })
+
+  it('明文 → **原样返回**（不乱解）', () => {
+    expect(decodeMaybeBase64('[00:10.00]占位歌词')).toBe('[00:10.00]占位歌词')
+    expect(decodeMaybeBase64('')).toBe('')
+  })
+
+  it('解出来不像歌词 → 原样返回（宁可原样，也不给用户一段乱码）', () => {
+    expect(decodeMaybeBase64(btoa('hello world'))).toBe(btoa('hello world'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// QQ 音乐适配器（T33）
+// ---------------------------------------------------------------------------
+
+describe('QQ 音乐适配器', () => {
+  /** 造的 QQ 搜索响应（照抄实测到的字段形状）。 */
+  function searchBody(songs: unknown[]): string {
+    return JSON.stringify({ code: 0, data: { song: { list: songs } } })
+  }
+
+  /** 造的 QQ 歌词响应。 */
+  function lyricBody(lyric: string, trans = ''): string {
+    return JSON.stringify({ retcode: 0, code: 0, subcode: 0, lyric, trans })
+  }
+
+  it('搜索 → 挑中候选 → 取歌词 → **原文与翻译都拿到**', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      {
+        match: 'c.y.qq.com/soso/fcgi-bin/client_search_cp',
+        body: searchBody([
+          { songmid: '001', songname: '占位歌名', interval: 180, singer: [{ name: '别人' }] },
+          { songmid: '002', songname: '占位歌名', interval: 200, singer: [{ name: '占位歌手' }] },
+        ]),
+      },
+      {
+        match: 'c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg',
+        body: lyricBody(LRC_SAMPLE, '[00:10.00]占位翻译'),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('qq', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.source).toBe('qq')
+    expect(result.original).toBe(LRC_SAMPLE)
+    expect(result.translation).toBe('[00:10.00]占位翻译')
+    // ⚠️ 选中的必须是**时长对得上且歌手对得上**的那条（songmid=002）。
+    expect(calls[1]).toContain('songmid=002')
+  })
+
+  it('歌名带 `<em>` 高亮标签 → **剥掉后**才匹配得上', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      {
+        match: 'c.y.qq.com/soso/fcgi-bin/client_search_cp',
+        body: searchBody([
+          // 歌名对得上，但歌手与时长都对不上 → **只能**靠剥标签后的歌名选中。
+          { songmid: '003', songname: '<em>占位歌名</em>', interval: 999, singer: [{ name: '别人' }] },
+          // 歌手对得上，但歌名对不上 → 靠歌名筛掉它。
+          { songmid: '004', songname: '别的歌名', interval: 999, singer: [{ name: '占位歌手' }] },
+        ]),
+      },
+      {
+        match: 'c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg',
+        body: lyricBody(LRC_SAMPLE),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('qq', '', QUERY)
+    expect(result.status).toBe('ok')
+    expect(calls[1]).toContain('songmid=003')
+  })
+
+  it('QQ 的 `interval` 是**秒** → 按秒挑中时长对得上的那条', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      {
+        match: 'c.y.qq.com/soso/fcgi-bin/client_search_cp',
+        body: searchBody([
+          { songmid: '001', songname: '占位歌名', interval: 180, singer: [{ name: '占位歌手' }] },
+          { songmid: '002', songname: '占位歌名', interval: 200, singer: [{ name: '占位歌手' }] },
+        ]),
+      },
+      {
+        match: 'c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg',
+        body: lyricBody(LRC_SAMPLE),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('qq', '', QUERY)
+    expect(result.status).toBe('ok')
+    // ⚠️ 若把 `interval` 当**毫秒**（除以 1000）→ 两个候选时长都对不上 → 会退回第一条（001）。
+    expect(calls[1]).toContain('songmid=002')
+  })
+
+  it('翻译字段为空 → 仍是 `ok`，翻译就是空串（**不报错**）', async () => {
+    const { fetchImpl } = makeFetch([
+      {
+        match: 'c.y.qq.com/soso/fcgi-bin/client_search_cp',
+        body: searchBody([
+          { songmid: '002', songname: '占位歌名', interval: 200, singer: [{ name: '占位歌手' }] },
+        ]),
+      },
+      {
+        match: 'c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg',
+        body: lyricBody(LRC_SAMPLE),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('qq', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.translation).toBe('')
+  })
+
+  it('歌词**不是 LRC**（纯文本）→ `not-found`（不把纯文本塞给解析器）', async () => {
+    const { fetchImpl } = makeFetch([
+      {
+        match: 'c.y.qq.com/soso/fcgi-bin/client_search_cp',
+        body: searchBody([
+          { songmid: '002', songname: '占位歌名', interval: 200, singer: [{ name: '占位歌手' }] },
+        ]),
+      },
+      {
+        match: 'c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg',
+        body: lyricBody('就是一段普通文字'),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('qq', '', QUERY)
+    expect(result.status).toBe('not-found')
+  })
+
+  it('歌词返回 `retcode` 非 0 → `error`（如实的「源不可用」，不是「确实没有」）', async () => {
+    const { fetchImpl } = makeFetch([
+      {
+        match: 'c.y.qq.com/soso/fcgi-bin/client_search_cp',
+        body: searchBody([
+          { songmid: '002', songname: '占位歌名', interval: 200, singer: [{ name: '占位歌手' }] },
+        ]),
+      },
+      {
+        match: 'c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg',
+        body: JSON.stringify({ retcode: -1310, code: -1310, subcode: 0, lyric: '', trans: '' }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('qq', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('-1310')
+  })
+
+  it('搜索结果里没有对得上的 → `not-found`（不是错误）', async () => {
+    const { fetchImpl } = makeFetch([
+      {
+        match: 'c.y.qq.com/soso/fcgi-bin/client_search_cp',
+        body: searchBody([]),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('qq', '', QUERY)
+    expect(result.status).toBe('not-found')
+  })
+
+  it('搜索接口返回 500 → `error` + 可读原因（**不抛异常**）', async () => {
+    const { fetchImpl } = makeFetch([
+      {
+        match: 'c.y.qq.com/soso/fcgi-bin/client_search_cp',
+        status: 500,
+        body: 'boom',
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('qq', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('500')
+  })
+
+  it('歌词接口返回 404 → `error` + 可读原因', async () => {
+    const { fetchImpl } = makeFetch([
+      {
+        match: 'c.y.qq.com/soso/fcgi-bin/client_search_cp',
+        body: searchBody([
+          { songmid: '002', songname: '占位歌名', interval: 200, singer: [{ name: '占位歌手' }] },
+        ]),
+      },
+      {
+        match: 'c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg',
+        status: 404,
+        body: 'not found',
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('qq', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('404')
   })
 })
 

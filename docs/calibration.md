@@ -769,7 +769,7 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
 | 源 | 搜索 | 歌词 | 稳定性 | 结论 |
 |---|---|---|---|---|
 | **网易云** `music.163.com` | 200，**18–235ms** | 200，**31–41ms**，带时间戳 | 歌词 10/10 全绿 | **默认**（国内最快、中文覆盖好）；⚠️ **非官方**公开接口 |
-| **QQ 音乐** `c.y.qq.com` | 200，**2.2s** | 200，65ms，带时间戳 | 通 | 搜索太慢；同样非官方；**不内置** |
+| **QQ 音乐** `c.y.qq.com` | 200，**2.2s** | 200，65ms，带时间戳 | 通 | 当时搜索太慢故不内置；同样非官方 → **T33 换了更快的搜索端点后已内置**（见第十六节） |
 | **lrclib.net** | 200，366–1300ms | — | **偶发 503** | **内置备选**（开源、官方、免费；有中文但少） |
 | vvhan / injahow / lolimi（第三方聚合） | **不通 / 404** | — | — | 那些公益聚合接口**现已不可用** |
 
@@ -845,3 +845,112 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
 - 外部源不可用时**不影响 NAS 已有歌词**的显示（NAS 优先）；
 - ⚠️ **真机活体验检未做**：本轮的外部源实测是**直接打 API**（node 探针），没有走完整的「客户端 → 主进程 → Chromium 分区栈 → 外网」链路。
   真实 NAS 上还要再验一次（中继带宽与外网可达性）。
+
+## 十六、T33：QQ 音乐外部歌词源 —— Lyricify 同款免凭据词源
+
+### 背景：用户的诉求
+
+> 「能加入 lyricify fusion 的歌词 api 吗？全屏歌词应该显示所有歌词」
+
+### 先纠正一个前提：Lyricify **没有**可供第三方调用的公开歌词 API
+
+| 查证 | 结果 |
+|---|---|
+| Lyricify Fusion 的形态 | **Windows 桌面软件**（面向所有接入 SMTC 的播放器），**不是** API 服务 |
+| 官方文档站 `docs.lyricify.app` | 只有使用指南，**没有** API 参考 |
+| `https://api.lyricify.app/app/connection-test` | `OK`（主站可达） |
+| 同站的 `openapi.json` / swagger | **没有** → 也**没有任何文档化的歌词查询端点** |
+| Lyricify 账户 | 与 **Spotify 账号**关联（首次登录 Spotify 时自动注册）→ 属**凭证** |
+
+⇒ 「直连 Lyricify 服务器取歌词」这条路需要：用户的 Spotify 账号 + 逆向一个**未公开的私有端点**
+→ **不做**（稳定性与合规风险都太高）。
+
+### 真正的抓手：Lyricify 官方开源库把「凭据」写清楚了
+
+`WXRIW/Lyricify-Lyrics-Helper`（**Apache-2.0**，Lyricify 家族开源成员）的**访问凭据表**：
+
+| 来源 | 配置要求 |
+|---|---|
+| QQ 音乐、网易云音乐、酷狗音乐、汽水音乐、LRCLIB | **无需配置** |
+| Apple Music | 必须提供 Media User Token |
+| Musixmatch | User Token（可自动获取） |
+| Spotify | 必须提供 `sp_dc` Cookie |
+
+⇒ Lyricify 的歌词能力**绝大部分建立在免凭据词源上** → 复刻其中一个（**QQ 音乐**）即可，
+**不需要任何账号 / token / OAuth**，也不新增 npm 依赖。
+
+### 端点实测（2026-11-04，本机真打）
+
+| 端点 | 结果 |
+|---|---|
+| `c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=10&w=<词>&format=json` | **200 / 814ms**，`data.song.list[]` |
+| `c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=<mid>&format=json&nobase64=1` | **200 / 70ms**，`lyric` = **明文 LRC**、`trans` = 翻译 LRC |
+| `c.y.qq.com/soso/fcgi-bin/client_search_cv` / `song.fcg` / `search_client_cp` | **404 已下线** |
+| `u.y.qq.com` 的 `music.search.SearchCgiService` | `code: 500001`（参数被拒） |
+| `u.y.qq.com` 的 `DoSearchForQQMusicDesktop` | 200 但**列表为空** |
+
+### 踩到的五个真实坑
+
+1. **base64 不是加密**：QQ 的 `lyric` 带 base64 时也只是**传输编码**，解码后仍是明文 LRC
+   → **零解密成本**；代码里仍留了一层 base64 兜底（万一哪天 `nobase64` 失效）。
+2. **搜索结果带 `<em>` 高亮标签**（实测 `albumname_hilight` 是 `<em>占位曲目五</em>`）
+   → 歌名不剥标签就**永远匹配不上**查询的歌名。
+3. **`interval` 是「秒」**（实测《占位曲目五》= 256，对应 4:16）→ 与 `pickCandidate` 口径**一致**，
+   **不用**除以 1000（网易云才是毫秒）。
+4. **该歌词端点不返回 `qrc`** → **拿不到逐字**（逐字在 `u.y.qq.com` 的 `PlayLyricInfo`，
+   `qrc` 是**密文**）→ 本轮**不做**（留给后续任务）。
+5. ⚠️ **歌词端点强制要求 `Referer`**（**搜索端点不要求**）：
+   - 带 `Referer` → `retcode=0`、歌词带时间戳（200 / 72ms）；
+   - 只带 UA、**不带** `Referer` → **`retcode=-1310`**、歌词长度 0 → **静默失败**（HTTP 仍是 200）。
+
+   ⇒ 那个 `referer` 头是**必需的**，且**绝不能**指望「少了也能用」。
+   ⚠️ 已在**真实 Electron 主进程**里验过（`session.defaultSession.fetch`）：
+   带 `referer` → `retcode=0` / `lyricLen=1743` / 带时间戳；
+   不带 → `retcode=-1310` / `lyricLen=0`
+   ⇒ Chromium 网络栈**不会**把它当「受限头」丢掉 → 主进程直连这条路走得通。
+
+### 用户拍板的三个决策
+
+| 决策点 | 结论 |
+|---|---|
+| 集成档位 | **接 Lyricify 同款免凭据词源**：新增「QQ 音乐」内置源（行级 LRC + 翻译） |
+| 全屏歌词形态 | 歌词舞台式（全量渲染 + 当前行放大逐字高亮 + 自动滚动）→ **T34**，本轮不做 |
+| 多源策略 | **保持单选**，行为与 T32 一致；**默认值仍是网易云**（QQ 搜索 814ms 明显更慢） |
+
+### 改动
+
+| 文件 | 内容 |
+|---|---|
+| `shared/lyricProvider.ts` | `LyricSource` 加 `'qq'`；`LYRIC_SOURCES` 白名单加 `'qq'`；默认值**不变** |
+| `electron/lyricProvider.ts` | 加 `QQ_SEARCH_URL` / `QQ_LYRIC_URL`；加 `stripHighlightTags()` / `decodeMaybeBase64()`；加 `readQqCandidates()` + `fetchQq()`；dispatch 加 `qq` 分支 |
+| `src/components/SettingsPanel.tsx` | 「外部歌词源」下拉加 `<option value="qq">QQ 音乐（Lyricify 同款词源）</option>` |
+| `test/lyric-provider.test.ts` | 加 QQ 适配器用例（12 条）+ 两个新工具函数的用例 |
+| `test/settings-lyric-source.test.tsx` | 既有「四个选项」断言**改写**为「五个选项」（前提被用户推翻）；加 2 条 QQ 用例 |
+
+⚠️ `electron/ipc.ts` 的偏好白名单用的是 `LYRIC_SOURCES.includes(...)` → `'qq'` **自动放行**，
+`normalizeLyricSource` 同理 → **零改动**。
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1471 passed / 59 files**（基线 1456 → **+15**）；
+  `playwright test` **17 passed**。
+- 本轮改动文件 **U+FFFD = 0**；行尾保持原样（`docs/calibration.md` 仍是 CRLF，其余 LF）、无 BOM。
+- **变异自证（四处全部先红后改回，sha256 回基线 `8870252230543182`）**：
+  1. 去掉 `stripHighlightTags`（歌名带 `<em>` 不再剥）
+     → 「歌名带 `<em>` 高亮标签 → **剥掉后**才匹配得上」**红**（选中 songmid 变成 004）；
+  2. 把 QQ 的 `interval` 当**毫秒**（除以 1000）
+     → 「QQ 的 `interval` 是**秒**」**红**（时长筛失效 → 退回第一条 songmid=001）；
+  3. 去掉 QQ 的 `looksLikeLrc` 校验
+     → 「歌词**不是 LRC**（纯文本）→ `not-found`」**红**（`ok` ≠ `not-found`）；
+  4. 去掉 QQ 的 `retcode` 校验
+     → 「歌词返回 `retcode` 非 0 → `error`」**红**（静默失败被当成「确实没有」）。
+
+### 遗留 / 待办
+
+- **逐字**：QQ 的 QRC 是**密文**（在 `u.y.qq.com` 的 `PlayLyricInfo`），要复刻 Lyricify 的
+  「逐字 + 翻译」完整体验需实现解密 + 转 A2 增强 LRC（解析层已就绪：`parse.ts` 的
+  `WORD_TAG` 已支持 `<mm:ss.xx>`）→ 留给后续任务；
+- ⚠️ **真机活体验检未做**：本轮只直打 API 验证了端点与形态，**没有**走完整的
+  「客户端 → 主进程 → Chromium 分区栈 → 外网」链路；
+- QQ / 网易云都是**非官方**接口 → 变更风险。缓解：内置 lrclib + 自定义模板，一键切走；
+- QQ 翻译覆盖不全（实测《占位曲目五》`trans` 为空）→ 空就是空，**不报错**、**不阻塞**。
