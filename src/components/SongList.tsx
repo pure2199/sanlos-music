@@ -45,6 +45,7 @@ import {
 
 import type { Song } from '../../shared/types'
 import { CoverImage, formatCount } from './Cards'
+import { clampViewportHeight } from './viewport'
 import './song-list.css'
 
 /** 歌曲行的固定行高（像素）——裁剪计算依赖它。 */
@@ -205,8 +206,20 @@ export function SongList(props: SongListProps): ReactElement {
     return () => observer.disconnect()
   }, [])
 
+  /*
+   * 可视区高度：**量到的值要钳到窗口高度**（T22 兜底）。
+   *
+   * ⚠️ 为什么钳：主区一旦被内容顶开（真机曾量到 41,216px），
+   *    「可视区」就等于全部内容 → 虚拟裁剪失效 → 一次性挂载上千行
+   *    → 每行 28px 缩略图，上千个封面请求把中继打到 502；
+   *    同时「内容填不满可视区就自动续一页」永远成立 → 无限翻页。
+   *    详见 `./viewport.ts`。
+   *
+   * ⚠️ **注入值不钳**：`viewportHeight` 是调用方的显式契约（单测用它钉裁剪边界）。
+   */
   const viewportHeight =
-    viewportHeightProp ?? (measuredHeight > 0 ? measuredHeight : SONG_LIST_FALLBACK_VIEWPORT_HEIGHT)
+    viewportHeightProp ??
+    clampViewportHeight(measuredHeight > 0 ? measuredHeight : SONG_LIST_FALLBACK_VIEWPORT_HEIGHT)
 
   const visibleCount = Math.max(1, Math.ceil(viewportHeight / rowHeight))
   const firstVisible = Math.max(0, Math.floor(scrollTop / rowHeight))

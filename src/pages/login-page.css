@@ -9,6 +9,22 @@
 .fnm-login {
   display: flex;
   justify-content: center;
+  /*
+   * ⚠️ **`align-items: flex-start` 不能省**（T22 真机实测）：
+   *    flex item 默认 `align-items: stretch` → 登录卡会被**拉高到容器高度**
+   *    （空荡荡的一大块）。更要命的是：卡片一旦比容器高，
+   *    它的内容会被**裁掉**，而容器 `overflow-y: auto` 也救不回来
+   *    （被拉伸的卡片高度 = 容器高度，溢出的是**卡片内部**）。
+   *    改成 `flex-start` → 卡片保持内容高度，容器高时它就矮着、内容不满时容器滚动。
+   */
+  align-items: flex-start;
+  /*
+   * ⚠️ **`height: 100%` + `overflow-y: auto`**（T22 真机实测）：
+   *    矮窗口下登录卡会被裁掉（原来这里**没有任何滚动容器**）。
+   *    有了这两个，窗口再矮也能滚到表单底部。
+   */
+  height: 100%;
+  overflow-y: auto;
   padding: 32px 16px;
 }
 

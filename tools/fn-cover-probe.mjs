@@ -84,9 +84,25 @@ try {
     const imgs = [...document.querySelectorAll('img.fnm-cover__image')]
     const placeholders = document.querySelectorAll('[data-testid="cover-placeholder"]')
     const first = imgs[0]
+    // ⚠️ 网格是「虚拟裁剪」的（只渲染可视区）——这里量清楚**到底挂了多少**。
+    const grid = document.querySelector('.fnm-cardgrid')
+    const canvas = document.querySelector('.fnm-cardgrid__canvas')
+    const gridRect = grid ? grid.getBoundingClientRect() : null
+    let outside = 0
+    for (const img of imgs) {
+      const r = img.getBoundingClientRect()
+      if (gridRect && (r.top >= gridRect.bottom || r.bottom <= gridRect.top)) outside += 1
+    }
     return {
       imgCount: imgs.length,
       placeholderCount: placeholders.length,
+      cardCount: document.querySelectorAll('.fnm-card').length,
+      gridClientHeight: grid ? grid.clientHeight : null,
+      gridScrollHeight: grid ? grid.scrollHeight : null,
+      gridRectHeight: gridRect ? Math.round(gridRect.height) : null,
+      canvasChildren: canvas ? canvas.children.length : null,
+      rowHeightVar: grid ? getComputedStyle(grid).getPropertyValue('--grid-row-height') : null,
+      imgsOutsideGridViewport: outside,
       firstSrc: first ? first.currentSrc || first.src : null,
       firstComplete: first ? first.complete : null,
       firstNaturalWidth: first ? first.naturalWidth : null,
@@ -102,6 +118,40 @@ try {
   console.log(`\n[①-b 仅浏览专辑页阶段] console 计数 = ${JSON.stringify(logCounts)}`)
   const errTextsBeforePlay = logTexts.filter((t) => t.includes('502') || t.includes('Bad Gateway'))
   console.log(`[①-b 仅浏览专辑页阶段] 502/Bad Gateway 条数 = ${errTextsBeforePlay.length}`)
+
+  // ⚠️ **量整条高度链**：哪一层的 `clientHeight` 等于内容高度 → 那一层就没被约束。
+  const chain = await window.evaluate(() => {
+    const pick = (selector) => {
+      const el = document.querySelector(selector)
+      if (!el) return { selector, missing: true }
+      const style = getComputedStyle(el)
+      return {
+        selector,
+        clientHeight: el.clientHeight,
+        scrollHeight: el.scrollHeight,
+        offsetHeight: el.offsetHeight,
+        display: style.display,
+        flex: style.flex,
+        minHeight: style.minHeight,
+        height: style.height,
+        overflowY: style.overflowY,
+        position: style.position,
+      }
+    }
+    return {
+      windowInnerHeight: window.innerHeight,
+      documentScrollHeight: document.documentElement.scrollHeight,
+      bodyScrollHeight: document.body.scrollHeight,
+      layers: [
+        pick('.app-shell'),
+        pick('.app-shell__main'),
+        pick('.fnm-page'),
+        pick('.fnm-cardgrid'),
+        pick('.fnm-cardgrid__canvas'),
+      ],
+    }
+  })
+  console.log(`\n[①-c 高度链] ${JSON.stringify(chain, null, 2)}`)
 
   // -- ③ 渲染层能不能 fetch 到封面字节 ----------------------------------------
   const fetched = await window.evaluate(async () => {

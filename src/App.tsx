@@ -23,6 +23,7 @@ import type { DetailKind } from './state/libraryStore'
 import { useAppPrefsStore } from './state/appPrefsStore'
 import { usePlayerStore } from './state/playerStore'
 import { useSessionStore } from './state/sessionStore'
+import './styles/global.css'
 import './styles/app-shell.css'
 import './styles/tokens.css'
 

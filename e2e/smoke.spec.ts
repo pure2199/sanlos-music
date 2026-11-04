@@ -163,4 +163,70 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
     )
     expect(writes.filter((v) => v > 1)).not.toHaveLength(0)
   })
+
+  // -------------------------------------------------------------------------
+  // T22：虚拟网格 / 虚拟列表不能被内容撑破
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **缺陷**：主区 `.app-shell__main` 原先没有 `min-height: 0`——
+  //    flex item 的自动最小尺寸默认是 `min-height: auto` = 内容的 min-content 高度，
+  //    而虚拟网格的**画布高度 = 行数 × 行高** → 主区被内容顶到 4 万多像素
+  //    → 网格**没有负余量可压缩** → 「可视区」= 全部内容
+  //    → **虚拟裁剪失效**（真机实测：一次性挂载 **1,050 张卡片** → 1,050 个封面请求
+  //      把公共中继打到 502），同时「内容填不满可视区就自动续一页」永远成立
+  //    → **无限翻页**。
+  //
+  // ⚠️ **为什么在测试里伪造画布高度**：mock 只有 3 张专辑 / 8 首歌
+  //    （且 `test/mock-server.test.ts` 钉死了这些数量，**不能**为了让缺陷显形
+  //    而扩 mock 数据）→ 撑不出真机那个量级。
+  //    于是用 `!important` 把画布高度压到 40,000px，**复现同一个失效条件**：
+  //    「内容远超高时，容器必须自己滚动，而不是被内容顶高」。
+  //
+  // ⚠️ **鉴别力**：断言的是**几何关系**（`clientHeight < scrollHeight`），
+  //    不是「画了多少个节点」——mock 只有 3 张专辑，节点数恒等于 3，断言不了。
+  //
+  test('曲库网格 / 歌曲列表被内容撑高时，容器自己滚动（虚拟裁剪真实生效）', async () => {
+    // 伪造「内容远超高」。（`!important` 盖得过 React 的内联高度。）
+    await fixture.window.addStyleTag({
+      content: `
+        .fnm-cardgrid__canvas { height: 40000px !important; }
+        .fnm-songlist__canvas { height: 40000px !important; }
+      `,
+    })
+
+    /** 量一个滚动容器的几何关系 + 主区高度。 */
+    const measure = async (selector: string) =>
+      fixture.window.evaluate((sel) => {
+        const element = document.querySelector(sel) as HTMLElement | null
+        const main = document.querySelector('.app-shell__main') as HTMLElement | null
+        if (!element) throw new Error(`找不到 ${sel}`)
+        if (!main) throw new Error('找不到主区')
+        return {
+          clientHeight: element.clientHeight,
+          scrollHeight: element.scrollHeight,
+          mainClientHeight: main.clientHeight,
+          windowHeight: window.innerHeight,
+        }
+      }, selector)
+
+    // --- 专辑页（真机上就是这一页挂载了 1,050 张卡片） ---
+    await fixture.window.getByRole('button', { name: '专辑' }).click()
+    // ⚠️ 必须等**画布**出现：条目为空时网格渲染的是空态提示，没有画布。
+    await expect(fixture.window.locator('.fnm-cardgrid__canvas')).toBeVisible()
+
+    const grid = await measure('.fnm-cardgrid')
+    // ⚠️ **核心断言 1**：网格**自己内部滚动**（可视区 < 内容高度）
+    //    ——被内容顶高时这两个数会**相等**，虚拟裁剪就等于没裁剪。
+    expect(grid.clientHeight).toBeLessThan(grid.scrollHeight)
+    // ⚠️ **核心断言 2**：主区高度不超过窗口高度（否则内容会溢出到播放条上）。
+    expect(grid.mainClientHeight).toBeLessThanOrEqual(grid.windowHeight)
+
+    // --- 歌曲页（另一个虚拟列表：行内 28px 缩略图同样是封面请求） ---
+    await fixture.window.getByRole('button', { name: '歌曲' }).click()
+    await expect(fixture.window.locator('.fnm-songlist__canvas')).toBeVisible()
+
+    const list = await measure('.fnm-songlist__viewport')
+    expect(list.clientHeight).toBeLessThan(list.scrollHeight)
+    expect(list.mainClientHeight).toBeLessThanOrEqual(list.windowHeight)
+  })
 })

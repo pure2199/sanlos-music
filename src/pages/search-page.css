@@ -17,6 +17,16 @@
   flex-direction: column;
   gap: 16px;
   flex: 1 1 auto;
+  /*
+   * ⚠️ **`height: 100%` 不能省**（T22 真机实测）：
+   *    主区 `.app-shell__main` 修好 `min-height: 0` 之后高度是**固定的**
+   *    （= 窗口高度 − 顶栏 − 播放条），而本页是主区里的**块级盒子**：
+   *    `flex: 1 1 auto` 对它**不生效**（它不是 flex item），
+   *    没有 `height: 100%` 的话高度就是 auto → 被搜索结果顶高 →
+   *    内容**溢出到播放条上**。
+   *    有了确定高度，里面的 `.fnm-searchpanel` 的 `height: 100%` 才解析得出来。
+   */
+  height: 100%;
   min-height: 0;
 }
 

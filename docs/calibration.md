@@ -485,3 +485,108 @@ MediaImage src can only be of http/https/data/blob scheme: fnm://srv/static/cove
   佐证：T21 前后各跑一次真机，一次 901 条 502、一次 0 条；502 全是 `size=200`（应用内卡片封面），
   发生在**播放之前**（专辑页第 5 步），与 T21 改的 `size=160`（媒体会话封面，第 12 步才发生）无关。
   ⇒ 待办（下一任务候选）：真正懒加载 / 限制并发 / 只请求可见区域的封面。
+## 十一、T22：曲库网格撑破虚拟裁剪 —— 封面请求风暴 + 无限翻页
+
+### 背景：那批「九百多条 502」不是中继的锅，是**布局**的锅
+
+T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当时判成「公共中继带宽不够」——
+**判错了**。继续挖才挖到真正的根因：根因在**客户端布局**，跟服务端没关系。
+
+### 真机量到的证据（`tools/fn-cover-probe.mjs` 的 ① / ①-b / ①-c 段）
+
+| 量 | 修复前 | 修复后 |
+|---|---|---|
+| `window.innerHeight` | 735 | 735 |
+| `.app-shell` clientHeight | **41,477** | **735** |
+| `.app-shell__main` clientHeight | **41,316** | **574** |
+| `.app-shell__main` 的 `min-height` | `auto` ⚠️ | `0` |
+| `.fnm-page` clientHeight | 41,316 | 574 |
+| `.fnm-cardgrid` clientHeight / scrollHeight | **41,216 / 41,216**（**不滚动**） | **499 / 2,016**（自己滚动） |
+| 网格里挂载的卡片数 | **1,050** | 一个窗口放得下那么多 |
+| `document.documentElement.scrollHeight` | 41,477 | **735**（= 窗口高度，无幽灵滚动） |
+
+⇒ 网格的「可视区」= **全部内容** → **虚拟裁剪等于没裁剪** → 1,050 个节点 → 1,050 个封面请求 → 中继被打爆；
+同时「内容填不满可视区就自动续一页」的副作用**永远成立** → **无限翻页**（34,071 张专辑理论上会被全拉下来）。
+
+### 根因链：**三层，缺一层都修不好**（本轮踩了两次「只修一层」的坑）
+
+```
+第 1 层：外壳高度「不定」
+  .app-shell { min-height: 100vh }        ← 只有 min-height，高度是「不定」的
+  ⇒ flex 布局里 `flex-basis: 0%`（百分比）**退化成「按内容算」**
+     （CSS Flexbox：容器主尺寸不定时，百分比 flex-basis 按 content 处理）
+  ⇒ **谁都没有负余量可压缩** → 主区被内容顶到 4 万多像素
+
+第 2 层：主区的自动最小尺寸
+  .app-shell__main（flex item）默认 `min-height: auto` = 内容的 min-content 高度
+  ⇒ 主区的自动最小尺寸跟着画布高度暴涨 → 主区自己也被顶高
+  ⇒ 只写 `min-height: 0` 能压住主区，但**页面外壳不会跟着缩**
+
+第 3 层：页面外壳不是弹性项
+  .app-shell__main 是**块级容器** → .fnm-page 是普通块级盒子
+  ⇒ `height: 100%` 的百分比**解析不出来**（父级高度「不定」）→ 按 auto 处理
+  ⇒ 页面外壳 = 内容多高就多高 → 网格也跟着撑到 4 万像素
+```
+
+**实测走过的两条弯路**（都只修了一层，E2E 直接打脸）：
+
+1. 只加 `min-height: 0` → 主区仍 40,058px、网格仍 40,000px（页面外壳没缩）；
+2. 再把主区改成 flex 列容器 → 外壳高度仍「不定」→ 主区仍 40,058px、网格仍 40,000px。
+
+⇒ 最终修法是**把整条链打通**：`html/body` 有确定高度 → 外壳 `height: 100vh`（确定）
+→ 主区 `display: flex; flex-direction: column; min-height: 0` → 页面外壳成为弹性项、
+`flex: 1 1 auto` + `min-height: 0` 生效 → 网格才真的在自己内部滚动。
+
+### 改动（**分三层**，CSS 根因 / TS 兜底 / 行为回归）
+
+| 层 | 文件 | 动作 |
+|---|---|---|
+| CSS 根因 | `src/styles/global.css`（新） | `html, body { height: 100%; margin: 0 }` —— 去掉 UA 默认的 8px 边距（否则播放条底边被裁 8px，还多出一段 16px 幽灵滚动） |
+| CSS 根因 | `src/styles/app-shell.css` | `.app-shell { height: 100vh }`（**确定**高度）、`.app-shell__main { display: flex; flex-direction: column; min-height: 0 }` |
+| CSS 根因 | `src/pages/search-page.css` / `src/components/search-panel.css` / `src/pages/login-page.css` | 主区变矮之后，这三处必须有**自己的确定高度 + 滚动容器**，否则内容溢出到播放条上；登录卡另加 `align-items: flex-start`（原来靠 `stretch` 撑满，卡片一高就被裁） |
+| TS 兜底 | `src/components/viewport.ts`（新） | `clampViewportHeight()`：把**量到的**可视区高度钳到 `window.innerHeight` —— 万一布局又被别的东西顶开，挂载量与翻页次数也不会失控 |
+| TS 兜底 | `src/components/Cards.tsx` / `src/components/SongList.tsx` | 接入钳位（**注入的 `viewportHeight` 一律不钳** —— 那是调用方的显式契约，钳它会破坏既有单测） |
+| 行为回归 | `test/virtual-viewport-clamp.test.tsx`（新） | 8 条：钳位行为 4 条 + CSS 根因契约 4 条 |
+| 行为回归 | `e2e/smoke.spec.ts` | 新增 1 条 E2E：伪造「内容远超高」，断言网格**自己滚动**、主区不超窗口 |
+
+### E2E 回归：怎么在 mock 上复现真机的失效条件
+
+⚠️ mock 只有 **3 张专辑 / 8 首歌**（`test/mock-server.test.ts` 钉死了这些数量，
+**不能**为了让缺陷显形而扩 mock 数据）→ 撑不出真机那个量级。
+于是用 `!important` 把画布高度压到 40,000px —— **复现同一个失效条件**：
+「内容远超高时，容器必须自己滚动，而不是被内容顶高」。
+
+断言的是**几何关系**（`grid.clientHeight < grid.scrollHeight`），不是「画了多少个节点」
+（mock 只有 3 张专辑，节点数恒等于 3，断言不了）。
+
+### 变异自证（本轮实际跑过，全部红过再改回）
+
+1. 把钳位短路成 `return height` → **4 条**行为测试立刻红（网格挂载 1,050 / 歌曲挂载 500 / 两个「自动续一页」被触发）；
+2. 把 `.app-shell__main` 的 `min-height: 0` 改成 `auto` → CSS 契约测试**红**；
+   ⚠️ 第一版契约测试是**空断言**——规则注释里正文就写着「`min-height: 0` 不能省」，
+   断言匹配到了**注释里的那行字** → 改成「先剥注释再匹配」后才有鉴别力；
+3. 把 `.app-shell` 的 `height: 100vh` 改成 `auto` → **E2E 红**（网格回到 40,000）。
+
+### 真机复验（`tools/fn-live-check.mjs` + `tools/fn-cover-probe.mjs`）
+
+| 测什么 | 修复前 | 修复后 |
+|---|---|---|
+| **专辑页挂载卡片数** | **1,050** | **30**（= 5 行 × 6 列：3 行可视 + 2 行缓冲）✓ |
+| 专辑页**已加载条数** | 无限续页（一直往下拉） | **50**（= 1 页；画布 2,016px = 9 行 × 224）✓ |
+| 歌手页 / 风格页挂载卡片数 | 同量级暴涨 | 各 **30** ✓ |
+| 歌曲页挂载行数 | 暴涨 | **18** ✓ |
+| `.app-shell` clientHeight | 41,477 | **735**（= 窗口高度）✓ |
+| `.app-shell__main` clientHeight | 41,316 | **574** ✓ |
+| `.fnm-cardgrid` clientHeight | 41,216 | **499** ✓ |
+| `document.documentElement.scrollHeight` | 41,477 | **735**（无幽灵滚动）✓ |
+| 播放条的位置 | 被顶到 4 万像素以下（**看不见**） | 贴在窗口底部 ✓ |
+| 活体验检 | — | **15/15 成功** ✓ |
+
+⚠️ **判读提醒**：真机偶发 **502** 是**公共中继**的老问题（连着跑几轮真机会话会把中继压爆），
+与本次修复无关 —— 但**会干扰判读**。判读要以「高度链 + 挂载卡片数」为准，不要以「有没有 502」为准。
+
+### 遗留 / 待办
+
+- 真机复验时公共中继偶发 **502**（老问题：连着跑几轮真机会话会把中继压爆），
+  与本次修复无关，但**会干扰判读** —— 判读要以「高度链 + 挂载卡片数」为准。
+- 封面 `size` 的真实取值仍未校准（审计 Step K，现用 200 / 160）。

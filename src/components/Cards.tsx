@@ -36,6 +36,7 @@ import {
 
 import type { Album, Artist, Genre, Playlist } from '../../shared/types'
 import { coverUrl } from './coverUrl'
+import { clampViewportHeight } from './viewport'
 import './cards.css'
 
 // ---------------------------------------------------------------------------
@@ -303,8 +304,20 @@ export function CardGrid<T>(props: CardGridProps<T>): ReactElement {
     return () => observer.disconnect()
   }, [])
 
+  /*
+   * 可视区高度：**量到的值要钳到窗口高度**（T22 兜底）。
+   *
+   * ⚠️ 为什么钳：主区一旦被内容顶开（真机曾量到 41,216px），
+   *    「可视区」就等于全部内容 → 虚拟裁剪失效 → 一次性挂载上千张卡片
+   *    → 上千个封面请求把中继打到 502；同时「内容填不满可视区就自动续一页」
+   *    永远成立 → 无限翻页。详见 `./viewport.ts`。
+   *
+   * ⚠️ **注入值不钳**：`viewportHeight` 是调用方的显式契约（单测用它钉裁剪边界），
+   *    钳它会破坏既有单测。
+   */
   const viewportHeight =
-    viewportHeightProp ?? (measured.height > 0 ? measured.height : CARD_GRID_FALLBACK_VIEWPORT_HEIGHT)
+    viewportHeightProp ??
+    clampViewportHeight(measured.height > 0 ? measured.height : CARD_GRID_FALLBACK_VIEWPORT_HEIGHT)
   const columns =
     columnsProp ??
     (measured.width > 0
