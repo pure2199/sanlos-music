@@ -30,7 +30,7 @@
 // Task 16 需按真实响应校准。
 
 import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createHash } from 'node:crypto'
 import {
   API_PREFIX,
   CODE_OK,
@@ -70,6 +70,25 @@ export const MAX_PAGE_SIZE = 2000
 
 /** mock 的正确口令（明文）。 */
 const VALID_PASSWORD = 'x'
+
+// ---------------------------------------------------------------------------
+// 自动更新（Task 23）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **不走业务码信封**：更新清单**不是 NAS 接口**，而是一个普通的静态 JSON
+//    （客户端按本项目自定义的形状解析，见 `electron/update.ts`）。
+//
+// ⚠️ 清单版本**故意比应用版本新**（`package.json` 的 `version` 现在是 0.1.0），
+//    这样 E2E 才能断言「发现新版本」。
+
+/** 清单里的版本号（占位）。 */
+export const MOCK_UPDATE_VERSION = '9.9.9'
+
+/** 清单里的假安装包文件名。 */
+export const MOCK_UPDATE_INSTALLER_NAME = `FN-Music-Setup-${MOCK_UPDATE_VERSION}.exe`
+
+/** 假安装包的字节内容（**不是真的 PE**——只够跑通「下载 + 哈希校验」）。 */
+const MOCK_UPDATE_INSTALLER_BYTES = Buffer.from('MOCK-UPDATE-INSTALLER-PLACEHOLDER', 'utf8')
 
 /** mock 的正确口令（SHA-256 小写十六进制），供发送摘要的客户端使用。 */
 const VALID_PASSWORD_SHA256 =
@@ -324,6 +343,49 @@ function sendJson(res: ServerResponse, payload: OkEnvelope<unknown> | ErrEnvelop
     'content-length': String(Buffer.byteLength(text, 'utf8')),
   })
   res.end(text)
+}
+
+/**
+ * 发送**原始 JSON**（**不走业务码信封**）——自动更新清单用。
+ *
+ * ⚠️ 更新清单不是 NAS 接口：客户端按本项目自定义的形状解析
+ *    （`electron/update.ts` 的 `parseUpdateManifest`），多包一层信封反而解析不了。
+ */
+function sendRawJson(res: ServerResponse, payload: unknown): void {
+  if (res.headersSent) return
+  const text = JSON.stringify(payload)
+  res.writeHead(200, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': String(Buffer.byteLength(text, 'utf8')),
+  })
+  res.end(text)
+}
+
+/** 发送二进制响应——自动更新的假安装包用。 */
+function sendBinary(res: ServerResponse, bytes: Buffer, contentType = 'application/octet-stream'): void {
+  if (res.headersSent) return
+  res.writeHead(200, {
+    'content-type': contentType,
+    'content-length': String(bytes.byteLength),
+  })
+  res.end(bytes)
+}
+
+/** 造一份自动更新清单（哈希与假安装包一致 → 客户端的 SHA-512 校验能过）。 */
+function buildUpdateManifest(): unknown {
+  return {
+    version: MOCK_UPDATE_VERSION,
+    releasedAt: '2026-11-04T00:00:00.000Z',
+    notes: '占位更新说明',
+    files: [
+      {
+        name: MOCK_UPDATE_INSTALLER_NAME,
+        url: MOCK_UPDATE_INSTALLER_NAME,
+        sha512: createHash('sha512').update(MOCK_UPDATE_INSTALLER_BYTES).digest('hex'),
+        size: MOCK_UPDATE_INSTALLER_BYTES.byteLength,
+      },
+    ],
+  }
 }
 
 /**
@@ -867,6 +929,20 @@ export function createMockServer(): MockServer {
       const token = `mock-token-${randomBytes(8).toString('hex')}`
       tokens.add(token)
       sendJson(res, ok({ userToken: token, deviceId: strField(parsed, 'deviceId') ?? '' }))
+      return
+    }
+
+    // 免 token 端点：自动更新清单（Task 23）
+    //
+    // ⚠️ **免 token + 免业务码信封**：它不是 NAS 接口，
+    //    而是一个普通的静态 JSON（客户端按本项目自定义的形状解析）。
+    if (method === 'GET' && path === '/update/latest.json') {
+      sendRawJson(res, buildUpdateManifest())
+      return
+    }
+    // 免 token 端点：假安装包（**不是真的 PE**——只够跑通「下载 + 哈希校验」）。
+    if (method === 'GET' && path === `/update/${MOCK_UPDATE_INSTALLER_NAME}`) {
+      sendBinary(res, MOCK_UPDATE_INSTALLER_BYTES)
       return
     }
 

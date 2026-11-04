@@ -179,6 +179,10 @@ function fakeBridge(): {
     // FFmpeg 兜底解码（Task 12）：本用例不碰它，给个空实现即可。
     ffmpegStatus: async () => ({ available: false, path: '', version: '' }),
     ffmpegFallback: async () => ({ url: '', reason: 'no-ffmpeg', detail: null }),
+    // 自动更新（Task 23）：本用例不碰它，给个空实现即可。
+    checkUpdate: async () => ({ status: 'not-configured' }),
+    downloadUpdate: async () => ({ status: 'error', message: '未实现' }),
+    installUpdate: async () => ({ status: 'error', message: '未实现' }),
   }
   return {
     bridge,

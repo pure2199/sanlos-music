@@ -6,7 +6,7 @@ import type { LyricOverlayMessage, PlayerCommand, PlayerStateSnapshot } from '..
 import type { ThemeName } from '../shared/types'
 import { API_PREFIX } from '../shared/constants'
 import { resolveThemeName, themeSpec } from '../shared/themes'
-import { registerAuthIpc, registerPlayerIpc, PrefsStore } from './ipc'
+import { registerAuthIpc, registerPlayerIpc, registerUpdateIpc, PrefsStore } from './ipc'
 import { TrustedHosts } from './cert'
 import {
   DEFAULT_DOWNLOAD_SUBDIR,
@@ -24,6 +24,7 @@ import { buildUpstreamRequest, registerProxy } from './proxy'
 import { SessionManager } from './session'
 import { createCoverFetcher, createTray } from './tray'
 import { createBoundsSaver, resolveWindowBounds } from './windowBounds'
+import { createUpdateController } from './update'
 
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
 // 生产模式（npm start / 打包后的应用）加载随包发布的 dist/index.html。
@@ -516,6 +517,20 @@ if (!isPrimaryInstance) {
         downloads,
         // FFmpeg 兜底解码（Task 12）：探测与转码全在主进程。
         ffmpeg: fallback,
+      })
+
+      // 14. 自动更新 IPC（Task 23）。
+      //
+      //     ⚠️ **出网走同一个 Chromium 分区栈**：更新服务器**不在 `TrustedHosts` 里**
+      //     → 该分区对它的证书走 Chromium 默认校验（自签**不会**被放行）。
+      //     ⚠️ **渲染层不碰网络**：检查 / 下载 / 启动全在主进程。
+      registerUpdateIpc({
+        prefs,
+        update: createUpdateController({
+          fetchImpl: http.fetch,
+          currentVersion: app.getVersion(),
+          destDir: path.join(app.getPath('temp'), 'fnmusic-update'),
+        }),
       })
 
       // 13b. 启动时按偏好恢复悬浮窗（上次是开着的就接着开）。

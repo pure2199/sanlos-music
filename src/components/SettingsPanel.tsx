@@ -23,6 +23,7 @@ import type { CloseBehavior } from '../../shared/playerBridge'
 import type { FfmpegStatus } from '../../shared/ffmpeg'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import { totalDownloadedBytes, useDownloadStore } from '../state/downloadStore'
+import { useUpdateStore } from '../state/updateStore'
 import { detectFfmpegStatus, hasFfmpegSupport } from '../player/fallback'
 import { formatBytes } from './DownloadButton'
 import './settings-panel.css'
@@ -115,6 +116,52 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   useEffect(() => {
     refreshFfmpeg()
   }, [refreshFfmpeg])
+
+  // --- 自动更新（Task 23）---------------------------------------------------
+  //
+  // ⚠️ **渲染层只发请求**：检查 / 下载 / 启动全在主进程。
+  //    「预期的代码签名者」没配 → **不许启动安装器**（界面提前说清楚）。
+  const updateBaseUrl = useUpdateStore((state) => state.baseUrl)
+  const updateExpectedSigner = useUpdateStore((state) => state.expectedSigner)
+  const baseUrlDraft = useUpdateStore((state) => state.baseUrlDraft)
+  const signerDraft = useUpdateStore((state) => state.signerDraft)
+  const updateStatus = useUpdateStore((state) => state.status)
+  const updateResult = useUpdateStore((state) => state.result)
+  const updateDownload = useUpdateStore((state) => state.download)
+  const updateError = useUpdateStore((state) => state.error)
+  const loadUpdate = useUpdateStore((state) => state.load)
+  const saveUpdate = useUpdateStore((state) => state.save)
+  const setBaseUrlDraft = useUpdateStore((state) => state.setBaseUrlDraft)
+  const setSignerDraft = useUpdateStore((state) => state.setSignerDraft)
+  const checkUpdate = useUpdateStore((state) => state.check)
+  const downloadUpdate = useUpdateStore((state) => state.downloadUpdate)
+  const installUpdate = useUpdateStore((state) => state.installUpdate)
+
+  useEffect(() => {
+    void loadUpdate()
+  }, [loadUpdate])
+
+  const handleSaveUpdate = useCallback(() => {
+    void saveUpdate()
+  }, [saveUpdate])
+
+  const handleCheckUpdate = useCallback(() => {
+    void checkUpdate()
+  }, [checkUpdate])
+
+  const handleDownloadUpdate = useCallback(() => {
+    void downloadUpdate()
+  }, [downloadUpdate])
+
+  const handleInstallUpdate = useCallback(() => {
+    void installUpdate()
+  }, [installUpdate])
+
+  const updateBusy =
+    updateStatus === 'checking' || updateStatus === 'downloading' || updateStatus === 'installing'
+  const updateSaved =
+    baseUrlDraft.trim() === updateBaseUrl && signerDraft.trim() === updateExpectedSigner
+  const signatureOk = updateDownload?.status === 'ok' && updateDownload.signature.ok === true
 
   const rootClass = className ? `fnm-settings ${className}` : 'fnm-settings'
 
@@ -235,6 +282,110 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             {ffmpegChecking ? '检测中…' : '重新检测'}
           </button>
         </div>
+      </fieldset>
+
+      <fieldset className="fnm-settings__group">
+        <legend className="fnm-settings__legend">自动更新</legend>
+        <label className="fnm-settings__option fnm-settings__option--stack">
+          <span>更新服务器地址</span>
+          <input
+            type="text"
+            className="fnm-settings__input"
+            name="fnm-update-base-url"
+            value={baseUrlDraft}
+            placeholder="https://updates.example.com/fnmusic"
+            onChange={(event) => setBaseUrlDraft(event.target.value)}
+          />
+        </label>
+        <label className="fnm-settings__option fnm-settings__option--stack">
+          <span>预期的代码签名者</span>
+          <input
+            type="text"
+            className="fnm-settings__input"
+            name="fnm-update-signer"
+            value={signerDraft}
+            placeholder="CN=你的证书主体名"
+            onChange={(event) => setSignerDraft(event.target.value)}
+          />
+        </label>
+        <div className="fnm-settings__row">
+          <button
+            type="button"
+            className="fnm-settings__button"
+            onClick={handleSaveUpdate}
+            disabled={updateSaved}
+          >
+            保存
+          </button>
+          <button
+            type="button"
+            className="fnm-settings__button"
+            onClick={handleCheckUpdate}
+            disabled={updateBusy}
+          >
+            {updateStatus === 'checking' ? '检查中…' : '检查更新'}
+          </button>
+        </div>
+        {updateResult?.status === 'up-to-date' && (
+          <p className="fnm-settings__hint" data-testid="update-latest">
+            {`已是最新版本（${updateResult.current}）。`}
+          </p>
+        )}
+        {updateResult?.status === 'not-configured' && (
+          <p className="fnm-settings__hint" data-testid="update-not-configured">
+            还没填「更新服务器地址」，无法检查更新。
+          </p>
+        )}
+        {updateResult?.status === 'available' && (
+          <p className="fnm-settings__hint" data-testid="update-available">
+            {`发现新版本 ${updateResult.manifest.version}${
+              updateResult.manifest.notes ? `：${updateResult.manifest.notes}` : ''
+            }`}
+          </p>
+        )}
+        {updateDownload?.status === 'ok' && (
+          <p className="fnm-settings__hint" data-testid="update-downloaded">
+            {`安装包已下载（${formatBytes(updateDownload.bytes)}）。${
+              updateDownload.signature.ok
+                ? '签名校验通过。'
+                : `签名校验未通过：${updateDownload.signature.reason ?? '未知原因'}——不允许安装。`
+            }`}
+          </p>
+        )}
+        {updateResult?.status === 'available' && (
+          <div className="fnm-settings__row">
+            <button
+              type="button"
+              className="fnm-settings__button"
+              onClick={handleDownloadUpdate}
+              disabled={updateBusy}
+            >
+              {updateStatus === 'downloading' ? '下载中…' : '下载更新'}
+            </button>
+            <button
+              type="button"
+              className="fnm-settings__button"
+              onClick={handleInstallUpdate}
+              disabled={updateBusy || !signatureOk}
+              title={
+                signatureOk
+                  ? '启动安装器'
+                  : '需要先下载，且签名校验通过（未配置预期签名者时不允许安装）'
+              }
+            >
+              {updateStatus === 'installing' ? '启动中…' : '启动安装'}
+            </button>
+          </div>
+        )}
+        {updateError && (
+          <p className="fnm-settings__error" role="alert">
+            {updateError}
+          </p>
+        )}
+        <p className="fnm-settings__hint">
+          安装包必须带代码签名，且签名者与「预期的代码签名者」一致才会被启动；
+          未配置预期签名者时只允许下载，不允许安装。
+        </p>
       </fieldset>
 
       <p className="fnm-settings__hint">窗口位置与尺寸会自动记住，下次启动时恢复。</p>

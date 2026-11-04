@@ -22,6 +22,7 @@
 | **软件 EQ** | 10 段 / 15 段可切换，10 条预置曲线（平直 / 流行 / 摇滚 / 爵士 / 古典 / 电子 / 原声 / 响度 / 人声 / 低音增强），增益 ±12 dB |
 | **双主题** | **Apple 风** 与 **Windows 11 Fluent 风** 随时切换，即时生效 |
 | **托盘常驻** | 关闭窗口默认隐藏到托盘、播放继续；托盘菜单可播放控制 / 显示窗口 / 开关桌面歌词 / 退出 |
+| **自动更新** | 设置里填更新服务器地址 → 检查 → 下载 → **校验 SHA-512 + 代码签名** → 启动安装（全程需用户点击；未配签名者时只允许下载）|
 
 ---
 
@@ -81,6 +82,7 @@ npm run pack      # 打包 → release/
 | `npm run e2e` | E2E 冒烟（Playwright 驱动**真实 Electron** + 内嵌 mock NAS） |
 | `npm run pack` | 打包 → `release/` |
 | `npm run pack:probe` | 打包 → `release-probe/`（**不碰** `release/`，适合验证打包本身可行） |
+| `npm run publish:manifest` | 生成自动更新清单 `release/latest.json`（自动算 SHA-512）|
 
 ---
 
@@ -115,6 +117,9 @@ docs/              设计与计划文档、打包与验证文档
 - **唯一出网通道**是主进程代理的自定义协议 `fnm://`；渲染层不能直接发网络请求。
 - **证书只对 TrustedHosts 放行**，不做全局 `callback(0)`。
 - **主进程的 NAS 流量走同一个 Chromium 分区 HttpStack**，与渲染层共享连接池与 Cookie 语义。
+- **自动更新的出网由主进程发起**（渲染层同样不碰网络）：更新服务器**不在 TrustedHosts 里**
+  → 该分区对它走 Chromium **默认**证书校验（自签**不会**被放行）；
+  安装包还必须 **SHA-512 相符** + **Authenticode 签名者与用户配置的预期一致**才允许启动。
 - 自定义协议特权**整个进程只注册一次**（`fnm` 与 `fnml` 必须合并注册，见 `electron/schemes.ts`）—— Electron 的 `registerSchemesAsPrivileged()` 第二次调用会**静默覆盖**第一次。
 
 ---

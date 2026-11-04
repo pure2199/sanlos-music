@@ -19,6 +19,14 @@
   border-radius: var(--radius-panel);
   background: var(--surface-raised);
   box-shadow: 0 8px 24px var(--shadow);
+  /*
+   * ⚠️ **限高 + 内部滚动**（T23 加「自动更新」分组之后）：
+   *    面板内容已经比窗口高，不限高的话**下半部分会掉到窗口外**——
+   *    看得见却点不到（`position: absolute` 的面板不受文档滚动影响）。
+   *    96px ≈ 顶栏高度 + 一点余量。
+   */
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
 }
 
 /* 面板标题 */

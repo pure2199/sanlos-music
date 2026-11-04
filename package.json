@@ -21,6 +21,7 @@
     "e2e:only": "playwright test",
     "pack": "npm run build && node scripts/pack.cjs",
     "pack:probe": "cross-env FNM_PACK_OUTPUT=release-probe node scripts/pack.cjs",
+    "publish:manifest": "node scripts/publish-manifest.mjs",
     "dist": "npm run pack"
   },
   "devDependencies": {

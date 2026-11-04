@@ -1,0 +1,107 @@
+// ---------------------------------------------------------------------------
+// 生成自动更新的清单（`release/latest.json`）
+// ---------------------------------------------------------------------------
+//
+// 用法：
+//   node scripts/pack.cjs            # 先打出产物
+//   node scripts/publish-manifest.mjs # 再生成本清单
+//
+// ---------------------------------------------------------------------------
+// 为什么自己写清单（而不是用 electron-builder 的 `latest.yml`）
+// ---------------------------------------------------------------------------
+// - **零新依赖**：`latest.yml` 是 YAML，要解析它就得引 `js-yaml`；
+//   本项目不引新依赖，故用 **JSON**；
+// - **形状自己说了算**：清单是**不可信输入**（客户端要逐项校验），
+//   字段越少越好 —— 本清单只有 4 个字段，其中 2 个是必填。
+//
+// ---------------------------------------------------------------------------
+// 清单形状（客户端 = `electron/update.ts` 的 `parseUpdateManifest`）
+// ---------------------------------------------------------------------------
+// {
+//   "version": "1.2.3",
+//   "releasedAt": "2026-11-04T00:00:00.000Z",
+//   "notes": "更新说明（可空）",
+//   "files": [
+//     { "name": "….exe", "url": "….exe", "sha512": "<128 位 hex>", "size": 123456 }
+//   ]
+// }
+//
+// ⚠️ `files[].url` 是**相对清单所在目录**的相对路径，且**必须与清单同源**
+//    （客户端会拒绝跨源地址）—— 所以安装包与 `latest.json` 必须放在同一个目录。
+//
+// ---------------------------------------------------------------------------
+
+import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const APP_ROOT = resolve(HERE, '..')
+const RELEASE_DIR = join(APP_ROOT, 'release')
+const MANIFEST_NAME = 'latest.json'
+
+/** 清单里用的文件名（与 `electron-builder.yml` 的 `artifactName` 对齐）。 */
+const INSTALLER_PREFIX = 'FN-Music-Setup-'
+
+/** 读包版本（清单的 `version` 取它）。 */
+function readVersion() {
+  const raw = readFileSync(join(APP_ROOT, 'package.json'), 'utf8')
+  const parsed = JSON.parse(raw)
+  const version = typeof parsed.version === 'string' ? parsed.version.trim() : ''
+  if (!version) throw new Error('package.json 里没有 version')
+  return version
+}
+
+/** 流式算一个文件的 SHA-512（小写 hex）。 */
+async function sha512Of(filePath) {
+  const hash = createHash('sha512')
+  await new Promise((resolvePromise, rejectPromise) => {
+    const stream = createReadStream(filePath)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('error', rejectPromise)
+    stream.on('end', () => resolvePromise())
+  })
+  return hash.digest('hex')
+}
+
+const version = readVersion()
+const installerName = `${INSTALLER_PREFIX}${version}.exe`
+const installerPath = join(RELEASE_DIR, installerName)
+
+let size
+try {
+  size = statSync(installerPath).size
+} catch {
+  console.error(`✗ 找不到安装包：${installerPath}`)
+  console.error('  先跑 `node scripts/pack.cjs` 打出产物，再生成清单。')
+  process.exit(1)
+}
+
+const sha512 = await sha512Of(installerPath)
+
+const manifest = {
+  version,
+  releasedAt: new Date().toISOString(),
+  notes: process.env.UPDATE_NOTES ?? '',
+  files: [
+    {
+      name: installerName,
+      url: installerName,
+      sha512,
+      size,
+    },
+  ],
+}
+
+const manifestPath = join(RELEASE_DIR, MANIFEST_NAME)
+writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+
+console.log(`✓ 已生成更新清单：${manifestPath}`)
+console.log(`  版本：${version}`)
+console.log(`  安装包：${installerName}（${size} 字节）`)
+console.log(`  sha512：${sha512}`)
+console.log('')
+console.log('  把 latest.json 与安装包**放在同一个目录**上传到更新服务器，')
+console.log('  然后在应用「设置 → 自动更新」里填那个目录地址即可。')

@@ -229,4 +229,42 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
     expect(list.clientHeight).toBeLessThan(list.scrollHeight)
     expect(list.mainClientHeight).toBeLessThanOrEqual(list.windowHeight)
   })
+
+  // -------------------------------------------------------------------------
+  // T23：自动更新接线（检查 → 下载 → 签名闸）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **这条链路此前完全没有被任何测试覆盖过**（本项目原来压根没有自动更新）。
+  //    它一次跑通了四段：
+  //      渲染层发 IPC → 主进程拉清单（走 Chromium 分区栈）→ 比版本
+  //      → 下载 + SHA-512 校验 → Authenticode 闸门
+  //
+  // ⚠️ **断言的是「安全闸」**：mock 的假安装包**没有签名**
+  //    → 「启动安装」必须**禁用**（不许装未签名的包）。
+  //
+  test('自动更新：检查到新版本 → 下载校验通过 → 签名不过就不许安装', async () => {
+    // 打开设置面板。
+    await fixture.window.getByRole('button', { name: '设置' }).click()
+
+    // 填更新服务器地址（mock 的回环地址：http 只允许回环）与预期签名者。
+    await fixture.window
+      .locator('input[name="fnm-update-base-url"]')
+      .fill(`${fixture.mock.url}/update`)
+    await fixture.window
+      .locator('input[name="fnm-update-signer"]')
+      .fill('CN=Mock 占位签名者')
+    // ⚠️ `name` 默认是**子串**匹配 → 「保存」会同时命中「保存目录」→ 必须 exact。
+    await fixture.window.getByRole('button', { name: '保存', exact: true }).click()
+
+    // 检查更新 → mock 的清单版本是 9.9.9（比应用版本新）。
+    await fixture.window.getByRole('button', { name: '检查更新' }).click()
+    await expect(fixture.window.getByTestId('update-available')).toContainText('9.9.9')
+
+    // 下载 → SHA-512 与清单一致 → 落盘 → 签名校验**不通过**（假包没签名）。
+    await fixture.window.getByRole('button', { name: '下载更新' }).click()
+    await expect(fixture.window.getByTestId('update-downloaded')).toContainText('签名校验未通过')
+
+    // ⚠️ **核心断言**：签名没过 → 不许启动安装器（自动更新 = 远程代码执行）。
+    await expect(fixture.window.getByRole('button', { name: '启动安装' })).toBeDisabled()
+  })
 })

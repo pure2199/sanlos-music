@@ -135,6 +135,15 @@ const fnPlayer: PlayerBridge = {
   //    **全在主进程**——这里既不能指定路径，也拿不到任何凭证。
   ffmpegStatus: () => ipcRenderer.invoke('ffmpeg:status'),
   ffmpegFallback: (songId) => ipcRenderer.invoke('ffmpeg:fallback', { songId }),
+  // -------------------------------------------------------------------------
+  // 自动更新（Task 23）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **渲染进程只发请求、只收结果**：拉清单、下载、启动安装器**全在主进程**
+  //    ——渲染进程**不碰网络**，也**不能指定装哪个路径**（只报文件名）。
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: (name) => ipcRenderer.invoke('update:download', { name }),
+  installUpdate: (name) => ipcRenderer.invoke('update:install', { name }),
 }
 
 contextBridge.exposeInMainWorld('fnPlayer', fnPlayer)

@@ -44,6 +44,14 @@
 // | `ffmpeg:status`       | 渲染进程 → 主进程 | `ipcRenderer.invoke` | 无 → `FfmpegStatus`              |
 // | `ffmpeg:fallback`     | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `songId` → `FfmpegFallbackResult`|
 //
+// 自动更新（Task 23）：
+//
+// | 通道                  | 方向              | 机制                 | 入参 → 出参                      |
+// |-----------------------|-------------------|----------------------|----------------------------------|
+// | `update:check`        | 渲染进程 → 主进程 | `ipcRenderer.invoke` | 无 → `UpdateCheckResult`         |
+// | `update:download`     | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `{ name }` → `UpdateDownloadResult` |
+// | `update:install`      | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `{ name }` → `UpdateInstallResult`  |
+//
 // ⚠️ **主进程是唯一的命令路由**：渲染进程发来的 `player:command`（媒体会话的
 //    action handler）会被**转发**回渲染进程执行——渲染进程**只执行**从主进程
 //    收到的命令，绝不本地直接执行自己发出的命令，所以不存在「发一次执行两遍」。
@@ -86,6 +94,7 @@ import { probeCandidates } from './probe'
 import { authx } from './sign'
 import { SessionStateError, type SessionManager } from './session'
 import { createHttpStack, type HttpStack } from './http'
+import { validateUpdateBaseUrl, type UpdateController } from './update'
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -923,6 +932,36 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
     out.localFirst = record['localFirst']
   }
 
+  // 自动更新偏好（Task 23）：更新服务器地址 + 预期的代码签名者。
+  // ⚠️ **地址不合法就整段丢弃**（不是「存下来以后再说」）——
+  //    存一个非法地址只会让用户拿到一句看不懂的报错。
+  // ⚠️ 预期签名者是**公开主体名**（`CN=…`），**不是凭证**，可以落盘。
+  if (record['update'] !== undefined) {
+    const update = asRecord(record['update'])
+    if (update) {
+      const entry: NonNullable<AppPrefs['update']> = {}
+      const baseUrl = update['baseUrl']
+      if (
+        typeof baseUrl === 'string' &&
+        baseUrl.length <= 512 &&
+        !/[\u0000-\u001f]/.test(baseUrl)
+      ) {
+        const trimmed = baseUrl.trim()
+        // 空串 = **清除配置**（允许）；非空必须是合法地址。
+        if (trimmed === '' || validateUpdateBaseUrl(trimmed)) entry.baseUrl = trimmed
+      }
+      const expectedSigner = update['expectedSigner']
+      if (
+        typeof expectedSigner === 'string' &&
+        expectedSigner.length <= 256 &&
+        !/[\u0000-\u001f]/.test(expectedSigner)
+      ) {
+        entry.expectedSigner = expectedSigner.trim()
+      }
+      if (Object.keys(entry).length > 0) out.update = entry
+    }
+  }
+
   return out
 }
 
@@ -1189,6 +1228,60 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
     // ⚠️ 只在**落盘成功之后**通知主进程改窗口底色。
     opts.onTheme?.(written.theme ?? (theme as ThemeName))
     return written
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 自动更新 IPC（Task 23）
+// ---------------------------------------------------------------------------
+
+/** `registerUpdateIpc` 的参数。 */
+export interface UpdateIpcOptions {
+  /** `ipcMain` 替身；缺省时惰性取 Electron 的 `ipcMain`。 */
+  ipcMain?: IpcMainEventsLike
+  /** 偏好存储（更新服务器地址与预期签名者都从这里读）。 */
+  prefs: PrefsStore
+  /** 更新控制器（真正的逻辑在 `electron/update.ts`）。 */
+  update: UpdateController
+}
+
+/**
+ * 注册自动更新 IPC（Task 23）。
+ *
+ * 通道：
+ * - `update:check`（`handle`）：拉清单、比版本；
+ * - `update:download`（`handle`）：下载安装包（用**主进程缓存的**清单项）；
+ * - `update:install`（`handle`）：启动安装器（**启动前复查签名**）。
+ *
+ * ⚠️ **渲染进程是不可信输入**：
+ * - 它只能报**文件名**，不能报路径 → 路径由主进程拼到下载目录下面；
+ * - 下载用的地址与哈希**一律取主进程自己查到的清单**，不用渲染进程传来的。
+ */
+export function registerUpdateIpc(opts: UpdateIpcOptions): void {
+  const ipcMain = opts.ipcMain ?? resolveIpcMainEvents()
+  if (!ipcMain || typeof ipcMain.handle !== 'function') {
+    throw new Error('无法注册更新 IPC：当前进程没有可用的 ipcMain')
+  }
+  const prefs = opts.prefs
+  const update = opts.update
+
+  /** 读当前的更新偏好（地址 + 预期签名者）。 */
+  const readUpdatePrefs = (): NonNullable<AppPrefs['update']> => prefs.read().update ?? {}
+
+  ipcMain.handle('update:check', async () => {
+    return await update.check(readUpdatePrefs().baseUrl ?? '')
+  })
+
+  ipcMain.handle('update:download', async (_event, arg) => {
+    const name = readString(asRecord(arg)?.['name'])
+    if (name === '') return { status: 'error', message: '下载参数不合法' }
+    return await update.download(name, readUpdatePrefs().expectedSigner)
+  })
+
+  ipcMain.handle('update:install', async (_event, arg) => {
+    const name = readString(asRecord(arg)?.['name'])
+    if (name === '') return { status: 'error', message: '安装参数不合法' }
+    return await update.install(name, readUpdatePrefs().expectedSigner)
   })
 }
 

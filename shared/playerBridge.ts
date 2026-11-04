@@ -51,6 +51,12 @@
 import type { EqPrefsPayload } from './eqPrefs'
 import type { FfmpegFallbackResult, FfmpegStatus } from './ffmpeg'
 import type { PlayMode, ThemeName } from './types'
+import type {
+  UpdateCheckResult,
+  UpdateDownloadResult,
+  UpdateInstallResult,
+  UpdatePrefs,
+} from './update'
 
 // ---------------------------------------------------------------------------
 // 播放命令
@@ -241,6 +247,13 @@ export interface AppPrefs {
    * ⚠️ **默认开启**（`undefined` 视为 `true`）。
    */
   localFirst?: boolean
+  /**
+   * 自动更新的偏好（Task 23）。
+   *
+   * ⚠️ **非敏感**：更新服务器地址与预期签名者主体名都是公开信息，
+   *    与 `session.bin`（凭证）**无关**。
+   */
+  update?: UpdatePrefs
 }
 
 // ---------------------------------------------------------------------------
@@ -411,4 +424,26 @@ export interface PlayerBridge {
    * @returns 成功时带可播放的**本地地址**；失败时带**可判别**的 `reason`。
    */
   ffmpegFallback(songId: string): Promise<FfmpegFallbackResult>
+  // -------------------------------------------------------------------------
+  // 自动更新（Task 23）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **渲染层只发请求、只收结果**：检查 / 下载 / 启动**全在主进程**——
+  //    渲染层既不碰网络，也**不能指定要装哪个路径**（只报**文件名**）。
+  //
+  // ⚠️ 这三个方法**都不返回任何凭证**。
+  /** 检查更新（`update:check`）：拉清单、比版本。 */
+  checkUpdate(): Promise<UpdateCheckResult>
+  /**
+   * 下载安装包（`update:download`）。
+   *
+   * @param name 清单里的**文件名**（主进程会用自己缓存的清单项下载）。
+   */
+  downloadUpdate(name: string): Promise<UpdateDownloadResult>
+  /**
+   * 启动安装器（`update:install`）。
+   *
+   * @param name 已下载的**文件名**（主进程拼到下载目录下面，并复查签名）。
+   */
+  installUpdate(name: string): Promise<UpdateInstallResult>
 }

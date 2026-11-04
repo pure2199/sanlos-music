@@ -578,6 +578,27 @@ try {
     const { rows, status } = await listStats(window)
     return `${rows} 行｜${status}`
   })
+
+  // -- 7. 自动更新（Task 23）-------------------------------------------------
+  //
+  // ⚠️ **只验「没配地址时如实提示」**：真机没有更新服务器，
+  //    也不该去访问第三方地址（那不是本应用该做的事）。
+  //    「检查更新」在没配地址时必须**立刻**回「还没填地址」，而不是去联网。
+  await step('自动更新（未配置地址时如实提示，不联网）', async () => {
+    await window.getByRole('button', { name: '设置' }).click()
+    await window.waitForTimeout(400)
+    const baseUrl = window.locator('input[name="fnm-update-base-url"]')
+    await baseUrl.waitFor({ timeout: 10000 })
+    const current = await baseUrl.inputValue()
+    if (current.trim() !== '') {
+      throw new Error(`更新服务器地址本该是空的，却读到「${current}」`)
+    }
+    await window.getByRole('button', { name: '检查更新' }).click()
+    const hint = window.getByTestId('update-not-configured')
+    await hint.waitFor({ timeout: 10000 })
+    const text = (await hint.textContent())?.trim() ?? ''
+    return text
+  })
 } finally {
   // -- 退出 -----------------------------------------------------------------
   await Promise.race([

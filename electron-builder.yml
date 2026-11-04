@@ -57,3 +57,26 @@ nsis:
 
 portable:
   artifactName: FN-Music-Portable-${version}.${ext}
+
+# ---------------------------------------------------------------------------
+# 自动更新（Task 23）
+# ---------------------------------------------------------------------------
+# ⚠️ **`generic` provider 是「只读」的**：它只声明「更新清单与安装包放在这个地址」，
+#    electron-builder **不会**往那儿上传任何东西（上传是发布脚本 + 你自己的服务器的事）。
+#
+# ⚠️ **客户端真正读的地址不是这里**：应用「设置 → 自动更新 → 更新服务器地址」
+#    才是客户端的单一真相源（存 `prefs.json` 的 `update.baseUrl`）——
+#    换服务器时**不该重新打包**。
+#    下面这个占位符只是让 electron-builder 自己的工具有个默认值；
+#    换成你自己的地址即可（形如 `https://updates.example.com/fnmusic`）。
+#
+# ⚠️ 清单是**本项目自定义的 JSON**（`latest.json`），不是 electron-builder 的
+#    `latest.yml` —— 理由见 `scripts/publish-manifest.mjs` 的注释（零新依赖）。
+publish:
+  - provider: generic
+    url: https://updates.example.com/fnmusic
+
+# ⚠️ **代码签名**：本项目**未配置**签名证书（`win.sign` 留空）→
+#    产物未签名 → Windows SmartScreen 会提示「未知发布者」。
+#    自备证书的做法见 `docs/packaging.md` 的「自动更新」一节。
+
