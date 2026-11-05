@@ -53,7 +53,7 @@
   min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-field);
   background: var(--surface-raised);
   color: var(--text-primary);
   font-size: 14px;
@@ -84,7 +84,7 @@
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--danger);
-  border-radius: 8px;
+  border-radius: var(--radius-field);
   background: var(--danger-surface);
   color: var(--danger);
   font-size: 13px;
@@ -128,7 +128,7 @@
   align-self: flex-start;
   padding: 6px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-field);
   background: var(--surface-raised);
   color: var(--text-primary);
   font-size: 13px;
@@ -161,7 +161,7 @@
   flex: 0 0 auto;
   padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-secondary);
   font-size: 12px;

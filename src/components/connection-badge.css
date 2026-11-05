@@ -18,7 +18,7 @@
   gap: 6px;
   padding: 6px 12px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-raised);
   color: var(--text-primary);
   font-size: 13px;
@@ -29,18 +29,33 @@
   color: var(--text-secondary);
 }
 
-.fnm-badge__hint {
+/*
+ * 中继带宽提示（T51）。
+ *
+ * ⚠️ **它不再是徽标的一部分** —— 原来挂在 `.fnm-badge` 里（徽标是纵向 flex，
+ *    被这条提示撑到 320px 宽 → 顶栏被撑成两行，58px → 141px 真机实测）。
+ *    ⇒ 现在独立渲染在**主区顶部**：一行 12px 灰字，不占顶栏、不折行。
+ */
+.fnm-relayhint {
+  /* ⚠️ 主区是 flex 列容器 → 必须**不参与伸缩**，否则会被页面挤扁。 */
+  flex: 0 0 auto;
   margin: 0;
-  max-width: 320px;
+  padding: 6px 20px;
+  background: var(--surface);
+  color: var(--text-secondary);
   font-size: 12px;
-  color: var(--warning);
+  line-height: 18px;
+  /* ⚠️ **只占一行**：放不下就截断，绝不把主区撑高。 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fnm-badge__panel {
   min-width: 280px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   background: var(--surface-raised);
   box-shadow: 0 8px 24px var(--shadow);
 }

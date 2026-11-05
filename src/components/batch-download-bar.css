@@ -55,7 +55,7 @@
 .fnm-batchdownload__action {
   padding: 4px 12px;
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--accent);
   color: var(--accent-text);
   font-size: 12px;
@@ -78,7 +78,7 @@
 .fnm-batchdownload__clear {
   padding: 4px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-secondary);
   font-size: 12px;

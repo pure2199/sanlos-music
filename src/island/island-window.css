@@ -44,7 +44,14 @@ body {
   padding: 10px 18px;
   /* 999px → 两端完全圆（高度的一半是上限），这就是「岛」的形状。 */
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill, 999px);
+  /*
+   * ⚠️ **T51：必须用 `--radius-island`（固定 999px），不能用 `--radius-pill`**。
+   *    词岛是**独立窗口 + 固定形态**，不是主题控件 ——
+   *    之前写 `var(--radius-pill, 999px)` → 切到 Windows 11 风时
+   *    `--radius-pill` = 4px → **词岛直接变成方块**（真机实测：屏幕顶部
+   *    一个白色大矩形，完全没有「岛」的形状）。
+   */
+  border-radius: var(--radius-island, 999px);
   background: var(--surface-raised);
   color: var(--text-primary);
   box-shadow: 0 2px 18px var(--shadow);
@@ -171,7 +178,8 @@ body {
   display: block;
   width: 3px;
   min-height: 2px;
-  border-radius: 999px;
+  /* 频谱柱是**圆头柱** —— 同属词岛的固定形态，不跟主题走。 */
+  border-radius: var(--radius-island, 999px);
   background: var(--accent);
   opacity: 0.85;
   /* ⚠️ 24fps 的数据配 80ms 过渡 → **平滑不抖**（逐帧跳会像在闪）。 */

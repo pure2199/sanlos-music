@@ -5,6 +5,7 @@ import { onAuthLost } from './api/client'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { formatCount } from './components/Cards'
 import { PlayerBar } from './components/PlayerBar'
+import { RelayHint } from './components/RelayHint'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ThemeSwitcher } from './components/ThemeSwitcher'
 import { AlbumsPage } from './pages/AlbumsPage'
@@ -467,6 +468,12 @@ export default function App() {
         <ConnectionBadge />
       </header>
       <main className="app-shell__main">
+        {/*
+         * ⚠️ **T51：中继带宽提示挪到这里**（原来挂在顶栏的连接徽标里）。
+         *    它把徽标撑到 320px 宽 → 顶栏被撑成两行（58px → 141px 真机实测）。
+         *    现在是主区顶部的一条独立提示：一行 12px 灰字，顶栏恢复单行。
+         */}
+        <RelayHint />
         {renderMainView()}
         {fullPlayerOpen && <FullPlayerPage onClose={() => setFullPlayerOpen(false)} />}
       </main>

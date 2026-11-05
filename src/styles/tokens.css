@@ -52,10 +52,37 @@
   --shadow: #0000001f;
   --focus-ring: #0a66ff59;
 
-  /* 圆角（两套主题的**形状**差异就走这三个令牌） */
+  /*
+   * 圆角（两套主题的**形状**差异就走这几个令牌）。
+   *
+   * ⚠️ **T51：两套主题的形状必须「各自成套」**。
+   *    之前 60 多处圆角是**硬编码**的（`border-radius: 6px` / `999px` …），
+   *    → 两套主题**长得一模一样**（Fluent 一点也不方正）；
+   *    而且有几处**胶囊**（999px）压根不跟主题走 → Fluent 下依然是胶囊。
+   *    ⇒ 现在**全部走令牌**：Apple 风的数值 = 原来的硬编码值（**像素级不变**），
+   *      Fluent 风的数值 = 一整套方正值。
+   *
+   * ⚠️ **不要在业务 CSS 里写死圆角**（契约测试会拦住）：
+   *    胶囊 `--radius-pill` / 小控件 `--radius-control` / 输入框类 `--radius-field` /
+   *    极小方控件 `--radius-sharp` / 面板 `--radius-panel` / 卡片 `--radius-card`。
+   */
   --radius-pill: 999px;
   --radius-panel: 10px;
   --radius-card: 10px;
+  --radius-control: 6px;
+  --radius-field: 8px;
+  --radius-sharp: 4px;
+
+  /*
+   * 词岛胶囊的圆角 —— ⚠️ **故意不主题化**。
+   *
+   * ⚠️ **为什么**：词岛是**独立窗口 + 固定形态**（屏幕顶部的胶囊），
+   *    不是「主题控件」。它以前写成 `var(--radius-pill, 999px)`
+   *    → 切到 Windows 11 风时 `--radius-pill` = 4px
+   *    → **词岛直接变成方块**（真机实测：屏幕顶部一个白色大矩形）。
+   *    ⇒ 胶囊外形必须**固定**。
+   */
+  --radius-island: 999px;
 
   /*
    * 品牌名（顶栏左上角）。
@@ -121,6 +148,18 @@
   --radius-pill: 4px;
   --radius-panel: 6px;
   --radius-card: 4px;
+  --radius-control: 4px;
+  --radius-field: 4px;
+  --radius-sharp: 2px;
+  /*
+   * ⚠️ 词岛胶囊 —— **两套主题的值相同**（都是 999px）。
+   *
+   * ⚠️ **为什么明明不跟主题走，还要在 Fluent 组里再写一遍**：
+   *    项目既有约定是「**两套主题的语义变量集合必须完全相同**」
+   *    （`test/theme.test.tsx` 钉着，不多不少）→ 少一个令牌就会红。
+   *    ⇒ 这里**照抄 999px**，而不是省略 —— 变量集合相同，值也相同。
+   */
+  --radius-island: 999px;
 
   /*
    * 品牌名（Fluent）：**方正克制** → 字号略小、字重 500

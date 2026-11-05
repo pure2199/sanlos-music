@@ -10,7 +10,7 @@
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-field);
   background: var(--surface-sunken);
   color: var(--text-secondary);
   font-size: 12px;

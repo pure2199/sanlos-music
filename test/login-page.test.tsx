@@ -28,6 +28,7 @@ import userEvent from '@testing-library/user-event'
 
 import { LoginPage } from '../src/pages/LoginPage'
 import { ConnectionBadge } from '../src/components/ConnectionBadge'
+import { RelayHint } from '../src/components/RelayHint'
 import { useSessionStore } from '../src/state/sessionStore'
 import { useSettingsStore } from '../src/state/settingsStore'
 import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT } from '../shared/constants'
@@ -691,6 +692,20 @@ describe('会话恢复', () => {
 // ---------------------------------------------------------------------------
 
 describe('ConnectionBadge', () => {
+  // ⚠️ **T51：带宽提示从徽标里挪到了独立的 `RelayHint`**（渲染在主区顶部）。
+  //    原因：徽标是纵向 flex，提示把它撑到 320px 宽 → 顶栏被撑成两行
+  //    （58px → 141px，真机实测）。
+  //    ⇒ 下面四条**同时渲染徽标与提示组件**（= 真实界面的组合），
+  //    **断言一条都没有减弱**：链路仍由 `bridge.connectionInfo()` 驱动。
+  const renderBoth = (): void => {
+    render(
+      <>
+        <ConnectionBadge />
+        <RelayHint />
+      </>,
+    )
+  }
+
   it('中继链路展示主进程给的带宽提示（不展示兜底长句）', async () => {
     bridge.connectionInfo.mockResolvedValue({
       kind: 'relay',
@@ -702,7 +717,7 @@ describe('ConnectionBadge', () => {
       bandwidthHint: '主进程自定义带宽提示',
     } satisfies ConnectionInfo)
 
-    render(<ConnectionBadge />)
+    renderBoth()
 
     expect(await screen.findByText('主进程自定义带宽提示')).toBeTruthy()
     expect(screen.queryByText(/0.5–4 Mbps/)).toBeNull()
@@ -718,7 +733,7 @@ describe('ConnectionBadge', () => {
         '中继带宽受限（约 0.5–4 Mbps），无损与下载建议在局域网内进行',
     } satisfies ConnectionInfo)
 
-    render(<ConnectionBadge />)
+    renderBoth()
 
     expect(await screen.findByText(/中继带宽受限（约 0\.5–4 Mbps）/)).toBeTruthy()
   })
@@ -731,7 +746,7 @@ describe('ConnectionBadge', () => {
       isRelay: true,
     } satisfies ConnectionInfo)
 
-    render(<ConnectionBadge />)
+    renderBoth()
 
     expect(await screen.findByText(/0.5–4 Mbps/)).toBeTruthy()
   })
@@ -744,7 +759,7 @@ describe('ConnectionBadge', () => {
       isRelay: false,
     } satisfies ConnectionInfo)
 
-    render(<ConnectionBadge />)
+    renderBoth()
 
     expect(await screen.findByText('内网直连')).toBeTruthy()
     expect(screen.queryByText(/0.5–4 Mbps/)).toBeNull()

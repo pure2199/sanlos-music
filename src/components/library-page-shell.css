@@ -49,7 +49,7 @@
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--danger);
-  border-radius: 8px;
+  border-radius: var(--radius-field);
   background: var(--danger-surface);
   color: var(--danger);
   font-size: 13px;

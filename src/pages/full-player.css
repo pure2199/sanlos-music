@@ -98,7 +98,7 @@
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--danger);
-  border-radius: 8px;
+  border-radius: var(--radius-field);
   background: var(--danger-surface);
   color: var(--danger);
   font-size: 13px;
@@ -117,7 +117,7 @@
 .fnm-fullplayer__tab {
   padding: 4px 12px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-secondary);
   font-size: 12px;
@@ -168,7 +168,7 @@
   min-width: 0;
   padding: 6px 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-primary);
   font-size: 13px;
@@ -204,7 +204,7 @@
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sharp);
   background: transparent;
   color: var(--text-secondary);
   font-size: 14px;
@@ -253,7 +253,7 @@
   height: 36px;
   padding: 0 12px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-primary);
   font-size: 14px;
@@ -285,7 +285,7 @@
   height: 44px;
   min-width: 44px;
   padding: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
   color: var(--accent-text);
   font-size: 16px;

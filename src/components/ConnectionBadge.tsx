@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 
 import { getBridge } from '../lib/bridge'
-import { KIND_LABELS, RELAY_BANDWIDTH_HINT } from '../lib/connection'
+import { KIND_LABELS } from '../lib/connection'
 import { useSessionStore } from '../state/sessionStore'
 import './connection-badge.css'
 
@@ -10,8 +10,13 @@ import './connection-badge.css'
 //
 // - 当前链路来自 `window.fn.connectionInfo()`（`ConnectionInfo | null`）；
 // - 展示文案按 `kind` 分三种：内网直连 / 公网直连 / 中继；
-// - 中继时展示带宽提示：**主进程给的 `bandwidthHint` 优先**，没有才用兜底文案；
 // - 点击展开最近一次 `probe()` 的全部候选（缓存在 `sessionStore.candidates`）。
+//
+// ⚠️ **T51：中继的带宽提示已经挪走**（→ `RelayHint` 组件）。
+//    它原本是这个徽标的一部分：徽标是纵向 flex，提示把徽标撑到 **320px 宽**
+//    → 顶栏第一行放不下 → **整个顶栏被撑成两行**（58px → 141px），
+//    提示文字还自己折行，橙字夹在 13px 的导航按钮中间，非常突兀。
+//    ⇒ 现在徽标只留一个触发器（~62px），提示独立渲染在**页面内容区顶部**。
 // ---------------------------------------------------------------------------
 
 export function ConnectionBadge(): ReactElement {
@@ -38,11 +43,6 @@ export function ConnectionBadge(): ReactElement {
 
   const kind = connection?.kind ?? null
   const kindLabel = kind === null ? '未连接' : KIND_LABELS[kind]
-  const isRelay = kind === 'relay'
-  // ⚠️ 主进程给了值就用它的，没给才用兜底文案（追加要求 H）。
-  const hint = isRelay
-    ? connection?.bandwidthHint?.trim() || RELAY_BANDWIDTH_HINT
-    : null
 
   return (
     <div className="fnm-badge">
@@ -57,12 +57,6 @@ export function ConnectionBadge(): ReactElement {
           ▾
         </span>
       </button>
-
-      {hint && (
-        <p className="fnm-badge__hint" role="status">
-          {hint}
-        </p>
-      )}
 
       {expanded && (
         <div className="fnm-badge__panel">
