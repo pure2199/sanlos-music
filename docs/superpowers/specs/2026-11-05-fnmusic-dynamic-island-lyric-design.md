@@ -64,7 +64,7 @@ Lyricify Fusion（原 Lyricify Lite）是基于 SMTC 的 Windows 桌面歌词工
 | --- | --- | --- |
 | **T45** | **词岛骨架**：顶部居中锚定 + 胶囊形态 + 设置里样式二选一（经典窗**一字未变**） | 本规格的详细设计在第 5 节 |
 | **T46** | 词岛内容与动效：逐字发光 + 曲名/歌手 + 鼠标进入隐藏 | 第 7 节 |
-| **T47** | 频谱波形：`captureStream` + Analyser + 限频 IPC + 词岛波形柱 | 第 8 节 |
+| **T47** | 频谱波形：Analyser + 限频 IPC + 词岛**两端各 8 根镜像**波形柱 | 第 8 节（**取数路线已按探针修正**，见 8.1 / 8.2） |
 
 每个任务 **2 个 commit**（规格 + 实现）；既有测试一条不许删、断言一条不许削弱。
 
@@ -375,13 +375,107 @@ export function islandBounds(
 
 ---
 
-## 8. T47 概览（频谱波形）
+## 8. T47 详细设计：频谱波形
 
-- 主窗口：`<audio>.captureStream()` → **独立** `AudioContext` → `AnalyserNode`
-  → 每 **24fps** 取 **16 个对数分布 bin**（80Hz–8kHz）→ IPC `lyric:spectrum`。
-- ⚠️ **只在词岛可见时采样**；窗口隐藏立刻停 → 不给「顿卡」添新堵点。
-- ⚠️ Analyser 的 `AudioContext` **不连 destination**（探针已验证 `ctxState = "running"`）。
-- 主进程只转发（与 `lyric:state` 同一风格）；词岛窗渲染波形柱（纯 CSS 高度）。
+### 8.1 取数路线的**修正**（规格第 2.1 节的判断依据已过时）
+
+规格第 2.1 节写的是「项目的 Web Audio 图**只在开 EQ 时才建**（`ensureAudioChain`）」，
+因此选了 `captureStream()` 路线，理由是「别为了频谱去 `createMediaElementSource`，
+那会劫持 `<audio>` 的输出」。
+
+⚠️ **该前提与当前代码不符**：`src/player/engine.ts` 的 `ensureAudioGraph()` 在
+**每一次首次播放**时**无条件**建图（`createMediaElementSource` → `gain` → `destination`），
+**与 EQ 开没开无关** ⇒ **所有用户的音频本来就走 Web Audio**。
+
+⇒ 复用现有音频图挂 `AnalyserNode` **不新增任何劫持**（不新建 `AudioContext`、
+不新建解码路径），而且反映的是 **EQ + 音量之后**的信号 = 用户真正听到的。
+
+### 8.2 探针结论（`release/verify/t47-spectrum-probe.js`，Electron 32.3.3 实测）
+
+| 路线 | 做法 | 实测 |
+| --- | --- | --- |
+| **A（本方案）** | `source → gain → destination`，**额外** `gain → analyser`（analyser **不连** destination） | `peak = 249`；`stillPlaying = true`（挂 analyser **不影响**音频继续播） |
+| B（规格原文） | `captureStream()` → 独立 `AudioContext` → `createMediaStreamSource` → analyser | `peak = 249`，且与路线 A **逐 bin 相同**（**元素被 Web Audio 接管后照样拿得到声音**） |
+| C（对照） | `source → analyser`（不连 destination） | `peak = 236` |
+
+- 实测环境：`sampleRate = 48000`、`fftSize = 2048` → `frequencyBinCount = 1024`；
+- ⚠️ **T45 探针的 `captureStream` 是在 `createMediaElementSource` 之前测的**；
+  T47 探针改成**接管之后**再测 → 结论变了（**没有静音**）。
+
+⇒ 两条路都可用；**选 A**（零新增上下文 / 反映 EQ 后信号 / 不依赖 `captureStream`）。
+路线 B 留作「将来 `createMediaElementSource` 不可用」时的备选，**本任务不实现**。
+
+### 8.3 采样
+
+- **24fps**（每 42ms 一帧）读一次 `getByteFrequencyData` → 切成 **16 个对数分布 bin**（80Hz–8kHz，
+  每个 bin 取区间**最大值**）→ IPC `lyric:spectrum`（载荷 `number[]`，长度 16，值 0–255）。
+- ⚠️ **只在「桌面歌词可见 **且** 形态 = `island`」时采样**；不满足就**完全不采样**
+  → 不给「顿卡」添新堵点。
+  - 可见性 ← `lyric:visibility` 事件 + 启动时 `getPrefs()` 兜底（与 `lyricOverlay.ts` 同一套路）；
+  - 形态 ← 主窗口的 `useAppPrefsStore.lyricOverlayMode`（形态**只在设置页**改 → 那里就是主窗口）。
+- 采样源：`PlayerEngine.getAudioNodes()` → `{ context, source, gain, eq, analyser }`。
+  - `analyser` 建在 **`gain` 之后**（EQ + 音量之后 = 听到的信号），**不连 destination**；
+  - ⚠️ **建 analyser 失败不许影响播放**：老 Chromium / 测试替身没有 `createAnalyser` → `analyser = null`
+    → **没有频谱**（词岛照常显示歌词，**不崩**）。
+
+### 8.4 IPC 与桥
+
+- 新增推送通道 **`lyric:spectrum`**（`ipcRenderer.send` → `ipcMain.on` → `webContents.send`）。
+  - ⚠️ **主进程只转发**给 `activeLyricWindow()`（与 `lyric:state` 同一风格）；
+  - ⚠️ 形状校验（长度 16、每项 0–255 的整数）放在 `shared/spectrum.ts` 的
+    `sanitizeSpectrumBins()`，**主进程与 preload 共用一份**；形状不对 → **丢弃**。
+- 桥（`shared/playerBridge.ts` + `electron/preload.ts`）：
+  - `pushSpectrum(bins: number[])`（**主窗口**渲染进程用）；
+  - `onSpectrum(handler: (bins: number[]) => void)`（**词岛**渲染进程用）。
+
+### 8.5 词岛渲染（**两端各 8 根，镜像**）
+
+- 布局：`[左 8 根] [曲名/歌手] [歌词] [右 8 根]`。
+- **镜像的定义**：整条频谱 = 16 段（低频 → 高频）；左端显示第 1–8 段、
+  右端显示第 9–16 段；**两组都从「外缘向内」按频率递增** ⇒ 左右呈镜像。
+  - 左组 DOM 顺序 = `bins[0..7]`；右组 DOM 顺序 = `bins[15..8]`（逆序）。
+- 柱子的**高度**：`0` → 4%（留一个可见的小点），`255` → 100%；
+  `align-items: center` ⇒ 柱子**从胶囊中线上下对称生长**（Dynamic Island 观感）。
+- ⚠️ **纯 CSS 高度**（不引新依赖、不用 canvas）；`transition: height 80ms linear`
+  —— 24fps 的数据配 80ms 过渡 → 平滑不抖。
+- ⚠️ **经典悬浮窗一字不变**（不显示柱子、不订阅 `lyric:spectrum`）。
+
+### 8.6 影响文件清单
+
+| 文件 | 改动 |
+| --- | --- |
+| `shared/spectrum.ts`（新） | `SPECTRUM_BIN_COUNT` / `sanitizeSpectrumBins()`（纯逻辑，主进程与 preload 共用） |
+| `shared/playerBridge.ts` | `pushSpectrum` / `onSpectrum` |
+| `electron/preload.ts` | 暴露两个桥方法 |
+| `electron/ipc.ts` | `lyric:spectrum` 通道 + 形状校验 + `onSpectrum` 选项 |
+| `electron/main.ts` | 转发给 `activeLyricWindow()` |
+| `src/player/engine.ts` | `AnalyserNodeLike` / `createAnalyser?()` / `getAudioNodes().analyser` |
+| `src/player/spectrum.ts`（新） | `toLogBins()` + 采样器 + `installSpectrum()` |
+| `src/state/playerStore.ts` | 导出引擎实例（采样器取分析节点） |
+| `src/main.tsx` | `installSpectrum()` 装配 |
+| `src/island/SpectrumBars.tsx`（新） | 波形柱组件 |
+| `src/island/IslandApp.tsx` | 接入两端柱子 |
+| `src/island/island-window.css` | 柱子样式（只用语义变量） |
+| `test/spectrum.test.ts`（新） | bin 映射 / 采样器 / 启停 |
+| `test/lyric-island-app.test.tsx` | 柱子渲染断言 |
+| `test/lyric-island-css.test.ts` | CSS 契约 |
+| `test/tray-tooltip.test.ts` | 通道集合断言**改写** + `lyric:spectrum` 转发用例 |
+| `test/media-session.test.ts` | 假桥补两个方法 |
+
+### 8.7 既有断言会被推翻的地方（**改写，不放宽**）
+
+- `test/tray-tooltip.test.ts` 的「注册了全部通道」是**通道集合的精确断言**：
+  `listeners` 由 `['lyric:state', 'player:command', 'player:state']` 变成
+  `['lyric:spectrum', 'lyric:state', 'player:command', 'player:state']`
+  → **改写为新的完整集合**（与 T41 / T45 的处理一致），**不删、不放宽**。
+
+### 8.8 验收点
+
+1. `tsc --noEmit` 0 错；vitest 全绿；playwright 24 绿；build 0；
+2. **变异自证 ≥3 处**（采样器不启动 / bin 映射错 / 主进程不转发）→ 全红后复原（sha256 核对）；
+3. **真机**：词岛两端柱子随音乐跳动；经典悬浮窗无柱子；关掉桌面歌词 → 采样停；
+   Analyser 不可用 → 词岛照常显示歌词；
+4. ⚠️ **待用户复验**：挂 analyser **不改变听感**（音量 / 延迟）——探针只验了「还在播」。
 
 ---
 
