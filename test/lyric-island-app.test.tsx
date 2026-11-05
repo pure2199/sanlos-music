@@ -212,7 +212,35 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
     expect(currentLine(container)?.textContent).not.toContain('丙行丙')
   })
 
-  it('当前行仍然**逐字推进**，并带 T46 的发光钩子', async () => {
+  it('当前行仍然**逐字推进**，并带 T48 的**卡拉OK 填色**', async () => {
+    const fake = fakeBridge()
+    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+
+    const { container } = render(<IslandApp />)
+    act(() => {
+      fake.emitLyricState({
+        kind: 'track',
+        track: { id: 't1', title: '歌名', artist: '歌手' },
+        lines: THREE_LINES,
+      })
+      fake.emitLyricState({ kind: 'progress', position: 15, isPlaying: false })
+    })
+
+    // ⚠️ **等待条件就是目标状态本身**（当前词 = 「乙行乙」）：
+    //    位置还没传播到 15 秒时，**上一行**的「甲行甲」就已经带着 `--karaoke`
+    //    （词内比例 0%）了 → 只等「有一个 `--karaoke`」会**抢跑**。
+    await waitFor(() => {
+      expect(container.querySelector('.fnm-lyricview__word--karaoke')?.textContent).toBe('乙行乙')
+    })
+    const karaoke = container.querySelector('.fnm-lyricview__word--karaoke')
+    expect(karaoke?.textContent).toBe('乙行乙')
+    // ⚠️ 当前词**不许**再整词上色：整词已是强调色 → 词内填色就看不见了。
+    expect(karaoke?.className).not.toContain('fnm-lyricview__word--sung')
+    // ⚠️ 词「乙行乙」占 10~20s → t=15 → 词内比例正好 **50%**。
+    expect(karaoke?.getAttribute('data-karaoke-progress')).toBe('50.0')
+  })
+
+  it('词岛**不再**用整词发光（T46 的旧机制，已被卡拉OK 取代）', async () => {
     const fake = fakeBridge()
     ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
 
@@ -227,10 +255,10 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
     })
 
     await waitFor(() => {
-      expect(container.querySelector('.fnm-lyricview__word--active')?.textContent).toBe('乙行乙')
+      expect(currentLine(container)?.getAttribute('data-index')).toBe('1')
     })
-    const active = container.querySelector('.fnm-lyricview__word--active')
-    expect(active?.textContent).toBe('乙行乙')
+    // ⚠️ **整词发光与填色不能共存**：光晕会把填色的边界糊掉 → 看到的还是一条模糊亮边。
+    expect(container.querySelector('.fnm-lyricview__word--active')).toBeNull()
   })
 
   it('播放位置跨行 → 显示的行跟着换（仍只一行）', async () => {

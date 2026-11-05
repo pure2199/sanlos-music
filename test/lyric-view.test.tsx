@@ -25,7 +25,7 @@ import {
   LYRIC_LINE_HEIGHT,
   LYRIC_WINDOW_RADIUS,
 } from '../src/ui/lyrics/LyricView'
-import { attachTranslations, parseLrc } from '../src/ui/lyrics/parse'
+import { attachTranslations, parseLrc, type LyricLine } from '../src/ui/lyrics/parse'
 import { PlayerBar, resolveQuality, LOSSLESS_CODECS } from '../src/components/PlayerBar'
 import {
   FullPlayerPage,
@@ -323,6 +323,110 @@ describe('LyricView：当前词高亮钩子（T46）', () => {
     const previous = lineAt(container, 0)
     const words = Array.from(previous.querySelectorAll('[data-word]'))
     expect(words.some((word) => /fnm-lyricview__word--active/.test(word.className))).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T48：卡拉OK 渐进填色
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么要有这一档**：词级高亮是**整词跳变**——词一到就整词变色 →
+//    **每个词的边界都在「闪一下」** → 看起来不顺滑。
+//    卡拉OK 是**颜色边界连续推进**（已唱部分染色、未唱部分留白）→ 才顺滑。
+//
+// ⚠️ **数据源是现成的**：`LyricWordProgress.wordProgress`（词内**连续**比例）。
+//    本档只钉「谁挂什么类 / 比例是多少」，**不动**纯函数。
+// ---------------------------------------------------------------------------
+
+/** T48 专用：一条**逐字明确**的行（甲 0~2s、乙 2~4s、丙 4~6s）。 */
+const KARAOKE_LINE: LyricLine = {
+  time: 0,
+  text: '甲乙丙',
+  translation: '',
+  words: [
+    { text: '甲', start: 0, end: 2 },
+    { text: '乙', start: 2, end: 4 },
+    { text: '丙', start: 4, end: 6 },
+  ],
+}
+
+/** 取某个词（`.fnm-lyricview__word`，带 `data-word`）。 */
+function wordAt(container: HTMLElement, wordIndex: number): HTMLElement {
+  const element = container.querySelector(`[data-word="${wordIndex}"]`)
+  expect(element).not.toBeNull()
+  return element as HTMLElement
+}
+
+describe('LyricView：卡拉OK 渐进填色（T48）', () => {
+  it('开了 karaoke → 当前词**不再整词上色**，改挂 `--karaoke`', () => {
+    const { container } = render(
+      <LyricView lines={[KARAOKE_LINE]} currentTime={3} mode="single" karaoke />,
+    )
+
+    // t=3 → 当前词是「乙」（2~4s）
+    const current = wordAt(container, 1)
+    expect(current.textContent).toBe('乙')
+    expect(current.className).toContain('fnm-lyricview__word--karaoke')
+    // ⚠️ **不许**再整词上色：整词已是强调色 → 词内填色就看不见了。
+    expect(current.className).not.toContain('fnm-lyricview__word--sung')
+  })
+
+  it('**已唱过的词照旧整词上色**，**没唱到的词不上色**', () => {
+    const { container } = render(
+      <LyricView lines={[KARAOKE_LINE]} currentTime={3} mode="single" karaoke />,
+    )
+
+    expect(wordAt(container, 0).className).toContain('fnm-lyricview__word--sung')
+    const after = wordAt(container, 2)
+    expect(after.className).not.toContain('fnm-lyricview__word--sung')
+    expect(after.className).not.toContain('fnm-lyricview__word--karaoke')
+  })
+
+  it('填充比例 = **词内连续比例**（t=3 时正好 50%）', () => {
+    const { container } = render(
+      <LyricView lines={[KARAOKE_LINE]} currentTime={3} mode="single" karaoke />,
+    )
+
+    expect(wordAt(container, 1).getAttribute('data-karaoke-progress')).toBe('50.0')
+  })
+
+  it('比例随时间**连续推进**（不是整词跳变）', () => {
+    const { container: early } = render(
+      <LyricView lines={[KARAOKE_LINE]} currentTime={2.5} mode="single" karaoke />,
+    )
+    expect(wordAt(early, 1).getAttribute('data-karaoke-progress')).toBe('25.0')
+
+    const { container: middle } = render(
+      <LyricView lines={[KARAOKE_LINE]} currentTime={3} mode="single" karaoke />,
+    )
+    expect(wordAt(middle, 1).getAttribute('data-karaoke-progress')).toBe('50.0')
+
+    const { container: late } = render(
+      <LyricView lines={[KARAOKE_LINE]} currentTime={3.5} mode="single" karaoke />,
+    )
+    expect(wordAt(late, 1).getAttribute('data-karaoke-progress')).toBe('75.0')
+  })
+
+  it('该行已走满 → **不再有**当前词（整行都是唱过的状态）', () => {
+    const { container } = render(
+      <LyricView lines={[KARAOKE_LINE]} currentTime={8} mode="single" karaoke />,
+    )
+
+    const words = Array.from(container.querySelectorAll('[data-word]'))
+    expect(words).toHaveLength(3)
+    expect(words.some((word) => /fnm-lyricview__word--karaoke/.test(word.className))).toBe(false)
+    expect(words.every((word) => /fnm-lyricview__word--sung/.test(word.className))).toBe(true)
+  })
+
+  it('**没开** karaoke → 行为**一字不变**（当前词照旧整词上色，没有填色钩子）', () => {
+    const { container } = render(
+      <LyricView lines={[KARAOKE_LINE]} currentTime={3} mode="single" />,
+    )
+
+    const current = wordAt(container, 1)
+    expect(current.className).toContain('fnm-lyricview__word--sung')
+    expect(current.className).not.toContain('fnm-lyricview__word--karaoke')
+    expect(current.getAttribute('data-karaoke-progress')).toBeNull()
   })
 })
 

@@ -144,15 +144,20 @@ export function IslandApp(): ReactElement {
             - `single` 本身是**窗口裁剪**（默认半径 3 → 渲染当前行上下共 7 行），
               半径压到 **0** 才是真·一行；
             - `single` 的当前行**照常逐字推进**（`progress: isActive ? computeLineProgress(...) : null`）
-              → T46 的**逐字发光**不受影响；
+              → T48 的**卡拉OK 渐进填色**不受影响；
             - 经典悬浮窗**仍是 `double`** → 主界面 / 歌词舞台行为一字不变。 */}
+        {/* ⚠️ T48：`karaoke` —— 当前词**不再**整词发光，而是**词内渐进填色**
+            （整词跳变 → 每个词边界都闪一下 → 不顺滑）。
+            ⚠️ 填色的**数据源**是现成的 `LyricWordProgress.wordProgress`（词内连续比例）。
+            ⚠️ `activeWordClassName`（整词发光钩子）**保留不动**（通用钩子），
+                但词岛**不再**用它 —— 发光与填色同时存在会让「填色边界」被光晕糊掉。 */}
         <LyricView
           lines={state.lines}
           currentTime={position}
           mode="single"
           windowRadius={0}
           emptyLabel="暂无歌词"
-          activeWordClassName="fnm-lyricview__word--active"
+          karaoke
         />
       </div>
       {/* ⚠️ T47：右端的频谱柱（**原序**：低频 → 高频；与左端互为镜像）。 */}

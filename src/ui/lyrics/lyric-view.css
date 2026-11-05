@@ -7,7 +7,8 @@
  * ---------------------------------------------------------------------------
  * 动态值（CSS 表达不了的少数几个）走 CSS 自定义属性，由组件用内联 style 写：
  * - `--fnm-lyricview__canvas-height`：画布总高度（随歌词行数变化）；
- * - `--fnm-lyricview__line-top`：单行模式下某一行的纵向位置（随行号变化）。
+ * - `--fnm-lyricview__line-top`：单行模式下某一行的纵向位置（随行号变化）；
+ * - `--fnm-lyricview__karaoke-progress`：卡拉OK 模式下**当前词**的词内填充比例（T48）。
  *
  * 其余几何（行高、字号、间距、圆角、颜色）全部在本文件里。
  */
@@ -191,6 +192,34 @@
 /* 已经唱到的词。 */
 .fnm-lyricview__word--sung {
   color: var(--accent);
+}
+
+/*
+ * 卡拉OK 渐进填色（T48）：**当前词**按「词内连续比例」染色。
+ *
+ * ⚠️ **为什么不用整词上色**：整词跳变 → 每个词的边界都在「闪一下」→ 不顺滑。
+ *    词内的推进比例（`LyricWordProgress.wordProgress`）是**连续**的
+ *    → 用它驱动渐变的填充宽度 → 颜色边界**连续推进**。
+ *
+ * ⚠️ **为什么用 `background-clip: text` 而不是叠一层文字**：
+ *    叠一层文字 = 同一行文字出现**三遍**（底层原文 / 着色层 / 填色层）
+ *    → 无障碍与测试都取不准，还多一份 DOM。
+ *    `background-clip: text` **不改字形**（只改「字被什么颜色填」）
+ *    → 逐字着色层与底层原文依旧**严丝合缝**（T46 的纪律）。
+ *
+ * ⚠️ **`color: transparent` 是安全的降级**：字形本身透明 → 没填到的那一段
+ *    直接**透出底层原文**（就是「还没唱到」该有的颜色）；
+ *    万一 `background-clip` 不生效 → 最多是「当前词没有填色」，
+ *    **不会**变成「当前词看不见」（底层原文还在）。
+ */
+.fnm-lyricview__word--karaoke {
+  color: transparent;
+  background-image: linear-gradient(90deg, var(--accent) 0%, var(--accent) 100%);
+  background-size: var(--fnm-lyricview__karaoke-progress, 100%) 100%;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  -webkit-background-clip: text;
+  background-clip: text;
 }
 
 /* --------------------------------------------------------------------------

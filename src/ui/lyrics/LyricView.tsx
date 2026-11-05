@@ -108,6 +108,19 @@ export interface LyricViewProps {
    * ⚠️ 只给**正在被唱的那一个词**加；该行已走满 → **不加**（整行都是唱过的状态）。
    */
   activeWordClassName?: string
+  /**
+   * 「**卡拉OK模式**」：当前词**渐进填色**（T48：灵动歌词）。
+   *
+   * ⚠️ **缺省 = `false`** → 既有用法（主界面歌词 / 全屏歌词舞台 / 经典悬浮窗）
+   *    的行为**一字不变**。
+   * ⚠️ **为什么需要它**：词级高亮是**整词跳变**——词一到就整词变色 →
+   *    每个词的边界都在「闪一下」。卡拉OK 是**颜色边界连续推进**
+   *    （已唱部分染色、未唱部分留白），用词内的**连续比例**
+   *    （`LyricWordProgress.wordProgress`）驱动 → 才顺滑。
+   * ⚠️ 与 `activeWordClassName`（整词发光）是**两套机制**：开了卡拉OK 之后，
+   *    当前词**不再**按「已唱到」整词上色（否则整词已是强调色，填色看不见了）。
+   */
+  karaoke?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +221,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
     emptyLabel = '暂无歌词',
     className,
     activeWordClassName,
+    karaoke = false,
   } = props
 
   const safeLines = Array.isArray(lines) ? lines : []
@@ -314,6 +328,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
           active: isActive,
           onSeek,
           activeWordClassName,
+          karaoke,
           style: { '--fnm-lyricview__line-top': `${top}px` },
         }),
       )
@@ -375,6 +390,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
           onSeek={onSeek}
           showTranslation={index === translationIndex}
           activeWordClassName={activeWordClassName}
+          karaoke={karaoke}
         />,
       )
     }
@@ -432,6 +448,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
           active: false,
           onSeek,
           activeWordClassName,
+          karaoke,
           slot: 'previous',
         })}
 
@@ -443,6 +460,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
           active: false,
           onSeek,
           activeWordClassName,
+          karaoke,
           slot: 'next',
         })}
     </div>
@@ -464,6 +482,12 @@ interface RenderLineOptions {
   style?: CssVars
   /** 「当前词」要额外挂的类名（见 `LyricViewProps.activeWordClassName`）。 */
   activeWordClassName?: string
+  /**
+   * 卡拉OK 模式（见 `LyricViewProps.karaoke`）。
+   *
+   * ⚠️ 缺省 `false` → 当前词照旧走「整词上色」，既有行为**一字不变**。
+   */
+  karaoke?: boolean
   /**
    * 要不要渲染翻译副行。
    *
@@ -510,18 +534,38 @@ function renderLine(options: RenderLineOptions): ReactElement {
     const sung = isWordHighlighted(progress, segment.wordIndex)
     // ⚠️ T46：「当前正在唱的词」= `progress.wordIndex` 指向的那**一个**词。
     //    该行已走满（`completed`）→ **不加**（整行都是唱过的状态，没有「当前」可言）。
-    const isActiveWord =
-      Boolean(options.activeWordClassName) &&
+    //
+    // ⚠️ T48：这里把「**是不是当前词**」与「**要不要挂哪个类**」**拆开**了：
+    //    「当前词」这个事实只算一次，两个机制（整词钩子 / 卡拉OK填色）各自取用。
+    const isCurrentWord =
       progress !== null &&
       !progress.completed &&
       progress.wordIndex >= 0 &&
       segment.wordIndex === progress.wordIndex
-    const activeClass = isActiveWord ? ` ${options.activeWordClassName as string}` : ''
+    const activeClass =
+      Boolean(options.activeWordClassName) && isCurrentWord ? ` ${options.activeWordClassName as string}` : ''
+    // ⚠️ T48：卡拉OK 模式下，「当前词」**不**整词上色（`--sung`）——
+    //    整词已经是强调色 → 词内填色就**看不见**了。
+    //    当前词改挂 `--karaoke`：由**词内连续比例**（`wordProgress`）驱动渐变填色
+    //    → 颜色边界**连续推进**（不是整词跳变）→ 才顺滑。
+    const karaokeWord = Boolean(options.karaoke) && isCurrentWord
+    const showSung = karaokeWord ? false : sung
+    const karaokeClass = karaokeWord ? ' fnm-lyricview__word--karaoke' : ''
+    // ⚠️ **同时给一份 `data-` 钩子**：jsdom 的 CSSOM 对**自定义属性**不可靠
+    //    （`style.getPropertyValue('--x')` 未必读得到）→ 单测一律读 data 属性
+    //    （与 `data-scroll-top` 同一套纪律）。
+    const karaokePercent = karaokeWord ? ((progress?.wordProgress ?? 0) * 100).toFixed(1) : null
+    const karaokeStyle =
+      karaokePercent === null
+        ? undefined
+        : ({ '--fnm-lyricview__karaoke-progress': `${karaokePercent}%` } as CssVars)
     overlayContent.push(
       <span
         key={`word-${position}`}
-        className={`fnm-lyricview__word${sung ? ' fnm-lyricview__word--sung' : ''}${activeClass}`}
+        className={`fnm-lyricview__word${showSung ? ' fnm-lyricview__word--sung' : ''}${karaokeClass}${activeClass}`}
         data-word={segment.wordIndex}
+        data-karaoke-progress={karaokePercent ?? undefined}
+        style={karaokeStyle}
       >
         {segment.text}
       </span>,
@@ -605,6 +649,7 @@ const AllLyricLine = memo(function AllLyricLine(props: {
   onSeek?: (t: number) => void
   showTranslation: boolean
   activeWordClassName?: string
+  karaoke?: boolean
 }): ReactElement {
   return renderLine({
     line: props.line,
@@ -614,6 +659,7 @@ const AllLyricLine = memo(function AllLyricLine(props: {
     onSeek: props.onSeek,
     showTranslation: props.showTranslation,
     activeWordClassName: props.activeWordClassName,
+    karaoke: props.karaoke,
     style: { '--fnm-lyricview__line-top': `${props.index * LYRIC_ALL_LINE_HEIGHT}px` },
   })
 })
