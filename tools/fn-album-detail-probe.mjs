@@ -209,7 +209,9 @@ async function main() {
     ['search/album', '/music/api/v1/search/album'],
     ['search/artist', '/music/api/v1/search/artist'],
   ]) {
-    const q = encodeURIComponent('占位歌手三')
+    // ⚠️ **搜索词走环境变量**：要搜的歌手名是**用户曲库里的真实条目**，
+    //    不能硬编码进仓库（公开仓库里会暴露曲库内容）→ 由使用者自己注入。
+    const q = encodeURIComponent(process.env.FN_ARTIST ?? '占位歌手')
     const p1 = await call(`${path}?q=${q}&page=1&size=5`)
     const p2 = await call(`${path}?q=${q}&page=2&size=5`)
     const noPage = await call(`${path}?q=${q}&size=5`)

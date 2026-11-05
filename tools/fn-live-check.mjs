@@ -315,7 +315,9 @@ try {
     await window.locator('nav[aria-label="主导航"] button', { hasText: '搜索' }).first().click()
     const input = window.locator('input[type="search"], input[type="text"]').first()
     await input.waitFor({ timeout: 10000 })
-    await input.fill('占位歌手三')
+    // ⚠️ **搜索词走环境变量**：要搜的歌手名是**用户曲库里的真实条目**，
+    //    不能硬编码进仓库（公开仓库里会暴露曲库内容）→ 由使用者自己注入。
+    await input.fill(process.env.FN_ARTIST ?? '占位歌手')
     await input.press('Enter')
     await window.waitForTimeout(6000)
     const tracks = await textOf(window, '[data-testid="fnm-search-count-tracks"]')
