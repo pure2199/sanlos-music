@@ -94,7 +94,7 @@ import type {
   PlayerStateSnapshot,
   WindowBounds,
 } from '../shared/playerBridge'
-import type { ConnectionInfo, ConnectionKind, PlayMode, ThemeName } from '../shared/types'
+import type { ConnectionInfo, ConnectionKind, PlayMode, StreamQuality, ThemeName } from '../shared/types'
 import { sanitizeSpectrumBins } from '../shared/spectrum'
 import { buildCandidates, fetchConnectionParams, hostOf, normalizeBase } from './connection'
 import { TrustedHosts } from './cert'
@@ -785,7 +785,7 @@ export interface PrefsStoreOptions {
  *    那是 `session.bin`（DPAPI 加密）的职责，两者**不许混**。
  *    本类用**白名单**实现这一点：`write()` 只接受 `theme` / `closeBehavior` /
  *    `windowBounds` / `eq` / `lyricOverlay` / `downloadDir` / `localFirst` /
- *    `playMode` / `update` / `lyric` 这十个键，其余键**一律丢弃**——
+ *    `playMode` / `streamQuality` / `update` / `lyric` 这十一个键，其余键**一律丢弃**——
  *    渲染进程就算塞进来也写不进去。
  * 2. 写盘**原子化**：先写 `<file>.tmp` 再 `rename` 覆盖，
  *    避免写到一半崩溃留下截断的偏好文件。
@@ -897,6 +897,17 @@ const CLOSE_BEHAVIORS: readonly CloseBehavior[] = ['hide', 'quit']
 const PLAY_MODES: readonly PlayMode[] = ['sequence', 'shuffle', 'loop-one', 'loop-list']
 
 /**
+ * 合法的音质档位（T54）。
+ *
+ * ⚠️ **只认服务端支持的两个值**：`original` / `standard`。
+ *    服务端**不接受** `higher` / `exhigh`（实测 `code=100002`），
+ *    写进去也只是让播放时必然失败 → 陌生值一律丢弃。
+ * ⚠️ `prefs.json` 是**用户可编辑的文件** → 陌生值一律丢弃（不落盘），
+ *    渲染进程读回来时按「原始音质」处理。
+ */
+const STREAM_QUALITIES: readonly StreamQuality[] = ['original', 'standard']
+
+/**
  * 桌面歌词的样式（T45）：**只认这两个值**。
  *
  * ⚠️ 偏好文件是用户手改也改得动的地方 → 陌生值一律**丢弃**，不写半截进文件。
@@ -998,6 +1009,13 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
   const playMode = record['playMode']
   if (typeof playMode === 'string' && (PLAY_MODES as readonly string[]).includes(playMode)) {
     out.playMode = playMode as PlayMode
+  }
+
+  // 音质偏好（T54）：**只认 `original` / `standard`**，陌生值整段丢弃（不落盘）。
+  // ⚠️ 缺省**不写**（`undefined`）→ 渲染进程按「原始音质」处理，既有行为一字不变。
+  const streamQuality = record['streamQuality']
+  if (typeof streamQuality === 'string' && (STREAM_QUALITIES as readonly string[]).includes(streamQuality)) {
+    out.streamQuality = streamQuality as StreamQuality
   }
 
   // 自动更新偏好（Task 23）：更新服务器地址 + 预期的代码签名者。

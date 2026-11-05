@@ -162,6 +162,32 @@ export const FALLBACK_PREPARING_MESSAGE = '正在转换音频（首次播放需�
 /** 兜底转码是**有损**的实话（界面要如实注明）。 */
 export const FALLBACK_LOSSY_NOTE = '兜底播放使用 Opus 转码（音质有损，原始文件不变）'
 
+// ---------------------------------------------------------------------------
+// 标准音质（T54：服务端转码）
+// ---------------------------------------------------------------------------
+
+/**
+ * 标准音质**准备中**的提示（T54）。
+ *
+ * ⚠️ 与 `FALLBACK_PREPARING_MESSAGE`（客户端兜底转码）**分开**：
+ *    那个转的是**本地文件**，这个转的是**服务端产物**（省流量）——
+ *    用户要知道自己等的是哪一种。
+ */
+export const STANDARD_QUALITY_PREPARING_MESSAGE = '正在准备标准音质…（NAS 正在转码，需要几秒）'
+
+/**
+ * 标准音质**不可用**、已回退原始音质时的说明（T54）。
+ *
+ * ⚠️ **这不是错误**：标准音质失败时**自动回退原始音质**、音乐照常播放——
+ *    这里只**如实说明为什么没走标准音质**，界面显示**灰字**（不是红字）。
+ *
+ * @param detail 失败原因（可为空；为空时只说「不可用」）。
+ */
+export function standardQualityUnavailableMessage(detail: string | null): string {
+  const suffix = detail && detail.length > 0 ? `：${detail}` : ''
+  return `标准音质不可用${suffix}，已改用原始音质播放`
+}
+
 /**
  * **缓冲中**的提示（T37）。
  *

@@ -44,7 +44,12 @@ import {
 
 import type { Song } from '../../shared/types'
 import { usePlayerStore, type PlayerStore } from '../state/playerStore'
-import { BUFFERING_MESSAGE, FALLBACK_LOSSY_NOTE, FALLBACK_PREPARING_MESSAGE } from '../player/format'
+import {
+  BUFFERING_MESSAGE,
+  FALLBACK_LOSSY_NOTE,
+  FALLBACK_PREPARING_MESSAGE,
+  STANDARD_QUALITY_PREPARING_MESSAGE,
+} from '../player/format'
 import { CoverImage } from './Cards'
 import { EqPanel } from './EqPanel'
 import { nextPlayMode, playModeLabel } from './playMode'
@@ -222,6 +227,15 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
   const preparing = state.preparing === true
   /** 当前这一曲是兜底产物在播（Task 12）。 */
   const fallbackActive = state.fallbackActive === true
+  /** 正在准备**标准音质**（T54：服务端转码中）。 */
+  const qualityPreparing = state.qualityPreparing === true
+  /**
+   * 「标准音质」**不可用**时的说明（T54）。
+   *
+   * ⚠️ 这**不是错误**：标准音质失败时**自动回退原始音质**、音乐照常播放——
+   *    这里只是**如实说明为什么没走标准音质**（**灰字**，不是红字）。
+   */
+  const qualityNote = typeof state.qualityNote === 'string' ? state.qualityNote : ''
   /** 播放错误（可为空串）。 */
   const errorText = typeof state.error === 'string' ? state.error : ''
   /**
@@ -243,13 +257,17 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
   const noticeText =
     errorText.length > 0
       ? errorText
-      : preparing
-        ? FALLBACK_PREPARING_MESSAGE
-        : buffering
-          ? BUFFERING_MESSAGE
-          : fallbackActive
-            ? FALLBACK_LOSSY_NOTE
-            : ''
+      : qualityPreparing
+        ? STANDARD_QUALITY_PREPARING_MESSAGE
+        : preparing
+          ? FALLBACK_PREPARING_MESSAGE
+          : buffering
+            ? BUFFERING_MESSAGE
+            : qualityNote.length > 0
+              ? qualityNote
+              : fallbackActive
+                ? FALLBACK_LOSSY_NOTE
+                : ''
 
   /** 拖动进度条时的预览值（`null` = 没在拖动）。 */
   const [dragValue, setDragValue] = useState<number | null>(null)

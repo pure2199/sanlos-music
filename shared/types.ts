@@ -7,6 +7,19 @@ export type ThemeName = 'apple' | 'fluent'
 /** 播放模式。 */
 export type PlayMode = 'sequence' | 'shuffle' | 'loop-one' | 'loop-list'
 
+/**
+ * 音质档位（T54）。
+ *
+ * - `original`：**原始音质**——直拉 NAS 上的原文件（FLAC / MP3 …），**既有行为**；
+ * - `standard`：**标准音质**——让 NAS 服务端转码（官方旧下载协议里 = MP3 320k），
+ *   流量小得多。
+ *
+ * ⚠️ **缺省 = `original`** → 老用户升级后行为**一字不变**。
+ * ⚠️ 服务端**只认这两个值**（`higher` / `exhigh` 会被拒：`code=100002`），
+ *    也没有 192k 那一档。
+ */
+export type StreamQuality = 'original' | 'standard'
+
 /** 链路类型：内网直连 / 公网直连 / FN 中继。 */
 export type ConnectionKind = 'lan' | 'public' | 'relay'
 
@@ -243,4 +256,20 @@ export interface PlayerState {
    * ⚠️ 界面据此如实注明「音质有损」——**不许**让用户以为在听原始无损文件。
    */
   fallbackActive?: boolean
+  /**
+   * 是否正在准备**标准音质**（T54：服务端转码中）。
+   *
+   * ⚠️ 与 `preparing`（客户端兜底转码）是**两件事**：那个转的是本地文件，
+   *    这个转的是**服务端**产物（省流量）。
+   * ⚠️ **可选**：没在准备时是 `false` / `undefined`。
+   */
+  qualityPreparing?: boolean
+  /**
+   * 「标准音质」**不可用**时的说明（T54）。
+   *
+   * ⚠️ 这**不是错误**：标准音质失败时**自动回退原始音质**、音乐照常播放，
+   *    这里只是**如实说明为什么没走标准音质**（界面显示**灰字**，不是红字）。
+   * ⚠️ **可选**：没有说明时是 `null` / `undefined`。
+   */
+  qualityNote?: string | null
 }

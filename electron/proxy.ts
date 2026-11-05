@@ -79,8 +79,18 @@ const ALLOWED_HOST = 'srv'
  *
  * 判定依据是「相对 API 基址的路径」（与 `SessionManager.request(path)` 的 `path` 同语义，
  * 不含 `/music/api/v1`）。`registerProxy` 的 `opts.binaryPaths` 可覆盖它。
+ *
+ * ⚠️ **为什么 `download/track/transcode/file` 必须在里面**（T54 实测）：
+ *    服务端转码产物是**音频字节**（官方旧下载协议里 = MP3 320k）。
+ *    走 JSON 路径会**把字节丢掉**（`JSON.parse` 失败 → 变成 `null`），
+ *    而且 JSON 路径有 30 秒超时、**不透传 `Range`**（拖进度条就没了）。
+ *    ⇒ 必须走二进制路径：上游 body 直接作为响应体，`Range` / `206` 原样透传。
  */
-export const DEFAULT_BINARY_PATHS: readonly string[] = ['track/stream', 'static/cover']
+export const DEFAULT_BINARY_PATHS: readonly string[] = [
+  'track/stream',
+  'static/cover',
+  'download/track/transcode/file',
+]
 
 /**
  * 允许透传到上游的**请求头**白名单。

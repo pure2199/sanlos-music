@@ -21,7 +21,7 @@
 
 import { create } from 'zustand'
 
-import type { ThemeName } from '../../shared/types'
+import type { StreamQuality, ThemeName } from '../../shared/types'
 import { DEFAULT_THEME, resolveThemeName } from '../../shared/themes'
 import {
   DEFAULT_LYRIC_SOURCE,
@@ -31,6 +31,7 @@ import {
 } from '../../shared/lyricProvider'
 import type { CloseBehavior, LyricOverlayMode, PlayerBridge } from '../../shared/playerBridge'
 import { applyTheme } from '../theme'
+import { DEFAULT_STREAM_QUALITY, normalizeStreamQuality } from '../player/transcode'
 
 /** 默认的「关闭窗口」行为（隐藏，播放继续）。 */
 export const DEFAULT_CLOSE_BEHAVIOR: CloseBehavior = 'hide'
@@ -94,6 +95,14 @@ export interface AppPrefsStore {
   lyricTemplate: string
   /** 改外部歌词源（乐观应用 + 写回主进程；失败则回滚）。 */
   setLyricSource: (source: LyricSource, template?: string) => Promise<void>
+  /**
+   * 音质偏好（T54）：`original`（原始音质）/ `standard`（标准音质，服务端转码）。
+   *
+   * ⚠️ **缺省 = `original`** → 老用户升级后行为**一字不变**。
+   */
+  streamQuality: StreamQuality
+  /** 切换音质偏好（乐观应用 + 写回主进程；失败则回滚）。 */
+  setStreamQuality: (quality: StreamQuality) => Promise<void>
 }
 
 /** 应用偏好镜像 store（生产用）。 */
@@ -104,6 +113,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
   lyricOverlayMode: DEFAULT_LYRIC_OVERLAY_MODE,
   lyricSource: DEFAULT_LYRIC_SOURCE,
   lyricTemplate: '',
+  streamQuality: DEFAULT_STREAM_QUALITY,
   error: null,
 
   load: async (): Promise<void> => {
@@ -117,6 +127,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricOverlayMode: DEFAULT_LYRIC_OVERLAY_MODE,
         lyricSource: DEFAULT_LYRIC_SOURCE,
         lyricTemplate: '',
+        streamQuality: DEFAULT_STREAM_QUALITY,
         error: null,
       })
       return
@@ -130,6 +141,8 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricOverlayMode: normalizeLyricOverlayMode(prefs.lyricOverlay?.mode),
         lyricSource: normalizeLyricSource(prefs.lyric?.source),
         lyricTemplate: normalizeLyricTemplate(prefs.lyric?.template),
+        // ⚠️ 外部数据**不可信**：`prefs.json` 是用户可编辑的文件 → 陌生值压成缺省档。
+        streamQuality: normalizeStreamQuality(prefs.streamQuality),
         error: null,
       })
     } catch {
@@ -141,6 +154,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricOverlayMode: DEFAULT_LYRIC_OVERLAY_MODE,
         lyricSource: DEFAULT_LYRIC_SOURCE,
         lyricTemplate: '',
+        streamQuality: DEFAULT_STREAM_QUALITY,
         error: null,
       })
     }
@@ -234,6 +248,23 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricTemplate: previousTemplate,
         error: '歌词源设置保存失败，已恢复原设置',
       })
+    }
+  },
+
+  setStreamQuality: async (quality: StreamQuality): Promise<void> => {
+    const next = normalizeStreamQuality(quality)
+    const previous = get().streamQuality
+    // 乐观应用：切换音质**必须即时反馈**（下一首歌就用新档位）。
+    set({ streamQuality: next, error: null })
+
+    const bridge = playerBridge()
+    if (!bridge) return
+
+    try {
+      await bridge.setPrefs({ streamQuality: next })
+    } catch {
+      // 写回失败 → 回滚（界面不能停在一个「没被记住」的音质档位上）。
+      set({ streamQuality: previous, error: '音质偏好保存失败，已恢复原设置' })
     }
   },
 }))

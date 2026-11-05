@@ -25,7 +25,7 @@
 | 项 | 实测结论 | 来源 |
 |---|---|---|
 | **端口** | `port.httpPort = 5666`、`port.httpsPort = 5667` | `/sys/config` |
-| **服务端转码** | `track/transcode` 返回 `code=100001` → **不可用** | `tools/fn-transcode-probe.mjs` |
+| **服务端转码** | 播放侧 `POST track/transcode` → `code=100001`（**16 种请求体形状全试过**）；**真正可用的是下载侧协议** `download/track/transcode/{prepare,status,file,delete}`（`prepare` / `status` / `delete` 全通）。⚠️ 但**本机 NAS 的转码引擎不可用**（`errno=68157441 / transcoding error`）→ 详见「三十九、T54」 | `tools/fn-transcode-probe.mjs` + `release/verify/t54-*.mjs` |
 | **兜底方案** | 改为**客户端 FFmpeg** 转 Opus（见 README 常见问题） | `tools/ffmpeg-verify.mts` |
 | **本机 FFmpeg 覆盖度** | 9.0.2（Gyan full build）→ 支持 12 种容器：`ape`/`alac`/`dsf`/`wma`/`dts`/`aiff`/`ra`/`au`/`dvf`/`tta`/`dss`/`mmf`；**仅 `dff` 不支持**（无 `dsdiff` 解封装器） | `tools/ffmpeg-verify.mts` |
 | **中继链路是硬性关卡** | 不带 `mode=relay` Cookie → 返回 HTML 错误页 | `tools/fn-httstack-verify.mjs` |
@@ -3024,3 +3024,97 @@ Lyricify Fusion 的**灵动词岛** = 屏幕顶部居中的圆角胶囊 + 逐字
 - ⚠️ **待用户复验**：真实歌曲下的长句观感（是否还会觉得行高偏紧）；
 - ⚠️ 仍待复验：T46、T47、T48；T49/T50 的覆盖安装；
 - ⚠️ **待用户拍板**：词岛胶囊要不要收窄（当前 520×96）；Electron 默认图标要不要换。
+## 三十九、T54：音质偏好（原始音质 / 标准音质）
+
+### 起因（用户原话）
+
+> 加入音质偏好设置，原始音质和标准音质，标准音质好是192K飞牛音乐服务器支持的好像是这个
+
+### 挖入口（9 轮探针，逐条实测真实 NAS + 用户公网反代）
+
+用户拍板走「**服务端转码**」（只有服务端转码能在公网链路真正省带宽）。
+于是把服务端能力**逐条打穿**，结论如下（**每一条都是实测**，不是推断）：
+
+| 端点 | 实测结果 |
+| --- | --- |
+| `GET /music/api/v1/track/stream?guid=…`（+ 13 种音质参数） | ✅ 正常，但**不认任何音质参数** —— 响应**字节级完全相同**（恒为原始 FLAC：`audio/flac` + 魔数 `66 4c 61 43`） |
+| `POST /music/api/v1/track/transcode`（**播放侧**） | ❌ **16 种**请求体形状（`{guid}` / `{trackGUID,quality}` / `{codec,bitrate}` / `{id}` / GET 变体 …）→ **全部** `code=100001 unknown error` |
+| `GET /music/api/v1/track/hls/{guid}/preset.m3u8` | ⚠️ **路由存在**：对照组（3 / 4 / 5 段乱路径）一律回 `null`，它回 `100005 resource not found`；文件名只认 `preset.m3u8` / `init.mp4` / `*.m4s`（别的 → `100002 invalid arguments`）。**会话靠上面那个 POST 建** → POST 挂了就没有会话 |
+| `POST /music/api/v1/download/track/transcode/prepare` `{trackGUID, quality}` | ✅ `code=0` → `data{status:'success', errno:'', errmsg:'', downloadId}` |
+| `GET /music/api/v1/download/track/transcode/status?downloadId=` | ✅ 有**真实进度** `percent`；⚠️ **`status` 词不可信**（第一次查询就报 `ready`，随后又变回 `transcoding / percent=N`）→ **只信 percent** |
+| `GET /music/api/v1/download/track/transcode/file?downloadId=` | ⚠️ 任务未完成 → 秒回 `100002`；任务标称 `ready` 时 → **45 秒连响应头都没有**（挂死） |
+| `POST /music/api/v1/download/track/transcode/delete` `{downloadId}` | ✅ `data{downloadId, deleted:true}` |
+| `GET /api/stream/hires?fileId=&quality=`（官方网页版 HiRes） | ❌ 在**根路径**（不在 `/music/` 下）→ 用户的反代只转发 `/music/*` → 落到 fnOS 的 SPA 兜底页 |
+| `GET /music/api/v1/sys/config` | ✅ `capabilities={folderView:false, libraryReconnect:true}` —— **没有任何转码能力标志** |
+
+⇒ **真正可用的服务端转码入口是「下载侧」那套协议**
+（`download/track/transcode/{prepare,status,file,delete}`），**不是**官方 App 播放侧那套。
+
+### 档位语义（实测服务端只认两个值）
+
+| `quality` | 服务端反应 |
+| --- | --- |
+| `standard` | ✅ 接受 |
+| `original` | ✅ 接受 |
+| `higher` / `exhigh` | ❌ `code=100002 invalid arguments` |
+
+- ⚠️ 官方旧下载协议里 `standard` = **MP3 320k**（此条来自「按真实抓包对齐」的第三方实现，
+  **非我们实测的码率**—— 产物在本机根本取不出来）；
+- ⚠️ **服务端没有 192k 那一档**（用户原话里的「192K」在服务端**不存在**）。
+
+### 结论：本机 NAS 的**转码引擎不可用**
+
+3 首 FLAC 实测：
+
+| 曲目（占位） | 状态流转 | 取产物 |
+| --- | --- | --- |
+| 《占位曲目一》（96kHz / 24bit） | `ready / 100%` | **45 秒无响应头**（挂死） |
+| 《占位曲目二》 | `transcoding 0% → 64%` → **`failed`** | `100005`（任务已被回收） |
+| 《占位曲目三》 | `transcoding 0% → 85%` → **`failed`** | `100005` |
+
+失败时服务端给的是 `errno=68157441` / `errmsg='transcoding error'`（**恒定不变**，
+像「转码器不可用」而不是「这首曲子不行」）。
+
+⇒ **服务端转码这条路在当前 NAS 上走不通**：协议入口找对了，**引擎是坏的**。
+⇒ 但**客户端侧仍然把整条链路接上**（用户拍板「铺路」）：
+NAS 一升级 / 开启转码组件就**自动生效**，客户端**不用再改**；
+在此之前，标准音质**自动回退原始音质**并如实说明原因。
+
+### 客户端实现（T54）
+
+| 接缝 | 做法 |
+| --- | --- |
+| 偏好 | `AppPrefs.streamQuality?: 'original' \| 'standard'`（**非敏感**，落 `prefs.json`；主进程白名单**只认这两个值**，陌生值整段丢弃） |
+| 代理 | `download/track/transcode/file` 加进 `DEFAULT_BINARY_PATHS` —— **必须走二进制透传**：JSON 路径会把字节丢掉（`JSON.parse` 失败 → `null`）、还有 30 秒超时且**不透传 `Range`**（拖进度条就没了） |
+| 播放 | 引擎新增 `prepareStandardSource` / `streamQuality` 两个接缝；标准音质 → `prepare → 轮询 percent → 产物预检` → 用产物地址起播 |
+| 预检 | 起播前先 Range 取首字节 —— 实测「标称 ready 但文件端点挂死」，不预检就会界面一直停在「缓冲中…」 |
+| 回退 | 任何失败 → **自动改用原始音质**（音乐照常播，不黑屏），播放条给一条**灰字**说明（`role="status"`，**不是**错误） |
+| 不转码的曲子 | 本地曲目 / 本地有副本且「本地优先」开着 → **不转码**（已经在本地了，转码只是白费 NAS 的 CPU） |
+
+### 验证
+
+- `tsc --noEmit` 0 错；
+- 单元测试 **1847 条 / 85 个文件**全绿（新增 `test/stream-quality.test.ts` 23 条 + `test/stream-quality-ui.test.tsx` 12 条）；
+- Playwright E2E **24 条**全绿（真实 Electron + 内嵌 mock NAS）；
+- 打包通过；
+- **真机**（真实 NAS + 真实 userData，把偏好临时改成 `streamQuality:'standard'`）：
+  媒体元素的 `src` **只被写了一次**，且就是 `fnm://srv/track/stream?guid=…`
+  —— **转码产物地址从未被交给播放器**；播放条出现
+  「标准音质不可用：服务端转码产物无法读取，已改用原始音质播放」（`role="status"`，**灰字**）；
+  进度从 **0:11 走到 0:19** → **音乐照常播**。
+  ⚠️ 测完已把 `prefs.json` **逐字节还原**。
+
+### 已知限制（如实标注）
+
+- ⚠️ **当前这台 NAS 上标准音质必然回退**（转码引擎 `errno=68157441`）——
+  功能链路已就位，**等 NAS 侧具备能力即自动生效**；
+- ⚠️ 「标准音质」在服务端就是 **320k**，**没有 192k**；
+- ⚠️ 服务端转码要在 NAS 上**占 CPU**，切歌时会有几秒等待（界面显示「正在准备标准音质…」）。
+
+### 遗留 / 待办
+
+- ⚠️ **待用户侧确认**：NAS 的 fnOS 版本（实测 `serverVersion=1.0.10` / `mediasrvVersion=0.8.43`）
+  与应用中心里是否有「媒体转码」类组件需要启用；
+- ⚠️ **待用户侧确认**：内网直连（`192.168.1.2:5666`）时官方 App 选「标准音质」能否正常播放
+  （本机不在内网，连不上）；
+- ⚠️ **待用户侧确认**：fnOS 的 nginx 访问日志里 `track/transcode` 那条请求的状态码。

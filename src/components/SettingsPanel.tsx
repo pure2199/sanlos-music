@@ -33,10 +33,14 @@ import { APP_INFO } from '../../shared/appInfo'
 import type { CloseBehavior, LyricOverlayMode, PlayerBridge } from '../../shared/playerBridge'
 import type { FfmpegStatus } from '../../shared/ffmpeg'
 import type { LyricSource } from '../../shared/lyricProvider'
+import type { StreamQuality } from '../../shared/types'
+import { isLocalTrackId } from '../../shared/localMedia'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import { totalDownloadedBytes, useDownloadStore } from '../state/downloadStore'
+import { usePlayerStore } from '../state/playerStore'
 import { useUpdateStore } from '../state/updateStore'
 import { detectFfmpegStatus, hasFfmpegSupport } from '../player/fallback'
+import { probeServerTranscode } from '../player/transcode'
 import { formatBytes } from './DownloadButton'
 import './settings-panel.css'
 
@@ -75,6 +79,47 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const lyricOverlayMode = useAppPrefsStore((state) => state.lyricOverlayMode)
   const setLyricOverlayMode = useAppPrefsStore((state) => state.setLyricOverlayMode)
   const error = useAppPrefsStore((state) => state.error)
+
+  // --- 音质偏好（T54）------------------------------------------------------
+  const streamQuality = useAppPrefsStore((state) => state.streamQuality)
+  const setStreamQuality = useAppPrefsStore((state) => state.setStreamQuality)
+  /**
+   * 服务端转码能力的**探测结果**（`null` = 还没探测过）。
+   *
+   * ⚠️ 探测会**真的让 NAS 转一遍** → 只在用户点「检测」时才做，**不做自动探测**。
+   */
+  const [qualityProbe, setQualityProbe] = useState<{ supported: boolean; detail: string | null } | null>(
+    null,
+  )
+  /** 正在探测（界面显示「检测中…」）。 */
+  const [qualityProbing, setQualityProbing] = useState(false)
+
+  const handleSelectStreamQuality = useCallback(
+    (quality: StreamQuality) => {
+      void setStreamQuality(quality)
+    },
+    [setStreamQuality],
+  )
+
+  /**
+   * 探测服务端**到底能不能**转码。
+   *
+   * ⚠️ 用**当前正在播的那首**当探测对象：本地曲目在 NAS 上根本不存在，
+   *    拿它去探测只会得到一个无意义的失败。
+   */
+  const handleProbeTranscode = useCallback(async () => {
+    const song = usePlayerStore.getState().current
+    if (!song || isLocalTrackId(song.id)) return
+    setQualityProbing(true)
+    try {
+      const result = await probeServerTranscode(song.id)
+      setQualityProbe(result)
+    } catch {
+      setQualityProbe({ supported: false, detail: '探测失败' })
+    } finally {
+      setQualityProbing(false)
+    }
+  }, [])
 
   const handleChange = useCallback(
     (behavior: CloseBehavior) => {
@@ -465,33 +510,81 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         )}
 
         {category === 'decoder' && (
-          <fieldset className="fnm-settings__group">
-            <legend className="fnm-settings__legend">FFmpeg 兜底解码</legend>
-            <p className="fnm-settings__hint" data-testid="ffmpeg-status">
-              {ffmpeg.available
-                ? `已检测到 FFmpeg：${ffmpeg.version || ffmpeg.path}`
-                : '未检测到 FFmpeg。'}
-            </p>
-            <p className="fnm-settings__hint">
-              APE / ALAC / DSF 等格式 Chromium 解不了：把歌曲下载到本地后，客户端会用 FFmpeg
-              转码成 Opus 播放（音质有损，原始文件不变）。
-            </p>
-            {!ffmpeg.available && (
+          <>
+            <fieldset className="fnm-settings__group">
+              <legend className="fnm-settings__legend">音质偏好</legend>
+              <label className="fnm-settings__option">
+                <input
+                  type="radio"
+                  name="fnm-stream-quality"
+                  value="original"
+                  checked={streamQuality === 'original'}
+                  onChange={() => handleSelectStreamQuality('original')}
+                />
+                <span>原始音质（直拉 NAS 上的原文件，FLAC 无损）</span>
+              </label>
+              <label className="fnm-settings__option">
+                <input
+                  type="radio"
+                  name="fnm-stream-quality"
+                  value="standard"
+                  checked={streamQuality === 'standard'}
+                  onChange={() => handleSelectStreamQuality('standard')}
+                />
+                <span>标准音质（由 NAS 服务端转码，流量小得多）</span>
+              </label>
               <p className="fnm-settings__hint">
-                安装方式：<code>winget install Gyan.FFmpeg</code>，装完后点「重新检测」。
+                标准音质由 NAS 服务端转码后播放（官方协议里是 MP3 320k），流量比原始文件小一个量级。
+                若服务端没启用转码、或转码失败，会自动改用原始音质播放，并在播放条上说明原因。
               </p>
-            )}
-            <div className="fnm-settings__row">
-              <button
-                type="button"
-                className="fnm-settings__button"
-                onClick={refreshFfmpeg}
-                disabled={ffmpegChecking}
-              >
-                {ffmpegChecking ? '检测中…' : '重新检测'}
-              </button>
-            </div>
-          </fieldset>
+              <div className="fnm-settings__row">
+                <button
+                  type="button"
+                  className="fnm-settings__button"
+                  onClick={() => {
+                    void handleProbeTranscode()
+                  }}
+                  disabled={qualityProbing}
+                >
+                  {qualityProbing ? '检测中…' : '检测服务端能力'}
+                </button>
+              </div>
+              {qualityProbe && (
+                <p className="fnm-settings__hint" data-testid="stream-quality-probe">
+                  {qualityProbe.supported
+                    ? '服务端转码可用：标准音质能正常生效。'
+                    : `服务端转码不可用：${qualityProbe.detail ?? '未知原因'}。标准音质会自动回退原始音质。`}
+                </p>
+              )}
+            </fieldset>
+            <fieldset className="fnm-settings__group">
+              <legend className="fnm-settings__legend">FFmpeg 兜底解码</legend>
+              <p className="fnm-settings__hint" data-testid="ffmpeg-status">
+                {ffmpeg.available
+                  ? `已检测到 FFmpeg：${ffmpeg.version || ffmpeg.path}`
+                  : '未检测到 FFmpeg。'}
+              </p>
+              <p className="fnm-settings__hint">
+                APE / ALAC / DSF 等格式 Chromium 解不了：把歌曲下载到本地后，客户端会用 FFmpeg
+                转码成 Opus 播放（音质有损，原始文件不变）。
+              </p>
+              {!ffmpeg.available && (
+                <p className="fnm-settings__hint">
+                  安装方式：<code>winget install Gyan.FFmpeg</code>，装完后点「重新检测」。
+                </p>
+              )}
+              <div className="fnm-settings__row">
+                <button
+                  type="button"
+                  className="fnm-settings__button"
+                  onClick={refreshFfmpeg}
+                  disabled={ffmpegChecking}
+                >
+                  {ffmpegChecking ? '检测中…' : '重新检测'}
+                </button>
+              </div>
+            </fieldset>
+          </>
         )}
 
         {category === 'update' && (

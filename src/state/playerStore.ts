@@ -49,7 +49,8 @@ import {
 } from '../player/playModePrefs'
 import { playModePrefsPort } from '../player/playModePrefsBridge'
 import { prepareFallbackSource } from '../player/fallback'
-import { resolvePlaybackSource } from './downloadStore'
+import { resolvePlaybackSource, prepareStandardQualitySource } from './downloadStore'
+import { useAppPrefsStore } from './appPrefsStore'
 
 // 引擎接口从 `engine.ts` 定义（它是引擎的对外契约），这里**再导出**一份，
 // 便于「store 的依赖」与「store 的类型」从同一个入口取。
@@ -81,6 +82,15 @@ export interface PlayerStore {
   preparing?: boolean
   /** 当前这一曲是不是兜底产物在播（Task 12；界面据此注明「音质有损」）。 */
   fallbackActive?: boolean
+  /** 是否正在准备**标准音质**（T54：服务端转码中）。 */
+  qualityPreparing?: boolean
+  /**
+   * 「标准音质」**不可用**时的说明（T54）。
+   *
+   * ⚠️ 这**不是错误**：标准音质失败时**自动回退原始音质**、音乐照常播放，
+   *    这里只是**如实说明为什么没走标准音质**（界面显示**灰字**）。
+   */
+  qualityNote?: string | null
 
   /**
    * 播放一首曲目。
@@ -544,6 +554,8 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       buffering: state.buffering ?? false,
       preparing: state.preparing ?? false,
       fallbackActive: state.fallbackActive ?? false,
+      qualityPreparing: state.qualityPreparing ?? false,
+      qualityNote: state.qualityNote ?? null,
     })
   })
 
@@ -582,6 +594,12 @@ export const playerEngine = new PlayerEngine({
   //    转码成 Opus 再播。接缝**在这里接上**——不接的话引擎走的是既有的
   //    「写可读错误、不播放」路径（既有行为与既有断言一字不变）。
   prepareSource: prepareFallbackSource,
+  // ⚠️ **标准音质**（T54）：用户把音质偏好切到「标准音质」时，
+  //    请**服务端**把这一曲转码（省流量）；转码失败 → 引擎**自动回退原始音质**
+  //    并如实说明原因（音乐照常播，不黑屏）。
+  prepareStandardSource: prepareStandardQualitySource,
+  // ⚠️ 每次起播都读**最新**的偏好（用户随时可能在设置里改档位）。
+  streamQuality: () => useAppPrefsStore.getState().streamQuality,
 })
 
 export const usePlayerStore = createPlayerStore(

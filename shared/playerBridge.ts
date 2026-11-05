@@ -51,7 +51,7 @@
 import type { EqPrefsPayload } from './eqPrefs'
 import type { FfmpegFallbackResult, FfmpegStatus } from './ffmpeg'
 import type { ExternalLyricQuery, ExternalLyricResult, LyricPrefs } from './lyricProvider'
-import type { PlayMode, ThemeName } from './types'
+import type { PlayMode, StreamQuality, ThemeName } from './types'
 import type {
   UpdateCheckResult,
   UpdateDownloadResult,
@@ -277,6 +277,15 @@ export interface AppPrefs {
    *    写进去的陌生值一律丢弃 → 读回来时按「顺序播放」处理。
    */
   playMode?: PlayMode
+  /**
+   * 音质偏好（T54）：`original`（原始音质）/ `standard`（标准音质，服务端转码）。
+   *
+   * ⚠️ **非敏感**：就是一个档位名，与 `session.bin`（凭证）**无关**。
+   * ⚠️ **缺省 = `original`** → 老用户升级后行为**一字不变**。
+   * ⚠️ **只有合法值才落盘**（主进程白名单）：`prefs.json` 是用户可编辑的文件，
+   *    写进去的陌生值一律丢弃 → 读回来时按「原始音质」处理。
+   */
+  streamQuality?: StreamQuality
   /**
    * 自动更新的偏好（Task 23）。
    *

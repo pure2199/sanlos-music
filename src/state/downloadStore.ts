@@ -36,6 +36,7 @@ import type {
 import { localMediaUrl, isLocalTrackId } from '../../shared/localMedia'
 import { parseTrackFileName } from '../../shared/localMeta'
 import { streamUrl } from '../player/format'
+import { prepareTranscode } from '../player/transcode'
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。 */
 function playerBridge(): PlayerBridge | null {
@@ -373,6 +374,31 @@ export function resolvePlaybackSource(song: Song): string {
     return localMediaUrl(song.id)
   }
   return streamUrl(song.id)
+}
+
+/**
+ * 「标准音质」的播放源准备（T54；引擎的 `prepareStandardSource` 接缝）。
+ *
+ * 返回值的形状与引擎约定一致：
+ * - **非空字符串** → 服务端转码产物的地址（引擎用它起播）；
+ * - **空串** → 这一曲**不需要**转码，引擎静默走既有地址；
+ * - **抛异常** → 转码失败，引擎**自动回退原始音质**并如实说明原因。
+ *
+ * ⚠️ **哪些曲子不需要转码**：
+ * - **本地曲目**（用户自己加进来的文件）——NAS 上根本没有这个文件；
+ * - **本地有副本且「本地优先播放」开着**——已经在本地了，再转码只是白费 NAS 的 CPU。
+ *
+ * ⚠️ **本地有副本但「本地优先」关着** → 照样转码
+ *    （此时走的是 NAS 流，流量是要省下来的）。
+ */
+export async function prepareStandardQualitySource(song: Song): Promise<string> {
+  if (isLocalTrackId(song.id)) return ''
+  const state = useDownloadStore.getState()
+  if (state.localFirst && Object.prototype.hasOwnProperty.call(state.entries, song.id)) {
+    return ''
+  }
+  const session = await prepareTranscode(song.id, 'standard')
+  return session.url
 }
 
 /**

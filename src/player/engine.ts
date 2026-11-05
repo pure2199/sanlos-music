@@ -41,13 +41,14 @@
 // ---------------------------------------------------------------------------
 // 播放**只取当前这一曲的流**，不在播放时顺带拉列表（曲库 17.3 万首，严禁全量拉取）。
 
-import type { PlayMode, PlayerState, Song } from '../../shared/types'
+import type { PlayMode, PlayerState, Song, StreamQuality } from '../../shared/types'
 import { SPECTRUM_FFT_SIZE, SPECTRUM_SMOOTHING } from '../../shared/spectrum'
 import {
   describeMediaError,
   fallbackUnavailableMessage,
   formatUnsupportedMessage,
   songFormatExtension,
+  standardQualityUnavailableMessage,
   streamUrl,
   undecodableFormat,
   type FallbackFailure,
@@ -56,6 +57,18 @@ import {
 // ---------------------------------------------------------------------------
 // 注入式接口（只描述用到的最小面，便于单测替换）
 // ---------------------------------------------------------------------------
+
+/**
+ * 从任意错误里取出**可读**的说明（非 `Error` / 空消息 → `null`）。
+ *
+ * ⚠️ 只取 `message`：**绝不能**把整个错误对象塞进界面（可能带内部细节）。
+ */
+function errorDetail(err: unknown): string | null {
+  if (err instanceof Error && typeof err.message === 'string' && err.message.length > 0) {
+    return err.message
+  }
+  return null
+}
 
 /** 媒体事件监听器。 */
 export type MediaEventListener = (event: unknown) => void
@@ -421,6 +434,30 @@ export interface PlayerEngineOptions {
    * ⚠️ 返回值里**不许**带凭证；失败原因用**可判别的码**（`reason`）。
    */
   prepareSource?: (song: Song, format: string) => Promise<FallbackPreparation>
+  /**
+   * 「**标准音质**」的播放源准备接缝（T54）。
+   *
+   * 用户把音质偏好切到「标准音质」时 → 引擎先请它把这一曲交给**服务端**转码，
+   * 转好了才起播（转码产物是普通音频文件，`Range` 可拖进度条）。
+   *
+   * 返回值的三种形状：
+   * - **非空字符串** → 那是转码产物的地址，引擎用它起播；
+   * - **空串** → 这一曲**不需要**转码（本地副本 / 本地曲目），
+   *   引擎静默改用既有地址（**不留任何提示**）；
+   * - **抛异常** → 转码失败 → 引擎**自动回退原始音质**并如实说明原因
+   *   （界面显示**灰字**，音乐照常播放，**不黑屏、不卡死**）。
+   *
+   * ⚠️ 与 `prepareSource`（兜底解码）**不是一回事**：那个用**本机 FFmpeg**
+   *    转本地文件（解不了格式时用）；这个走**服务端**转码（**省流量**）。
+   */
+  prepareStandardSource?: (song: Song) => Promise<string>
+  /**
+   * 当前音质偏好（T54）：`standard` 走服务端转码，`original` 照旧直拉原文件。
+   *
+   * ⚠️ **不给 / 返回 `original`** → 既有行为**一字不变**（直拉 NAS 原文件）。
+   * ⚠️ 做成**函数**而不是值：偏好会变，每次起播都要读**最新**的那个。
+   */
+  streamQuality?: () => StreamQuality
 }
 
 /** 引擎的对外接口（store 依赖它；也是单测替身的形状）。 */
@@ -543,6 +580,20 @@ export class PlayerEngine implements PlayerEngineLike {
   /** 当前这一曲是不是**兜底产物**在播（界面据此注明「音质有损」）。 */
   private fallbackActive = false
   /**
+   * 正在准备**标准音质**（T54：服务端转码中）。
+   *
+   * ⚠️ 与 `preparing`（客户端兜底转码）**分开**：
+   *    界面要给**不同的提示文案**（「正在准备标准音质…」vs「正在转换音频…」）。
+   */
+  private qualityPreparing = false
+  /**
+   * 「标准音质」**不可用**时的说明（T54）。
+   *
+   * ⚠️ 这**不是错误**：标准音质失败时**自动回退原始音质**、音乐照常播放，
+   *    这里只是**如实说明为什么没走标准音质**（界面显示**灰字**）。
+   */
+  private qualityNote: string | null = null
+  /**
    * 兜底准备的**轮次号**（**只增不减**）。
    *
    * 用途：丢弃**过时的异步结果**——用户点了 A 歌（正在转码）又点了 B 歌，
@@ -586,6 +637,8 @@ export class PlayerEngine implements PlayerEngineLike {
       buffering: this.buffering,
       preparing: this.preparing,
       fallbackActive: this.fallbackActive,
+      qualityPreparing: this.qualityPreparing,
+      qualityNote: this.qualityNote,
     }
   }
 
@@ -629,18 +682,40 @@ export class PlayerEngine implements PlayerEngineLike {
    * 播放一首歌。
    *
    * 顺序：
-   * 1. **先判格式**：Chromium 不可解 →
+   * 1. **音质偏好是「标准音质」**（T54）且有准备接缝 →
+   *    先请**服务端**转码（转好了才起播；失败**自动回退原始音质**）；
+   * 2. **再判格式**：Chromium 不可解 →
    *    - **有兜底接缝**（Task 12）→ 走 `playViaFallback`（转码后再播）；
    *    - 没有 → 写可读错误、**不播放**（不静默失败）；
-   * 2. 懒创建音频元素与 `AudioContext`（第一次真正播放时才建）；
-   * 3. 把 `audio.src` 指到 `fnm://srv/track/stream?guid=…`；
-   * 4. 起播并推进进度。
+   * 3. 懒创建音频元素与 `AudioContext`（第一次真正播放时才建）；
+   * 4. 把 `audio.src` 指到 `fnm://srv/track/stream?guid=…`；
+   * 5. 起播并推进进度。
    */
   play(song: Song): void {
     // ⚠️ **作废在飞的兜底准备**：切歌后旧结果回来**不得**改状态。
     this.fallbackGeneration += 1
     const generation = this.fallbackGeneration
+    // ⚠️ 新的一曲 → **清掉上一曲的音质说明**（说明是**跟着那一曲**的）。
+    this.qualityNote = null
+    this.qualityPreparing = false
 
+    // T54：标准音质 → 走服务端转码（**失败自动回退原始音质**）。
+    const quality = this.options.streamQuality?.() ?? 'original'
+    if (quality === 'standard' && this.options.prepareStandardSource) {
+      this.playViaStandardQuality(song, generation)
+      return
+    }
+
+    this.playResolved(song, generation)
+  }
+
+  /**
+   * 按既有规则起播（**格式判定** → 兜底解码 → 直接起播）。
+   *
+   * ⚠️ 这是 `play()` 与「标准音质失败后的回退」**共用**的一段——
+   *    两处走**同一条**既有路径，回退时既有行为（兜底 / 报错）**一字不变**。
+   */
+  private playResolved(song: Song, generation: number): void {
     const undecodable = undecodableFormat(song.codec, songFormatExtension(song))
     if (undecodable !== null) {
       if (this.options.prepareSource) {
@@ -660,6 +735,55 @@ export class PlayerEngine implements PlayerEngineLike {
     }
 
     this.startPlayback(song, this.resolveSource(song), false)
+  }
+
+  /**
+   * 标准音质（T54）：先让**服务端**转码，转好了才起播。
+   *
+   * ⚠️ **失败自动回退原始音质**：转码失败 → 写一条**灰字**说明（不是错误），
+   *    然后走**既有**的起播路径（`playResolved`）——音乐照常播放，
+   *    **不黑屏、不卡死**。
+   * ⚠️ **过时结果一律丢弃**：`generation` 变了（用户已经切歌）→ 不改状态。
+   */
+  private playViaStandardQuality(song: Song, generation: number): void {
+    const prepare = this.options.prepareStandardSource
+    if (!prepare) {
+      this.playResolved(song, generation)
+      return
+    }
+
+    this.stopTicking()
+    this.playing = false
+    this.preparing = false
+    this.qualityPreparing = true
+    this.fallbackActive = false
+    this.currentSong = song
+    this.positionSec = 0
+    this.durationSec = song.duration
+    this.errorMessage = null
+    this.element?.pause()
+    this.emit()
+
+    void Promise.resolve()
+      .then(() => prepare(song))
+      .then((url) => {
+        if (generation !== this.fallbackGeneration) return
+        this.qualityPreparing = false
+        if (typeof url === 'string' && url.length > 0) {
+          // 转码产物 → 直接起播（**不**算兜底：那是服务端产物，不是本机有损转码）。
+          this.startPlayback(song, url, false)
+          return
+        }
+        // 空串 → 这一曲**不需要**转码（本地副本 / 本地曲目）→ 静默走既有路径。
+        this.playResolved(song, generation)
+      })
+      .catch((err: unknown) => {
+        if (generation !== this.fallbackGeneration) return
+        this.qualityPreparing = false
+        // ⚠️ **回退原始音质**：说明写**灰字**（不是错误），音乐照常播。
+        this.qualityNote = standardQualityUnavailableMessage(errorDetail(err))
+        this.playResolved(song, generation)
+      })
   }
 
   /**
@@ -728,6 +852,8 @@ export class PlayerEngine implements PlayerEngineLike {
     this.preparing = false
     this.buffering = false
     this.fallbackActive = viaFallback
+    // ⚠️ 起播了 → 「准备标准音质」这一步**已经结束**。
+    this.qualityPreparing = false
     this.currentSong = song
     this.positionSec = 0
     this.durationSec = song.duration
@@ -903,6 +1029,8 @@ export class PlayerEngine implements PlayerEngineLike {
     this.fallbackGeneration += 1
     this.preparing = false
     this.fallbackActive = false
+    // ⚠️ 同理：在飞的**标准音质**准备也作废（否则它回来会自己起播）。
+    this.qualityPreparing = false
   }
 
   // --- 内部：音频元素与音频图 ---------------------------------------------
