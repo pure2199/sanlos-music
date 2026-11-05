@@ -54,7 +54,7 @@
 import { API_PREFIX } from '../shared/constants'
 import { authx, buildCookie } from './sign'
 import { SessionStateError, type SessionManager } from './session'
-import { createHttpStack, type HttpStack } from './http'
+import { createHttpStack, type HttpStack, type UpstreamStream } from './http'
 import {
   APP_SCHEME_PRIVILEGES,
   FNM_SCHEME,
@@ -507,17 +507,28 @@ async function proxyBinary(
     }
   }
 
-  const send = (): Promise<Response> =>
-    http.fetch(
-      buildUpstreamRequest(
-        { method, url, headers: request.headers },
-        session.state.token,
-        isRelay,
-        requestBody,
-      ),
+  const send = (): Promise<UpstreamStream> => {
+    const upstreamRequest = buildUpstreamRequest(
+      { method, url, headers: request.headers },
+      session.state.token,
+      isRelay,
+      requestBody,
     )
+    // ⚠️ **优先走 `http.stream`**（T56）：`http.fetch` 走 Electron 的 `session.fetch`，
+    //    它把上游响应头塞进 undici 的 `Headers` ⇒ **ByteString 校验**
+    //    （每个字符必须 ≤ 255）；而 Chromium 按 **UTF-8** 解码响应头 ⇒
+    //    上游一旦回带中文的头（实测 NAS 转码产物的
+    //    `Content-Disposition: attachment; filename="占位曲目一 - 占位歌手二.mp3"`），
+    //    就抛 `TypeError`，且**抛在事件回调里** ⇒ 主进程未捕获异常
+    //    + 那个请求**永不返回** ⇒ 二进制路径挂死。
+    //    `http.stream` 走 Electron 的 `net.request`：响应头是**普通字符串记录**，
+    //    **不经过** ByteString 校验。
+    if (typeof http.stream === 'function') return http.stream(upstreamRequest)
+    // 回落（替身没有 `stream`）：行为与 T56 之前一致。
+    return streamViaFetch(http, upstreamRequest)
+  }
 
-  let upstream: Response
+  let upstream: UpstreamStream
   try {
     upstream = await send()
   } catch {
@@ -527,7 +538,7 @@ async function proxyBinary(
   // token 失效：流式路径拿不到「200 + JSON 信封里的 99999」（读 body 就破坏流式），
   // 上游只会用 401 / 403 表达。这里**静默续期一次**再重发一次（只重试一次）。
   if (upstream.status === 401 || upstream.status === 403) {
-    await discardBody(upstream)
+    await discardBody(upstream.body)
     const renewed = await renewSession(session)
     if (!renewed) {
       // 续期失败：按「上游异常」处理，**不把上游的 401 原样透给渲染进程**。
@@ -543,8 +554,13 @@ async function proxyBinary(
 
   const headers = new Headers()
   for (const name of FORWARD_RESPONSE_HEADERS) {
-    const value = upstream.headers.get(name)
-    if (value !== null) headers.set(name, value)
+    const value = upstream.headers[name.toLowerCase()]
+    if (value === undefined) continue
+    // ⚠️ **只转发 ByteString 安全的值**（每个字符的码位 ≤ 255）：
+    //    `Headers.set` 会做 ByteString 校验，撞上就抛 ⇒ 整个响应失败。
+    //    宁可**少转一个头**，也不能让整个响应挂掉。
+    if (!isByteStringSafe(value)) continue
+    headers.set(name, value)
   }
   // Electron 会自动解压上游的 gzip：留着原始 content-encoding 会让渲染进程二次解压而报错。
   //
@@ -554,7 +570,7 @@ async function proxyBinary(
   // `content-length`，渲染进程会拿到「声明 24 字节、实际 100 字节」的响应 →
   // Chromium `ERR_CONTENT_LENGTH_MISMATCH` / 截断，**封面与音频流直接加载失败**。
   // 解压后长度未知，故上游带 `content-encoding` 时**一并删掉** `content-length`。
-  if (upstream.headers.get('content-encoding') !== null) {
+  if (upstream.headers['content-encoding'] !== undefined) {
     headers.delete('content-length')
   }
   headers.delete('content-encoding')
@@ -564,13 +580,39 @@ async function proxyBinary(
   return new Response(responseBody, { status: upstream.status, headers })
 }
 
-/** 丢弃一个响应的 body（释放连接），忽略失败。 */
-async function discardBody(res: Response): Promise<void> {
+/** 丢弃一个响应体（释放连接），忽略失败。 */
+async function discardBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
   try {
-    await res.body?.cancel()
+    await body?.cancel()
   } catch {
     // 忽略：丢弃失败不影响主流程
   }
+}
+
+/**
+ * 回落：`http.stream` 缺席时用 `http.fetch` 取上游，并转成 `UpstreamStream`。
+ *
+ * ⚠️ 行为与 T56 之前**完全一致**（单测环境没有 Electron，走的就是这条路）。
+ */
+async function streamViaFetch(http: HttpStack, request: Request): Promise<UpstreamStream> {
+  const res = await http.fetch(request)
+  const headers: Record<string, string> = {}
+  res.headers.forEach((value, name) => {
+    headers[name.toLowerCase()] = value
+  })
+  return { status: res.status, headers, body: res.body }
+}
+
+/**
+ * 值是不是 **ByteString 安全的**（每个字符的码位 ≤ 255）。
+ *
+ * ⚠️ `Headers.set` 会做这个校验，撞上就抛 `TypeError` ⇒ 宁可**不转**这个头。
+ */
+function isByteStringSafe(value: string): boolean {
+  for (const ch of value) {
+    if ((ch.codePointAt(0) ?? 0) > 255) return false
+  }
+  return true
 }
 
 /**

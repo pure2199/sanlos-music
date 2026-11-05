@@ -470,6 +470,121 @@ describe('registerProxy 的二进制路径', () => {
     expect(res.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  // -------------------------------------------------------------------------
+  // T56：二进制路径改走 `http.stream`（绕开 undici 的 ByteString 崩溃）
+  //
+  // ⚠️ 根因（实测）：NAS 转码产物的响应带
+  //    `Content-Disposition: attachment; filename="占位曲目一 - 占位歌手二.mp3"`（UTF-8 原始字节），
+  //    Chromium 按 UTF-8 解码 ⇒ 真正的 CJK 字符；`session.fetch` 把它塞进 undici 的
+  //    `Headers` ⇒ ByteString 校验（≤255）⇒ 抛 TypeError，且**抛在事件回调里**
+  //    ⇒ 主进程未捕获异常 + 那个请求**永不返回** ⇒ 二进制路径挂死。
+  // -------------------------------------------------------------------------
+
+  it('上游响应头带中文时仍能正常返回（T56 核心回归：必须走 http.stream）', async () => {
+    const fake = fakeProtocol()
+    const { session } = fakeSession()
+    const fetchMock = vi.fn(async () => {
+      throw new Error('二进制路径不该走 http.fetch')
+    })
+    const streamMock = vi.fn(async () => ({
+      status: 206,
+      headers: {
+        'content-type': 'audio/mpeg',
+        'content-range': 'bytes 0-2/1024',
+        // ⚠️ 实测 NAS 转码产物的真实头：中文歌名。
+        'content-disposition': 'attachment; filename="占位曲目一 - 占位歌手二.mp3"',
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3]))
+          controller.close()
+        },
+      }),
+    }))
+    registerProxy(session, {
+      protocol: fake.proto,
+      http: {
+        fetch: fetchMock,
+        stream: streamMock,
+        bumpTrustEpoch: () => {},
+        partitionName: () => 'fn-nas-v0',
+      },
+    })
+
+    const res = await fake.call(
+      new Request('fnm://srv/download/track/transcode/file?downloadId=d1'),
+    )
+
+    expect(res.status).toBe(206)
+    expect(res.headers.get('content-type')).toBe('audio/mpeg')
+    expect(res.headers.get('content-range')).toBe('bytes 0-2/1024')
+    // 白名单外的头**不转发**（更不会被塞进 undici 的 `Headers`）。
+    expect(res.headers.get('content-disposition')).toBeNull()
+    // ⚠️ **鉴别力**：二进制路径必须走 `stream`——走 `fetch` 就会踩 ByteString 崩溃。
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(streamMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('白名单里的头若含非 ASCII 就跳过（宁可少转一个头，也不让整个响应失败）', async () => {
+    const fake = fakeProtocol()
+    const { session } = fakeSession()
+    const streamMock = vi.fn(async () => ({
+      status: 206,
+      headers: {
+        // ⚠️ 白名单里的头带了中文 ⇒ `Headers.set` 会抛 ByteString 错 ⇒ 必须跳过。
+        'content-type': 'audio/mpeg; name="占位曲目一"',
+        'content-range': 'bytes 0-2/1024',
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3]))
+          controller.close()
+        },
+      }),
+    }))
+    registerProxy(session, {
+      protocol: fake.proto,
+      http: {
+        fetch: async () => {
+          throw new Error('二进制路径不该走 http.fetch')
+        },
+        stream: streamMock,
+        bumpTrustEpoch: () => {},
+        partitionName: () => 'fn-nas-v0',
+      },
+    })
+
+    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    expect(res.status).toBe(206)
+    expect(res.headers.get('content-type')).toBeNull()
+    expect(res.headers.get('content-range')).toBe('bytes 0-2/1024')
+  })
+
+  it('http.stream 缺席时回落到 http.fetch（行为与 T56 之前一致）', async () => {
+    const fake = fakeProtocol()
+    const { session } = fakeSession()
+    const upstream = streamResponse(new Uint8Array([1, 2, 3]), {
+      status: 206,
+      headers: { 'content-type': 'audio/mpeg', 'content-range': 'bytes 0-2/1024' },
+    })
+    const fetchMock = vi.fn(async () => upstream)
+    registerProxy(session, {
+      protocol: fake.proto,
+      http: {
+        fetch: fetchMock,
+        bumpTrustEpoch: () => {},
+        partitionName: () => 'fn-nas-v0',
+      },
+    })
+
+    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+
+    expect(res.status).toBe(206)
+    expect(res.headers.get('content-range')).toBe('bytes 0-2/1024')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 // ---------------------------------------------------------------------------

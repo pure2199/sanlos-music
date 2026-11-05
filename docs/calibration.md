@@ -3214,9 +3214,16 @@ T54 交付后的真机结论是「服务端转码不可用 → 标准音质必�
 - 单元测试 **1853 条 / 85 个文件**全绿（基线 1847 / 85，**新增 6**：`test/stream-quality.test.ts` 23 → 29）；
 - **变异自证**：把「预检重试」改回 T54 的「单次预检」→ **4 条红**；复原后 sha256 回基线 `1f4202c52245e20f` → 全绿；
 - Playwright E2E **24 条**全绿；打包通过；
-- **真机**（真实 NAS + 真实 userData，偏好临时改 `standard`）：`<audio>.src` = **转码产物地址**
-  `fnm://srv/download/track/transcode/file?downloadId=…`（**不再是** `track/stream`），
-  播放条先显示「正在准备标准音质…」约 1 秒后正常播放；测完 `prefs.json` **逐字节还原**。
+- ⚠️ **真机结论（T56 复验后更正）**：转码链路**确实跑起来了**
+  （`prepare` 1205 ms → `status` 89 ms → `file` …），**第一次产物预检确实失败**
+  （就绪竞态在真机真实发生，被 T55 的重试救回）；
+  但**产物请求最终没能返回**（根因见 T56：主进程在 `session.fetch` 里崩了）⇒
+  `<audio>.src` **仍然是回退的** `fnm://srv/track/stream?guid=…`，
+  播放条显示「标准音质不可用：请求超时（20000 毫秒内没有响应），已改用原始音质播放」，
+  进度 0:04 → 0:12 在走（音乐照常播）。
+  ⇒ **本节修的就绪判定是对的**（它确实救回了第一次预检失败），
+  **但当时标准音质仍走回退** —— 根因与修复见 T56。
+  ⚠️ 测完 `prefs.json` **逐字节还原**。
 
 ### 已知限制（如实标注）
 
@@ -3230,6 +3237,118 @@ T54 交付后的真机结论是「服务端转码不可用 → 标准音质必�
 ### 遗留 / 待办
 
 - ⚠️ 待复验：T31~T55（用户侧肉眼）；
+- ⚠️ 待用户拍板：词岛胶囊要不要收窄（520×96）；Electron 默认图标要不要换；
+- ⚠️ 用户侧待办：更新服务器地址（https 静态目录）+ 代码签名证书与主体名；
+- ⚠️ **轮换 NAS 账号口令**（本轮探针用到的口令明文出现在会话记录里）。
+---
+
+## 四十一、T56：代理二进制路径改走 `net.request`（绕开 undici 的 ByteString 崩溃）
+
+### 起因
+
+T55 修完「就绪判定」后，真机复验**仍然拿不到转码产物**：产物请求挂住 **12 002 ms** 后被中止，
+紧接着的 `status` 也挂 **20 014 ms**，主进程还弹
+「**A JavaScript error occurred in the main process**」。
+⇒ T55 下面还压着**另一个、更底层的缺陷**（与就绪判定无关）。
+
+### 根因（字节级确认）
+
+#### 触发链
+
+1. NAS 转码产物端点的响应带：
+
+   ```text
+   Content-Disposition: attachment; filename="占位曲目一 - 占位歌手二.mp3"; filename*=UTF-8''%E5%8D%A0%E4%BD%8D%E6%9B%B2%E7%9B%AE%E4%B8%80%20-%20%E5%8D%A0%E4%BD%8D%E6%AD%8C%E6%89%8B%E4%BA%8C.mp3
+   ```
+
+   `filename="…"` 那一段是**原始 UTF-8 字节**（`filename*` 是 RFC 5987 的百分号编码版）。
+
+2. 主进程出网走 **Chromium 分区栈**
+   （`electron/http.ts` → `session.fromPartition('fn-nas-v<epoch>').fetch()`），
+   Chromium 把响应头按 **UTF-8** 解码 ⇒ 上面那个头变成**真正的 CJK 字符**。
+
+3. Electron 内部把上游响应头塞进 **undici 的 `Headers`** ⇒ `Headers.set` 要求 **ByteString**
+   （每个字符 ≤ 255）⇒ 抛
+   `TypeError: Cannot convert argument to a ByteString because the character at index 22 has a value of 21344 which is greater than 255.`
+
+4. **`attachment; filename="` 恰好 22 个字符** ⇒ **index 22 就是文件名的第一个字符** `占`
+   = **U+5360 = 21344** —— 与报错里的数值**完全吻合**。
+
+5. 该抛出发生在 **undici 的事件回调里**（不在我们的 `await` 链上）⇒
+   **主进程未捕获异常**（弹错误框），同时那个 `fetch` **永远不会 settle**
+   ⇒ 代理的二进制路径挂死 ⇒ 标准音质永远回退原始音质。
+
+#### 为什么别的路径没事
+
+| 路径 | 上游是否带 `Content-Disposition` | 结果 |
+|---|---|---|
+| `download/track/transcode/file` | **带**（中文歌名） | 崩 + 挂死 |
+| `track/stream` | 不带 | 正常（实测 99 ms / 206 / `audio/flac`） |
+| `static/cover` | 不带 | 正常 |
+| JSON 路径（`track/list` 等） | 不带 | 正常 |
+
+#### 为什么 Node 直连没事
+
+Node 自己的 undici 把响应头按 **latin1** 解码 ⇒ 中文变成乱码字节（每字节 ≤ 255）⇒ **不抛错**。
+探针实测：同一端点、同一任务，Node 直连 **63 ms** 返回 206。
+⇒ **同一台服务器、同一个端点，客户端栈不同 ⇒ 表现不同** —— 这就是「代理挂 / 直连秒回」的全部原因。
+
+#### 服务端绕不过
+
+实测 8 种查询参数（`inline=1` / `attachment=0` / `download=0` / `disposition=none` /
+`contentDisposition=0` / `filename=0` / `noDisposition=1` / `type=stream`）**全部无效**，
+`Content-Disposition` 照发 ⇒ **只能改客户端**。
+
+### 做法（用户拍板：代理二进制路径改用 `net.request`）
+
+- `electron/http.ts`：`HttpStack` 新增**可选**方法 `stream?()`；
+  Electron 运行时走 **`net.request({ url, method, headers, session })`**：
+  - **`session` 传当前分区 session**（`fn-nas-v<epoch>`）⇒ **证书放行语义一字不变**
+    （自签 NAS 照常能用，`setCertificateVerifyProc` 照样生效）；
+  - `net.request` 的响应头是 **`Record<string, string | string[]>`（普通字符串）**，
+    **不经过 undici 的 `Headers`** ⇒ **不做 ByteString 校验** ⇒ 非 ASCII 头**不会崩**；
+  - 无 Electron（单测）时回落到注入的 `fetchImpl` / 全局 `fetch`，**行为与改前完全一致**。
+- `electron/proxy.ts`：`proxyBinary` 改用 `http.stream?.()`；
+  上游响应头改用**普通记录**承载，**绝不**进 `Headers`；
+  转发给渲染进程时**逐个做 ByteString 安全检查**（含 >255 字符的值一律**跳过**）。
+- 行为保持不变：`Range` 透传、`206` / `content-range` / `accept-ranges` 原样带回、
+  `content-encoding` 存在时照样删 `content-length`、`401/403` 静默续期一次再重发、
+  响应体继续流式转发、渲染进程带来的 `cookie` / `authorization` 照样不透传。
+
+### 验证
+
+- `tsc --noEmit` exit 0；
+- 单元测试 **1862 条 / 85 个文件**全绿（基线 1853 / 85，**新增 9**：
+  `test/http-stack.test.ts` 17 → 23、`test/proxy.test.ts` 48 → 51）；
+- **变异自证**：把「二进制路径走 `http.stream`」改回「走 `http.fetch`」→ **2 条红**；
+  复原后 sha256 回基线 `446441275a63298a`；
+- Playwright E2E **24 条**全绿；打包通过；
+- **真机**（真实 NAS + 真实 userData，偏好临时改 `standard`，测完逐字节还原）：
+
+  | 观测项 | T55（修复前） | **T56（修复后）** |
+  |---|---|---|
+  | 产物请求耗时 | **12 002 ms** → 中止 | **89 ms**（206 / `audio/mpeg` / `bytes 0-1/7005165`） |
+  | 紧跟的 `status` | **20 014 ms** → 中止 | 89 ms（正常） |
+  | `<audio>.src` | 回退的 `fnm://srv/track/stream?guid=…` | **转码产物地址** `fnm://srv/download/track/transcode/file?downloadId=…` |
+  | 播放条提示 | 「标准音质不可用：请求超时（20000 毫秒内没有响应）…」（`role="status"`） | **没有提示**（`notice` 元素不存在） |
+  | 进度 | 0:04 → 0:12（在走，回退那一路） | **0:05 → 0:13**（在走，**产物那一路**） |
+  | 主进程未捕获异常 | 弹「A JavaScript error occurred in the main process」 | **0 条**（主进程 `uncaughtException` 钩子全程未触发） |
+
+### 已知限制（如实标注）
+
+- ⚠️ **JSON 路径仍走 `session.fetch`**（本轮不动）：目前观测到的 JSON 端点都不带非 ASCII 响应头；
+  若哪天某个 JSON 端点也开始带中文头，同一个崩溃会复现 —— **留作后续观察项**；
+- ⚠️ `net.request` 是 Electron 的 legacy API：它与 `session.fetch` **共用同一个 Chromium 网络栈**
+  （同一个 `URLLoader`），差别只在「响应头不经过 undici 的 ByteString 校验」；
+- ⚠️ `net.request` 不支持 `AbortSignal`：上游请求的中止语义与 T56 之前一致
+  （代理本来也没把渲染进程的取消信号透传给上游）；
+- ⚠️ **服务端引擎对个别曲目确定性失败**（《占位曲目二》《占位曲目三》6/6，`errno=68157441`）
+  → 与 T56 无关，这类曲目仍需回退原始音质；
+- ⚠️ 标准音质**首次起播要等 1~3 秒**（服务端转码时间），界面显示「正在准备标准音质…」。
+
+### 遗留 / 待办
+
+- ⚠️ 待复验：T31~T56（用户侧肉眼）；
 - ⚠️ 待用户拍板：词岛胶囊要不要收窄（520×96）；Electron 默认图标要不要换；
 - ⚠️ 用户侧待办：更新服务器地址（https 静态目录）+ 代码签名证书与主体名；
 - ⚠️ **轮换 NAS 账号口令**（本轮探针用到的口令明文出现在会话记录里）。

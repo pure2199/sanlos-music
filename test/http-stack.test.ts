@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { Readable } from 'node:stream'
 
-import { createHttpStack, type ElectronSessionLike } from '../electron/http'
+import {
+  createHttpStack,
+  type ElectronNetClientRequestLike,
+  type ElectronNetLike,
+  type ElectronSessionLike,
+} from '../electron/http'
 import { TrustedHosts, VERIFY_ACCEPT, VERIFY_REJECT } from '../electron/cert'
 
 // ---------------------------------------------------------------------------
@@ -236,6 +242,199 @@ describe('HttpStack 在没有 Electron 运行时时的回落', () => {
     const stack = createHttpStack()
     expect(() => stack.bumpTrustEpoch()).not.toThrow()
     expect(stack.partitionName()).toBe('fn-nas-v1')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T56：流式取上游（`net.request` 路径）
+//
+// ⚠️ 这一组钉的是 T56 的**核心根因**：
+//    `session.fetch` 会把上游响应头塞进 undici 的 `Headers` ⇒ **ByteString 校验**
+//    （每个字符 ≤ 255）；而 Chromium 按 **UTF-8** 解码响应头 ⇒ 上游一旦回带中文的
+//    头（实测 NAS 转码产物的 `Content-Disposition: attachment; filename="占位曲目一 - 占位歌手二.mp3"`），
+//    就抛 `TypeError` 且**抛在事件回调里** ⇒ 主进程未捕获异常 + 那个请求**永不返回**。
+//    ⇒ 二进制路径改走 `net.request`：它的响应头是**普通字符串记录**。
+// ---------------------------------------------------------------------------
+
+/** 假 Electron `net` 模块：记录请求参数，回放一条可读流响应。 */
+function fakeElectronNet(response: {
+  statusCode: number
+  headers: Record<string, string | string[]>
+  body?: string
+}): {
+  net: ElectronNetLike
+  calls: Array<{
+    url: string
+    method: string
+    headers: Record<string, string>
+    session: unknown
+    written: string
+  }>
+} {
+  const calls: Array<{
+    url: string
+    method: string
+    headers: Record<string, string>
+    session: unknown
+    written: string
+  }> = []
+
+  const net: ElectronNetLike = {
+    request(options) {
+      const call = {
+        url: options.url,
+        method: options.method,
+        headers: options.headers,
+        session: options.session,
+        written: '',
+      }
+      calls.push(call)
+      const handlers = new Map<string, Array<(arg: never) => void>>()
+      const req = {
+        on(event: string, listener: (arg: never) => void) {
+          const list = handlers.get(event) ?? []
+          list.push(listener)
+          handlers.set(event, list)
+        },
+        write(chunk: string) {
+          call.written += chunk
+        },
+        end() {
+          const res = Object.assign(Readable.from([Buffer.from(response.body ?? 'ok')]), {
+            statusCode: response.statusCode,
+            headers: response.headers,
+          })
+          for (const listener of handlers.get('response') ?? []) {
+            ;(listener as unknown as (r: unknown) => void)(res)
+          }
+        },
+      }
+      return req as unknown as ElectronNetClientRequestLike
+    },
+  }
+  return { net, calls }
+}
+
+/** 假 session 模块：额外把**创建出来的分区对象**记下来（用来核对 `net.request` 拿到的是它）。 */
+function fakeSessionModule(): { mod: ElectronSessionLike; created: unknown[] } {
+  const created: unknown[] = []
+  const mod: ElectronSessionLike = {
+    fromPartition() {
+      const ses = {
+        fetch: async () => new Response('ok', { status: 200 }),
+        setCertificateVerifyProc() {
+          // 本组用例不关心证书放行。
+        },
+      }
+      created.push(ses)
+      return ses
+    },
+  }
+  return { mod, created }
+}
+
+describe('HttpStack 的流式取上游（T56：net.request 路径）', () => {
+  it('Electron 可用时走 net.request，并带上当前分区 session（证书放行语义不变）', async () => {
+    const { mod, created } = fakeSessionModule()
+    const { net, calls } = fakeElectronNet({
+      statusCode: 206,
+      headers: { 'content-range': 'bytes 0-1/1024', 'content-type': 'audio/mpeg' },
+    })
+    const stack = createHttpStack({ session: mod, net })
+
+    const upstream = await stack.stream!(
+      new Request('https://nas.local:5667/music/api/v1/track/stream?guid=g1', {
+        headers: { range: 'bytes=0-1', authx: 'nonce=1', cookie: 'music-token=TK' },
+      }),
+    )
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.url).toBe('https://nas.local:5667/music/api/v1/track/stream?guid=g1')
+    expect(calls[0]?.method).toBe('GET')
+    expect(calls[0]?.headers['range']).toBe('bytes=0-1')
+    expect(calls[0]?.headers['authx']).toBe('nonce=1')
+    expect(calls[0]?.headers['cookie']).toBe('music-token=TK')
+    // ⚠️ **必须**是当前分区：否则自签 NAS 的证书放行会失效。
+    expect(calls[0]?.session).toBe(created[0])
+
+    expect(upstream.status).toBe(206)
+    expect(upstream.headers['content-range']).toBe('bytes 0-1/1024')
+    expect(upstream.headers['content-type']).toBe('audio/mpeg')
+  })
+
+  it('上游响应头含中文时**不抛错**，且头原样保留（T56 的核心回归）', async () => {
+    const { mod } = fakeSessionModule()
+    const disposition = 'attachment; filename="占位曲目一 - 占位歌手二.mp3"'
+    const { net } = fakeElectronNet({
+      statusCode: 206,
+      headers: { 'content-disposition': disposition, 'content-type': 'audio/mpeg' },
+    })
+    const stack = createHttpStack({ session: mod, net })
+
+    const upstream = await stack.stream!(new Request('https://nas.local/x'))
+
+    expect(upstream.status).toBe(206)
+    expect(upstream.headers['content-disposition']).toBe(disposition)
+    // ⚠️ **鉴别力**：这个值里真的有码位 > 255 的字符（`占` = U+5360 = 21344）。
+    //    走 undici 的 `Headers` 就会抛 ByteString 错 ⇒ 这里必须**不是** Headers。
+    expect([...(upstream.headers['content-disposition'] ?? '')].some((c) => (c.codePointAt(0) ?? 0) > 255)).toBe(
+      true,
+    )
+  })
+
+  it('响应头是**普通记录**（键统一小写），不是 undici 的 Headers', async () => {
+    const { mod } = fakeSessionModule()
+    const { net } = fakeElectronNet({
+      statusCode: 200,
+      headers: { 'Content-Type': 'audio/mpeg', 'Content-Length': '3' },
+    })
+    const stack = createHttpStack({ session: mod, net })
+
+    const upstream = await stack.stream!(new Request('https://nas.local/x'))
+
+    expect(upstream.headers['content-type']).toBe('audio/mpeg')
+    expect(upstream.headers['content-length']).toBe('3')
+    expect(upstream.headers instanceof Headers).toBe(false)
+  })
+
+  it('请求体被原样写给上游（POST）', async () => {
+    const { mod } = fakeSessionModule()
+    const { net, calls } = fakeElectronNet({ statusCode: 200, headers: {} })
+    const stack = createHttpStack({ session: mod, net })
+
+    await stack.stream!(
+      new Request('https://nas.local/x', { method: 'POST', body: '{"trackGUID":"g1"}' }),
+    )
+
+    expect(calls[0]?.method).toBe('POST')
+    expect(calls[0]?.written).toBe('{"trackGUID":"g1"}')
+  })
+
+  it('拿不到 net 模块时回落到 fetch（而不是崩）', async () => {
+    const { mod } = fakeSessionModule()
+    const globalMock = vi.fn(async () => new Response('fallback', { status: 200 }))
+    vi.stubGlobal('fetch', globalMock)
+    const stack = createHttpStack({ session: mod })
+
+    const upstream = await stack.stream!(new Request('http://nas.local/x'))
+
+    expect(globalMock).toHaveBeenCalledTimes(1)
+    expect(upstream.status).toBe(200)
+    expect(await new Response(upstream.body).text()).toBe('fallback')
+  })
+
+  it('没有 Electron 时回落到全局 fetch（单测环境，行为与改前一致）', async () => {
+    const globalMock = vi.fn(
+      async () => new Response('global', { status: 200, headers: { 'x-a': 'b' } }),
+    )
+    vi.stubGlobal('fetch', globalMock)
+    const stack = createHttpStack()
+
+    const upstream = await stack.stream!(new Request('http://nas.local/x'))
+
+    expect(globalMock).toHaveBeenCalledTimes(1)
+    expect(upstream.status).toBe(200)
+    expect(upstream.headers['x-a']).toBe('b')
   })
 })
 

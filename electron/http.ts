@@ -35,6 +35,8 @@
 //   （全局 fetch 在**调用时**解析，故 Vitest 的 `vi.stubGlobal('fetch', …)` 仍然有效）。
 // - 不引入新依赖；只用标准 Web API。
 
+import { Readable } from 'node:stream'
+
 import { TrustedHosts } from './cert'
 
 // ---------------------------------------------------------------------------
@@ -63,6 +65,69 @@ export interface ElectronSessionPartitionLike {
   ): void
 }
 
+/**
+ * Electron `net` 模块的最小接口（只用到 `request`）。
+ *
+ * ⚠️ **为什么二进制路径要绕开 `session.fetch`**（T56 实测根因）：
+ *    `session.fetch` 会把上游响应头塞进 **undici 的 `Headers`** ⇒
+ *    **ByteString 校验**（每个字符必须 ≤ 255）；而 Chromium 把响应头按 **UTF-8** 解码
+ *    ⇒ 上游一旦回一个带中文的头（实测 NAS 转码产物的
+ *    `Content-Disposition: attachment; filename="占位曲目一 - 占位歌手二.mp3"`），
+ *    就抛 `TypeError`，且**抛在事件回调里** ⇒ 主进程未捕获异常
+ *    （弹「A JavaScript error occurred in the main process」），
+ *    同时那个请求**永远不会返回** ⇒ 代理的二进制路径挂死。
+ *    ⇒ `net.request` 的响应头是**普通字符串记录**，**不经过** ByteString 校验。
+ */
+export interface ElectronNetLike {
+  /**
+   * 发一个请求。
+   *
+   * @param options `session` 传当前分区 ⇒ **证书放行语义与 `session.fetch` 一致**
+   *   （自签 NAS 照常能用；`setCertificateVerifyProc` 照样生效）。
+   */
+  request(options: {
+    url: string
+    method: string
+    headers: Record<string, string>
+    session?: unknown
+  }): ElectronNetClientRequestLike
+}
+
+/** `net.request` 返回的请求对象（只用到「事件」与「写入」）。 */
+export interface ElectronNetClientRequestLike {
+  on(event: 'response', listener: (response: ElectronNetResponseLike) => void): void
+  on(event: 'error', listener: (error: Error) => void): void
+  write(chunk: string): void
+  end(): void
+}
+
+/**
+ * `net.request` 的响应（Electron 的 `IncomingMessage`：Node Readable + 状态码 + 头）。
+ *
+ * ⚠️ `headers` 的值**可以含非 ASCII**（Chromium 的 UTF-8 解码结果）——
+ *    这正是它比 undici 的 `Headers` 安全的地方。
+ */
+export interface ElectronNetResponseLike extends Readable {
+  statusCode: number
+  headers: Record<string, string | string[]>
+}
+
+/**
+ * 上游流式响应的最小形状（T56）。
+ *
+ * ⚠️ **响应头是「普通记录」而不是 undici 的 `Headers`**：
+ *    `Headers.set` 会做 ByteString 校验，而上游头**可能含中文**
+ *    ⇒ **绝不**把上游响应头塞进 `Headers`。
+ */
+export interface UpstreamStream {
+  /** 上游状态码（`206` 必须原样保留）。 */
+  readonly status: number
+  /** 上游响应头（**键统一小写**；值是普通字符串，**可以**含非 ASCII）。 */
+  readonly headers: Readonly<Record<string, string>>
+  /** 响应体（流式；无体时为 `null`）。 */
+  readonly body: ReadableStream<Uint8Array> | null
+}
+
 /** 出网请求的入参。 */
 export type HttpStackInput = string | URL | Request
 
@@ -80,6 +145,19 @@ export interface HttpStack {
    * @param init 请求选项（方法 / 头 / 体 / `signal`）。
    */
   fetch(input: HttpStackInput, init?: RequestInit): Promise<Response>
+  /**
+   * **流式**取上游（T56 新增）。
+   *
+   * ⚠️ **二进制路径必须用它，不要用 `fetch`**：`fetch` 走 `session.fetch`，
+   *    它把上游响应头塞进 undici 的 `Headers` ⇒ **ByteString 校验**；
+   *    而 Chromium 按 UTF-8 解码响应头 ⇒ 上游一旦回带中文的头就会崩
+   *    （详见 `UpstreamStream` 的说明）。
+   *    `stream` 走 Electron 的 `net.request`：响应头是**普通字符串记录**，
+   *    **不经过** ByteString 校验。
+   *
+   * - **可选**：缺席时（第三方替身）由调用方回落到 `fetch`，行为与 T56 之前一致。
+   */
+  stream?(request: Request): Promise<UpstreamStream>
   /**
    * 信任版本 +1（**此后**换新分区）。
    *
@@ -103,6 +181,12 @@ export interface HttpStackOptions {
   fetchImpl?: typeof fetch
   /** Electron `session` 模块替身（**单测接缝**）；缺省时惰性取真的。 */
   session?: ElectronSessionLike
+  /**
+   * Electron `net` 模块替身（**单测接缝**）；缺省时惰性取真的。
+   *
+   * ⚠️ 只有 `stream()`（二进制路径）会用到它；`net` 拿不到时 `stream()` 回落到 fetch。
+   */
+  net?: ElectronNetLike
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +227,100 @@ function resolveElectronSession(): ElectronSessionLike | null {
   } catch {
     return null
   }
+}
+
+/**
+ * 惰性取 Electron 的 `net` 模块（**不在模块顶层调用**）。
+ *
+ * ⚠️ 与 `session` 同样的道理：非 Electron 进程里 `require('electron')` 取不到 API
+ * ⇒ 返回 `null`，由调用方回落到 fetch。
+ */
+function resolveElectronNet(): ElectronNetLike | null {
+  try {
+    if (typeof require !== 'function') return null
+    const mod = require('electron') as { net?: unknown } | string
+    if (typeof mod !== 'object' || mod === null) return null
+    const net = (mod as { net?: unknown }).net
+    if (typeof net !== 'object' || net === null) return null
+    return net as ElectronNetLike
+  } catch {
+    return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 上游响应头的承载方式（T56）
+// ---------------------------------------------------------------------------
+
+/** `Headers` → 普通记录（键统一小写）。 */
+function headersToRecord(headers: Headers): Record<string, string> {
+  const record: Record<string, string> = {}
+  headers.forEach((value, name) => {
+    record[name.toLowerCase()] = value
+  })
+  return record
+}
+
+/**
+ * `net.request` 的响应头 → 普通记录（键统一小写；重复头用 `, ` 连接）。
+ *
+ * ⚠️ 值**保留原样**（**可以**含非 ASCII）—— 这正是它绕开 ByteString 校验的关键。
+ */
+function normalizeNetHeaders(
+  headers: Record<string, string | string[]> | undefined,
+): Record<string, string> {
+  const record: Record<string, string> = {}
+  if (!headers) return record
+  for (const [name, value] of Object.entries(headers)) {
+    record[name.toLowerCase()] = Array.isArray(value) ? value.join(', ') : String(value)
+  }
+  return record
+}
+
+/**
+ * 用 Electron 的 `net.request` 流式取一次上游（T56）。
+ *
+ * ⚠️ **为什么不用 `fetch`**：见 `UpstreamStream` 的说明（ByteString 崩溃）。
+ *
+ * @param request 上游请求（已带签名与凭证 Cookie）。
+ * @param ses     当前分区 session（⇒ 证书放行语义与 `session.fetch` 一致）。
+ * @param net     Electron 的 `net` 模块。
+ */
+async function streamViaNet(
+  request: Request,
+  ses: unknown,
+  net: ElectronNetLike,
+): Promise<UpstreamStream> {
+  const headers: Record<string, string> = {}
+  request.headers.forEach((value, name) => {
+    headers[name] = value
+  })
+  // ⚠️ 请求体只能读一次：先读成字符串，`net.request` 再写出去。
+  const bodyText = request.body ? await request.text() : null
+
+  const clientRequest = net.request({
+    url: request.url,
+    method: request.method,
+    headers,
+    session: ses,
+  })
+
+  return await new Promise<UpstreamStream>((resolve, reject) => {
+    let settled = false
+    clientRequest.on('response', (response) => {
+      settled = true
+      resolve({
+        status: response.statusCode,
+        headers: normalizeNetHeaders(response.headers),
+        body: Readable.toWeb(response) as unknown as ReadableStream<Uint8Array>,
+      })
+    })
+    clientRequest.on('error', (error: Error) => {
+      if (!settled) reject(error)
+    })
+    if (bodyText !== null) clientRequest.write(bodyText)
+    clientRequest.end()
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +374,11 @@ export function createHttpStack(opts: HttpStackOptions = {}): HttpStack {
     return ses
   }
 
+  /** 取 `net` 模块：注入优先 → 惰性取真的。 */
+  function currentNet(): ElectronNetLike | null {
+    return opts.net ?? resolveElectronNet()
+  }
+
   return {
     async fetch(input: HttpStackInput, init?: RequestInit): Promise<Response> {
       const ses = currentPartition()
@@ -208,6 +391,24 @@ export function createHttpStack(opts: HttpStackOptions = {}): HttpStack {
       // ⚠️ 全局 fetch 在**调用时**解析，故 Vitest 的 `vi.stubGlobal('fetch', …)` 仍然有效。
       const impl = opts.fetchImpl ?? globalThis.fetch
       return await impl(input as RequestInfo, init)
+    },
+    /**
+     * **流式**取上游（T56）：Electron 运行时里走 `net.request`。
+     *
+     * ⚠️ **不走 `session.fetch`**：它会把上游响应头塞进 undici 的 `Headers`
+     *    ⇒ ByteString 校验 ⇒ 上游回带中文的头就崩（详见 `UpstreamStream`）。
+     */
+    async stream(request: Request): Promise<UpstreamStream> {
+      const ses = currentPartition()
+      const net = currentNet()
+      if (ses && net) {
+        return await streamViaNet(request, ses, net)
+      }
+      // 回落：无 Electron（单测）→ 注入的 fetchImpl / 全局 fetch。
+      // ⚠️ 这里**不预读 body**（预读会把请求体消费掉）——直接把 Request 交给 fetch。
+      const impl = opts.fetchImpl ?? globalThis.fetch
+      const res = await impl(request as RequestInfo)
+      return { status: res.status, headers: headersToRecord(res.headers), body: res.body }
     },
     bumpTrustEpoch(): void {
       epoch += 1
