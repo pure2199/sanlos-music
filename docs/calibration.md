@@ -1420,8 +1420,12 @@ lookup 只认登记表里的**精确路径** → 路径穿越依然无从下手�
    文件名被 `sanitizeFileName()` 清洗过，非法字符成了下划线）；时长在**播放后**由媒体元素补
    （队列里其它曲目的时长仍显示 `--`）。要真标签得**单开任务**手写解析器（不引新依赖）。
 2. **只支持本地盘符路径**：不支持 `\\server\share` 网络路径，不支持 `.lnk` 快捷方式。
-3. Chromium 播不了的格式（FLAC / APE 等）→ 走**已有的 FFmpeg 兜底**，
+3. Chromium 播不了的格式（**APE / ALAC / WMA** 等）→ 走**已有的 FFmpeg 兜底**，
    本地曲目也接进了那条路（`lookupLocal` = 下载索引 → 本地曲目登记表）。
+   ⚠️ **2026-11-05 更正（T42）**：这一条原先写的是「FLAC / APE 等」→ **FLAC 那半句是错的**。
+   实测（真 Electron 32 / Chromium 128）：`canPlayType('audio/flac') = "probably"`；
+   16bit/44.1k 与 **24bit/96k** 的真 FLAC 字节进 Blob 都正常解出（`loadedmetadata`、duration 3 秒、零错误）；
+   APE / ALAC / WMA 才是 `""`。且 FLAC **不在** `UNDECODABLE_FORMATS` 里 → **不进** FFmpeg 兜底。
 
 ### 顺带修掉的一个真缺陷
 
@@ -1718,3 +1722,132 @@ T38 给顶栏加了一颗「本地」按钮 → 已登录态顶栏变成 **10 �
 - ⚠️ **白名单是按当前官网定的**：以后要加别的官方链接（帮助文档 / 仓库等），
   得**显式**往 `EXTERNAL_LINK_ALLOWED_HOSTS` 里加（**不自动放宽**）；
 - ⚠️ **真机肉眼复验未做**：点官网应**用系统浏览器打开**，**应用窗口不被导航走**。
+---
+
+## 二十五、T42：本地音乐标签再补三个容器（MP4/M4A、WAV、AIFF）
+
+### 背景与选型
+
+T39 已经手写了 **ID3v2 / FLAC / Ogg** 三个容器的标签解析器。T42 补上剩下三个最常见的：
+
+| 容器 | 标签放哪 | 与既有解析器的关系 |
+| --- | --- | --- |
+| **MP4 / M4A** | `moov.udta.meta.ilst` | 字段名是**带 © 的四字节码**（`©nam` / `©ART` / `©alb`）→ **复用不了** ID3 |
+| **WAV** | `LIST` → `INFO` → `INAM` / `IART` / `IPRD` | RIFF 家族，**块长小端** |
+| **AIFF / AIFC** | `COMM` + `ID3 ` 块 | FORM 家族，**块长大端**；`ID3 ` 块**就是** ID3v2 → 可复用 |
+
+⚠️ **选型理由**：台账里还留着「歌单面板排序 / 过滤」，但**真实账号 `playlist/list` 实测 `total=0`**
+（一个歌单都没有）→ 对用户**没有实际价值** → 本轮选「更多容器标签」。
+
+⚠️ **不引新 npm 依赖**：三个解析器全部手写（与 T39 一致）。
+
+### 字节布局（以 ffmpeg 9.0.2 造的真实文件核对过）
+
+样本留在仓库外的 `release/t42-samples/`，**不入库**。真实字节长这样：
+
+#### MP4（`sample.m4a`，25 882 字节）
+
+```
+@0     ftyp size=28
+@28    free size=8
+@36    mdat size=24481
+@24517 moov size=1365          ← ⚠️ moov 在文件尾！只读文件头会漏掉全部标签
+        ├─ mvhd  version=0 timescale=44100 duration=132300 → 3 秒
+        └─ udta
+           └─ meta              ← ⚠️ FullBox：头 4 字节 version+flags → 子原子从 +4 开始
+              ├─ hdlr
+              └─ ilst
+                 ├─ ©nam size=26
+                 ├─ ©ART size=26
+                 └─ ©alb size=27
+```
+
+⚠️ **`data` 原子的载荷前有 8 字节**（真实字节）：
+
+```
+00 00 00 12 64 61 74 61 | 00 00 00 01 | 00 00 00 00 | 54 31
+└ size=18 ┘└─ 'data' ─┘  └ 类型指示 ┘  └ locale ┘   └ 载荷 'T1' ┘
+```
+
+#### WAV（`sample.wav`，264 714 字节）
+
+```
+chunk fmt  @12  size=16   → channels=1 rate=44100 byteRate=88200 blockAlign=2 bits=16
+chunk LIST @36  size=62    → 'INFO' IART 'A1' INAM 'T1' IPRD 'AL1' ISFT 'Lavf…'
+chunk data @106 size=264600
+```
+
+⚠️ **文本块按 C 字符串写** → 长度里**含结尾的 NUL**（`'A1'` + 1 个 NUL = 3 字节）→ **必须按偶数补齐**，
+且 `String.trim()` **不删 NUL**。
+
+#### AIFF（`sample.aiff`，264 760 字节）
+
+```
+chunk NAME @12      size=2
+chunk COMM @22      size=18   → channels=1 frames=132300 sampleSize=16
+                                采样率 = 80 位扩展精度：40 0e ac 44 00 00 00 00 00 00 → 44100
+chunk SSND @48      size=264608
+chunk ID3  @264664  size=87   ← ⚠️ ffmpeg 要加 -write_id3v2 1 才会写
+```
+
+⚠️ **80 位扩展精度浮点**：`value = 尾数 × 2^(指数 − 16383 − 63)`；符号位是第 1 字节最高位，
+指数是 15 位（`0` = 0，`0x7FFF` = Inf/NaN → 当「没有采样率」）。
+
+### 抓到的两个真缺陷（都是**真文件**逼出来的，单靠构造字节流发现不了）
+
+1. **`data` 原子的载荷偏移是 +8 不是 +4**（4 字节类型指示 + 4 字节 locale）。
+   最初写成 +4 → 载荷里混进了 locale 的 4 个 NUL。
+   ⚠️ **但真实文件（ffmpeg / iTunes）的 locale 恒为 0** → 那 4 个 NUL 会被「剔 NUL」那层吸收
+   → **只测真实文件发现不了**。⇒ 单测里**故意用非 0 的 locale**（`0x41424344`）把偏移**钉死**。
+2. **文本结尾的 NUL 必须剔掉**：`String.trim()` 只删空白，**不删 NUL** → 歌名会带看不见的 `\0`。
+
+### 关键实现决定
+
+| 决定 | 理由 |
+| --- | --- |
+| 一律**按文件头嗅探**，不靠扩展名猜 | `readTagsFromReader` 是唯一入口；MP4 看第 4~8 字节，WAV 看 `RIFF`+`WAVE`，AIFF 看 `FORM`+`AIFF`/`AIFC` |
+| MP4 **按偏移走顶层原子表** | `moov` 常在文件尾 → 只读文件头会漏掉全部标签 |
+| 原子长度**三种写法**都认 | 32 位 / `size==1`（64 位 `largesize`）/ `size==0`（延伸到文件尾） |
+| `meta` 是 FullBox → 子原子从 **+4** 开始 | 否则会把 `hdlr` 当成第一个子原子 |
+| `mvhd` 的偏移**随版本变** | v0：`timescale@+12` / `duration@+16`；v1：`timescale@+20` / `duration@+24`（**8 字节**） |
+| 文本解码 **UTF-8 → GBK → Latin-1** | 老工具写的 WAV `LIST INFO` 常见 GBK 中文；UTF-8 用**严格模式**（`fatal: true`）才判得出解不出来 |
+| 80 位浮点**自己算** | Node 没有现成的 extended 格式 |
+| 元数据块续读沿用 **2 MB** 预算 | 宁可少读，也不把内存吃穿 |
+| 原子/块遍历**防死循环** | 下一个位置 ≤ 当前位置 → 立刻收手 |
+| **全程不抛** | 不认识 / 头不完整 → `null` 或**空标签** |
+
+### 明确不做（写进规格，免得被当漏做）
+
+**APEv2**（另一种标签格式，用得少）、**WMA / ASF**（另一个容器家族）、
+**裸 ADTS-AAC**（裸流没有容器头，元数据本来就无处安放）。
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1688 passed / 75 files**（基线 1669 / 74，**新增 19**）；
+  `playwright test` **24 passed**（本任务**不改 UI → 不新增 E2E**）；
+- **真文件验证**（不入库样本）：ffmpeg 造的 m4a / wav / aiff → 真解析器读出
+  歌名 / 歌手 / 专辑 / 时长**全部正确**；
+- 本轮改动文件 **U+FFFD = 0**、无 BOM、行尾保持原样（`docs/calibration.md` 仍 **CRLF**）；
+- **变异自证（六处全部先红后复原，sha256 回基线 `c1aab88f35040f1b`）**：
+  1. MP4 `data` 载荷偏移 `+8` → `+4` → 「locale 非 0」那条**红**；
+  2. MP4 找 `moov` 改成**只看文件头** → 「`moov` 在文件尾」那条**红**；
+  3. 去掉**结尾 NUL 剔除** → 「结尾的 NUL 要剔掉」那条**红**；
+  4. GBK 退路改成 Latin-1 → 「老工具写的 GBK 标签」那条**红**；
+  5. 80 位浮点指数少减 63 → 三条 AIFF 时长**红**；
+  6. WAV 字节率取错字段（`@+4` 采样率 instead of `@+8` 字节率）→ 三条 WAV 时长**红**。
+
+### 顺带修掉的一个文档错句
+
+「二十、T38」章节的「已知限制」第 3 条原写「Chromium 播不了的格式（**FLAC** / APE 等）」
+→ **FLAC 那半句是错的**（Chromium **能**解 FLAC，实测 `canPlayType('audio/flac') = "probably"`，
+16bit/44.1k 与 24bit/96k 的真 FLAC 字节进 Blob 都正常出 duration；且 FLAC **不在**
+`UNDECODABLE_FORMATS` 里 → **不进** FFmpeg 兜底）→ 已改成「APE / ALAC / WMA 等」并补更正说明。
+
+### 遗留 / 待办
+
+- ⚠️ **真机肉眼复验未做**：本地音乐里放真实的 m4a / wav / aiff 文件（用户侧操作）；
+- ⚠️ **iTunes 写的 m4a 没实测**（字节布局以 ffmpeg 的样本核对过）→ 单测用非 0 locale 把偏移钉死；
+- ⚠️ **WAV 的 `LIST INFO` 若是 UTF-16（无 BOM）** → 解不出来（会走 GBK / Latin-1）→ 可能乱码。
+  WAV 的历史遗留（无 BOM 无法判定），**不猜**；
+- ⚠️ **AIFC 的压缩类型没读** → AIFC 压缩音频的时长仍按采样帧数算；
+- ⚠️ **`ilst` 的自由格式条目**（`----` 开头）**不解析** → 只取 `©nam` / `©ART` / `©alb`。

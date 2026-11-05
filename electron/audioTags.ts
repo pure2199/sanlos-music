@@ -792,6 +792,427 @@ export async function parseOggTags(reader: TagReader, head: Buffer): Promise<Aud
 }
 
 // ---------------------------------------------------------------------------
+// 文本解码（MP4 / WAV / AIFF 共用）
+// ---------------------------------------------------------------------------
+
+/**
+ * 解码一段文本（**UTF-8 优先**）。
+ *
+ * ⚠️ WAV 的 `LIST INFO` 与 MP4 的 `ilst` 里**中文字幕常见 GBK**（老工具写的）
+ *    → UTF-8 解不出来（严格模式会抛）→ 退到 GBK，再退到 Latin-1（至少不炸）。
+ */
+function decodeContainerText(bytes: Buffer): string {
+  if (bytes.length === 0) return ''
+  // ⚠️ **UTF-16（带 BOM）**：Windows 的工具写 WAV `LIST INFO` 时常见。
+  if (bytes.length >= 2) {
+    const b0 = byteAt(bytes, 0)
+    const b1 = byteAt(bytes, 1)
+    if (b0 === 0xff && b1 === 0xfe) return cleanText(bytes.subarray(2).toString('utf16le'))
+    if (b0 === 0xfe && b1 === 0xff) return cleanText(swapBytes16(bytes.subarray(2)).toString('utf16le'))
+  }
+  try {
+    return cleanText(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+  } catch {
+    try {
+      return cleanText(new TextDecoder('gbk').decode(bytes))
+    } catch {
+      return cleanText(bytes.toString('latin1'))
+    }
+  }
+}
+
+/**
+ * 清掉文本里的 **NUL 填充**，再 trim。
+ *
+ * ⚠️ WAV `LIST INFO` 的文本块长度常常**含结尾的 NUL**（按 C 字符串写的）
+ *    → `String.trim()` **不删 NUL** → 必须先剔掉，否则歌名会带上看不见的 `\0`。
+ */
+function cleanText(value: string): string {
+  return value.replace(/\u0000/g, '').trim()
+}
+
+// ---------------------------------------------------------------------------
+// MP4 / M4A（ISO BMFF 容器）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么单独写**：M4A 是 iTunes 系的容器，标签在 `moov.udta.meta.ilst` 里，
+//    字段名是**带 © 的四字节码**（`©nam` / `©ART` / `©alb`）→ 和 ID3 的 `TIT2`
+//    完全不是一套，**复用不了** ID3 解析器。
+//
+// ⚠️ **`moov` 常在文件尾**：不流式写入的 mp4/m4a 会把索引放在末尾
+//    → 只能**走顶层原子表按偏移找**（`reader.read(offset, len)`），只读文件头会漏。
+//
+// ⚠️ **字节预算**：元数据块续读沿用 `TAG_METADATA_MAX_BYTES`（2 MB）
+//    → 超了只吃前面的部分（宁可少读，也不把内存吃穿）。
+
+/** MP4 / M4A 的顶层原子类型（位于字节 4~8）。 */
+function isMp4Magic(buffer: Buffer): boolean {
+  if (buffer.length < 8) return false
+  const type = buffer.subarray(4, 8).toString('latin1')
+  return type === 'ftyp' || type === 'moov' || type === 'styp' || type === 'mdat'
+}
+
+/** 一个 MP4 原子（盒子）。 */
+interface Mp4Atom {
+  /** 原子类型（4 字节 ASCII）。 */
+  type: string
+  /** 原子**内容**的起始偏移。 */
+  contentOffset: number
+  /** 原子内容长度（字节）。 */
+  contentSize: number
+}
+
+/** 读一个大端 64 位整数（原子长度可能超过 32 位）。 */
+function readUint64BE(buffer: Buffer, offset: number): number {
+  return readUint32BE(buffer, offset) * 4294967296 + readUint32BE(buffer, offset + 4)
+}
+
+/** 读一个 MP4 原子的头（**在内存缓冲里**；偏移相对缓冲起点）。 */
+function readMp4AtomIn(buffer: Buffer, offset: number): Mp4Atom | null {
+  if (offset < 0 || offset + 8 > buffer.length) return null
+  const size = readUint32BE(buffer, offset)
+  const type = buffer.subarray(offset + 4, offset + 8).toString('latin1')
+  let headerSize = 8
+  let contentSize = size
+  if (size === 1) {
+    // 64 位长度（largesize）。
+    if (offset + 16 > buffer.length) return null
+    contentSize = readUint64BE(buffer, offset + 8)
+    headerSize = 16
+  } else if (size === 0) {
+    // 长度 0 = 延伸到文件尾。
+    contentSize = buffer.length - offset
+  }
+  if (contentSize < headerSize) return null
+  return { type, contentOffset: offset + headerSize, contentSize: contentSize - headerSize }
+}
+
+/** 在**内存缓冲**里找**第一个**指定类型的原子（**不递归**）。 */
+function findMp4AtomIn(
+  buffer: Buffer,
+  start: number,
+  end: number,
+  type: string,
+): Mp4Atom | null {
+  let offset = start
+  while (offset + 8 <= end) {
+    const atom = readMp4AtomIn(buffer, offset)
+    if (!atom) return null
+    if (atom.type === type) return atom
+    const next = atom.contentOffset + atom.contentSize
+    // ⚠️ 防死循环（长度异常时 `next` 可能 ≤ `offset`）。
+    if (next <= offset) return null
+    offset = next
+  }
+  return null
+}
+
+/** 读一个 MP4 原子的头（**按文件偏移**，用读取器）。 */
+async function readMp4Atom(reader: TagReader, offset: number): Promise<Mp4Atom | null> {
+  if (offset < 0 || offset + 8 > reader.size) return null
+  const header = await reader.read(offset, Math.min(16, reader.size - offset))
+  if (header.length < 8) return null
+  let size = readUint32BE(header, 0)
+  const type = header.subarray(4, 8).toString('latin1')
+  let headerSize = 8
+  if (size === 1) {
+    if (header.length < 16) return null
+    size = readUint64BE(header, 8)
+    headerSize = 16
+  } else if (size === 0) {
+    size = reader.size - offset
+  }
+  if (size < headerSize) return null
+  return { type, contentOffset: offset + headerSize, contentSize: size - headerSize }
+}
+
+/** 按文件偏移在 `[start, end)` 区间里找**第一个**指定类型的原子（**不递归**）。 */
+async function findMp4Atom(
+  reader: TagReader,
+  start: number,
+  end: number,
+  type: string,
+): Promise<Mp4Atom | null> {
+  let offset = start
+  while (offset + 8 <= end) {
+    const atom = await readMp4Atom(reader, offset)
+    if (!atom) return null
+    if (atom.type === type) return atom
+    const next = atom.contentOffset + atom.contentSize
+    if (next <= offset) return null
+    offset = next
+  }
+  return null
+}
+
+/** MP4 的 iTunes 标签码（`©` 在 latin1 里是 0xA9）。 */
+const MP4_TAG_TITLE = '\u00a9nam'
+const MP4_TAG_ARTIST = '\u00a9ART'
+const MP4_TAG_ALBUM = '\u00a9alb'
+
+/** 解析 `ilst` 里的条目 → 标签码 → 文本值。 */
+function parseMp4Ilst(buffer: Buffer, ilst: Mp4Atom): Map<string, string> {
+  const result = new Map<string, string>()
+  const end = ilst.contentOffset + ilst.contentSize
+  let offset = ilst.contentOffset
+  while (offset + 8 <= end) {
+    const item = readMp4AtomIn(buffer, offset)
+    if (!item) break
+    // 条目里是 `data` 原子：size + 'data' + 4 字节（类型 + 语言） + 内容。
+    const data = readMp4AtomIn(buffer, item.contentOffset)
+    // ⚠️ `data` 的载荷前有 **8 字节**：4 字节类型指示（`00 00 00 01` = UTF-8）
+    //    + 4 字节 locale → 载荷从 `contentOffset + 8` 开始（真实 m4a 字节核对过）。
+    if (data && data.type === 'data' && data.contentSize > 8) {
+      const value = decodeContainerText(
+        buffer.subarray(data.contentOffset + 8, data.contentOffset + data.contentSize),
+      )
+      if (value.length > 0) result.set(item.type, value)
+    }
+    const next = item.contentOffset + item.contentSize
+    if (next <= offset) break
+    offset = next
+  }
+  return result
+}
+
+/**
+ * 解析 MP4 / M4A 的标签。
+ *
+ * @param reader 读取器。
+ * @param head 已经读好的文件头。
+ */
+export async function parseMp4Tags(reader: TagReader, head: Buffer): Promise<AudioTags | null> {
+  if (!isMp4Magic(head)) return null
+
+  // ⚠️ **`moov` 可能在文件尾** → 必须按偏移找，不能只看文件头。
+  const moov = await findMp4Atom(reader, 0, reader.size, 'moov')
+  if (!moov) return null
+  const size = Math.min(moov.contentSize, TAG_METADATA_MAX_BYTES)
+  const buffer = await reader.read(moov.contentOffset, size)
+  if (buffer.length < 8) return null
+
+  const tags: AudioTags = {}
+
+  // --- 时长：moov → mvhd ---
+  const mvhd = findMp4AtomIn(buffer, 0, buffer.length, 'mvhd')
+  if (mvhd) {
+    const c = mvhd.contentOffset
+    const version = byteAt(buffer, c)
+    // v0：timescale / duration 各 4 字节；v1：各 8 字节（时间戳也是 8 字节）。
+    const timescale = version === 1 ? readUint32BE(buffer, c + 20) : readUint32BE(buffer, c + 12)
+    const duration = version === 1 ? readUint64BE(buffer, c + 24) : readUint32BE(buffer, c + 16)
+    if (timescale > 0 && duration > 0) tags.duration = duration / timescale
+  }
+
+  // --- 标签：moov → udta → meta → ilst ---
+  const udta = findMp4AtomIn(buffer, 0, buffer.length, 'udta')
+  if (udta) {
+    const udtaEnd = udta.contentOffset + udta.contentSize
+    const meta = findMp4AtomIn(buffer, udta.contentOffset, udtaEnd, 'meta')
+    if (meta) {
+      // ⚠️ `meta` 是 FullBox：头 4 字节是 version + flags → 子原子从 +4 开始。
+      const metaStart = meta.contentOffset + 4
+      const ilst = findMp4AtomIn(buffer, metaStart, meta.contentOffset + meta.contentSize, 'ilst')
+      if (ilst) {
+        const items = parseMp4Ilst(buffer, ilst)
+        const title = items.get(MP4_TAG_TITLE)
+        const artist = items.get(MP4_TAG_ARTIST)
+        const album = items.get(MP4_TAG_ALBUM)
+        if (title) tags.title = title
+        if (artist) tags.artist = artist
+        if (album) tags.album = album
+      }
+    }
+  }
+
+  return tags
+}
+
+// ---------------------------------------------------------------------------
+// RIFF 家族（WAV / AIFF 共用的块结构）
+// ---------------------------------------------------------------------------
+
+/** 一个 RIFF 块（chunk）。 */
+interface RiffChunk {
+  /** 块标识（4 字节 ASCII）。 */
+  id: string
+  /** 块数据起始偏移。 */
+  dataOffset: number
+  /** 块数据长度。 */
+  dataSize: number
+}
+
+/** 读一个 RIFF 块的头（**在内存缓冲里**）。 */
+function readRiffChunkIn(buffer: Buffer, offset: number, littleEndian: boolean): RiffChunk | null {
+  if (offset < 0 || offset + 8 > buffer.length) return null
+  const id = buffer.subarray(offset, offset + 4).toString('latin1')
+  const size = littleEndian ? readUint32LE(buffer, offset + 4) : readUint32BE(buffer, offset + 4)
+  return { id, dataOffset: offset + 8, dataSize: size }
+}
+
+/** 读一个 RIFF 块的头（**按文件偏移**，用读取器）。 */
+async function readRiffChunk(
+  reader: TagReader,
+  offset: number,
+  end: number,
+  littleEndian: boolean,
+): Promise<RiffChunk | null> {
+  if (offset + 8 > end || offset + 8 > reader.size) return null
+  const header = await reader.read(offset, 8)
+  if (header.length < 8) return null
+  const id = header.subarray(0, 4).toString('latin1')
+  const size = littleEndian ? readUint32LE(header, 4) : readUint32BE(header, 4)
+  return { id, dataOffset: offset + 8, dataSize: size }
+}
+
+/**
+ * 按文件偏移找**第一个**指定标识的 RIFF 块。
+ *
+ * ⚠️ 块数据按**偶数**字节补齐（RIFF 规范）→ 下一个块的位置要跳过补齐字节。
+ */
+async function findRiffChunk(
+  reader: TagReader,
+  start: number,
+  end: number,
+  id: string,
+  littleEndian: boolean,
+): Promise<RiffChunk | null> {
+  let offset = start
+  while (offset + 8 <= end) {
+    const chunk = await readRiffChunk(reader, offset, end, littleEndian)
+    if (!chunk) return null
+    if (chunk.id === id) return chunk
+    const next = chunk.dataOffset + chunk.dataSize + (chunk.dataSize % 2)
+    if (next <= offset) return null
+    offset = next
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// WAV（RIFF/WAVE）
+// ---------------------------------------------------------------------------
+
+/** 判断是不是 RIFF/WAVE。 */
+function isRiffMagic(buffer: Buffer): boolean {
+  return (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('latin1') === 'WAVE'
+  )
+}
+
+/**
+ * 解析 WAV 的标签。
+ *
+ * - `fmt ` → 字节率（算时长用）；
+ * - `data` → 数据长度 ÷ 字节率 = **精确**时长；
+ * - `LIST INFO` → `INAM`（歌名）/ `IART`（歌手）/ `IPRD`（专辑）。
+ */
+export async function parseWavTags(reader: TagReader, head: Buffer): Promise<AudioTags | null> {
+  if (!isRiffMagic(head)) return null
+
+  const tags: AudioTags = {}
+
+  // `fmt ` 块：channels(2) / sampleRate(4) / byteRate(4) / blockAlign(2) / bits(2)。
+  const fmt = await findRiffChunk(reader, 12, reader.size, 'fmt ', true)
+  let byteRate = 0
+  if (fmt) {
+    const body = await reader.read(fmt.dataOffset, Math.min(fmt.dataSize, 16))
+    byteRate = readUint32LE(body, 8)
+  }
+
+  // `data` 块 → 时长。
+  const data = await findRiffChunk(reader, 12, reader.size, 'data', true)
+  if (data && byteRate > 0 && data.dataSize > 0) {
+    tags.duration = data.dataSize / byteRate
+  }
+
+  // `LIST INFO` → 文本标签。
+  const list = await findRiffChunk(reader, 12, reader.size, 'LIST', true)
+  if (list && list.dataSize > 4) {
+    const body = await reader.read(list.dataOffset, Math.min(list.dataSize, TAG_METADATA_MAX_BYTES))
+    if (body.subarray(0, 4).toString('latin1') === 'INFO') {
+      const end = body.length
+      let offset = 4
+      while (offset + 8 <= end) {
+        const chunk = readRiffChunkIn(body, offset, true)
+        if (!chunk) break
+        const value = decodeContainerText(
+          body.subarray(chunk.dataOffset, chunk.dataOffset + chunk.dataSize),
+        )
+        if (value.length > 0) {
+          if (chunk.id === 'INAM') tags.title = value
+          else if (chunk.id === 'IART') tags.artist = value
+          else if (chunk.id === 'IPRD') tags.album = value
+        }
+        const next = chunk.dataOffset + chunk.dataSize + (chunk.dataSize % 2)
+        if (next <= offset) break
+        offset = next
+      }
+    }
+  }
+
+  return tags
+}
+
+// ---------------------------------------------------------------------------
+// AIFF / AIFC
+// ---------------------------------------------------------------------------
+
+/** 判断是不是 AIFF / AIFC。 */
+function isAiffMagic(buffer: Buffer): boolean {
+  if (buffer.length < 12) return false
+  if (buffer.subarray(0, 4).toString('latin1') !== 'FORM') return false
+  const type = buffer.subarray(8, 12).toString('latin1')
+  return type === 'AIFF' || type === 'AIFC'
+}
+
+/** 读 10 字节的 **80 位 IEEE 扩展精度**浮点（AIFF 的采样率用它）。 */
+function readExtended80(buffer: Buffer, offset: number): number {
+  const sign = (byteAt(buffer, offset) & 0x80) === 0 ? 1 : -1
+  const exponent = ((byteAt(buffer, offset) & 0x7f) << 8) | byteAt(buffer, offset + 1)
+  let mantissa = 0
+  for (let i = 0; i < 8; i += 1) mantissa = mantissa * 256 + byteAt(buffer, offset + 2 + i)
+  // 指数 0 且尾数 0 = 0；指数全 1 = Inf / NaN → 都当「没有采样率」。
+  if (exponent === 0 || exponent === 0x7fff) return 0
+  return sign * mantissa * Math.pow(2, exponent - 16383 - 63)
+}
+
+/**
+ * 解析 AIFF / AIFC 的标签。
+ *
+ * - `COMM` → 采样帧数 ÷ 采样率 = **精确**时长（采样率是 80 位扩展精度）；
+ * - `ID3 ` 块 → **复用已有的 ID3v2 解析器**（AIFF 里的 ID3 块就是 ID3v2）。
+ */
+export async function parseAiffTags(reader: TagReader, head: Buffer): Promise<AudioTags | null> {
+  if (!isAiffMagic(head)) return null
+
+  const tags: AudioTags = {}
+
+  // `COMM` 块：channels(2) / numSampleFrames(4) / sampleSize(2) / sampleRate(10)。
+  const comm = await findRiffChunk(reader, 12, reader.size, 'COMM', false)
+  if (comm && comm.dataSize >= 18) {
+    const body = await reader.read(comm.dataOffset, 18)
+    const frames = readUint32BE(body, 2)
+    const sampleRate = readExtended80(body, 8)
+    if (frames > 0 && sampleRate > 0) tags.duration = frames / sampleRate
+  }
+
+  // `ID3 ` 块 → 复用 ID3v2 解析器。
+  const id3 = await findRiffChunk(reader, 12, reader.size, 'ID3 ', false)
+  if (id3 && id3.dataSize > 10) {
+    const body = await reader.read(id3.dataOffset, Math.min(id3.dataSize, TAG_METADATA_MAX_BYTES))
+    const parsed = parseId3v2(body)
+    if (parsed.title) tags.title = parsed.title
+    if (parsed.artist) tags.artist = parsed.artist
+    if (parsed.album) tags.album = parsed.album
+  }
+
+  return tags
+}
+
+// ---------------------------------------------------------------------------
 // 入口
 // ---------------------------------------------------------------------------
 
@@ -825,6 +1246,11 @@ export async function readTagsFromReader(reader: TagReader): Promise<AudioTags |
   }
 
   if (isOggMagic(head)) return await parseOggTags(reader, head)
+
+  // ⚠️ T42：ISO 家族容器（**按文件头嗅探**，不靠扩展名猜）。
+  if (isMp4Magic(head)) return await parseMp4Tags(reader, head)
+  if (isRiffMagic(head)) return await parseWavTags(reader, head)
+  if (isAiffMagic(head)) return await parseAiffTags(reader, head)
 
   // 没有 ID3 头的裸 MPEG 音频。
   const mpeg = parseMpegFrameHeader(head, 0)
