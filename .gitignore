@@ -3,6 +3,9 @@ dist/
 release/
 release-probe/
 .pack-staging/
+# 打包脚本按时间戳建的暂存目录（`.pack-staging-<epoch>`）——同样要忽略，
+# 否则每次打包后 `git status` 都会变脏（2026-11-06 全面复验时发现）。
+.pack-staging-*/
 out/
 *.log
 .DS_Store
