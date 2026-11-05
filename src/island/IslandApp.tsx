@@ -103,10 +103,17 @@ export function IslandApp(): ReactElement {
       <div className="fnm-island__lyrics">
         {/* ⚠️ **不给 `onSeek`**：词岛是**点击穿透**的（不挡屏幕顶部的应用）
             → 点了词岛也是点下面的应用 → 词岛**不做**点歌跳转（经典悬浮窗仍有）。 */}
+        {/* ⚠️ **只显示当前一行**（T46 补丁）：`single` + `windowRadius={0}`。
+            - `single` 本身是**窗口裁剪**（默认半径 3 → 渲染当前行上下共 7 行），
+              半径压到 **0** 才是真·一行；
+            - `single` 的当前行**照常逐字推进**（`progress: isActive ? computeLineProgress(...) : null`）
+              → T46 的**逐字发光**不受影响；
+            - 经典悬浮窗**仍是 `double`** → 主界面 / 歌词舞台行为一字不变。 */}
         <LyricView
           lines={state.lines}
           currentTime={position}
-          mode="double"
+          mode="single"
+          windowRadius={0}
           emptyLabel="暂无歌词"
           activeWordClassName="fnm-lyricview__word--active"
         />

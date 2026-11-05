@@ -2261,3 +2261,55 @@ Lyricify Fusion 的**灵动词岛** = 屏幕顶部居中的圆角胶囊 + 逐字
 ### 遗留 / 待办
 
 - ⚠️ **T47**：频谱波形（`captureStream` + `AnalyserNode` + 限频 IPC）。
+## 三十、T46 补丁：词岛歌词只显示当前一行
+
+用户反馈：「灵动歌词一行就够」。这是 T46 验收后的**呈现修正**（属 T46 范围内的补丁）。
+
+### 为什么
+
+词岛是**贴在屏幕顶部**的一条窄胶囊（96px 高）→ 双行歌词会把整条胶囊撑满，
+当前词被挤在中间，**扫一眼看不出「正在唱哪个词」**。一行 = 当前行**放大居中**
+（正是 Lyricify「灵动歌词」的观感）。
+
+### 实现路径：`mode="single"` + `windowRadius={0}`
+
+| 候选 | 结论 |
+| --- | --- |
+| `mode="double"`（现状） | ❌ 两行同时在场 → 不满足「一行就够」 |
+| `mode="single"`（**缺省**） | ❌ `single` 是**窗口裁剪**，默认半径 `LYRIC_WINDOW_RADIUS = 3` → 渲染当前行上下**共 7 行** |
+| `mode="single"` + `windowRadius={0}` | ✅ **只渲染当前行**；当前行**照常逐字推进** → T46 的**逐字发光**不受影响 |
+
+⚠️ **高度不动**（`ISLAND_WINDOW_HEIGHT = 96`）：当前行 44px，胶囊内容区 76px
+→ 滚动定位（`scrollTop = 行位置 + 行高/2 − 可视区/2`）让当前行**正好垂直居中**；
+左侧曲名/歌手两行仍占位 → 胶囊不显得空。
+⚠️ 改高度会牵动 `shared/islandAnchor.ts` 的常量与锚定单测 → **本轮不做**。
+
+⚠️ **经典悬浮窗不动**（仍 `double`）→ 主界面 / 歌词舞台 / 经典悬浮窗的行为**一字不变**。
+
+### 影响文件
+
+- **改**：`src/island/IslandApp.tsx`（`mode` + `windowRadius`）
+- **改**：`test/lyric-island-app.test.tsx`（新增 4 条；假桥补 `emitLyricState`）
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1730 passed / 79 files**（基线 1726 / 79，**新增 4**）；
+  `playwright test` **24 passed**；`npm run build` exit 0；
+- **先红后绿**：4 条新断言先红 → 实现后**全部转绿**，既有 5 条**一条没红**；
+- ⚠️ **红的原因不是实现**：新断言最初用 `getByText('乙行乙')` → 逐字着色层（`aria-hidden`）
+  会把同一行文字**再渲染一遍** → testing-library **同时命中两处** → `waitFor` 一直重试到超时。
+  → 改成**读行节点的 `data-index` 与 `textContent`**（断言更精确，不放宽）。
+- **变异自证（三处全部先红后复原，sha256 回基线）**：
+  1. 退回 `mode="double"` → 「只渲染一行」等 **3 条红**；
+  2. 不传 `windowRadius={0}`（半径回到 3 → 渲染 7 行）→ **3 条红**；
+  3. 去掉 `activeWordClassName` → 「发光钩子」**1 条红**；
+- **复原校验**：跑一轮 apply+revert 后两个文件 sha256 与基线**完全一致**
+  （`cafd75cc7dc8d2ef` / `05f6e31cf095f07d`）。
+- **真机**（`release/verify/t46p-single-probe.mjs`）：合成两行逐字歌词、推进到第二行
+  → 词岛 DOM 里**歌词行恰好 1 个**、`data-index` 命中播放位置所在行、
+  当前词带 `fnm-lyricview__word--active` 且 computed `text-shadow` 非 none。
+
+### 遗留 / 待办
+
+- ⚠️ **真机视觉**：单行在 96px 胶囊里的观感（是否偏空）→ 用户复验后决定要不要收窄高度；
+- ⚠️ **T47**：频谱波形（`captureStream` + `AnalyserNode` + 限频 IPC）。
