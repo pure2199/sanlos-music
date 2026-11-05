@@ -3369,7 +3369,120 @@ Node 自己的 undici 把响应头按 **latin1** 解码 ⇒ 中文变成乱码�
 
 ### 遗留 / 待办
 
-- ⚠️ 待复验：T31~T56（用户侧肉眼）；
+- ⚠️ 待复验：T31~T58（用户侧肉眼）；
 - ⚠️ 待用户拍板：词岛胶囊要不要收窄（520×96）；Electron 默认图标要不要换；
 - ⚠️ 用户侧待办：更新服务器地址（https 静态目录）+ 代码签名证书与主体名；
 - ⚠️ **轮换 NAS 账号口令**（本轮探针用到的口令明文出现在会话记录里）。
+
+
+## 四十二、T58：抹除用户私有标识与凭证残留
+
+### 起因
+
+T57 轮全面复验后，仓库与工作区里散落着**用户私有的标识**与**一行明文口令**。
+用户拍板：「**就这样，该抹除的抹除，不要留**」。
+
+### 判定口径（抹 7 类 / 留 5 类）
+
+**抹**：明文口令；用户自有反代域名与证书 CN；FN ID 中继域名；NAS 真实内网 IP；
+真实公网 IP；本机真实路径；本机会话标识。
+
+**留**：开发者署名（产品身份：关于页 + 安装包属性 + ICP 备案主体）；
+公司名 / 官网 / ICP 备案号；RFC1918 示例 IP（含**产品默认预填地址** + 约 50 处断言）；
+签名常量；代码里本就存在的通用占位域名。
+
+### 前置核实（动手前先查清）
+
+| 事实 | 结论 |
+| --- | --- |
+| 私有域名是否被**代码**硬编码？ | **没有** —— 代码里只有 `<fnId>.fnos.net` / `example-fn-id` / `myfn` / `abc` / `demo` 这类通用占位 |
+| 私有域名出现在哪？ | **只在注释与文档里**（`src/lib/address.ts` 文件头注释 + 3 份设计文档 + 本文件） |
+| 明文口令在不在版本库？ | **工作树与历史都 0 命中**（`git grep` + `git log -S`）—— 只在 gitignored 的 `.superpowers/` 里 |
+| 别的凭证形态？ | `set-cookie` / `access_token` / `Authorization` 在已跟踪文件里 **0 命中**；`Bearer` 仅出现在 `test/proxy.test.ts` 的**假 token** |
+
+⇒ **本轮全部改动都在注释、文档与探针脚本里 → 运行时行为零变化。**
+
+### 改了什么（已跟踪文件 26 处）
+
+| 文件 | 处数 | 改法 |
+| --- | --- | --- |
+| `src/lib/address.ts` | 2 | **仅注释**里的域名换占位 |
+| `docs/calibration.md` | 11 | 同上 |
+| `docs/superpowers/specs/2026-11-05-fnmusic-domain-port-design.md` | 6 | 同上；「不能把私有域名硬编码进白名单」那条论断改为不含原值的表述 |
+| `docs/superpowers/specs/2026-11-05-sanlos-music-stream-quality-ready-design.md` | 5 | 同上 |
+| `docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md` | 2 | IP 换占位；media 的 `src` 改仓库相对路径 |
+
+替换词：`.invalid`（**RFC 2606 保留顶级域**，永不可解析）、`<FN-ID>.fnos.net`
+（与代码里既有的 `<fnId>.fnos.net` 写法一致）、`192.168.100.xxx`（保留网段，只抹主机号）。
+
+### 规格文档与 commit message 本身也不落原值
+
+⚠️ **第一版规格文档把原值逐字抄了进去** —— 那等于**没抹**（`git grep` 照样命中）。
+已重写为「只记类别与替换值」，并 `git commit --amend` + `git reflog expire` +
+`git gc --prune=now` 把那个含原值的对象**真正清出 `.git`**。
+
+⇒ 复核结果：**所有 commit message**（含正文）对 6 类私有值 **0 命中**；
+`git log -S '<明文口令>'` **0 命中** ⇒ **口令从未进过历史**。
+
+### 未跟踪 / 忽略区的清理
+
+| 目标 | 动作 |
+| --- | --- |
+| `.superpowers/`（gitignored 的 agent scratch，**含明文口令**） | **删**（101 文件 / 3.9 MB） |
+| `release/verify/**` | 批量泛化（首轮 **81 个文件 / 221 处**，后续补扫数轮） |
+| `release/verify/tmp-build`、`tmp-build2` | **删**（构建临时目录） |
+| `.pack-staging/`（11-04 旧暂存）、`release-probe/win-unpacked/`（11-04 旧免安装产物） | 可动的部分移出回收站（**398 MB**）；⚠️ 各剩一个被锁住的 `resources/app.asar`（见下） |
+| 台账 `progress-ledger.md`（仓库外） | 泛化 **18 处** + 补扫（**含少 3 字符的会话 ID 变体**） |
+| `release-probe/` | **保留**：安装包 + 便携版（11-06 当前版） |
+
+### ⚠️ 已知限制：两处 `app.asar` 删不掉（被 MiniMax Code 自己锁住）
+
+用 Restart Manager API 定位持有者：**pid 1272 = MiniMax Code 本体**
+（工作区文件监听器以「可读写、但不允许删除共享」的方式持有 `app.asar`
+→ Windows 拒绝删除/改名上层目录，EPERM / SHARING_VIOLATION）。
+
+⚠️ 这与 `scripts/pack.cjs` 头部早就写明的现象**完全一致**（第 20–25 行）——
+打包脚本已经为它设计好了兜底（产物 exe 用新文件名发布，`win-unpacked` 留在暂存目录）。
+
+⇒ **两个残留**：
+
+- `.pack-staging/win-unpacked/resources/app.asar`（463 221 B）
+- `release-probe/win-unpacked/resources/app.asar`（463 221 B）
+
+⇒ **退出 MiniMax Code 后**即可删（回收站可恢复删除）；在此之前**无法**删除。
+⚠️ `release-probe/win-unpacked/` 现在**不是可运行的免安装版**了（只余一个 `app.asar`）——
+当前版的免安装产物在 `.pack-staging-1793898142144/win-unpacked/`（**Sanlos Music.exe**）。
+
+### 历史口径
+
+⚠️ 域名 / IP 这类半敏感标识**从 T 阶段早期起就在 git 历史里**（本仓库**无 remote**，从未 push）。
+本轮**不重写历史** —— 沿用用户自己在「清除仓库中的真实 FN ID」那次 commit 立下的口径
+（**清当前版本，不改写历史**），避免 152 个 commit 的 sha 全变、台账的 sha 引用全断。
+⇒ 历史里**只有域名 / IP / 路径**，**没有口令**。
+
+### 验收
+
+| 项 | 结果 |
+| --- | --- |
+| 全仓库（含 ignored）扫 6 类私有值 | **0 命中**（751 个文本文件） |
+| 补扫后才揪出的 3 类漏网 | **真实 FN ID**（探针 JSON 的 `"fnId"` 字段）、**token 指纹**（`tokenHead`）、**会话 ID 变体**（少 3 字符的那种）—— 全部已抹 |
+| 所有 commit message（含正文）扫 6 类私有值 | **0 命中** |
+| `git log -S '<明文口令>'` | **0 命中** |
+| `git grep '<开发者署名>'` | 只剩**开发者署名**那 8 处（K1） |
+| `tsc --noEmit` | exit 0 |
+| `vitest` | **1862 passed / 85 files**（不增不减） |
+| `playwright` | **24 passed** |
+| `build` | exit 0 |
+| U+FFFD 扫描 | 0 命中；无 BOM；行尾保持（本文件仍 CRLF） |
+
+### 口径自证（脱敏是零行为影响的）
+
+把 `src/lib/address.ts` 的注释**改回旧文本** → **没有任何测试变红**
+⇒ 私有域名只存在于**注释层**，纯文本脱敏不影响任何运行时行为。
+
+### 遗留 / 待办
+
+- ⚠️ **会话历史快照里的口令**：`.minimax/v2/sessions/**` 含明文口令（探针注入 + 报告引用）。
+  那是运行时自己的日志，**本轮不动**（改写历史不安全）→ 有效收口是**轮换 NAS 账号口令**；
+- ⚠️ **K1 的开发者署名仍是公开信息**（见判定口径）；
+- ⚠️ 退出 MiniMax Code 后清理上面那两处 `app.asar` 残留。

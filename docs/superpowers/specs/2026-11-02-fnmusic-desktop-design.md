@@ -588,5 +588,5 @@ Task 10 实现后在真实 Electron 主进程里做了一组对照实验，结�
 **影响面**：真实用户的当前链路是**中继** `https://<fnId>.fnos.net`（实测证书有效，Node fetch 直接可用），局域网 HTTP（5666）也不需要证书；只有「HTTPS 直连 + 自签证书」这一种场景依赖本条。
 
 <deliver-assets>
-<media type="file" src="C:\Users\<USER>\.minimax\sessions\<SESSION>\workspace\docs\superpowers\specs\2026-11-02-fnmusic-desktop-design.md" caption="设计规格（含真实 NAS 实测校验、7 条规格修正与字段形状实测 §15.7）" />
+<media type="file" src="docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md" caption="设计规格（含真实 NAS 实测校验、7 条规格修正与字段形状实测 §15.7）" />
 </deliver-assets>
