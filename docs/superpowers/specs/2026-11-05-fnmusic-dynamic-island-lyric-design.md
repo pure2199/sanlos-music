@@ -484,7 +484,102 @@ export function islandBounds(
 
 ---
 
-## 9. 风险与待校准
+## 9. T48 详细设计：卡拉OK 渐进填色（整词发光 → 词内连续填色）
+
+### 9.1 为什么改
+
+用户反馈：「灵动歌词的发光效果做成卡啦OK模式，那样看起来才顺滑」。
+
+**根因**：T46 的逐字发光是**整词跳变** —— 词一到就整词变色（`--sung` 整词上强调色
++ `text-shadow` 光晕）⇒ **每个词的边界都在「闪一下」**。
+
+**关键发现**：工程里早就有「词内连续比例」—— `LyricWordProgress.wordProgress`
+（`src/ui/lyrics/doubleLine.ts`），它的注释明写「词内的时间是连续的，所以这个值适合做
+『平滑扫光』」—— 只是**一直没人用**。⇒ 本任务**不需要**新算任何时间轴。
+
+### 9.2 方案对比
+
+| 候选 | 结论 |
+| --- | --- |
+| 保留整词发光，另加一层填色 | ❌ 两套机制共存 → 光晕把填色的**边界糊掉**（看到的还是一条模糊亮边，不是清晰的推进线） |
+| 叠一层文字做填色 | ❌ 同一行文字出现**三遍**（底层原文 / 着色层 / 填色层）→ 无障碍与测试都取不准，还多一份 DOM |
+| **`background-clip: text` + 渐变**（**选定**） | ✅ **不改字形**（只改「字被什么颜色填」）→ 着色层与底层原文依旧**严丝合缝**（T46 的纪律）；未填部分 `color: transparent` → **透出底层原文**（= 还没唱到的颜色） |
+
+### 9.3 关键决定
+
+| 决定 | 理由 |
+| --- | --- |
+| `LyricView` 加**可选** prop `karaoke?: boolean`（缺省 `false`） | 主界面歌词 / 全屏歌词舞台 / 经典悬浮窗的行为**一字不变** |
+| 卡拉OK 模式下当前词**不再**整词上色（`--sung`） | 整词已是强调色 → 词内填色就**看不见**了 |
+| 填色比例 = `wordProgress × 100%`，走 CSS 变量 `--fnm-lyricview__karaoke-progress` | CSS 表达不了「随时间变化的百分比」；变量是仓库既有套路（`--fnm-lyricview__line-top`） |
+| **同时**给 `data-karaoke-progress` 属性 | jsdom 的 CSSOM 对**自定义属性**不可靠 → 单测一律读 data 属性（与 `data-scroll-top` 同一套纪律） |
+| `activeWordClassName`（整词发光钩子）**保留不动** | 它是 `LyricView` 的**通用钩子**；只是**词岛不再用它** |
+| 词岛**删掉** `.fnm-lyricview__word--active` 的 `text-shadow` 规则 | 光晕与填色不能共存（见 9.2） |
+| 只影响**词岛** | 经典悬浮窗 / 歌词舞台**一字不变** |
+
+### 9.4 CSS 契约
+
+```css
+.fnm-lyricview__word--karaoke {
+  color: transparent;
+  background-image: linear-gradient(90deg, var(--accent) 0%, var(--accent) 100%);
+  background-size: var(--fnm-lyricview__karaoke-progress, 100%) 100%;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+```
+
+- ⚠️ **不许**出现改变字形的声明（`transform` / `font-weight` / `font-size`）
+  → 着色层与底层原文会**错位**（T46 纪律）；
+- ⚠️ **不许** `text-shadow` → 光晕把填色边界糊掉；
+- ⚠️ 颜色**只用语义变量**（`var(--accent)`）—— 词岛窗支持明暗两套主题。
+
+### 9.5 影响文件清单
+
+| 文件 | 改动 |
+| --- | --- |
+| `src/ui/lyrics/LyricView.tsx` | + 可选 prop `karaoke`；`renderLine` 里把「是不是当前词」与「挂哪个类」**拆开**；词 span 挂 `--karaoke` + 内联进度变量 + `data-karaoke-progress` |
+| `src/ui/lyrics/lyric-view.css` | + `.fnm-lyricview__word--karaoke` |
+| `src/island/IslandApp.tsx` | `activeWordClassName` → `karaoke` |
+| `src/island/island-window.css` | 删掉整词发光的 `text-shadow` 规则 |
+| `test/lyric-view.test.tsx` | + 6 条（卡拉OK 行为） |
+| `test/lyric-view-css.test.ts`（新） | + 7 条 CSS 契约 |
+| `test/lyric-island-app.test.tsx` | T46 的「发光钩子」断言**改写**为卡拉OK断言（+ 新增 1 条「不再整词发光」） |
+| `test/lyric-island-css.test.ts` | + 2 条「不再整词发光」契约 |
+
+### 9.6 既有断言会被推翻的地方（**改写，不放宽**）
+
+- `test/lyric-island-app.test.tsx` 的「当前行仍然逐字推进，并带 T46 的发光钩子」：
+  前提被用户**显式**推翻（整词发光 → 卡拉OK 填色）→ **改写为新行为断言**
+  （当前词挂 `--karaoke`、`data-karaoke-progress` = 50%、**不再**挂 `--sung`、
+  **不再**有 `--active`）；
+- `test/lyric-view.test.tsx` 的 T46 三条（`activeWordClassName` 钩子）**一条没动**
+  —— 钩子本身**保留**，只是词岛不再用它；
+- `test/lyric-island-css.test.ts` 的 T46 三条（居中契约）**一条没动**。
+
+### 9.7 验收点
+
+1. `tsc --noEmit` 0 错；vitest 全绿且 **≥ 1790**（基线 1774 + 新增 16）；playwright 24 绿；build 0；
+2. **变异自证 ≥ 5 处**（当前词仍整词上色 / 比例写死 / 去掉 `background-clip` /
+   填充宽度写死 / 取消 `color: transparent` / 词岛退回整词发光）→ 全红后复原（sha256 核对）；
+3. **真机像素级**：词岛当前词的**填色边界**随时间**连续推进**
+   （25% / 50% / 75% 三点，量出的边界与期望差 ≤ 2%）；
+4. U+FFFD 0、无 BOM、行尾保持原样。
+
+### 9.8 已知限制（如实标注）
+
+- ⚠️ **填色是「词内」的**：词很长时，填色要走**整个词的时间**才填满 —— 这是卡拉OK 的定义，
+  不是缺陷；
+- ⚠️ **没有逐字标签的歌词**（伪逐字）：词 = 按词数均分的片段 → 填色粒度 = 伪逐字的粒度；
+- ⚠️ **只影响词岛**：经典悬浮窗 / 歌词舞台仍是**整词跳变**（用户只要求灵动歌词改）；
+- ⚠️ **`background-clip: text` 的降级**：万一某内核不支持 → 最多是「当前词没有填色」
+  （底层原文还在，**不会**变成「当前词看不见」）。
+
+---
+
+## 10. 风险与待校准
 
 - ⚠️ **挖孔屏遮挡**：Chromium 拿不到刘海/挖孔几何 → 胶囊可能被遮 → **已知限制**。
 - ⚠️ **多显示器**：词岛跟随**主窗口**所在屏（不是鼠标）→ 用户把主窗口拖到副屏，词岛才过去。
@@ -495,3 +590,5 @@ export function islandBounds(
   （既有悬浮窗已是此行为）→ 词岛沿用；是否需要「全屏时自动隐藏」留待用户定。
 - ⚠️ **词岛默认关闭还是开启**：默认沿用 `classic`（老用户行为不变）；
   想让新形态「更显眼」需用户在设置里切。
+- ⚠️ **T48 的填色只落在词岛**：经典悬浮窗 / 歌词舞台仍是**整词跳变**
+  —— 若用户后续要求「所有形态都卡拉OK」，再把 `karaoke` 铺开（本轮**不擅自扩范围**）。
