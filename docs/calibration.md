@@ -33,6 +33,7 @@
 | **播放历史端点** | `GET /music/api/v1/play-history/list` → `total=414`，条目为**完整歌曲对象** | `tools/fn-history-probe.mjs` |
 | **曲库编码分布** | 含 `alac` 46 首等 → **APE / ALAC 可以走兜底播放** | `tools/fn-codec-census.mjs` |
 | **中继端口** | 中继**只监听标准 HTTPS 端口 443**，**不监听** 5666 / 5667 | `tools/fn-live-check.mjs`（不写端口登录失败 → 写 `:443` 成功） |
+| **自建反代的端口** | 与官方中继一样**只监听标准 HTTPS 端口 443**（实测用户的 openresty 反代：5666 / 5667 都 ECONNREFUSED，443 通且 `/music/api/v1/sys/config` 返回 200）| `release/verify/t43-relay-probe.mjs` |
 | **专辑详情取法** | `GET /album/detail?guid=<id>`；`data` 是**裸专辑对象**（不是 `{list,total}`）。用 `albumGUID` / `albumGuid` / `albumId` / `id` 一律 `code=100002` | `tools/fn-album-detail-probe.mjs` |
 | **服务端不提供播放历史写入端点** | 17 个候选**历史**写端点全是 SPA 兜底 HTML；`stream` **不写**播放历史 → **NAS 历史只读**，客户端「本机记录 + NAS 只读」的设计正确。⚠️ **这条只针对「历史」**——收藏 / 歌单的写端点**是存在的**（见下一行） | `tools/fn-history-probe.mjs` + `tools/fn-writeback-probe.mjs` |
 | **收藏 / 歌单写回可用** | `favorite-track/create` · `favorite-track/delete` → **`{ trackGUID }`**；`playlist/add-track` · `playlist/remove-track` → **`{ guid, trackGUIDs: [id] }`**；`playlist/create` → `{ name }`（**回显 guid**）；`playlist/delete` → `{ guid }`。四个端点**实测真生效**（收藏列表里出现 / 消失、歌单详情里出现 / 消失） | `tools/fn-writeback-probe.mjs` |
@@ -1851,3 +1852,107 @@ chunk ID3  @264664  size=87   ← ⚠️ ffmpeg 要加 -write_id3v2 1 才会写
   WAV 的历史遗留（无 BOM 无法判定），**不猜**；
 - ⚠️ **AIFC 的压缩类型没读** → AIFC 压缩音频的时长仍按采样帧数算；
 - ⚠️ **`ilst` 的自由格式条目**（`----` 开头）**不解析** → 只取 `©nam` / `©ART` / `©alb`。
+---
+
+## 二十六、T43：域名型 NAS 地址走标准端口（端口补全规则第五版）
+
+### 背景：用户反馈「自建反代的域名地址登不上，端口被写死了」
+
+用户自建反向代理（openresty + 自有泛域名证书），地址形如 `https://<用户私有域名>`。
+客户端把它补成了 `https://<用户私有域名>:5667` → **ECONNREFUSED** → 登不上。
+
+### 真机实测（探针脚本 `release/verify/t43-relay-probe.mjs`，**不带任何凭证**）
+
+| 端口 | 结果 |
+| --- | --- |
+| **443** | **通** —— TLS 握手成功；证书 CN=`<用户私有域名>`，SAN 里**含**该域名；`server: openresty` |
+| **5666** | **ECONNREFUSED** |
+| **5667** | **ECONNREFUSED** ← **旧代码补出来的就是这个** |
+| 80 | 通（openresty，301 跳 https） |
+
+音乐接口本身**完全正常**（免凭证只读接口 `GET /music/api/v1/sys/config`）：
+
+```
+→ 200 application/json
+  {"code":0,"data":{"nasOAuth":{"clientId":"…"},"serverName":"…","serverVersion":"1.0.10",
+   "mediasrvVersion":"0.8.43","capabilities":{…}}}
+```
+
+⇒ **反代正常、服务器正常，唯一的问题是客户端把端口补错了。**
+
+### 根因：旧的域名例外只认「官方中继」的后缀
+
+旧规则只有一条域名例外 —— `RELAY_DOMAIN_SUFFIX = '.fnos.net'`，那是 fnOS **官方中继**
+`<fnId>.fnos.net` 的形状（官方中继**也**只听 443，见上表「中继端口」行）。
+
+自建反代的域名**完全不在白名单里** → 被当普通 NAS → 补 `:5667` → 必然连不上。
+
+⚠️ **不能把用户的私有域名硬编码进白名单**（换域名、又换一套反代，就得再改一次代码）
+→ **把判定维度换对**：不是「是不是官方中继」，而是「**是不是 IP 字面量**」。
+
+### 规则表（T43 之后）
+
+| 主机形态 | 真实含义 | 端口 |
+| --- | --- | --- |
+| **IP 字面量**（`192.168.1.2`） | 局域网直连 fnOS 音乐服务 | `5666` / `5667`（**既有行为不变**） |
+| **域名**（自建反代 / 官方中继 / 局域网主机名） | 反向代理 / 公网入口 | **标准端口 `80` / `443`** |
+
+`withDefaultPort()` 的判定顺序（**顺序有讲究**）：
+
+1. 空串 → 原样；
+2. 非 http/https 协议 → 原样；
+3. **有显式端口** → **原样**（端口一个字符都不改，协议也不改）；
+4. **`.fnos.net` 中继域名** → 不补端口 + **协议归一到 https**
+   （官方中继只提供 HTTPS；**必须排在第 5 条前面** —— 它也是域名）；
+5. **IP 字面量** → 按协议补 5666 / 5667；**其它域名 → 不补端口**。
+
+`isIpLiteral()` 的判法：IPv4 = 四段十进制；IPv6 = **含冒号**（方括号已由
+`hostOfAuthority()` 去掉 → 里面必有冒号）→ 复用同一套 host 语义，判定与拆解**口径一致**。
+
+### 已知代价：局域网**用域名**直连要显式写端口
+
+`nas.local`（局域网 NAS 的主机名）→ 现在走 80 → 连不上 → 要写成 `nas.local:5666`。
+
+⇒ 必须给用户可读引导，否则这个变化会变成「新的坑」：
+
+- 登录页地址框下方的提示文案改成写明新规则；
+- **连不上时补一句**：「若地址走反向代理或端口非标准，请在地址里显式写出端口（如 `https://host:443`）」。
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1693 passed / 75 files**（基线 1688 / 75，**新增 5**）；
+  `playwright test` **24 passed**（登录页只改文案 → 不新增 E2E）；
+- **端到端真机验证**：用**真实模块**（`withDefaultPort` → `normalizeBase`）处理真实域名 →
+  基址 `https://<域名>/music` → 真请求 `/api/v1/sys/config` → **200**，
+  `serverName` / `serverVersion` / `supportsNasLogin` 全部读得到；
+  同时核对了 IP 地址与官方中继的补全结果**一字未变**；
+- 本轮改动文件 **U+FFFD = 0**、无 BOM、行尾保持原样（`docs/calibration.md` 仍 **CRLF**）；
+- **变异自证（四处全部先红后复原，sha256 回基线 `edde386477316296` / `1449adb4db20948a`）**：
+  1. IPv4 判定失效 → 「IP 地址仍按协议补默认端口」**红**；
+  2. 域名规则被删 → 「域名地址不补端口」**红**；
+  3. IPv6 判定失效 → 「IPv6 字面量也算 IP」**红**；
+  4. 登录页提示文案被删 → 「提示文案写明新规则」**红**。
+
+⚠️ **变异脚本又踩了同一个坑**（T42 也踩过）：把 `return /^\d…/.test(host)` 换成 `return false`，
+而文件里 `return false` 出现 **4 次** → **复原时锚点不唯一 → 复原没执行** →
+后面几轮的失败列表全是叠加的（每轮都多红几条）。
+⇒ 修法两条：① 复原时唯一性要查**被替换掉的那一侧**；② **变异后的文本必须唯一**
+（改成 `return false /* MUTANT: ipv4 */`）。
+
+### 改写的既有测试（前提被用户**显式**推翻）
+
+| 文件 | 改法 |
+| --- | --- |
+| `test/address.test.ts`「直连 NAS 仍按协议补默认端口（既有行为不变）」 | 前提（「域名也补默认端口」）被用户显式推翻 → **改写**为「**IP 地址**仍按协议补默认端口」+ 新增「**域名地址**不补端口」；**IP 的三条断言一字未改**（只把主机从 `nas.local` 换成 `192.168.1.2`） |
+| `test/address.test.ts`「路径与查询串在补端口时保持不变」 | 同上 → 改用 IP 主机保留原意图，**并追加**一条「域名不补端口时路径与查询串同样原样保留」 |
+
+### 遗留 / 待办
+
+- ⚠️ **真机未验**：用域名地址**真登录**（需要用户凭证 → 用户侧操作）；
+- ⚠️ **`isRelayHost` 仍按 `.fnos.net` 后缀判定**（`src/lib/address.ts` 与 `electron/session.ts` 两处）
+  → 自建反代**不算**官方中继 → 登录请求**不带** `Cookie: mode=relay`。
+  官方中继缺这个 Cookie 会返回 HTML 错误页（实测踩到）；
+  ⚠️ **自建反代是否需要该 Cookie 取决于它后面接的是什么**（直连本机 5666 → 不需要；
+  转发到官方中继 → 需要）→ **本轮不自动判定**，如实标注为待校准；
+- ⚠️ **IPv4 判定只认四段十进制**：`0x7f000001` 这类十六进制写法会被当域名 → 不补端口
+  （极端边缘，且不是用户会填的写法）。

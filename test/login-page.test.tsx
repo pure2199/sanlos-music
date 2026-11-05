@@ -274,6 +274,32 @@ describe('默认端口补全', () => {
     )
   })
 
+  it('域名地址 → **不补端口**（走标准端口，反代 / 公网入口只听 443）', async () => {
+    // ⚠️ T43 真机实测：域名型地址补默认端口必然连不上 → 域名一律走标准端口。
+    const user = userEvent.setup()
+    render(<LoginPage />)
+
+    const input = screen.getByPlaceholderText(/NAS 地址/)
+    await user.clear(input)
+    await user.type(input, 'https://fnos.example-ink.test')
+    await user.click(screen.getByRole('button', { name: '检测服务器' }))
+
+    await waitFor(() => expect(bridge.serverInfo).toHaveBeenCalledTimes(1))
+    expect(bridge.serverInfo).toHaveBeenCalledWith('https://fnos.example-ink.test')
+    expect(bridge.serverInfo).not.toHaveBeenCalledWith(
+      `https://fnos.example-ink.test:${DEFAULT_HTTPS_PORT}`,
+    )
+  })
+
+  it('提示文案写明新规则（IP 补默认端口 / 域名走标准端口 / 非标准端口要显式写）', () => {
+    render(<LoginPage />)
+
+    const hint = screen.getByText(/域名地址走标准端口/)
+    expect(hint).toBeTruthy()
+    expect(hint.textContent).toContain(String(DEFAULT_HTTP_PORT))
+    expect(hint.textContent).toContain(String(DEFAULT_HTTPS_PORT))
+  })
+
   it('显式端口原样保留（不改写成默认端口）', async () => {
     const user = userEvent.setup()
     render(<LoginPage />)

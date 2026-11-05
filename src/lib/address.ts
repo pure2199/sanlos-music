@@ -20,6 +20,13 @@ import { DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, RELAY_DOMAIN_SUFFIX } from '../.
 // 4. **中继域名（`<fnId>.fnos.net`）不补默认端口**：中继只监听标准 HTTPS 端口（443），
 //    **不监听** fnOS 音乐服务的 5666 / 5667——补了默认端口就一定连不上。
 //    顺带把协议归一到 HTTPS（中继只提供 HTTPS）。
+//
+// ⚠️ 第五条规则（T43，真机实测补上）
+// 5. **只有 IP 字面量才补默认端口**：**域名**地址走**标准端口**（80 / 443）。
+//    理由：域名几乎总是「反向代理 / 公网入口」——实测用户的自建 openresty 反代
+//    `*.invalid` **只听 443**，**不监听** 5666 / 5667 → 补了默认端口就一定连不上。
+//    直连 NAS 用 **IP**（`192.168.1.2`）→ 仍按协议补 5666 / 5667（既有行为不变）。
+//    ⚠️ 局域网若用**域名**直连（如 `nas.local`）→ 需**显式写端口**（`nas.local:5666`）。
 // ---------------------------------------------------------------------------
 
 /** 形如 `scheme://` 的协议前缀（带捕获组，取协议名）。 */
@@ -110,13 +117,30 @@ function isRelayHost(authority: string): boolean {
 }
 
 /**
+ * 判定 host 是不是 **IP 字面量**（IPv4 / IPv6）。
+ *
+ * ⚠️ 只认两种形态：
+ * - **IPv6**：方括号在 `hostOfAuthority()` 里**已经去掉** → 里面必然有冒号；
+ * - **IPv4**：四段十进制（`192.168.1.2`）。
+ *
+ * 其余（`nas.local`、`user-proxy.invalid`）都是**域名** → 走标准端口（80 / 443）。
+ */
+function isIpLiteral(host: string): boolean {
+  if (host.length === 0) return false
+  if (host.includes(':')) return true
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host)
+}
+
+/**
  * 给「用户输入的地址」补默认端口。
  *
- * - 没有显式端口 → 补协议（缺省 `http://`）与该协议的默认端口
- *   （http → `DEFAULT_HTTP_PORT`，https → `DEFAULT_HTTPS_PORT`）；
+ * - 有显式端口 → **原样返回**（端口一个字符都不改，协议也不改）；
  * - **中继域名（`<fnId>.fnos.net`）例外**：中继只听 443 → **不补端口**，
  *   并把协议归一到 `https`（用户写 `http://` 也能连上）；
- * - 有显式端口 → **原样返回**（端口一个字符都不改，协议也不改）；
+ * - **IP 字面量** → 补协议（缺省 `http://`）与该协议的默认端口
+ *   （http → `DEFAULT_HTTP_PORT`，https → `DEFAULT_HTTPS_PORT`）；
+ * - **域名** → **不补端口**，走**标准端口**（80 / 443）
+ *   （T43 真机实测：自建反向代理只听 443，补 5666 / 5667 一定连不上）；
  * - 非 http/https 协议 → 原样返回（主进程会给出「地址无效」的可读错误）。
  *
  * 端口取自 `shared/constants.ts`，**不写字面量**。
@@ -135,6 +159,11 @@ export function withDefaultPort(input: string): string {
   // ⚠️ 中继域名：**不补默认端口**（T18-1 真机实测：补了 5667 就连不上），
   //    协议按 HTTPS 处理（中继只提供 HTTPS）。
   if (isRelayHost(authority)) return `https://${authority}${tail}`
+
+  // ⚠️ T43：**只有 IP 字面量**才补默认端口。
+  //    域名（反代 / 公网入口 / 自建中继）走**标准端口**——实测自建反代只听 443，
+  //    补了 5666 / 5667 就一定连不上。
+  if (!isIpLiteral(hostOfAuthority(authority))) return `${protocol}://${authority}${tail}`
 
   const port = protocol === 'https' ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT
   // 端口追加在 authority 末尾 —— userinfo（`user:pw@host`）在 '@' 之前，不会被误伤。

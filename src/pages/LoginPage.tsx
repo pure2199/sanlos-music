@@ -58,6 +58,11 @@ function describeError(err: unknown): string {
     .replace(/^Error:\s*/, '')
     .trim()
   if (cleaned.includes(NAS_HANDLER_MISSING)) return NAS_UNAVAILABLE_HINT
+  // ⚠️ T43：连不上时补一句「地址该怎么写」的提示——域名地址**不再自动补端口**了，
+  //    用户走反向代理 / 非标准端口时需要知道该显式写出端口。
+  if (/无法连接|网络不可达/.test(cleaned)) {
+    return `${cleaned}。若地址走反向代理或端口非标准，请在地址里显式写出端口（如 https://host:443）`
+  }
   return cleaned.length > 0 ? cleaned : '操作失败，请稍后重试'
 }
 
@@ -349,8 +354,9 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
                 spellCheck={false}
               />
               <p className="fnm-login__hint">
-                未填写端口时按协议自动补默认端口：HTTP {DEFAULT_HTTP_PORT} / HTTPS{' '}
-                {DEFAULT_HTTPS_PORT}（FN 中继域名除外，中继走标准 HTTPS 端口）
+                未填写端口时：IP 地址自动补 HTTP {DEFAULT_HTTP_PORT} / HTTPS{' '}
+                {DEFAULT_HTTPS_PORT}；域名地址走标准端口（80 / 443，适合反代与中继）。
+                非标准端口请显式写出（如 host:5666）
               </p>
               <button
                 type="button"
