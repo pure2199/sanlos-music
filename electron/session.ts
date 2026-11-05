@@ -109,6 +109,19 @@ export interface SessionManagerOptions {
    * 否则各层的信任版本号会各走各的，证书放行与换分区就对不上了。
    */
   http?: HttpStack
+  /**
+   * 单次业务请求的**超时**（毫秒）。
+   *
+   * ⚠️ **为什么需要**（T44 真机实测）：会话层的每一次 HTTP 请求原先**都没有超时**
+   *    → 网络一抖动就挂到 **TCP 超时**（Windows 默认可达 21 秒+）→ 界面「顿住」；
+   *    token 失效时还要 `relogin()` 再重试 → 每个请求变成 **3 个网络往返**。
+   *
+   * ⚠️ **不影响流式路径**：`track/stream`（音频）与 `static/cover`（封面）走
+   *    `proxy.ts` 自己的 `fetch`，**不经过**本模块的 `send()` → 不会被这里截断。
+   *
+   * 缺省 {@link DEFAULT_REQUEST_TIMEOUT_MS}；单测可注入**极小值**（别真等 30 秒）。
+   */
+  requestTimeoutMs?: number
 }
 
 /** `request()` 的可选参数。 */
@@ -147,6 +160,39 @@ export class SessionApiError extends Error {
     this.name = 'SessionApiError'
     this.code = code
   }
+}
+
+/**
+ * 请求**超时**（T44）。
+ *
+ * ⚠️ 与「连不上」区分开：前者是「对端在时限内没回话」，后者是「根本没连上」——
+ *    用户看到的文案要能分清这两种，否则「顿卡」与「断网」会被混为一谈。
+ */
+export class SessionRequestTimeoutError extends Error {
+  /** 超时时长（毫秒）。 */
+  readonly timeoutMs: number
+
+  constructor(timeoutMs: number) {
+    super(`请求超时：${Math.max(1, Math.round(timeoutMs / 1000))} 秒内没有响应`)
+    this.name = 'SessionRequestTimeoutError'
+    this.timeoutMs = timeoutMs
+  }
+}
+
+/**
+ * 把底层失败翻译成**可读**的中文文案。
+ *
+ * ⚠️ **超时**与**连不上**是两句话（T44）：
+ * - 超时 → 「无法连接音乐服务（响应超时：N 秒内没有响应）」；
+ * - 其他 → 「无法连接音乐服务（网络不可达或服务未响应）」。
+ *
+ * ⚠️ 两句都**以「无法连接音乐服务」开头** → 既有断言（子串匹配）一条都不用改。
+ */
+function describeNetworkFailure(cause: unknown): string {
+  if (cause instanceof SessionRequestTimeoutError) {
+    return `无法连接音乐服务（响应超时：${Math.max(1, Math.round(cause.timeoutMs / 1000))} 秒内没有响应）`
+  }
+  return '无法连接音乐服务（网络不可达或服务未响应）'
 }
 
 /**
@@ -206,6 +252,16 @@ const HEADER_PLAINTEXT = 'P0'
 
 /** 会话文件名（落在 `app.getPath('userData')` 下）。 */
 const SESSION_FILE_NAME = 'session.bin'
+
+/**
+ * 单次业务请求的默认**超时**（毫秒）。
+ *
+ * ⚠️ **为什么是 30 秒**（T44）：用户走**公网中继 / 反向代理**（实测约 230KB/s），
+ *    曲库分页、专辑详情这类 JSON 响应在慢网下要几秒 —— 30 秒足够宽裕；
+ *    而**不设上限**的代价是：网络一抖动就挂到 **TCP 超时**（Windows 默认可达 21 秒+）
+ *    → 界面「顿住」→ 用户以为软件卡死了。
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 
 /** 会话文件的结构版本号（便于将来迁移格式）。 */
 const SESSION_FORMAT_VERSION = 1
@@ -769,9 +825,53 @@ export class SessionManager {
     }
 
     // token 失效：静默续期一次，然后重试**一次**。
-    await this.relogin()
+    //
+    // ⚠️ **续期失败就不再重试**（T44 真机实测）：续期本身就是一次**完整的登录往返**
+    //    （走公网中继时要好几秒）；网络不通时它必然失败 → 再重试业务请求
+    //    = **又多一个网络往返**（而且那个请求同样会挂到超时）→ 界面顿得更久。
+    //    ⇒ 续期失败就把**第一次**的 99999 原样交回去 → 渲染层立刻切回登录页
+    //    （`src/App.tsx` 已有这条路径），比「干等」好得多。
+    const renewed = await this.relogin()
+    if (!renewed) {
+      return { status: first.status, json }
+    }
     const second = await this.send(url, method, bodyString, isRelay)
     return { status: second.status, json: await readJson(second) }
+  }
+
+  /**
+   * 发一次请求，**带超时**（T44）。
+   *
+   * ⚠️ **双保险**（缺一不可）：
+   * 1. **传 `signal`**：底层请求**真取消**（真 Electron 的 Chromium 分区 fetch
+   *    实测支持 `AbortSignal` —— 探针 `release/verify/t44-abort-probe.js` 量到
+   *    1217ms 就中断），不留悬挂连接；
+   * 2. **`Promise.race` 兜底**：即便底层实现**不理会** `signal`（单测里的假 fetch
+   *    就是这样），我们也**只等** `timeoutMs` → 不会无限挂住。
+   *
+   * @param url 完整 URL。
+   * @param init 请求选项（方法 / 头 / 体）。
+   */
+  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+    const timeoutMs = this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort()
+        reject(new SessionRequestTimeoutError(timeoutMs))
+      }, timeoutMs)
+    })
+    try {
+      return await Promise.race([
+        this.http().fetch(url, { ...init, signal: controller.signal }),
+        expired,
+      ])
+    } finally {
+      // ⚠️ 必须清掉定时器：否则请求提前返回后，定时器仍会在稍后 reject
+      //    → 变成**无人处理的 rejection**（Node 会打警告）。
+      if (timer !== undefined) clearTimeout(timer)
+    }
   }
 
   /**
@@ -792,10 +892,10 @@ export class SessionManager {
     if (bodyString !== undefined) headers['content-type'] = 'application/json'
     try {
       // 走出网通道（Electron 运行时里 = Chromium 分区栈，证书放行才真正生效）。
-      return await this.http().fetch(url, { method, headers, body: bodyString })
+      return await this.fetchWithTimeout(url, { method, headers, body: bodyString })
     } catch (cause) {
       // 消息里**不含** URL 与凭证，只说明「连不上」。
-      throw new Error('无法连接音乐服务（网络不可达或服务未响应）', { cause })
+      throw new Error(describeNetworkFailure(cause), { cause })
     }
   }
 
@@ -807,9 +907,9 @@ export class SessionManager {
   ): Promise<unknown> {
     let res: Response
     try {
-      res = await this.http().fetch(url, { method: 'POST', headers, body })
+      res = await this.fetchWithTimeout(url, { method: 'POST', headers, body })
     } catch (cause) {
-      throw new Error('无法连接音乐服务（网络不可达或服务未响应）', { cause })
+      throw new Error(describeNetworkFailure(cause), { cause })
     }
     const json = await readJson(res)
     if (json === null) {

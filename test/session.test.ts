@@ -1099,3 +1099,87 @@ describe('续期竞态（I1 / I2 / I3）', () => {
     expect(m.lastSaveError?.code).toBe('NO_STORAGE')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 请求超时（T44）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **背景**：会话层的每一次 HTTP 请求原先**都没有超时**（`send()` 不传 `signal`）
+//    → 网络一抖动就挂到 TCP 超时（可达 21 秒+）→ 界面「顿住」；
+//    且 token 失效时 `relogin()` 失败**仍会重试** → 每个请求变成 3 个网络往返。
+//
+// ⚠️ 这里用**极小的超时**（80ms）而不是等真实的 30 秒 —— 单测要快。
+// ---------------------------------------------------------------------------
+
+describe('请求超时（T44）', () => {
+  it('服务端不响应 → 请求在**超时**内失败（不无限挂住）', async () => {
+    let hang = false
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/user/password-login')) {
+        return new Response(
+          JSON.stringify({ code: 0, data: { userToken: 'TK', deviceId: 'D' } }),
+          { status: 200 },
+        )
+      }
+      // ⚠️ 业务接口**永不响应**（模拟 NAS 挂住 / 网络不通 / 对端不回包）。
+      if (hang) return new Promise<Response>(() => {})
+      return new Response(JSON.stringify({ code: 0, data: { list: [] } }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager({ requestTimeoutMs: 80 })
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
+    hang = true
+
+    // ⚠️ 没有超时的话，这条会**永远挂住** → 单测超时失败。
+    await expect(m.request('track/list')).rejects.toThrow(/无法连接音乐服务/)
+  })
+
+  it('超时与「连不上」是**两句话**（用户能分清是哪种）', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/user/password-login')) {
+        return new Response(
+          JSON.stringify({ code: 0, data: { userToken: 'TK', deviceId: 'D' } }),
+          { status: 200 },
+        )
+      }
+      return new Promise<Response>(() => {})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager({ requestTimeoutMs: 80 })
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
+
+    await expect(m.request('track/list')).rejects.toThrow(/响应超时/)
+  })
+
+  it('续期失败时**不再重试**（不多花一个网络往返，直接把 99999 交回去）', async () => {
+    let businessCount = 0
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/user/password-login')) {
+        // ⚠️ 首次登录成功；**续期**时网络不通 → 登录失败。
+        if (businessCount === 0) {
+          return new Response(
+            JSON.stringify({ code: 0, data: { userToken: 'TK', deviceId: 'D' } }),
+            { status: 200 },
+          )
+        }
+        throw new Error('ECONNREFUSED')
+      }
+      businessCount += 1
+      return new Response(
+        JSON.stringify({ code: CODE_TOKEN_EXPIRED, msg: 'INVALID TOKEN' }),
+        { status: 401 },
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const m = new SessionManager()
+    await m.passwordLogin('http://127.0.0.1:5666/music', 'demo', 'pw')
+    const res = await m.request('track/list')
+
+    expect((res.json as { code?: number }).code).toBe(CODE_TOKEN_EXPIRED)
+    // ⚠️ 续期失败 → **不该**再发第二次业务请求（那会再挂一个网络往返）。
+    expect(businessCount).toBe(1)
+  })
+})

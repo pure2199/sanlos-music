@@ -527,6 +527,18 @@ describe('auth:logout', () => {
     expect(session.clear).toHaveBeenCalled()
     expect(info.connected).toBe(false)
   })
+
+  it('服务端**挂住**时，登出也能**立刻**完成（不等网络）', async () => {
+    const session = fakeSession()
+    // ⚠️ 永不 resolve（模拟 NAS / 中继不通）——旧实现会在这里**永远等下去**。
+    session.request.mockReturnValue(new Promise(() => {}))
+    const { handlers } = setup(session)
+
+    const info = await invoke(handlers, 'auth:logout')
+
+    expect(session.clear).toHaveBeenCalled()
+    expect(info.connected).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------

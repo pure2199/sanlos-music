@@ -600,16 +600,24 @@ function handleRestore(session: SessionManager): AuthSessionInfo {
 /**
  * `auth:logout`：登出。
  *
- * 尽力通知服务端（`user/logout`），**失败不阻断**本地清理——
- * 服务端不可达时用户也必须能登出。
+ * ⚠️ **不等网络**（T44 真机实测）：服务端不可达 / 中继不通时，登出请求会挂很久
+ *    （旧实现就是 `await session.request('user/logout')`）→ 界面卡在「退出中」，
+ *    用户看着就是「**点退出登录没反应**」。
+ *
+ * ⇒ 改成「**先启动**服务端通知（后台）→ **立刻**本地清理 → **立刻**返回」。
+ * 这与 `src/App.tsx` 里**早就有的**同一设计（「立刻切视图，不等 `logout()`」）一致。
+ *
+ * ⚠️ **顺序有讲究**：通知必须在 `clear()` **之前**启动 —— `clear()` 会清掉 token，
+ *    之后就发不出去了。`request()` 是 async 函数：调用它会**同步**跑到第一个 await
+ *    （请求头已带上凭证、请求已发出），之后才挂起 → 这个顺序是安全的。
  */
 async function handleLogout(session: SessionManager): Promise<AuthSessionInfo> {
-  try {
-    await session.request('user/logout')
-  } catch {
-    // 尽力而为：服务端登出失败不影响本地清理。
-  }
+  // ① 先启动服务端通知（**不 await**）：失败不阻断。
+  const notifying = Promise.resolve(session.request('user/logout')).catch(() => undefined)
+  // ② 立刻做本地清理（**不等网络**）——用户必须马上能登出。
   session.clear()
+  // ③ 后台收尾（**不阻塞返回**）。
+  void notifying
   return toSessionInfo(session)
 }
 
