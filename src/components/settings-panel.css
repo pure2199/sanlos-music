@@ -252,3 +252,52 @@
   color: var(--disabled);
   cursor: not-allowed;
 }
+
+/* --------------------------------------------------------------------------
+ * 「关于」分类（T41）：软件信息
+ * -------------------------------------------------------------------------- */
+
+/* 信息表：左列字段名、右列值。 */
+.fnm-settings__about {
+  margin: 0;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.fnm-settings__about-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+/* 字段名（固定宽 → 值列对齐）。 */
+.fnm-settings__about-row dt {
+  flex: 0 0 72px;
+  color: var(--text-secondary);
+}
+
+.fnm-settings__about-row dd {
+  margin: 0;
+  color: var(--text-primary);
+  /* ⚠️ 官网链接很长 → 窄窗口下允许断行，别把内容列撑破。 */
+  overflow-wrap: anywhere;
+}
+
+/* 官网链接（**用系统浏览器打开**，不在应用内跳转）。 */
+.fnm-settings__about-link {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.fnm-settings__about-link:hover {
+  text-decoration: underline;
+}
+
+.fnm-settings__about-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}

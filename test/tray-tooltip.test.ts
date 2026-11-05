@@ -593,7 +593,7 @@ describe('registerPlayerIpc', () => {
     return { ipcMain, handlers, listeners }
   }
 
-  it('注册了全部通道（含 Task 10 的悬浮歌词通道、Task 11 的下载通道与 Task 12 的 FFmpeg 通道）', () => {
+  it('注册了全部通道（含 Task 10 的悬浮歌词通道、Task 11 的下载通道、Task 12 的 FFmpeg 通道与 Task 41 的外部链接通道）', () => {
     // ⚠️ T10（桌面悬浮歌词）新增了两个通道，T11（本地下载）又新增了四个，
     //    T12（FFmpeg 兜底解码）再新增两个：
     //    - `lyric:set-visible`（调用式）：开关悬浮窗；
@@ -602,9 +602,16 @@ describe('registerPlayerIpc', () => {
     //      （调用式）：本地下载的索引、启动、取消、清空。
     //    - `ffmpeg:status` / `ffmpeg:fallback`（调用式）：探测 FFmpeg、请求兜底转码。
     //    → 原来的「全部八个通道」前提被这三个任务推翻，这里改写为**新的完整集合**。
+    //
+    // ⚠️ T41（软件信息）又新增一个：
+    //    - `app:open-external`（调用式）：用系统默认浏览器打开白名单里的官网。
+    //      （渲染层**不能**自己开网页 → 主窗口没配 `setWindowOpenHandler`，
+    //        链接会把应用窗口整个导航走。）
+    //    → 前提再次被推翻，这里**继续**改写为新的完整集合（不是放宽断言）。
     const { ipcMain, handlers, listeners } = fakeIpcMain()
     registerPlayerIpc({ ipcMain, prefs: new PrefsStore({ filePath: tempFile() }) })
     expect([...handlers.keys()].sort()).toEqual([
+      'app:open-external',
       'download:cancel',
       'download:clear',
       'download:list',
@@ -620,6 +627,36 @@ describe('registerPlayerIpc', () => {
       'win:toggle-maximize',
     ])
     expect([...listeners.keys()].sort()).toEqual(['lyric:state', 'player:command', 'player:state'])
+  })
+
+  it('app:open-external：白名单里的官网 → 交给系统浏览器打开', async () => {
+    const { ipcMain, handlers } = fakeIpcMain()
+    const openExternal = vi.fn().mockResolvedValue(undefined)
+    registerPlayerIpc({
+      ipcMain,
+      prefs: new PrefsStore({ filePath: tempFile() }),
+      openExternal,
+    })
+
+    const handler = handlers.get('app:open-external')
+    expect(handler).toBeTruthy()
+    await expect(handler?.({}, 'https://www.sanlos.cn')).resolves.toBe(true)
+    expect(openExternal).toHaveBeenCalledWith('https://www.sanlos.cn')
+  })
+
+  it('app:open-external：不在白名单的地址 → **拒绝**（一次都不调）', async () => {
+    const { ipcMain, handlers } = fakeIpcMain()
+    const openExternal = vi.fn().mockResolvedValue(undefined)
+    registerPlayerIpc({
+      ipcMain,
+      prefs: new PrefsStore({ filePath: tempFile() }),
+      openExternal,
+    })
+
+    const handler = handlers.get('app:open-external')
+    await expect(handler?.({}, 'https://example.com')).resolves.toBe(false)
+    await expect(handler?.({}, 'http://www.sanlos.cn')).resolves.toBe(false)
+    expect(openExternal).not.toHaveBeenCalled()
   })
 
   it('download:list 是调用：返回索引 + 任务 + 下载目录', async () => {

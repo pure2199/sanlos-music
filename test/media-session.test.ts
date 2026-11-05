@@ -165,6 +165,8 @@ function fakeBridge(): {
     minimize: async () => {},
     toggleMaximize: async () => {},
     close: async () => {},
+    // T41：用系统浏览器打开外部链接 —— 本用例不碰它，给个空实现即可。
+    openExternal: async () => false,
     // 桌面悬浮歌词（Task 10）：本用例不碰它，给个空实现即可。
     pushLyricState: () => {},
     onLyricState: () => () => {},

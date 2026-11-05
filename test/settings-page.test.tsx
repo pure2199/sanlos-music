@@ -12,7 +12,7 @@
 //    （那部分由 `settings-panel.test.tsx` / `settings-lyric-source.test.tsx` 钉）。
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 
 import { SettingsPanel } from '../src/components/SettingsPanel'
@@ -46,13 +46,15 @@ describe('设置页：整页结构（T35）', () => {
     expect(screen.queryByRole('dialog', { name: '设置' })).toBeNull()
   })
 
-  it('左侧有**五个**分类：通用 / 歌词 / 下载 / 解码 / 更新', () => {
+  it('左侧有**六个**分类：通用 / 歌词 / 下载 / 解码 / 更新 / 关于', () => {
     render(<SettingsPanel />)
 
     const labels = within(nav())
       .getAllByRole('button')
       .map((button) => button.textContent?.trim() ?? '')
-    expect(labels).toEqual(['通用', '歌词', '下载', '解码', '更新'])
+    // ⚠️ T41：**前提被用户显式推翻**（要加软件信息）→ 分类从 5 个变 6 个，
+    //    这条断言**改写为新行为**（仍逐项精确，不是放宽）。
+    expect(labels).toEqual(['通用', '歌词', '下载', '解码', '更新', '关于'])
   })
 
   it('默认停在「通用」，且**只有当前分类**的内容在显示', () => {
@@ -141,5 +143,62 @@ describe('设置页：整页结构（T35）', () => {
     // 切到别的分类 → 横幅**仍然**在（它渲染在内容区顶部，不属于任何一个分类）。
     pickCategory('歌词')
     expect(screen.getByRole('alert').textContent).toContain('写盘失败')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T41：「关于」分类（软件信息）
+// ---------------------------------------------------------------------------
+
+describe('设置页：「关于」分类（T41）', () => {
+  /** 装一个假的播放器桥（只关心 `openExternal`）。 */
+  function stubBridge(): { openExternal: ReturnType<typeof vi.fn> } {
+    const openExternal = vi.fn().mockResolvedValue(true)
+    ;(globalThis as unknown as { fnPlayer?: unknown }).fnPlayer = { openExternal }
+    return { openExternal }
+  }
+
+  afterEach(() => {
+    delete (globalThis as unknown as { fnPlayer?: unknown }).fnPlayer
+  })
+
+  it('点「关于」→ 显示开发者 / 公司 / 官网 / 备案号', () => {
+    render(<SettingsPanel />)
+
+    pickCategory('关于')
+
+    expect(screen.getByRole('group', { name: '关于' })).toBeTruthy()
+    expect(screen.getByTestId('app-about-developer').textContent).toBe('pure2199')
+    expect(screen.getByTestId('app-about-company').textContent).toBe('广西闪链时空网络科技有限公司')
+    expect(screen.getByTestId('app-about-icp').textContent).toBe('桂ICP备202507161号-1')
+    // 官网：文字就是那个地址。
+    expect(screen.getByRole('link', { name: 'https://www.sanlos.cn' })).toBeTruthy()
+  })
+
+  it('点官网 → **请主进程**用系统浏览器打开（不在应用内跳转）', () => {
+    const { openExternal } = stubBridge()
+    render(<SettingsPanel />)
+
+    pickCategory('关于')
+    const link = screen.getByRole('link', { name: 'https://www.sanlos.cn' })
+
+    // ⚠️ 关键：链接**不许**真的把应用窗口导航走
+    //    （主窗口没配 `setWindowOpenHandler`）→ 必须 `preventDefault`。
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    link.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(openExternal).toHaveBeenCalledWith('https://www.sanlos.cn')
+  })
+
+  it('没有桥（浏览器预览 / 单测）→ 点官网**不炸**，也不导航', () => {
+    render(<SettingsPanel />)
+
+    pickCategory('关于')
+    const link = screen.getByRole('link', { name: 'https://www.sanlos.cn' })
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    expect(() => link.dispatchEvent(event)).not.toThrow()
+    expect(event.defaultPrevented).toBe(true)
   })
 })

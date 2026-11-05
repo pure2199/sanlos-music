@@ -11,7 +11,8 @@
 
 appId: com.fnmusic.desktop
 productName: 飞牛音乐
-copyright: Copyright © 2026 fnmusic-desktop
+# ⚠️ **版权信息与「设置 → 关于」里的软件信息同源**（`shared/appInfo.ts`）。
+copyright: Copyright © 2026 广西闪链时空网络科技有限公司
 
 # ⚠️ **锁死 electron 版本**：不写这一行，builder 会自己解析版本，
 #    可能拉到与项目里那份不同的 electron（→ 产物行为随时间漂移）。

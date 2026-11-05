@@ -96,6 +96,7 @@ import type {
 import type { ConnectionInfo, ConnectionKind, PlayMode, ThemeName } from '../shared/types'
 import { buildCandidates, fetchConnectionParams, hostOf, normalizeBase } from './connection'
 import { TrustedHosts } from './cert'
+import { openExternalUrl } from './externalLinks'
 import { probeCandidates } from './probe'
 import { authx } from './sign'
 import { SessionStateError, type SessionManager } from './session'
@@ -210,6 +211,28 @@ function resolveIpcMain(): IpcMainLike | null {
     const ipcMain = (mod as { ipcMain?: unknown }).ipcMain
     if (typeof ipcMain !== 'object' || ipcMain === null) return null
     return ipcMain as IpcMainLike
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 惰性取 Electron 的 `shell`（**不在模块顶层调用**）。
+ *
+ * ⚠️ 与 {@link resolveIpcMain} 同理：非 Electron 进程（Vitest / 普通 Node）里
+ *    `require('electron')` 返回的是**可执行文件路径字符串** → 取不到任何 API；
+ *    此时返回 `null`，调用方直接拒绝打开外链。
+ */
+function resolveShell(): { openExternal(url: string): Promise<void> } | null {
+  try {
+    if (typeof require !== 'function') return null
+    const mod = require('electron') as { shell?: unknown } | string
+    if (typeof mod !== 'object' || mod === null) return null
+    const shell = (mod as { shell?: unknown }).shell
+    if (!shell || typeof (shell as { openExternal?: unknown }).openExternal !== 'function') {
+      return null
+    }
+    return shell as { openExternal(url: string): Promise<void> }
   } catch {
     return null
   }
@@ -1078,6 +1101,13 @@ export interface PlayerIpcOptions {
   /** 「关闭窗口」请求（默认只是隐藏；由主进程决定隐藏还是退出）。 */
   requestClose?: () => void
   /**
+   * 用系统默认浏览器打开一个**白名单里的**外部地址（T41）。
+   *
+   * ⚠️ 缺省时惰性取 Electron 的 `shell.openExternal`；单测可注入替身，
+   *    避免在 Vitest 里真的拉起浏览器。
+   */
+  openExternal?: (url: string) => Promise<void>
+  /**
    * 渲染进程推来**悬浮歌词消息**时的回调（Task 10）。
    *
    * ⚠️ 主进程**只转发**：把消息原样交给悬浮窗的渲染进程。
@@ -1270,6 +1300,21 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
     const win = opts.getWindow?.()
     if (!win || win.isDestroyed?.()) return
     win.hide()
+  })
+
+  // --- 外部链接（T41）-----------------------------------------------------
+  //
+  // ⚠️ 渲染层**不能**自己开网页：主窗口没配 `setWindowOpenHandler`
+  //    → `<a href>` 会把**应用窗口整个导航走**（界面被网站替换掉）。
+  //    ⇒ 渲染层只发请求，这里用系统默认浏览器开；**白名单在主进程这一侧**
+  //    （`shared/appInfo.ts` 的 `isAllowedExternalUrl`）→ 开不了别的站点。
+  ipcMain.handle('app:open-external', async (_event, arg) => {
+    const url = readString(asRecord(arg)?.['url'] ?? arg)
+    const shell = resolveShell()
+    const open =
+      opts.openExternal ?? (shell ? (target: string) => shell.openExternal(target) : undefined)
+    if (!open) return false
+    return openExternalUrl(url, { open })
   })
 
   // 偏好。

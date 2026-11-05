@@ -663,6 +663,40 @@ test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
   })
 
   // -------------------------------------------------------------------------
+  // T41：软件信息（「关于」分类）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **只断言显示，不点官网**：点了会真的调 `shell.openExternal`
+  //    → 在测试机上**拉起系统浏览器**（不可控）。点击行为由单测钉住
+  //    （`test/settings-page.test.tsx`：`preventDefault` + 请主进程打开）。
+  test('设置 →「关于」：显示开发者 / 公司 / 官网 / 备案号', async () => {
+    // ⚠️ 设置页是**开关**：上一条用例（T23 自动更新）可能开着 → 不在才点。
+    const settingsRegion = fixture.window.getByRole('region', { name: '设置' })
+    const alreadyOpen = await settingsRegion.isVisible().catch(() => false)
+    if (!alreadyOpen) {
+      await fixture.window.getByRole('button', { name: '设置', exact: true }).click()
+      await expect(settingsRegion).toBeVisible()
+    }
+
+    // 切到「关于」分类。
+    await fixture.window
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '关于', exact: true })
+      .click()
+
+    await expect(fixture.window.getByTestId('app-about-developer')).toHaveText('pure2199')
+    await expect(fixture.window.getByTestId('app-about-company')).toHaveText(
+      '广西闪链时空网络科技有限公司',
+    )
+    await expect(fixture.window.getByTestId('app-about-icp')).toHaveText('桂ICP备202507161号-1')
+    await expect(fixture.window.getByRole('link', { name: 'https://www.sanlos.cn' })).toBeVisible()
+
+    // ⚠️ **状态复原**：设置页是开关 → 关掉，别影响后面的用例。
+    await fixture.window.getByRole('button', { name: '关闭设置' }).click()
+    await expect(settingsRegion).toBeHidden()
+  })
+
+  // -------------------------------------------------------------------------
   // T29：播放模式持久化（切模式 → **重启应用** → 模式还在）
   // -------------------------------------------------------------------------
   // 外部歌词源（T32）

@@ -27,9 +27,10 @@
 //    样式住在同目录的 `settings-panel.css`。
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 
-import type { CloseBehavior } from '../../shared/playerBridge'
+import { APP_INFO } from '../../shared/appInfo'
+import type { CloseBehavior, PlayerBridge } from '../../shared/playerBridge'
 import type { FfmpegStatus } from '../../shared/ffmpeg'
 import type { LyricSource } from '../../shared/lyricProvider'
 import { useAppPrefsStore } from '../state/appPrefsStore'
@@ -40,7 +41,7 @@ import { formatBytes } from './DownloadButton'
 import './settings-panel.css'
 
 /** 设置页的分类。 */
-export type SettingsCategory = 'general' | 'lyrics' | 'download' | 'decoder' | 'update'
+export type SettingsCategory = 'general' | 'lyrics' | 'download' | 'decoder' | 'update' | 'about'
 
 /** 左侧分类导航的条目（顺序 = 显示顺序）。 */
 const CATEGORIES: { id: SettingsCategory; label: string }[] = [
@@ -49,6 +50,7 @@ const CATEGORIES: { id: SettingsCategory; label: string }[] = [
   { id: 'download', label: '下载' },
   { id: 'decoder', label: '解码' },
   { id: 'update', label: '更新' },
+  { id: 'about', label: '关于' },
 ]
 
 /** `SettingsPanel` 的属性。 */
@@ -209,6 +211,21 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const handleInstallUpdate = useCallback(() => {
     void installUpdate()
   }, [installUpdate])
+
+  /**
+   * 点官网 → 用**系统默认浏览器**打开（不在应用内跳转）。
+   *
+   * ⚠️ **必须 `preventDefault()`**：主窗口**没有** `setWindowOpenHandler`
+   *    → 不拦住的话，浏览器会把**应用窗口整个导航到那个网站**
+   *    （应用界面被替换掉，等于把软件弄坏）。
+   * ⚠️ **白名单在主进程那一侧**（`shared/appInfo.ts` 的 `isAllowedExternalUrl`）
+   *    → 渲染层给什么 URL 都开不了别的站点。
+   */
+  const handleOpenWebsite = useCallback((event: ReactMouseEvent<HTMLAnchorElement>): void => {
+    event.preventDefault()
+    const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
+    void scope.fnPlayer?.openExternal(APP_INFO.website)
+  }, [])
 
   const updateBusy =
     updateStatus === 'checking' || updateStatus === 'downloading' || updateStatus === 'installing'
@@ -538,6 +555,47 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             <p className="fnm-settings__hint">
               安装包必须带代码签名，且签名者与「预期的代码签名者」一致才会被启动；
               未配置预期签名者时只允许下载，不允许安装。
+            </p>
+          </fieldset>
+        )}
+
+        {category === 'about' && (
+          <fieldset className="fnm-settings__group">
+            <legend className="fnm-settings__legend">关于</legend>
+            <dl className="fnm-settings__about" data-testid="app-about">
+              <div className="fnm-settings__about-row">
+                <dt>应用名称</dt>
+                <dd>{APP_INFO.name}</dd>
+              </div>
+              <div className="fnm-settings__about-row">
+                <dt>开发者</dt>
+                <dd data-testid="app-about-developer">{APP_INFO.developer}</dd>
+              </div>
+              <div className="fnm-settings__about-row">
+                <dt>公司</dt>
+                <dd data-testid="app-about-company">{APP_INFO.company}</dd>
+              </div>
+              <div className="fnm-settings__about-row">
+                <dt>官网</dt>
+                <dd>
+                  {/* ⚠️ 必须 `preventDefault`（见 `handleOpenWebsite`）：
+                      不拦住的话浏览器会把**应用窗口**导航到那个网站。 */}
+                  <a
+                    className="fnm-settings__about-link"
+                    href={APP_INFO.website}
+                    onClick={handleOpenWebsite}
+                  >
+                    {APP_INFO.website}
+                  </a>
+                </dd>
+              </div>
+              <div className="fnm-settings__about-row">
+                <dt>备案号</dt>
+                <dd data-testid="app-about-icp">{APP_INFO.icp}</dd>
+              </div>
+            </dl>
+            <p className="fnm-settings__hint">
+              点官网会用系统默认浏览器打开（不在应用内跳转）。
             </p>
           </fieldset>
         )}

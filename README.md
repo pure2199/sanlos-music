@@ -166,3 +166,17 @@ A：默认**隐藏窗口、播放继续**，可在「设置 → 通用 → 关�
 | [`docs/changelog.md`](./docs/changelog.md) | 版本号变更说明 |
 | [`docs/superpowers/specs/`](./docs/superpowers/specs/) | 设计规格 |
 | [`docs/superpowers/plans/`](./docs/superpowers/plans/) | 实施计划 |
+
+---
+
+## 九、软件信息
+
+| 项 | 内容 |
+|---|---|
+| **应用名称** | 飞牛音乐 |
+| **开发者** | pure2199 |
+| **公司** | 广西闪链时空网络科技有限公司 |
+| **官网** | https://www.sanlos.cn |
+| **备案号** | 桂ICP备202507161号-1 |
+
+同一份信息也显示在**应用内**「设置 → 关于」里（官网用系统默认浏览器打开）。

@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "飞牛音乐 Windows 桌面客户端",
-  "author": "fnmusic-desktop",
+  "author": "pure2199 (广西闪链时空网络科技有限公司)",
+  "homepage": "https://www.sanlos.cn",
   "license": "MIT",
   "main": "dist-electron/main.js",
   "scripts": {

@@ -89,6 +89,15 @@ const fnPlayer: PlayerBridge = {
   toggleMaximize: () => ipcRenderer.invoke('win:toggle-maximize'),
   close: () => ipcRenderer.invoke('win:close'),
   // -------------------------------------------------------------------------
+  // 外部链接（T41）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **白名单在主进程那一侧**（`shared/appInfo.ts` 的 `isAllowedExternalUrl`）
+  //    → 渲染层给什么 URL 都开不了别的站点。
+  // ⚠️ 渲染层**不许**自己 `window.open`：主窗口没配 `setWindowOpenHandler`
+  //    → 链接会把应用窗口整个导航走（界面被网站替换掉）。
+  openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
+  // -------------------------------------------------------------------------
   // 桌面悬浮歌词（Task 10）
   // -------------------------------------------------------------------------
   //

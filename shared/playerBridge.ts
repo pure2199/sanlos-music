@@ -462,6 +462,14 @@ export interface PlayerBridge {
   /** 关闭窗口（`win:close`；默认只是隐藏，播放继续）。 */
   close(): Promise<void>
   /**
+   * 用**系统默认浏览器**打开一个外部链接（`app:open-external`）。
+   *
+   * ⚠️ **白名单在主进程那一侧**（`shared/appInfo.ts` 的 `isAllowedExternalUrl`）：
+   *    只允许 `https` + 白名单域名 → 渲染层给什么 URL 都开不了别的站点。
+   * @returns 是否真的打开了。
+   */
+  openExternal(url: string): Promise<boolean>
+  /**
    * 推送悬浮歌词消息（`lyric:state`，`ipcRenderer.send`）。
    *
    * ⚠️ **主窗口渲染进程**用它把「曲目 + 歌词」与「播放进度」推给主进程，

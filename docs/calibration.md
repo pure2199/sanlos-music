@@ -1646,3 +1646,75 @@ T38 给顶栏加了一颗「本地」按钮 → 已登录态顶栏变成 **10 �
 - ⚠️ **窗口边框 16px / 39px 是本机实测值**（Windows + 100% 缩放）→ 换机器 / 换缩放比例时
   「内容宽 = 外框宽 − 边框」会变；最小宽度取 **800**（而不是贴着 733 的下限）就是给这个浮动留余量。
 - ⚠️ **真机肉眼复验未做**：在真机上把窗口拖到最小，看顶栏换行后的观感。
+
+---
+
+## 二十四、T41：软件信息（关于页）
+
+- 日期：2026-11-05
+- 状态：**完成**
+- 规格：`docs/superpowers/specs/2026-11-05-fnmusic-app-info-design.md`（提交 `54d6b0c`）
+
+### 用户诉求
+
+加入软件信息：开发者 `pure2199`、公司 广西闪链时空网络科技有限公司、
+官网 https://www.sanlos.cn 、ICP 备案号 桂ICP备202507161号-1。
+
+### 落点与做法
+
+| 项 | 落点 |
+| --- | --- |
+| 显示 | 设置页新增「**关于**」分类（左侧导航第 6 项） |
+| 单一真相源 | `shared/appInfo.ts`（设置页 / `package.json` / `electron-builder.yml` / README 同一份） |
+| 打包元数据 | `electron-builder.yml` 的 `copyright`；`package.json` 的 `author` / `homepage` |
+| 文档 | README 新增「九、软件信息」 |
+
+### ⚠️ 本任务唯一的坑：官网**不能**直接用 `<a href>`
+
+主窗口**没有**配 `setWindowOpenHandler` ⇒ 渲染层里的 `<a href="https://…">` 一旦被点，
+**Chromium 会把应用窗口整个导航到那个网站** → 应用界面被替换掉，等于把软件弄坏。
+
+⇒ 点击处理：① **先 `event.preventDefault()`**（拦住导航）；② 再请**主进程**用
+`shell.openExternal` 打开（用**系统默认浏览器**，不在应用内跳转）。
+
+### 白名单在**主进程**那一侧
+
+| 规则 | 值 |
+| --- | --- |
+| 协议 | **只允许 `https:`**（`http` / `file` / `javascript` / `data` 一律拒绝） |
+| 主机名 | **精确匹配** `sanlos.cn` / `www.sanlos.cn`（**不做后缀匹配** → `sanlos.cn.evil.example` 不放行） |
+| 账号密码 / 端口 | 不许带 / 只允许默认 443 |
+
+- 判断是**纯函数**（`shared/appInfo.ts` 的 `isAllowedExternalUrl`）→ 不用起 Electron 就能单测；
+- 真正的「打开」抽到 `electron/externalLinks.ts`（**依赖注入**）→ 单测里喂替身，
+  **不会在测试机上真的拉起浏览器**；
+- `electron/ipc.ts` 的**模块顶层不得 import Electron**（它要能在 Vitest 里单测）
+  → `shell` **惰性解析**（`resolveShell()`），与既有 `resolveIpcMain()` 同一套路；
+- `registerPlayerIpc` 的参数**全部可注入** → 新增可选 `openExternal`（单测注入替身）。
+
+### 改写的既有测试（前提被用户**显式**推翻）
+
+| 文件 | 改法 |
+| --- | --- |
+| `test/settings-page.test.tsx` | 「左侧有**五个**分类」→ 改成**六个**（多了「关于」）→ **改写为新行为断言**（仍逐项精确，不是放宽） |
+| `test/tray-tooltip.test.ts` | 「注册了全部通道」的期望集合**加** `app:open-external` → 继续改写为新的完整集合；另**新增** 2 条 `app:open-external` 行为断言 |
+| `test/media-session.test.ts` | 假桥**只加** `openExternal` 空实现（CRLF → 用 `release/verify/patch-t41-crlf.mjs` 写回），既有断言**一条未动** |
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1669 passed / 74 files**（基线 1652 / 72）；
+  `playwright test` **24 passed**（基线 23 + 新增 1）；
+- 本轮改动文件 **U+FFFD = 0**、无 BOM、行尾保持原样（`docs/calibration.md` 与
+  `test/media-session.test.ts` 仍是 **CRLF**）；
+- **变异自证（三处全部先红后复原，sha256 回基线）**：
+  1. 放宽协议（允许 `http`）→ 白名单单测**红**（2 条）；
+  2. 去掉 `openExternalUrl()` 的白名单校验 → 外链单测**红**（2 条）；
+  3. 去掉 `preventDefault()` → 设置页单测**红**（2 条）。
+
+### 遗留 / 待办
+
+- ⚠️ **版本号没显示**（「关于」页只有用户给的四项 + 应用名）→ 版本要走主进程
+  `app.getVersion()`，需再加一条 IPC + 加载态 → 本轮**不扩范围**；
+- ⚠️ **白名单是按当前官网定的**：以后要加别的官方链接（帮助文档 / 仓库等），
+  得**显式**往 `EXTERNAL_LINK_ALLOWED_HOSTS` 里加（**不自动放宽**）；
+- ⚠️ **真机肉眼复验未做**：点官网应**用系统浏览器打开**，**应用窗口不被导航走**。
