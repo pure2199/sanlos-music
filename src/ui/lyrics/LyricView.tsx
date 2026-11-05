@@ -217,6 +217,15 @@ export function LyricView(props: LyricViewProps): ReactElement {
   const [viewportHeight, setViewportHeight] = useState(0)
 
   // 量可视区高度（浏览器里用 ResizeObserver；jsdom 里量不到 → 用兜底常量）。
+  //
+  // ⚠️ **依赖里必须有 `safeLines.length`**（T46 补丁②）：
+  //    挂载那一刻歌词往往还是**空的** → 组件走**空态分支**（**没有视口节点**）
+  //    → 这个 effect 拿不到节点就直接走了。若依赖写死 `[]`，
+  //    **歌词到达后不会重跑** → `viewportHeight` 永远停在 0 →
+  //    单行模式的居中一律按**兜底高度 400** 算 → 当前行不在中间。
+  //
+  //    ⚠️ 双行模式**不受影响**（滚动位置恒为 0，用不到视口高度）
+  //       → 这个缺陷在双行下**完全看不出来**。
   useEffect(() => {
     const element = viewportRef.current
     if (!element) return
@@ -230,7 +239,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
     const observer = new ResizeObserver(() => measure())
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [safeLines.length])
 
   // 当前行（单行 / 全量模式用；双行模式由纯函数给出「上一行 / 下一行」）。
   const activeIndex = useMemo(

@@ -121,6 +121,18 @@ body {
   min-height: 0;
   display: flex;
   overflow: hidden;
+  /*
+   * ⚠️ **高度必须由胶囊给**（`align-self: stretch`），**不能跟歌词总高走**。
+   *
+   * 单行模式（`mode="single"`）下 `LyricView` 的画布高度 = **整份歌词的总高**
+   * （行数 × 34px）——真实歌曲几百行 → 画布几千 px。
+   * 歌词区若按内容取高，就会被画布撑到几千 px → 胶囊（只有 96px）裁剪后
+   * 露出的是「**歌词表的垂直中点**」，而不是当前行；滚动定位也一并跑偏。
+   *
+   * → `stretch` 让歌词区正好等于胶囊内容区 → `LyricView` 量到的可视区高度
+   *   才是真的 → 当前行被滚到**正中**。
+   */
+  align-self: stretch;
   /* 点歌词要能跳转，不能被拖动区吃掉。 */
   -webkit-app-region: no-drag;
 }

@@ -19,7 +19,12 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ReactElement } from 'react'
 
-import { LyricView, LYRIC_WINDOW_RADIUS } from '../src/ui/lyrics/LyricView'
+import {
+  LyricView,
+  LYRIC_ACTIVE_LINE_HEIGHT,
+  LYRIC_LINE_HEIGHT,
+  LYRIC_WINDOW_RADIUS,
+} from '../src/ui/lyrics/LyricView'
 import { attachTranslations, parseLrc } from '../src/ui/lyrics/parse'
 import { PlayerBar, resolveQuality, LOSSLESS_CODECS } from '../src/components/PlayerBar'
 import {
@@ -345,6 +350,59 @@ describe('LyricView：单行模式', () => {
 
     const viewport = container.querySelector('[data-testid="lyric-view"]') as HTMLElement
     expect(Number(viewport.getAttribute('data-scroll-top'))).toBeGreaterThan(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T46 补丁②：单行模式的**视口测量**
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **这个坑只在「歌词从空到有」时才会踩**：
+//    挂载那一刻歌词还是空的 → 组件走**空态分支**（没有视口节点）→
+//    量视口的 effect 拿不到节点就走了；而该 effect 的依赖若写死 `[]`，
+//    **歌词到达后不会重跑** → `viewportHeight` 永远停在 0 →
+//    单行模式的居中一律按**兜底高度 400** 算 → 当前行不在中间。
+//
+//    ⚠️ 双行模式**不受影响**（它的滚动位置恒为 0，用不到视口高度）→ 这个缺陷
+//       在双行下**完全看不出来**，直到词岛改用单行模式才暴露。
+//
+// ⚠️ jsdom 的 `getBoundingClientRect()` 一律返回 0 → 这里**mock 成 74px**
+//    才能区分「量到了真实视口」与「还在用兜底 400」。
+// ---------------------------------------------------------------------------
+
+describe('LyricView：单行模式的视口测量（T46 补丁②）', () => {
+  it('歌词**从空到有**时会重新量视口（否则永远用兜底 400 → 当前行不在中间）', () => {
+    const VIEWPORT_HEIGHT = 74
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      height: VIEWPORT_HEIGHT,
+      width: 520,
+      top: 0,
+      left: 0,
+      right: 520,
+      bottom: VIEWPORT_HEIGHT,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    const many = parseLrc(
+      Array.from({ length: 20 }, (_, i) => `${stamp(i * 10)}占位行${i}`).join('\n'),
+    )
+
+    // 先挂载**空歌词**（此时组件走空态分支，还没有视口节点）。
+    const { container, rerender } = render(<LyricView lines={[]} currentTime={0} mode="single" />)
+    // 歌词到达 → 切到单行分支（此时才有视口节点，量视口的 effect 必须重跑）。
+    rerender(<LyricView lines={many} currentTime={95} mode="single" />)
+
+    const viewport = container.querySelector('[data-testid="lyric-view"]') as HTMLElement
+    const scrollTop = Number(viewport.getAttribute('data-scroll-top'))
+
+    // 第 10 行（行时间 90s，95s 落在它里面）→ 用**真实视口**算的居中位置。
+    const expected =
+      9 * LYRIC_LINE_HEIGHT + LYRIC_ACTIVE_LINE_HEIGHT / 2 - VIEWPORT_HEIGHT / 2
+    expect(scrollTop).toBe(expected)
+    // ⚠️ 用兜底 400 会算成 `9 * 34 + 22 - 200 = 128` → 两者**必须不同**。
+    expect(scrollTop).not.toBe(9 * LYRIC_LINE_HEIGHT + LYRIC_ACTIVE_LINE_HEIGHT / 2 - 400 / 2)
   })
 })
 
