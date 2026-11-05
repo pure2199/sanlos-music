@@ -170,6 +170,8 @@ function fakeBridge(): {
     // ⚠️ T45：桌面歌词样式的两个新桥方法 —— 本用例不碰它们，给空实现即可。
     setLyricMode: async () => {},
     onLyricMode: () => () => undefined,
+    // ⚠️ T46：指针位置通知 —— 本用例不碰它，给空实现即可。
+    onLyricPointer: () => () => undefined,
     // 桌面悬浮歌词（Task 10）：本用例不碰它，给个空实现即可。
     pushLyricState: () => {},
     onLyricState: () => () => {},

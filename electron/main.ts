@@ -32,7 +32,7 @@ import { buildUpstreamRequest, registerProxy } from './proxy'
 import { SessionManager } from './session'
 import { createCoverFetcher, createTray } from './tray'
 import { createBoundsSaver, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, resolveWindowBounds } from './windowBounds'
-import { islandBounds, ISLAND_WINDOW_HEIGHT, ISLAND_WINDOW_WIDTH } from './islandAnchor'
+import { islandBounds, isPointInsideRect, ISLAND_WINDOW_HEIGHT, ISLAND_WINDOW_WIDTH } from './islandAnchor'
 import { createUpdateController } from './update'
 
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
@@ -113,6 +113,8 @@ function showMainWindow(): void {
 
 /** 词岛重新锚定的节流间隔（毫秒）。 */
 const ISLAND_REANCHOR_THROTTLE_MS = 200
+/** 词岛指针位置的轮询间隔（毫秒）——「鼠标进入隐藏」的恢复靠它。 */
+const ISLAND_POINTER_POLL_MS = 100
 /** 上次重新锚定的时间戳（0 = 从没锚定过）。 */
 let lastIslandReanchorAt = 0
 /** 节流窗口末尾的补锚定时器（拖动停止后补算一次）。 */
@@ -617,10 +619,27 @@ if (!isPrimaryInstance) {
         win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
         islandWindow = win
 
+        // ⚠️ T46：词岛**点击穿透** —— 它贴在屏幕顶部，不穿透的话最大化应用的
+        //    标题栏中央就点不到。
+        //    `forward: true` → 仍然转发鼠标移动（探针实测：仍收到 131 次 mousemove）。
+        win.setIgnoreMouseEvents(true, { forward: true })
+
+        // ⚠️ T46：「鼠标进入隐藏」的**恢复**只能靠轮询：忽略鼠标事件之后，
+        //    渲染进程收不到「鼠标离开」（实测：指针移出后 0 个 mousemove）。
+        let pointerInside = false
+        const pointerTimer = setInterval(() => {
+          if (win.isDestroyed() || !win.isVisible()) return
+          const inside = isPointInsideRect(screen.getCursorScreenPoint(), win.getBounds())
+          if (inside === pointerInside) return
+          pointerInside = inside
+          win.webContents.send('lyric:pointer', inside)
+        }, ISLAND_POINTER_POLL_MS)
+
         // ⚠️ T36：菜单栏没了 → **Ctrl+C / Ctrl+V** 自己接回来。
         attachAppShortcuts(win.webContents)
 
         win.on('closed', () => {
+          clearInterval(pointerTimer)
           islandWindow = null
         })
 

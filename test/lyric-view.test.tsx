@@ -275,6 +275,53 @@ describe('LyricView：双行模式', () => {
 })
 
 // ---------------------------------------------------------------------------
+// T46：当前词的额外类名（灵动态词岛的「逐字发光」用）
+// ---------------------------------------------------------------------------
+
+describe('LyricView：当前词高亮钩子（T46）', () => {
+  it('给了 activeWordClassName → **当前正在唱的词**带上这个类', () => {
+    const { container } = render(
+      <LyricView
+        lines={THREE_LINES}
+        currentTime={25}
+        mode="double"
+        activeWordClassName="fnm-lyricview__word--active"
+      />,
+    )
+
+    // t=25 时乙行（20~30s）正在唱 → 它的「当前词」该带钩子类名。
+    const next = lineAt(container, 1)
+    const words = Array.from(next.querySelectorAll('[data-word]'))
+    const active = words.filter((word) => word.className.includes('fnm-lyricview__word--active'))
+    expect(active).toHaveLength(1)
+  })
+
+  it('不给 → **不加**任何额外类名（既有行为一字不变）', () => {
+    const { container } = render(<LyricView lines={THREE_LINES} currentTime={25} mode="double" />)
+
+    const next = lineAt(container, 1)
+    const words = Array.from(next.querySelectorAll('[data-word]'))
+    expect(words.some((word) => /fnm-lyricview__word--active/.test(word.className))).toBe(false)
+  })
+
+  it('该行已走满 → **不给**当前词加钩子（整行都是唱过的状态）', () => {
+    const { container } = render(
+      <LyricView
+        lines={THREE_LINES}
+        currentTime={25}
+        mode="double"
+        activeWordClassName="fnm-lyricview__word--active"
+      />,
+    )
+
+    // t=25 时甲行（10~20s）早已走满 → 它的词**全是** sung，不该再有「当前词」。
+    const previous = lineAt(container, 0)
+    const words = Array.from(previous.querySelectorAll('[data-word]'))
+    expect(words.some((word) => /fnm-lyricview__word--active/.test(word.className))).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 要求 D：单行模式的性能
 // ---------------------------------------------------------------------------
 

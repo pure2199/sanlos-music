@@ -12,10 +12,12 @@
 
 export {
   islandBounds,
+  isPointInsideRect,
   ISLAND_TOP_MARGIN,
   ISLAND_WINDOW_HEIGHT,
   ISLAND_WINDOW_WIDTH,
   type IslandBounds,
   type IslandDisplayLike,
   type IslandSize,
+  type PointLike,
 } from '../../../shared/islandAnchor'

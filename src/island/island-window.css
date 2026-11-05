@@ -47,10 +47,36 @@ body {
   border-radius: var(--radius-pill, 999px);
   background: var(--surface-raised);
   color: var(--text-primary);
+  box-shadow: 0 2px 18px var(--shadow);
+  /* T46：指针进入 / 离开时的淡出淡回。 */
+  transition: opacity 220ms ease, transform 220ms ease;
   /* 词岛整体不接管鼠标拖动（它不提供拖动把手）。 */
   -webkit-app-region: no-drag;
   user-select: none;
   overflow: hidden;
+}
+
+/*
+ * 指针落在词岛上 → 淡出（T46「鼠标进入隐藏」）。
+ *
+ * ⚠️ 淡出**只降不透明度**，不 `display: none` / `visibility: hidden`：
+ *    词岛是**点击穿透**的（`setIgnoreMouseEvents`），状态变化靠主进程轮询
+ *    指针位置通知 → 淡出不会影响那个机制。
+ */
+.fnm-island--pointer-inside {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+/*
+ * 当前正在唱的词：**发光**（T46）。
+ *
+ * ⚠️ 只用 `text-shadow`——**不能**加 `transform: scale`：
+ *    逐字着色层（overlay）与底层整行文本必须**字形严丝合缝**
+ *    → 任何改变字宽的样式（scale / 字重）都会让两层错位。
+ */
+.fnm-island .fnm-lyricview__word--active {
+  text-shadow: 0 0 8px var(--accent), 0 0 18px var(--accent);
 }
 
 /* --------------------------------------------------------------------------

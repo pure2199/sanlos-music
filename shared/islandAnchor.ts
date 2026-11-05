@@ -36,6 +36,27 @@ export interface IslandBounds {
   height: number
 }
 
+/** 屏幕上的一个点（像素坐标）。 */
+export interface PointLike {
+  x: number
+  y: number
+}
+
+/**
+ * 指针是否落在矩形内（T46：词岛的「鼠标进入隐藏」）。
+ *
+ * ⚠️ **边界含**：指针正好压在边缘上 → 算「在矩形内」。
+ * ⚠️ 矩形可以是**负坐标**（副屏在主屏左边）→ 不做任何坐标系假设。
+ */
+export function isPointInsideRect(point: PointLike, rect: IslandBounds): boolean {
+  return (
+    point.x >= rect.x &&
+    point.x <= rect.x + rect.width &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.height
+  )
+}
+
 /** 词岛默认的宽度（像素）。 */
 export const ISLAND_WINDOW_WIDTH = 520
 /**

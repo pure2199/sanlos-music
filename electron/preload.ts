@@ -135,6 +135,16 @@ const fnPlayer: PlayerBridge = {
       ipcRenderer.removeListener('lyric:mode', listener)
     }
   },
+  // ⚠️ T46：指针是否落在词岛上（主进程轮询 `screen.getCursorScreenPoint()` 得出）。
+  onLyricPointer: (handler) => {
+    const listener = (_event: unknown, inside: unknown): void => {
+      handler(inside === true)
+    }
+    ipcRenderer.on('lyric:pointer', listener)
+    return () => {
+      ipcRenderer.removeListener('lyric:pointer', listener)
+    }
+  },
   // -------------------------------------------------------------------------
   // 下载（Task 11）
   // -------------------------------------------------------------------------

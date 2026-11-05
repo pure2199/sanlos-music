@@ -100,6 +100,14 @@ export interface LyricViewProps {
   emptyLabel?: string
   /** 附加类名。 */
   className?: string
+  /**
+   * 「当前正在唱的词」要额外挂上的类名（T46：灵动态词岛的逐字发光）。
+   *
+   * ⚠️ **缺省 = 不加任何类名** → 既有用法（主界面歌词 / 全屏歌词舞台 /
+   *    经典悬浮窗）的行为**一字不变**。
+   * ⚠️ 只给**正在被唱的那一个词**加；该行已走满 → **不加**（整行都是唱过的状态）。
+   */
+  activeWordClassName?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +207,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
     windowRadius = LYRIC_WINDOW_RADIUS,
     emptyLabel = '暂无歌词',
     className,
+    activeWordClassName,
   } = props
 
   const safeLines = Array.isArray(lines) ? lines : []
@@ -295,6 +304,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
           progress: isActive ? computeLineProgress(line, time) : null,
           active: isActive,
           onSeek,
+          activeWordClassName,
           style: { '--fnm-lyricview__line-top': `${top}px` },
         }),
       )
@@ -355,6 +365,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
           progress={isActive ? computeLineProgress(line, time) : null}
           onSeek={onSeek}
           showTranslation={index === translationIndex}
+          activeWordClassName={activeWordClassName}
         />,
       )
     }
@@ -411,6 +422,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
           progress: state.previous,
           active: false,
           onSeek,
+          activeWordClassName,
           slot: 'previous',
         })}
 
@@ -421,6 +433,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
           progress: state.next,
           active: false,
           onSeek,
+          activeWordClassName,
           slot: 'next',
         })}
     </div>
@@ -440,6 +453,8 @@ interface RenderLineOptions {
   onSeek?: (t: number) => void
   slot?: 'previous' | 'next'
   style?: CssVars
+  /** 「当前词」要额外挂的类名（见 `LyricViewProps.activeWordClassName`）。 */
+  activeWordClassName?: string
   /**
    * 要不要渲染翻译副行。
    *
@@ -484,10 +499,19 @@ function renderLine(options: RenderLineOptions): ReactElement {
       return
     }
     const sung = isWordHighlighted(progress, segment.wordIndex)
+    // ⚠️ T46：「当前正在唱的词」= `progress.wordIndex` 指向的那**一个**词。
+    //    该行已走满（`completed`）→ **不加**（整行都是唱过的状态，没有「当前」可言）。
+    const isActiveWord =
+      Boolean(options.activeWordClassName) &&
+      progress !== null &&
+      !progress.completed &&
+      progress.wordIndex >= 0 &&
+      segment.wordIndex === progress.wordIndex
+    const activeClass = isActiveWord ? ` ${options.activeWordClassName as string}` : ''
     overlayContent.push(
       <span
         key={`word-${position}`}
-        className={`fnm-lyricview__word${sung ? ' fnm-lyricview__word--sung' : ''}`}
+        className={`fnm-lyricview__word${sung ? ' fnm-lyricview__word--sung' : ''}${activeClass}`}
         data-word={segment.wordIndex}
       >
         {segment.text}
@@ -571,6 +595,7 @@ const AllLyricLine = memo(function AllLyricLine(props: {
   progress: LyricWordProgress | null
   onSeek?: (t: number) => void
   showTranslation: boolean
+  activeWordClassName?: string
 }): ReactElement {
   return renderLine({
     line: props.line,
@@ -579,6 +604,7 @@ const AllLyricLine = memo(function AllLyricLine(props: {
     active: props.active,
     onSeek: props.onSeek,
     showTranslation: props.showTranslation,
+    activeWordClassName: props.activeWordClassName,
     style: { '--fnm-lyricview__line-top': `${props.index * LYRIC_ALL_LINE_HEIGHT}px` },
   })
 })
