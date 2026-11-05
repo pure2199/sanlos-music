@@ -40,6 +40,7 @@ import { dirname, join } from 'node:path'
 import { mkdir, open, rename, rm, stat } from 'node:fs/promises'
 
 import type { DownloadEntry, DownloadRequest, DownloadTask } from '../shared/playerBridge'
+import { readFileTags, type AudioTags, type TagFileSystem } from './audioTags'
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -100,6 +101,12 @@ export interface DownloadManagerDeps {
   renameFile?: (from: string, to: string) => Promise<void>
   /** 删除文件（不存在也不报错）。 */
   removeFile?: (path: string) => Promise<void>
+  /**
+   * 读一段字节（T39：读音频标签用）。
+   *
+   * ⚠️ **可选**：没有它 = **解析能力自动降级**（时长保持未知）。
+   */
+  readBytes?: (path: string, offset: number, length: number) => Promise<Buffer>
   /** 任务状态变化回调（主进程据此推给渲染进程）。 */
   onChange?: (tasks: DownloadTask[]) => void
 }
@@ -258,6 +265,8 @@ export class DownloadManager {
   private readonly partPaths = new Map<string, string>()
   /** 上次推送进度的时刻（节流用）。 */
   private lastNotifyAt = 0
+  /** 标签回填的 Promise（T39；**只跑一次**）。 */
+  private tagsReady: Promise<void> | null = null
 
   constructor(deps: DownloadManagerDeps) {
     this.deps = deps
@@ -289,6 +298,12 @@ export class DownloadManager {
           //    老条目没有 → 渲染层用**文件名反推**兜底（近似值）。
           title: typeof entry.title === 'string' ? entry.title : undefined,
           artist: typeof entry.artist === 'string' ? entry.artist : undefined,
+          // ⚠️ T39：时长 / 专辑来自文件内嵌标签——同样**可选**。
+          duration:
+            typeof entry.duration === 'number' && Number.isFinite(entry.duration) && entry.duration > 0
+              ? entry.duration
+              : undefined,
+          album: typeof entry.album === 'string' ? entry.album : undefined,
         }
       }
       return clean
@@ -319,6 +334,64 @@ export class DownloadManager {
   /** 当前下载目录（绝对路径）。 */
   getDir(): string {
     return this.deps.getDownloadDir()
+  }
+
+  // --- 标签（T39）---------------------------------------------------------
+
+  /**
+   * 读一个文件的音频标签（T39）。
+   *
+   * ⚠️ **读不到 / 解析失败 → `null`**（不抛）：下载结果**不受影响**。
+   */
+  private async readTags(file: string): Promise<AudioTags | null> {
+    const readBytes = this.deps.readBytes
+    if (!readBytes) return null
+    const statSize = this.deps.statSize ?? defaultStatSize
+    const fs: TagFileSystem = {
+      readBytes: (path, offset, length) => readBytes(path, offset, length),
+      statSize: (path) => statSize(path),
+    }
+    try {
+      return await readFileTags(fs, file)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 回填**老条目**的时长 / 专辑（T39）。
+   *
+   * ⚠️ 老条目（升级前下的）索引里没有时长 → 这里逐个读文件头补上。
+   * ⚠️ **读不出来就跳过**（下次启动再试）——文件可能暂时不在（移动硬盘没插）。
+   *
+   * @returns 补上了多少条。
+   */
+  async backfillTags(): Promise<number> {
+    let changed = 0
+    for (const entry of Object.values(this.entries)) {
+      if (entry.duration !== undefined) continue
+      const tags = await this.readTags(entry.file)
+      if (!tags || tags.duration === undefined) continue
+      entry.duration = tags.duration
+      if (tags.album) entry.album = tags.album
+      changed += 1
+    }
+    if (changed > 0) this.writeIndex()
+    return changed
+  }
+
+  /**
+   * 确保标签回填**跑过一次**（**幂等**）。
+   *
+   * ⚠️ 渲染进程第一次读下载列表时**等它**→ 第一次就能看到时长。
+   */
+  ensureTags(): Promise<void> {
+    if (!this.tagsReady) {
+      this.tagsReady = this.backfillTags()
+        .then(() => undefined)
+        .catch(() => undefined)
+    }
+    return this.tagsReady
   }
 
   // --- 写 -----------------------------------------------------------------
@@ -588,6 +661,9 @@ export class DownloadManager {
     }
 
     this.partPaths.delete(task.songId)
+    // ⚠️ T39：读一下文件头的**内嵌标签** → 时长 / 专辑。
+    //    读不出来就缺省（**不影响下载结果**）。
+    const tags = await this.readTags(finalPath)
     this.entries[task.songId] = {
       songId: task.songId,
       file: finalPath,
@@ -598,6 +674,9 @@ export class DownloadManager {
       //    （服务端曲库这时拿不到）。老条目没有这两个字段 → 渲染层反推文件名兜底。
       title: request.title,
       artist: request.artist,
+      // ⚠️ T39：时长 / 专辑来自标签（**可选**）。
+      duration: tags?.duration,
+      album: tags?.album,
     }
     this.writeIndex()
     task.status = 'done'

@@ -23,12 +23,13 @@
 // - 文件读写**可注入**：单测用内存替身，**不碰真实磁盘**。
 
 import { createHash } from 'node:crypto'
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 
 import { LOCAL_TRACK_ID_PREFIX } from '../shared/localMedia'
 import { AUDIO_EXTENSIONS, fileExtension, isAudioFileName, parseTrackFileName } from '../shared/localMeta'
 import type { LocalLibraryItem } from '../shared/playerBridge'
+import { mergeTrackTags, readFileTags, type MergedTrackMeta, type TagFileSystem } from './audioTags'
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -45,6 +46,14 @@ export const MAX_SCAN_DEPTH = 8
 
 /** 单次目录扫描最多登记多少个文件（**防拖死主进程**）。 */
 export const MAX_SCAN_FILES = 20000
+
+/**
+ * 后台解析标签时**一批**处理多少个文件（T39）。
+ *
+ * ⚠️ 一批 = 一次「解析 → 落盘 → 推给渲染层」。
+ *    批与批之间 `await`，主进程的事件循环不会被占死。
+ */
+export const TAG_PARSE_BATCH_SIZE = 200
 
 // ---------------------------------------------------------------------------
 // 文件系统替身
@@ -84,6 +93,38 @@ export interface LocalLibraryFs {
   listDir(path: string): Promise<LocalDirEntry[]>
   /** 取文件大小；**不是文件**或**不存在**都返回 `null`。 */
   statFile(path: string): Promise<LocalFileStat | null>
+  /**
+   * 读一段**二进制**字节（T39：读音频标签用）。
+   *
+   * ⚠️ **可选**：没有它 = **解析能力自动降级**（歌名 / 歌手退回文件名反推）。
+   *    单测的内存替身**可以不带**它。
+   */
+  readBytes?(path: string, offset: number, length: number): Promise<Buffer>
+}
+
+/**
+ * 读一段字节（**默认实现**）。
+ *
+ * ⚠️ **导出**它：主进程要把它接到下载管理器上（同一份实现，**不写两遍**）。
+ *
+ * @param path 文件绝对路径。
+ * @param offset 起始偏移（字节）。
+ * @param length 要读多少字节。
+ * @returns 读到的字节（可能比 `length` 短——到文件尾为止）。
+ */
+export async function readFileBytes(
+  path: string,
+  offset: number,
+  length: number,
+): Promise<Buffer> {
+  const handle = await open(path, 'r')
+  try {
+    const buffer = Buffer.alloc(length)
+    const { bytesRead } = await handle.read(buffer, 0, length, offset)
+    return buffer.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
+  }
 }
 
 /** 默认实现：真实 `node:fs/promises`。 */
@@ -116,6 +157,7 @@ const nodeFs: LocalLibraryFs = {
       return null
     }
   },
+  readBytes: readFileBytes,
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +191,8 @@ export function sanitizeLocalItem(value: unknown): LocalLibraryItem | null {
   const path = typeof record['path'] === 'string' ? record['path'] : ''
   if (id.length === 0 || path.length === 0) return null
   const size = record['size']
+  const duration = record['duration']
+  const tagSource = record['tagSource']
   return {
     id,
     path,
@@ -157,6 +201,13 @@ export function sanitizeLocalItem(value: unknown): LocalLibraryItem | null {
     size: typeof size === 'number' && Number.isFinite(size) ? size : 0,
     ext: typeof record['ext'] === 'string' ? record['ext'] : '',
     addedAt: typeof record['addedAt'] === 'string' ? record['addedAt'] : '',
+    // ⚠️ T39：这三个都是**可选**的（老清单没有 → 当作「还没解析过」）。
+    album: typeof record['album'] === 'string' ? record['album'] : undefined,
+    duration:
+      typeof duration === 'number' && Number.isFinite(duration) && duration > 0
+        ? duration
+        : undefined,
+    tagSource: tagSource === 'tag' || tagSource === 'name' ? tagSource : undefined,
   }
 }
 
@@ -222,6 +273,12 @@ export interface LocalLibraryOptions {
   filePath: string
   /** 文件系统替身（缺省：真实 `node:fs`）。 */
   fs?: LocalLibraryFs
+  /**
+   * 清单变化回调（T39）。
+   *
+   * ⚠️ **只推变化的那几条**（后台解析完一批就推一批）。
+   */
+  onChanged?: (items: LocalLibraryItem[]) => void
 }
 
 /**
@@ -232,11 +289,15 @@ export interface LocalLibraryOptions {
 export class LocalLibrary {
   private readonly filePath: string
   private readonly fs: LocalLibraryFs
+  private readonly onChanged: ((items: LocalLibraryItem[]) => void) | undefined
   private items: LocalLibraryItem[] = []
+  /** 正在后台解析标签（**防重入**）。 */
+  private parsing = false
 
   constructor(options: LocalLibraryOptions) {
     this.filePath = options.filePath
     this.fs = options.fs ?? nodeFs
+    this.onChanged = options.onChanged
   }
 
   /** 读清单（文件不存在 / 损坏 → **当作没有**，不抛）。 */
@@ -326,6 +387,82 @@ export class LocalLibrary {
     if (trimmed.length === 0) return this.list()
     const files = await collectAudioFiles(trimmed, this.fs)
     return this.addPaths(files)
+  }
+
+  /**
+   * 后台分批解析**还没解析过**的条目（T39）。
+   *
+   * ⚠️ **分批**：一批 `TAG_PARSE_BATCH_SIZE` 条 → 解析 → 落盘 → 推给渲染层；
+   *    批与批之间 `await` → 主进程的事件循环不会被占死（托盘、菜单照常响应）。
+   * ⚠️ **重入直接返回**：已经在跑就别再开一个。
+   * ⚠️ **文件不在了**（读不到）→ 标记 `tagSource: 'name'`（**不无限重试**）。
+   *
+   * @param options 批大小（单测用）。
+   * @returns 这次解析了多少条。
+   */
+  async parsePending(options: { batchSize?: number } = {}): Promise<number> {
+    if (this.parsing) return 0
+    const batchSize = options.batchSize ?? TAG_PARSE_BATCH_SIZE
+    // ⚠️ 只取「还没解析过」的（`tagSource` 缺省）。
+    const pending = this.items.filter((item) => !item.tagSource)
+    if (pending.length === 0) return 0
+
+    this.parsing = true
+    let processed = 0
+    try {
+      for (let offset = 0; offset < pending.length; offset += batchSize) {
+        const batch = pending.slice(offset, offset + batchSize)
+        const updated: LocalLibraryItem[] = []
+        for (const item of batch) {
+          const merged = await this.readMeta(item)
+          item.title = merged.title
+          item.artist = merged.artist
+          item.album = merged.album
+          item.duration = merged.duration > 0 ? merged.duration : undefined
+          item.tagSource = merged.tagSource
+          updated.push({ ...item })
+          processed += 1
+        }
+        await this.save()
+        try {
+          this.onChanged?.(updated)
+        } catch {
+          // 回调异常不该影响解析。
+        }
+      }
+    } finally {
+      this.parsing = false
+    }
+    return processed
+  }
+
+  /**
+   * 读一个条目的标签，并与**文件名反推值**合并。
+   *
+   * ⚠️ **绝不抛**：读不到 / 解析失败 → 退回文件名反推。
+   */
+  private async readMeta(item: LocalLibraryItem): Promise<MergedTrackMeta> {
+    try {
+      const tags = await readFileTags(this.tagFileSystem(), item.path)
+      return mergeTrackTags(basename(item.path), tags)
+    } catch {
+      return mergeTrackTags(basename(item.path), null)
+    }
+  }
+
+  /** 把本地的 fs 适配成标签解析要用的最小接口。 */
+  private tagFileSystem(): TagFileSystem {
+    const readBytes = this.fs.readBytes
+    return {
+      readBytes: async (path, offset, length) => {
+        if (!readBytes) throw new Error('当前文件系统不支持读取字节')
+        return await readBytes(path, offset, length)
+      },
+      statSize: async (path) => {
+        const info = await this.fs.statFile(path)
+        return info ? info.size : null
+      },
+    }
   }
 
   /**
@@ -508,11 +645,20 @@ export function registerLocalLibraryIpc(opts: LocalLibraryIpcOptions): void {
     return result.filePaths[0] ?? ''
   })
 
-  ipcMain.handle('local:add', async (_event, arg) => await library.addPaths(readStringArray(arg)))
+  ipcMain.handle('local:add', async (_event, arg) => {
+    const items = await library.addPaths(readStringArray(arg))
+    // ⚠️ T39：**登记完立刻开始后台读标签**（不阻塞返回）→
+    //    渲染层先看到「文件名反推」的近似值，标签解析完再逐批刷新。
+    void library.parsePending()
+    return items
+  })
 
   ipcMain.handle('local:add-folder', async (_event, arg) => {
     const folder = typeof arg === 'string' ? arg : ''
-    return await library.addFolder(folder)
+    const items = await library.addFolder(folder)
+    // ⚠️ 同上：后台渐进解析。
+    void library.parsePending()
+    return items
   })
 
   ipcMain.handle('local:remove', async (_event, arg) => {

@@ -12,8 +12,8 @@
 // ⚠️ **渲染进程不碰文件系统**：它只能让主进程弹对话框、把选中的路径交给
 //    主进程登记、拿回登记好的清单。
 //
-// ⚠️ **不解析音频标签** → 歌名 / 歌手来自**文件名反推**（近似值），
-//    时长在**播放后**由媒体元素补（队列里其它曲目的时长仍显示 `--`）。
+// ⚠️ **标签解析（T39）在主进程**：歌名 / 歌手优先取**文件内嵌标签**，
+//    读不到才按文件名反推（近似值）；时长来自标签，播放后仍以媒体元素实测为准。
 //
 // ---------------------------------------------------------------------------
 
@@ -23,7 +23,7 @@ import type { Song } from '../../shared/types'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { SongList } from '../components/SongList'
 import { downloadEntryToSong, useDownloadStore } from '../state/downloadStore'
-import { localItemToSong, useLocalLibraryStore } from '../state/localLibraryStore'
+import { localItemToSong, pendingTagCount, useLocalLibraryStore } from '../state/localLibraryStore'
 import { useSessionStore } from '../state/sessionStore'
 import './local-music-page.css'
 
@@ -61,6 +61,8 @@ export function LocalMusicPage({ onPlay, onGoToLogin }: LocalMusicPageProps): Re
     () => Object.values(entries).map(downloadEntryToSong),
     [entries],
   )
+  /** 还有多少首**没读标签**（T39：主进程正在后台读）。 */
+  const pending = useMemo(() => pendingTagCount(items), [items])
 
   /** 行内「移除」——**只从清单里去掉，不删磁盘上的文件**。 */
   const renderLocalRowActions = useCallback(
@@ -106,9 +108,17 @@ export function LocalMusicPage({ onPlay, onGoToLogin }: LocalMusicPageProps): Re
           添加文件夹
         </button>
         <span className="fnm-localmusic__hint">
-          歌名与歌手按文件名推断；移除只是从列表里去掉，不会删除磁盘上的文件。
+          歌名与歌手优先读文件内标签，读不到才按文件名推断；移除只是从列表里去掉，不会删除磁盘上的文件。
         </span>
       </div>
+
+      {pending > 0 && (
+        // ⚠️ 用 `aria-live` 而不是 `role="status"`：页面里已经有另一个
+        //    `status` 角色（未登录提示条）——**同页两个 status 会撞角色查询**。
+        <p className="fnm-localmusic__pending" aria-live="polite">
+          正在读取标签，还剩 {pending} 首…
+        </p>
+      )}
 
       <section className="fnm-localmusic__section" aria-label="本地文件">
         <h2 className="fnm-localmusic__section-title">本地文件</h2>

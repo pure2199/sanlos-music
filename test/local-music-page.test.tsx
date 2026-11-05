@@ -230,12 +230,46 @@ describe('T38 本地音乐页', () => {
     expect(screen.getByText('还没有下载过曲目')).toBeTruthy()
   })
 
-  it('界面上写明「歌名按文件名推断」与「移除不删文件」', async () => {
+  it('界面上写明「标签优先、文件名兜底」与「移除不删文件」（T39）', async () => {
     installBridge(fakeBridge())
     render(<LocalMusicPage />)
 
     await waitFor(() => expect(screen.getByRole('button', { name: '添加文件' })).toBeTruthy())
-    const hint = screen.getByText(/歌名与歌手按文件名推断/)
+    const hint = screen.getByText(/优先读文件内标签/)
+    // ⚠️ T39（前提被用户批准改写）：歌名 / 歌手**优先取文件内嵌标签**。
+    expect(hint.textContent).toContain('优先读文件内标签')
+    // ⚠️ 读不到才按文件名推断——**兜底说明不能少**。
+    expect(hint.textContent).toContain('读不到才按文件名推断')
+    // ⚠️ 「移除不删用户的音乐文件」这个承诺**一字未改**。
     expect(hint.textContent).toContain('不会删除磁盘上的文件')
+  })
+
+  it('还有没解析完的条目 → 显示「正在读取标签，还剩 N 首…」（T39）', async () => {
+    installBridge(fakeBridge())
+    render(<LocalMusicPage />)
+
+    await waitFor(() => expect(screen.getByText(/正在读取标签，还剩 1 首/)).toBeTruthy())
+  })
+
+  it('条目都解析完了 → **不**显示进度提示（T39）', async () => {
+    installBridge(
+      fakeBridge({ listLocalTracks: vi.fn(async () => [{ ...ITEM, tagSource: 'tag' }]) }),
+    )
+    render(<LocalMusicPage />)
+
+    await waitFor(() => expect(screen.getByRole('listbox', { name: '本地文件列表' })).toBeTruthy())
+    expect(screen.queryByText(/正在读取标签/)).toBeNull()
+  })
+
+  it('时长来自标签 → 列表里**显示得出**（T39）', async () => {
+    installBridge(
+      fakeBridge({
+        listLocalTracks: vi.fn(async () => [{ ...ITEM, duration: 180, tagSource: 'tag' }]),
+      }),
+    )
+    render(<LocalMusicPage />)
+
+    await waitFor(() => expect(screen.getByRole('listbox', { name: '本地文件列表' })).toBeTruthy())
+    expect(screen.getByText('3:00')).toBeTruthy()
   })
 })

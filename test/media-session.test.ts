@@ -192,6 +192,8 @@ function fakeBridge(): {
     addLocalTracks: async () => [],
     addLocalFolder: async () => [],
     removeLocalTrack: async () => [],
+    // ⚠️ T39：清单变化推送（假用例用不到，给个空实现即可）。
+    onLocalChanged: () => () => undefined,
   }
   return {
     bridge,

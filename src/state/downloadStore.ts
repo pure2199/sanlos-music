@@ -309,22 +309,28 @@ export const useDownloadStore = create<DownloadStore>()((set, get) => ({
  * - **老条目**（升级前下的）没有 → 用**文件名反推**兜底
  *   （形如 `歌手 - 歌名.ext`，**近似值**）。
  *
- * ⚠️ `duration` = 0（本地文件没解析标签）→ 播放后由媒体元素补。
+ * ⚠️ **时长 / 专辑（T39）**：来自下载文件的**内嵌标签**；
+ *    读不到 → `0` / 空串 → 播放后由媒体元素补。
  */
 export function downloadEntryToSong(entry: DownloadEntry): Song {
   const fallback = parseTrackFileName(entry.file)
   const title = entry.title && entry.title.length > 0 ? entry.title : fallback.title
   const artist = entry.artist && entry.artist.length > 0 ? entry.artist : fallback.artist
   const ext = entry.ext ?? ''
+  const duration =
+    typeof entry.duration === 'number' && Number.isFinite(entry.duration) && entry.duration > 0
+      ? entry.duration
+      : 0
+  const album = typeof entry.album === 'string' ? entry.album : ''
   return {
     id: entry.songId,
     title,
     artist,
     artistId: '',
-    album: '',
+    album,
     albumId: '',
     coverId: '',
-    duration: 0,
+    duration,
     favorite: false,
     codec: ext,
     bitrate: 0,
@@ -340,7 +346,7 @@ export function downloadEntryToSong(entry: DownloadEntry): Song {
       bitrate: null,
       codec: ext || null,
       container: ext || null,
-      duration: null,
+      duration: duration > 0 ? duration : null,
       format: ext || null,
       path: entry.file,
       size: entry.bytes,

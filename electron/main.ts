@@ -19,7 +19,7 @@ import { createHttpStack } from './http'
 import { attachAppShortcuts } from './appShortcuts'
 import { createLyricProvider } from './lyricProvider'
 import { registerLocalMedia } from './localMedia'
-import { LOCAL_LIBRARY_FILE_NAME, LocalLibrary, registerLocalLibraryIpc } from './localLibrary'
+import { LOCAL_LIBRARY_FILE_NAME, LocalLibrary, readFileBytes, registerLocalLibraryIpc } from './localLibrary'
 import { registerAppSchemes } from './schemes'
 import { FallbackTranscoder } from './fallbackTranscoder'
 import { createNasOAuthHandlers } from './oauthWindow'
@@ -366,6 +366,8 @@ if (!isPrimaryInstance) {
         getDownloadDir: resolveDownloadDir,
         readIndex: readDownloadIndex,
         writeIndex: writeDownloadIndex,
+        // ⚠️ T39：读下载文件头的**内嵌标签** → 时长 / 专辑。
+        readBytes: readFileBytes,
         onChange: (tasks) => {
           if (win.isDestroyed()) return
           win.webContents.send('download:changed', tasks)
@@ -392,8 +394,18 @@ if (!isPrimaryInstance) {
       // ⚠️ **必须先于 `fallback` 建**：兜底转码的查找链要用到它。
       const localLibrary = new LocalLibrary({
         filePath: path.join(app.getPath('userData'), LOCAL_LIBRARY_FILE_NAME),
+        // ⚠️ T39：后台解析完一批标签就推一批给渲染层（**只推变化的那几条**）。
+        onChanged: (items) => {
+          if (win.isDestroyed()) return
+          win.webContents.send('local:changed', items)
+        },
       })
-      void localLibrary.load()
+      // ⚠️ T39：启动后**后台补齐**老条目的标签
+      //    （老清单里只有文件名反推的近似值 → 读完标签就变精确）。
+      void localLibrary
+        .load()
+        .then(() => localLibrary.parsePending())
+        .catch(() => undefined)
 
       const fallback = new FallbackTranscoder({
         // ⚠️ T38：**本地曲目也要能被兜底转码**（FLAC / APE 等 Chromium 播不了的格式）

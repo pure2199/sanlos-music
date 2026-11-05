@@ -52,6 +52,14 @@
   font-size: 12px;
 }
 
+/* 标签解析进度提示（T39） */
+.fnm-localmusic__pending {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 /* 分区（本地文件 / 已下载） */
 .fnm-localmusic__section {
   display: flex;

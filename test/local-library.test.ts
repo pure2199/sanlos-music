@@ -19,6 +19,7 @@ import { resolve } from 'node:path'
 
 import { fileExtension, isAudioFileName, parseTrackFileName } from '../shared/localMeta'
 import { isLocalTrackId, LOCAL_TRACK_ID_PREFIX } from '../shared/localMedia'
+import type { LocalLibraryItem } from '../shared/playerBridge'
 import {
   collectAudioFiles,
   localTrackId,
@@ -43,6 +44,8 @@ interface MemoryFs {
   dirs: Map<string, LocalDirEntry[]>
   /** 路径 → 文本内容。 */
   texts: Map<string, string>
+  /** 路径 → 二进制内容（T39：读音频标签用）。 */
+  bytes: Map<string, Buffer>
   /** 被 `remove()` 删掉的路径（用来断言「不会删用户的音乐」）。 */
   removed: string[]
 }
@@ -52,6 +55,7 @@ function createMemoryFs(): MemoryFs {
   const files = new Map<string, number>()
   const dirs = new Map<string, LocalDirEntry[]>()
   const texts = new Map<string, string>()
+  const bytes = new Map<string, Buffer>()
   const removed: string[] = []
   const fs: LocalLibraryFs = {
     readText: async (path) => {
@@ -81,8 +85,63 @@ function createMemoryFs(): MemoryFs {
       const size = files.get(path)
       return size === undefined ? null : { size }
     },
+    readBytes: async (path, offset, length) => {
+      const data = bytes.get(path)
+      if (!data) throw new Error(`没有这个文件: ${path}`)
+      return data.subarray(offset, Math.min(offset + length, data.length))
+    },
   }
-  return { fs, files, dirs, texts, removed }
+  return { fs, files, dirs, texts, bytes, removed }
+}
+
+/**
+ * 造一个带标签的 FLAC 字节流（T39：够解析器读出**时长 / 专辑**）。
+ *
+ * ⚠️ 不用二进制样本文件：全部用代码构造。
+ */
+function flacBytes(
+  sampleRate: number,
+  totalSamples: number,
+  comments: Record<string, string>,
+): Buffer {
+  const u32le = (value: number): Buffer => {
+    const out = Buffer.alloc(4)
+    out.writeUInt32LE(value, 0)
+    return out
+  }
+  const info = Buffer.alloc(34)
+  info[10] = (sampleRate >>> 12) & 0xff
+  info[11] = (sampleRate >>> 4) & 0xff
+  info[12] = ((sampleRate & 0x0f) << 4) | 0x02
+  // ⚠️ **不能写 `totalSamples >>> 32`**：JS 的移位数会 mod 32。
+  info[13] = Math.floor(totalSamples / 4294967296) & 0x0f
+  info[14] = (totalSamples >>> 24) & 0xff
+  info[15] = (totalSamples >>> 16) & 0xff
+  info[16] = (totalSamples >>> 8) & 0xff
+  info[17] = totalSamples & 0xff
+
+  const vendor = Buffer.from('test', 'utf8')
+  const entries = Object.entries(comments).map(([key, value]) =>
+    Buffer.from(`${key}=${value}`, 'utf8'),
+  )
+  const commentBody = Buffer.concat([
+    u32le(vendor.length),
+    vendor,
+    u32le(entries.length),
+    ...entries.map((entry) => Buffer.concat([u32le(entry.length), entry])),
+  ])
+
+  const block = (type: number, payload: Buffer, last: boolean): Buffer => {
+    const header = Buffer.alloc(4)
+    header[0] = (last ? 0x80 : 0x00) | type
+    header.writeUIntBE(payload.length, 1, 3)
+    return Buffer.concat([header, payload])
+  }
+  return Buffer.concat([
+    Buffer.from('fLaC', 'latin1'),
+    block(0, info, false),
+    block(4, commentBody, true),
+  ])
 }
 
 /** 目录项快捷方式。 */
@@ -443,5 +502,137 @@ describe('T38 本地曲目 IPC', () => {
 
     expect(await handlers.get('local:add')?.(null, '不是数组')).toEqual([])
     expect(await handlers.get('local:add')?.(null, null)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T39：后台解析标签
+// ---------------------------------------------------------------------------
+
+describe('T39 本地曲目标签解析', () => {
+  it('文件里有标签 → **标签优先**（歌名 / 歌手 / 专辑 / 时长都用标签的）', async () => {
+    const mem = createMemoryFs()
+    mem.files.set(MUSIC_FILE, 4096)
+    mem.bytes.set(
+      MUSIC_FILE,
+      flacBytes(44100, 44100 * 180, {
+        TITLE: '标签歌名',
+        ARTIST: '标签歌手',
+        ALBUM: '标签专辑',
+      }),
+    )
+    const library = new LocalLibrary({ filePath: INDEX_PATH, fs: mem.fs })
+
+    await library.addPaths([MUSIC_FILE])
+    const processed = await library.parsePending()
+
+    expect(processed).toBe(1)
+    const item = library.list()[0]
+    expect(item?.title).toBe('标签歌名')
+    expect(item?.artist).toBe('标签歌手')
+    expect(item?.album).toBe('标签专辑')
+    expect(item?.duration).toBeCloseTo(180, 6)
+    expect(item?.tagSource).toBe('tag')
+  })
+
+  it('文件里没有标签 → **文件名兜底**（来源标 `name`）', async () => {
+    const mem = createMemoryFs()
+    mem.files.set(MUSIC_FILE, 4096)
+    mem.bytes.set(MUSIC_FILE, Buffer.from('就是些字节', 'utf8'))
+    const library = new LocalLibrary({ filePath: INDEX_PATH, fs: mem.fs })
+
+    await library.addPaths([MUSIC_FILE])
+    await library.parsePending()
+
+    const item = library.list()[0]
+    expect(item?.title).toBe('示例歌名')
+    expect(item?.artist).toBe('示例歌手')
+    expect(item?.duration).toBeUndefined()
+    expect(item?.tagSource).toBe('name')
+  })
+
+  it('分批解析 → 每批**落盘**并把变化的那几条推给渲染层', async () => {
+    const mem = createMemoryFs()
+    const changed: LocalLibraryItem[][] = []
+    const a = resolve('D:\\Music\\a.flac')
+    const b = resolve('D:\\Music\\b.flac')
+    mem.files.set(a, 100)
+    mem.files.set(b, 100)
+    mem.bytes.set(a, flacBytes(44100, 44100 * 10, { TITLE: '甲' }))
+    mem.bytes.set(b, flacBytes(44100, 44100 * 20, { TITLE: '乙' }))
+    const library = new LocalLibrary({
+      filePath: INDEX_PATH,
+      fs: mem.fs,
+      onChanged: (items) => changed.push(items),
+    })
+
+    await library.addPaths([a, b])
+    await library.parsePending({ batchSize: 1 })
+
+    // ⚠️ 批大小 1 → 两批 → 推两次。
+    expect(changed).toHaveLength(2)
+    expect(changed[0]?.[0]?.title).toBe('甲')
+    expect(changed[1]?.[0]?.title).toBe('乙')
+    // ⚠️ 结果要**落盘**（下次启动不用重读一遍）。
+    const restored = new LocalLibrary({ filePath: INDEX_PATH, fs: mem.fs })
+    const items = await restored.load()
+    expect(items.find((item) => item.path === a)?.tagSource).toBe('tag')
+  })
+
+  it('文件读不出来 → 标记 `name` 且**不反复重试**', async () => {
+    const mem = createMemoryFs()
+    mem.files.set(MUSIC_FILE, 4096)
+    // ⚠️ 没有 bytes → 读不出来。
+    const library = new LocalLibrary({ filePath: INDEX_PATH, fs: mem.fs })
+
+    await library.addPaths([MUSIC_FILE])
+    expect(await library.parsePending()).toBe(1)
+    expect(library.list()[0]?.tagSource).toBe('name')
+    // ⚠️ 第二次**不再处理**（已经解析过了）。
+    expect(await library.parsePending()).toBe(0)
+  })
+
+  it('老清单（没有 `tagSource`）→ 回填把它**补齐**', async () => {
+    const mem = createMemoryFs()
+    mem.files.set(MUSIC_FILE, 4096)
+    mem.bytes.set(MUSIC_FILE, flacBytes(44100, 44100 * 60, { TITLE: '标签歌名' }))
+    // 先写一个「老清单」（只有文件名反推的值）。
+    await mem.fs.writeText(
+      INDEX_PATH,
+      JSON.stringify({
+        version: 1,
+        items: [
+          {
+            id: localTrackId(MUSIC_FILE),
+            path: MUSIC_FILE,
+            title: '示例歌名',
+            artist: '示例歌手',
+            size: 4096,
+            ext: 'flac',
+            addedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    )
+
+    const library = new LocalLibrary({ filePath: INDEX_PATH, fs: mem.fs })
+    await library.load()
+
+    expect(await library.parsePending()).toBe(1)
+    expect(library.list()[0]?.title).toBe('标签歌名')
+    expect(library.list()[0]?.tagSource).toBe('tag')
+  })
+
+  it('文件系统**不支持读字节** → 解析降级为文件名反推（**不崩**）', async () => {
+    const mem = createMemoryFs()
+    mem.files.set(MUSIC_FILE, 4096)
+    // ⚠️ 去掉 `readBytes` → 解析能力自动降级。
+    const withoutBytes: LocalLibraryFs = { ...mem.fs, readBytes: undefined }
+    const library = new LocalLibrary({ filePath: INDEX_PATH, fs: withoutBytes })
+
+    await library.addPaths([MUSIC_FILE])
+    expect(await library.parsePending()).toBe(1)
+    expect(library.list()[0]?.title).toBe('示例歌名')
+    expect(library.list()[0]?.tagSource).toBe('name')
   })
 })

@@ -146,6 +146,16 @@ const fnPlayer: PlayerBridge = {
   addLocalFolder: (folder) =>
     ipcRenderer.invoke('local:add-folder', folder) as Promise<LocalLibraryItem[]>,
   removeLocalTrack: (id) => ipcRenderer.invoke('local:remove', id) as Promise<LocalLibraryItem[]>,
+  // ⚠️ T39：主进程后台解析完一批标签就推一批（**只推变化的那几条**）。
+  onLocalChanged: (handler) => {
+    const listener = (_event: unknown, items: LocalLibraryItem[]): void => {
+      handler(Array.isArray(items) ? items : [])
+    }
+    ipcRenderer.on('local:changed', listener)
+    return () => {
+      ipcRenderer.removeListener('local:changed', listener)
+    }
+  },
   // -------------------------------------------------------------------------
   // FFmpeg 兜底解码（Task 12）
   // -------------------------------------------------------------------------

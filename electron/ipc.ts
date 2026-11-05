@@ -1134,6 +1134,12 @@ export interface DownloadControllerLike {
   clear(): Promise<void>
   /** 当前下载目录（绝对路径）。 */
   getDir(): string
+  /**
+   * 确保标签回填**跑过一次**（T39；**幂等**）。
+   *
+   * ⚠️ **可选**：没有它 → 下载列表照常返回（只是没有时长）。
+   */
+  ensureTags?(): Promise<void>
 }
 
 /**
@@ -1190,9 +1196,12 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
   //    **全在主进程**（`electron/downloadManager.ts`）。
 
   // 渲染进程 → 主进程：读本地下载索引 + 当前任务 + 下载目录。
-  ipcMain.handle('download:list', () => {
+  ipcMain.handle('download:list', async () => {
     const downloads = opts.downloads
     if (!downloads) return { entries: {}, tasks: [], dir: '' }
+    // ⚠️ T39：**等标签回填跑完**（只跑一次）→ 第一次就能看到时长，
+    //    不用等用户切页面再刷新。
+    await downloads.ensureTags?.()
     return { ...downloads.list(), dir: downloads.getDir() }
   })
 

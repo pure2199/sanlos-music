@@ -30,23 +30,30 @@ function playerBridge(): PlayerBridge | null {
  *
  * ⚠️ **本地曲目没有服务端元数据**：
  * - `coverId` = 空串 → 列表渲染**占位块**（不发封面请求）；
- * - `duration` = 0（**未知**）→ 播放后由媒体元素的 `durationchange` 补；
- * - `artist` / `album` 可能为空串。
+ * - `artist` 可能为空串。
+ *
+ * ⚠️ **时长（T39）**：来自文件内嵌标签；读不到 → `0`（未知）→
+ *    播放后由媒体元素的 `durationchange` 补。
  *
  * ⚠️ `codec` / `audioSpec.format` 填**扩展名**（如 `flac`）——
  *    这样 Chromium 播不了的格式能走**既有的 FFmpeg 兜底**。
  */
 export function localItemToSong(item: LocalLibraryItem): Song {
   const ext = item.ext ?? ''
+  const duration =
+    typeof item.duration === 'number' && Number.isFinite(item.duration) && item.duration > 0
+      ? item.duration
+      : 0
+  const album = typeof item.album === 'string' ? item.album : ''
   return {
     id: item.id,
     title: item.title,
     artist: item.artist,
     artistId: '',
-    album: '',
+    album,
     albumId: '',
     coverId: '',
-    duration: 0,
+    duration,
     favorite: false,
     codec: ext,
     bitrate: 0,
@@ -62,12 +69,25 @@ export function localItemToSong(item: LocalLibraryItem): Song {
       bitrate: null,
       codec: ext || null,
       container: ext || null,
-      duration: null,
+      duration: duration > 0 ? duration : null,
       format: ext || null,
       path: item.path,
       size: item.size,
     },
   }
+}
+
+/**
+ * 还有多少条**没解析标签**（T39）。
+ *
+ * ⚠️ `tagSource` **缺省 = 还没解析过**（主进程正在后台读）。
+ */
+export function pendingTagCount(items: LocalLibraryItem[]): number {
+  let count = 0
+  for (const item of items) {
+    if (!item.tagSource) count += 1
+  }
+  return count
 }
 
 /** 本地曲目清单 store 的形状。 */
@@ -169,3 +189,33 @@ export const useLocalLibraryStore = create<LocalLibraryStore>()((set, get) => ({
     set({ error: null })
   },
 }))
+
+/**
+ * 装配本地曲目桥接（**在 `src/main.tsx` 里调用一次**）。
+ *
+ * - 订阅主进程推来的**清单变化**（`local:changed`）→ **按 id 合并**进 `items`；
+ * - 读一次清单。
+ *
+ * ⚠️ 主进程后台解析完一批标签就推一批 → 列表里的歌名 / 歌手 / 时长
+ *    **逐批变精确**（不用等用户切页面）。
+ *
+ * @returns 退订函数。
+ */
+export function installLocalLibraryStore(): () => void {
+  const bridge = playerBridge()
+  if (!bridge) return () => undefined
+  const unsubscribe = bridge.onLocalChanged((items) => {
+    if (!Array.isArray(items) || items.length === 0) return
+    useLocalLibraryStore.setState((state) => {
+      const merged = new Map<string, LocalLibraryItem>()
+      for (const item of state.items) merged.set(item.id, item)
+      for (const item of items) {
+        if (!item || typeof item.id !== 'string' || item.id.length === 0) continue
+        merged.set(item.id, item)
+      }
+      return { items: [...merged.values()] }
+    })
+  })
+  void useLocalLibraryStore.getState().load()
+  return unsubscribe
+}

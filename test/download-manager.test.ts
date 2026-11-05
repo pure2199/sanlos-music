@@ -38,6 +38,7 @@ function memoryFs(): {
   openSink: (path: string, append: boolean) => Promise<DownloadSink>
   renameFile: (from: string, to: string) => Promise<void>
   removeFile: (path: string) => Promise<void>
+  readBytes: (path: string, offset: number, length: number) => Promise<Buffer>
 } {
   const files = new Map<string, Uint8Array>()
   return {
@@ -69,7 +70,62 @@ function memoryFs(): {
     async removeFile(path: string): Promise<void> {
       files.delete(path)
     },
+    async readBytes(path: string, offset: number, length: number): Promise<Buffer> {
+      const data = files.get(path)
+      if (!data) throw new Error('文件不存在')
+      return Buffer.from(data.subarray(offset, offset + length))
+    },
   }
+}
+
+/**
+ * 造一个带标签的 FLAC 字节流（T39：够解析器读出**时长 / 专辑**）。
+ *
+ * ⚠️ 同样**不用二进制样本文件**：全部用代码构造。
+ */
+function flacBytes(
+  sampleRate: number,
+  totalSamples: number,
+  comments: Record<string, string>,
+): Buffer {
+  const u32le = (value: number): Buffer => {
+    const out = Buffer.alloc(4)
+    out.writeUInt32LE(value, 0)
+    return out
+  }
+  const info = Buffer.alloc(34)
+  info[10] = (sampleRate >>> 12) & 0xff
+  info[11] = (sampleRate >>> 4) & 0xff
+  info[12] = ((sampleRate & 0x0f) << 4) | 0x02
+  // ⚠️ **不能写 `totalSamples >>> 32`**：JS 的移位数会 mod 32。
+  info[13] = Math.floor(totalSamples / 4294967296) & 0x0f
+  info[14] = (totalSamples >>> 24) & 0xff
+  info[15] = (totalSamples >>> 16) & 0xff
+  info[16] = (totalSamples >>> 8) & 0xff
+  info[17] = totalSamples & 0xff
+
+  const vendor = Buffer.from('test', 'utf8')
+  const entries = Object.entries(comments).map(([key, value]) =>
+    Buffer.from(`${key}=${value}`, 'utf8'),
+  )
+  const commentBody = Buffer.concat([
+    u32le(vendor.length),
+    vendor,
+    u32le(entries.length),
+    ...entries.map((entry) => Buffer.concat([u32le(entry.length), entry])),
+  ])
+
+  const block = (type: number, payload: Buffer, last: boolean): Buffer => {
+    const header = Buffer.alloc(4)
+    header[0] = (last ? 0x80 : 0x00) | type
+    header.writeUIntBE(payload.length, 1, 3)
+    return Buffer.concat([header, payload])
+  }
+  return Buffer.concat([
+    Buffer.from('fLaC', 'latin1'),
+    block(0, info, false),
+    block(4, commentBody, true),
+  ])
 }
 
 /** 造一个带字节流的响应（`Response` 的 body 是 web ReadableStream）。 */
@@ -211,6 +267,7 @@ describe('下载：管理器', () => {
       openSink: fs.openSink,
       renameFile: fs.renameFile,
       removeFile: fs.removeFile,
+      readBytes: fs.readBytes,
     })
     return { manager, fs, written }
   }
@@ -468,5 +525,148 @@ describe('下载：管理器', () => {
   it('默认子目录名与索引文件名是常量（主进程据此落盘）', () => {
     expect(DEFAULT_DOWNLOAD_SUBDIR).toBe('飞牛音乐')
     expect(DOWNLOAD_INDEX_FILE_NAME).toBe('downloads.json')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T39：标签（时长 / 专辑）
+// ---------------------------------------------------------------------------
+
+describe('T39 下载：标签', () => {
+  /** 造一个管理器（内存 fs + 可控的取流）。 */
+  function makeManager(
+    fetchStream: (songId: string, rangeStart: number) => Promise<Response>,
+    overrides?: { index?: DownloadIndex; dir?: string },
+  ): {
+    manager: DownloadManager
+    fs: ReturnType<typeof memoryFs>
+    written: DownloadIndex[]
+  } {
+    const fs = memoryFs()
+    const written: DownloadIndex[] = []
+    let index: DownloadIndex = overrides?.index ?? { version: 1, entries: {} }
+    const manager = new DownloadManager({
+      fetchStream,
+      getDownloadDir: () => overrides?.dir ?? DIR,
+      readIndex: () => index,
+      writeIndex: (next) => {
+        written.push(next)
+        index = next
+      },
+      statSize: fs.statSize,
+      openSink: fs.openSink,
+      renameFile: fs.renameFile,
+      removeFile: fs.removeFile,
+      readBytes: fs.readBytes,
+    })
+    return { manager, fs, written }
+  }
+
+  it('下载完成 → 索引条目带上**时长 / 专辑**（读文件内嵌标签）', async () => {
+    const bytes = flacBytes(44100, 44100 * 100, { ALBUM: '示例专辑' })
+    const { manager } = makeManager(async () =>
+      streamResponse(bytes, { headers: { 'content-length': String(bytes.byteLength) } }),
+    )
+
+    manager.start({ songId: SONG_ID, title: '示例歌名', artist: '示例歌手', ext: 'flac' })
+    await tick()
+    await tick()
+    await tick()
+
+    const entry = manager.list().entries[SONG_ID]
+    // ⚠️ STREAMINFO 给的是**精确**时长（100 秒）。
+    expect(entry?.duration).toBeCloseTo(100, 6)
+    expect(entry?.album).toBe('示例专辑')
+  })
+
+  it('文件读不出标签 → **不影响下载结果**（时长缺省，条目照常登记）', async () => {
+    const { manager } = makeManager(async () =>
+      streamResponse(new Uint8Array([1, 2, 3, 4]), {
+        headers: { 'content-length': '4' },
+      }),
+    )
+
+    manager.start({ songId: SONG_ID, title: '示例歌名', artist: '示例歌手', ext: 'flac' })
+    await tick()
+    await tick()
+    await tick()
+
+    const entry = manager.list().entries[SONG_ID]
+    expect(entry).toBeTruthy()
+    expect(entry?.duration).toBeUndefined()
+    expect(entry?.title).toBe('示例歌名')
+  })
+
+  it('老条目（没有时长）→ `backfillTags()` **回填**并落盘', async () => {
+    const { manager, fs, written } = makeManager(async () => streamResponse(new Uint8Array([1])), {
+      index: {
+        version: DOWNLOAD_INDEX_VERSION,
+        entries: {
+          legacy: {
+            songId: 'legacy',
+            file: 'C:\\Music\\旧歌.flac',
+            bytes: 2048,
+            ext: 'flac',
+            downloadedAt: '2026-01-01T00:00:00.000Z',
+          },
+        },
+      },
+    })
+    // ⚠️ 老条目的文件**确实存在**（升级前下的）。
+    fs.files.set('C:\\Music\\旧歌.flac', flacBytes(44100, 44100 * 42, { ALBUM: '旧专辑' }))
+
+    const changed = await manager.backfillTags()
+
+    expect(changed).toBe(1)
+    const entry = manager.list().entries['legacy']
+    expect(entry?.duration).toBeCloseTo(42, 6)
+    expect(entry?.album).toBe('旧专辑')
+    // ⚠️ 回填结果要**落盘**（下次启动不用再读一遍）。
+    expect(written[written.length - 1]?.entries['legacy']?.duration).toBeCloseTo(42, 6)
+  })
+
+  it('文件不在了 → 回填**跳过**（不编一个时长出来）', async () => {
+    const { manager } = makeManager(async () => streamResponse(new Uint8Array([1])), {
+      index: {
+        version: DOWNLOAD_INDEX_VERSION,
+        entries: {
+          legacy: {
+            songId: 'legacy',
+            file: 'C:\\Music\\根本没下过的.flac',
+            bytes: 2048,
+            ext: 'flac',
+            downloadedAt: '2026-01-01T00:00:00.000Z',
+          },
+        },
+      },
+    })
+
+    expect(await manager.backfillTags()).toBe(0)
+    expect(manager.list().entries['legacy']?.duration).toBeUndefined()
+  })
+
+  it('`ensureTags()` **幂等**：重复调用只回填一次', async () => {
+    const { manager, fs } = makeManager(async () => streamResponse(new Uint8Array([1])), {
+      index: {
+        version: DOWNLOAD_INDEX_VERSION,
+        entries: {
+          legacy: {
+            songId: 'legacy',
+            file: 'C:\\Music\\旧歌.flac',
+            bytes: 2048,
+            ext: 'flac',
+            downloadedAt: '2026-01-01T00:00:00.000Z',
+          },
+        },
+      },
+    })
+    fs.files.set('C:\\Music\\旧歌.flac', flacBytes(44100, 44100 * 42, {}))
+
+    await manager.ensureTags()
+    const first = manager.list().entries['legacy']?.duration
+    await manager.ensureTags()
+
+    expect(first).toBeCloseTo(42, 6)
+    expect(manager.list().entries['legacy']?.duration).toBeCloseTo(42, 6)
   })
 })
