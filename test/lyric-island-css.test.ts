@@ -16,6 +16,8 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+// ⚠️ T53：跨文件不等式要用**词岛窗口的真实高度**（不是写死的 96）。
+import { ISLAND_WINDOW_HEIGHT } from '../shared/islandAnchor'
 
 /** 读 CSS 并**剥掉注释**（剥完再匹配，否则会匹配到注释正文）。 */
 function readCss(...parts: string[]): string {
@@ -111,5 +113,74 @@ describe('词岛的 CSS 契约（T48：不再整词发光）', () => {
 
   it('词岛样式里**没有**任何 `text-shadow`（光晕会把填色边界糊掉）', () => {
     expect(css).not.toMatch(/text-shadow:/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T53：词岛的**长歌词**（折成两行时第二行被裁掉）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么必须钉**：用户报障「长歌词显示不完整，他会变两行也看不到」。
+//
+// 根因（真机实测，22 字长句）：
+// - `.fnm-lyricview__line--active` 是**定高 44px**，而 `white-space: pre-wrap`
+//   允许换行 → 长句折 2 行 = **88px 内容溢出定高盒**；
+// - 歌词视口 `overflow: hidden` → 溢出部分**被裁掉**；
+// - 单行模式的滚动定位按**44px 行盒**居中 → 越往歌后面裁得越狠。
+//
+// 修法（只影响词岛）：当前行**可长高** + **行高 32px** + 视口 **flex 居中**
+// → 折两行 = 64px ≤ 歌词带 74px → **两行都完整可见**。
+//
+// ⚠️ **契约测试要先剥注释再匹配**（否则匹配到的是注释正文 = 空断言）。
+// ---------------------------------------------------------------------------
+
+describe('词岛的 CSS 契约（T53：长歌词折行不被裁）', () => {
+  const css = readCss('src', 'island', 'island-window.css')
+  const activeBlock = blockOf(
+    css,
+    '.fnm-island__lyrics .fnm-lyricview--single .fnm-lyricview__line--active',
+  )
+
+  it('当前行**可以长高**（不能再是定高 44px → 否则长句折行会溢出盒子）', () => {
+    expect(activeBlock).toMatch(/height:\s*auto/)
+    expect(activeBlock).not.toMatch(/height:\s*44px/)
+  })
+
+  it('当前行**行高 32px**（折两行 = 64px，要塞进 74px 的歌词带）', () => {
+    expect(activeBlock).toMatch(/line-height:\s*32px/)
+  })
+
+  it('歌词视口改成 **flex 居中**（当前行按自己的高度居中，不靠滚动定位）', () => {
+    const block = blockOf(css, '.fnm-island__lyrics .fnm-lyricview')
+    expect(block).toMatch(/display:\s*flex/)
+    expect(block).toMatch(/align-items:\s*center/)
+  })
+
+  it('画布高度 **auto**（不撑到整份歌词的总高），超出的部分被裁', () => {
+    const block = blockOf(css, '.fnm-island__lyrics .fnm-lyricview__canvas')
+    expect(block).toMatch(/height:\s*auto/)
+    expect(block).toMatch(/max-height:\s*100%/)
+    expect(block).toMatch(/overflow:\s*hidden/)
+  })
+
+  it('当前行**不再绝对定位**（否则它的 `top` 会把它顶到画布外面去）', () => {
+    const block = blockOf(css, '.fnm-island__lyrics .fnm-lyricview--single .fnm-lyricview__line')
+    expect(block).toMatch(/position:\s*static/)
+  })
+
+  it('**两行必须塞得进胶囊**（跨文件不等式：窗口高 − 上下留白 − 边框 ≥ 2 × 行高）', () => {
+    const island = blockOf(css, '.fnm-island')
+    // ⚠️ `padding: 10px 18px` → 取**上下**的 10px；`border: 1px solid …` → 上下共 2px。
+    const pad = Number(/padding:\s*(\d+)px/.exec(island)?.[1] ?? NaN)
+    const border = Number(/border:\s*(\d+)px/.exec(island)?.[1] ?? NaN)
+    expect(Number.isNaN(pad)).toBe(false)
+    expect(Number.isNaN(border)).toBe(false)
+
+    const band = ISLAND_WINDOW_HEIGHT - pad * 2 - border * 2
+    const lineHeight = Number(/line-height:\s*(\d+)px/.exec(activeBlock)?.[1] ?? NaN)
+    expect(Number.isNaN(lineHeight)).toBe(false)
+
+    // 74px 的歌词带必须装得下**两行** 32px 的歌词（留 10px 余量）。
+    expect(band).toBeGreaterThanOrEqual(lineHeight * 2)
   })
 })

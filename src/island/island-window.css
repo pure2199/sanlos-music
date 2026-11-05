@@ -140,16 +140,58 @@ body {
    * 歌词区若按内容取高，就会被画布撑到几千 px → 胶囊（只有 96px）裁剪后
    * 露出的是「**歌词表的垂直中点**」，而不是当前行；滚动定位也一并跑偏。
    *
-   * → `stretch` 让歌词区正好等于胶囊内容区 → `LyricView` 量到的可视区高度
-   *   才是真的 → 当前行被滚到**正中**。
+   * → `stretch` 让歌词区正好等于胶囊内容区（74px）→ 歌词区**自己**就是可视区。
+   *
+   * ⚠️ **T53**：当前行的「居中」**不再靠 `LyricView` 的滚动定位**
+   *    （那是按「当前行 = 44px 定高盒」算的 → 长句折行后会偏）。
+   *    现在改成：歌词视口自己 **flex 居中** + 当前行 `position: static`
+   *    → **当前行有多高就按多高居中**，长句折两行也照样完整。
    */
   align-self: stretch;
   /* 点歌词要能跳转，不能被拖动区吃掉。 */
   -webkit-app-region: no-drag;
 }
 
+/*
+ * ⚠️ **T53：长歌词（>14 字）折成两行时，第二行原本会被裁掉**。
+ *
+ * 根因（真机实测，22 字长句）：
+ * - `.fnm-lyricview__line--active` 是**定高 44px**（`height: 44px`），
+ *   而 `white-space: pre-wrap` 允许换行 → 长句折 2 行 = **88px 内容溢出定高盒**；
+ * - 歌词视口是 `overflow: hidden` → 溢出部分**被裁掉**；
+ * - 单行模式的滚动定位又按**44px 行盒**居中 → 越往歌后面裁得越狠。
+ *
+ * 做法（**只影响词岛**，主界面 / 经典悬浮窗 / 歌词舞台一字不变）：
+ * - 歌词视口改成 **flex 居中**、画布高度 `auto`、当前行 `position: static`
+ *   → 当前行**不再靠滚动定位**，而是**按自己的实际高度居中**；
+ * - 当前行 `height: auto` + `line-height: 32px`
+ *   → 折 2 行 = **64px ≤ 歌词带 74px** → **两行都完整可见**；
+ *   → 胶囊高度**不变**（仍是 96px）。
+ */
 .fnm-island__lyrics .fnm-lyricview {
   overflow: hidden;
+  /* 当前行按自己的高度居中（不再靠 `LyricView` 的滚动定位）。 */
+  display: flex;
+  align-items: center;
+}
+
+/* 画布不再撑到「整份歌词的总高」——词岛只渲染当前一行。 */
+.fnm-island__lyrics .fnm-lyricview__canvas {
+  height: auto;
+  /* ⚠️ 超长句（3 行以上）裁掉多出来的部分，但**上面**的行要留着。 */
+  max-height: 100%;
+  overflow: hidden;
+}
+
+/* 当前行不再绝对定位（否则它的 `top` 会把它顶到画布外面去）。 */
+.fnm-island__lyrics .fnm-lyricview--single .fnm-lyricview__line {
+  position: static;
+}
+
+/* 当前行**可以长高**，行高压到 32px → 折两行也塞得进 74px 的歌词带。 */
+.fnm-island__lyrics .fnm-lyricview--single .fnm-lyricview__line--active {
+  height: auto;
+  line-height: 32px;
 }
 
 /* --------------------------------------------------------------------------
