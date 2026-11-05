@@ -56,6 +56,24 @@
   --radius-pill: 999px;
   --radius-panel: 10px;
   --radius-card: 10px;
+
+  /*
+   * 品牌名（顶栏左上角）。
+   *
+   * ⚠️ **为什么要令牌化**：品牌名从「飞牛音乐」（4 个汉字）换成「Sanlos Music」
+   *    （12 个拉丁字符）后，**宽度暴涨 61%**（60px → 96.6px），
+   *    而且**拉丁字母不能用中文字体去渲染**（Noto Sans SC 字腔偏宽，
+   *    12 个字母连读又宽又重）⇒ 品牌名必须**按主题各调各的**。
+   *
+   * ⚠️ **字体栈的顺序很关键**：拉丁字母优先走**系统 UI 字体**
+   *    （Segoe UI / SF），中文才回退到中文字体 —— 否则拉丁字母会被
+   *    Noto Sans SC 接管（字腔宽、字重糊）。
+   */
+  --brand-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
+  /* Apple 风：略大、圆润柔和 → 字重 600 + 负字距（拉丁文收紧）。 */
+  --brand-font-size: 16px;
+  --brand-font-weight: 600;
+  --brand-letter-spacing: -0.3px;
 }
 
 /*
@@ -103,4 +121,16 @@
   --radius-pill: 4px;
   --radius-panel: 6px;
   --radius-card: 4px;
+
+  /*
+   * 品牌名（Fluent）：**方正克制** → 字号略小、字重 500
+   *（Segoe UI 的 600 在 Fluent 的语言里偏重）、字距归零。
+   *
+   * ⚠️ **优先用 Segoe UI Variable Text**（Win11 的新 UI 字体）——
+   *    它才是 Fluent 语言的正脸；没有它（Win10）就回退到 Segoe UI。
+   */
+  --brand-font-family: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --brand-font-size: 15px;
+  --brand-font-weight: 500;
+  --brand-letter-spacing: 0px;
 }

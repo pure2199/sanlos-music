@@ -35,7 +35,7 @@ const NAS_HANDLER_MISSING = '尚未安装 NAS 账号登录处理器'
 const NAS_UNAVAILABLE_HINT = 'NAS 账号授权登录将在下一版本开放，请先使用独立账号登录'
 
 /** 桥不可用时的提示（纯浏览器预览等场景）。 */
-const BRIDGE_UNAVAILABLE = '认证桥不可用：请在 Sanlos music 桌面客户端内使用本页面'
+const BRIDGE_UNAVAILABLE = '认证桥不可用：请在 Sanlos Music 桌面客户端内使用本页面'
 
 /** 地址输入框的默认值：带协议 + 默认端口（端口取自共享常量，不写字面量）。 */
 const DEFAULT_ADDRESS = `http://192.168.1.2:${DEFAULT_HTTP_PORT}`

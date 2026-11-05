@@ -16,7 +16,7 @@
 /** 软件信息（关于页显示的就是这份）。 */
 export const APP_INFO = {
   /** 应用名。 */
-  name: 'Sanlos music',
+  name: 'Sanlos Music',
   /** 开发者。 */
   developer: 'pure2199',
   /** 公司（著作权人）。 */

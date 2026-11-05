@@ -43,8 +43,17 @@
 }
 
 .app-shell__brand {
-  font-size: 15px;
-  font-weight: 600;
+  /*
+   * ⚠️ **排版全部走令牌**（`tokens.css` 的 `--brand-*`）——
+   *    品牌名从「飞牛音乐」（4 个汉字）换成「Sanlos Music」（12 个拉丁字符）后，
+   *    宽度暴涨 61%（60px → 96.6px），且**拉丁字母不能由中文字体渲染**
+   *    → 字号 / 字重 / 字距 / 字体栈必须**按主题各调各的**
+   *    （Apple 风圆润柔和 16px/600，Fluent 风方正克制 15px/500）。
+   */
+  font-family: var(--brand-font-family);
+  font-size: var(--brand-font-size, 15px);
+  font-weight: var(--brand-font-weight, 600);
+  letter-spacing: var(--brand-letter-spacing, 0);
   color: var(--text-primary);
   /*
    * ⚠️ T40：**品牌名永不被压扁**（实测：外框窄到 640 时它被挤成 15px 宽 / 84px 高

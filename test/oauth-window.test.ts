@@ -182,13 +182,13 @@ describe('授权 URL 拼装', () => {
     expect(u.pathname).toBe('/signin')
     expect(u.searchParams.get('client_id')).toBe(CLIENT_ID)
     expect(u.searchParams.get('redirect_uri')).toBe('https://nas.local:5667/music/oauth/result')
-    expect(u.searchParams.get('app_name')).toBe('Sanlos music')
+    expect(u.searchParams.get('app_name')).toBe('Sanlos Music')
   })
 
   it('app_name 被 URL 编码（空格 → %20，URL 里不是明文）', () => {
     const url = buildAuthorizeUrl({ base: BASE, clientId: CLIENT_ID })
-    expect(url).toContain('app_name=Sanlos%20music')
-    expect(url).not.toContain('Sanlos music')
+    expect(url).toContain('app_name=Sanlos%20Music')
+    expect(url).not.toContain('Sanlos Music')
   })
 
   it('redirect_uri 本身被 URL 编码（它是 query 的值）', () => {
@@ -368,7 +368,7 @@ describe('NasLoginHandler', () => {
     expect(openWindow).toHaveBeenCalledTimes(1)
     const arg = openWindow.mock.calls[0]![0]
     expect(arg.url).toContain('/signin?client_id=')
-    expect(arg.url).toContain('app_name=Sanlos%20music')
+    expect(arg.url).toContain('app_name=Sanlos%20Music')
     expect(arg.redirect).toBe('https://nas.local:5667/music/oauth/result')
     expect(arg.silent).toBe(false)
     expect(session.state.token).toBe('TK-NAS')

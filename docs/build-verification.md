@@ -3,7 +3,7 @@
 > 本文件记录**实际跑过的验证**及其证据。口径与操作见 [`packaging.md`](./packaging.md)。
 > 原始打包日志在本地 `release/verify/pack.log`（该目录被 `.gitignore` 忽略，不入库）。
 >
-> ⚠️ **产物名已按 T49 的改名同步更新**（`飞牛音乐.exe` → `Sanlos music.exe`），
+> ⚠️ **产物名已按 T49 的改名同步更新**（`飞牛音乐.exe` → `Sanlos Music.exe`），
 > 其余**历史实测数据本身不变**（那次打包确实产出的是改名前的名字）。
 
 **验证时间**：2026-11-04
@@ -32,7 +32,7 @@
 | 安装包 | `release/FN-Music-Setup-0.1.0.exe` — **82.05 MB** |
 | 便携版 | `release/FN-Music-Portable-0.1.0.exe` — **75.15 MB** |
 | 差分映射 | `release/FN-Music-Setup-0.1.0.exe.blockmap` — 0.09 MB |
-| 解包目录 | `release/win-unpacked/Sanlos music.exe`（`productName` 已生效） |
+| 解包目录 | `release/win-unpacked/Sanlos Music.exe`（`productName` 已生效） |
 | electron 版本 | **32.3.3**（锁定） |
 
 ### app.asar 内容清单（实测）
@@ -63,13 +63,13 @@
 
 ## 三、打包产物**真机启动**冒烟
 
-> 验证的是**打包后的 exe**（`release/win-unpacked/Sanlos music.exe`），不是开发目录。
+> 验证的是**打包后的 exe**（`release/win-unpacked/Sanlos Music.exe`），不是开发目录。
 
 | 检查 | 实测 |
 |---|---|
 | exe 文件版本 | `0.1.0` |
 | exe 产品版本 | `0.1.0.0` |
-| exe 产品名 | `Sanlos music` |
+| exe 产品名 | `Sanlos Music` |
 | exe 公司名 | `fnmusic-desktop` |
 | 启动后 12 秒是否存活 | **是**（进程树 4 个：主进程 + 渲染 + GPU + utility） |
 | 隔离 userData 是否被应用写入 | **是** —— 写出 `prefs.json` + Chromium profile（`Local Storage` / `Cache` / `Preferences` 等） |
@@ -111,7 +111,7 @@ PID=20864  app='MiniMax Code'  type=RmUnknownApp  restartable=False
    留着旧包是个坑：跑起来会得到**带 `fnm://` 缺陷的旧版应用**。
 3. **`release/win-unpacked/` 补齐为完整可运行构建** —— 把新构建**就地合并**
    （truncate + write，不走 unlink）写进去，73 个文件齐备，
-   `Sanlos music.exe` 可直接运行（见第三节冒烟证据）。
+   `Sanlos Music.exe` 可直接运行（见第三节冒烟证据）。
 
 ### 仍然残留（**不影响使用**）
 
@@ -148,6 +148,6 @@ npm run pack         # 正式产物 → release/
 
 ```bash
 npm run pack
-# 启动 release\win-unpacked\Sanlos music.exe
+# 启动 release\win-unpacked\Sanlos Music.exe
 # 或用隔离的 --user-data-dir 跑，观察它是否写出自己的 prefs.json
 ```

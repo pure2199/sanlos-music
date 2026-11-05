@@ -2642,3 +2642,121 @@ Lyricify Fusion 的**灵动词岛** = 屏幕顶部居中的圆角胶囊 + 逐字
 - ⚠️ **待用户复验**：改名后的观感（顶栏拉丁文品牌名的排版、开始菜单 / 任务栏显示）；
 - ⚠️ **待真机验**：覆盖安装（装完 `Sanlos music.exe` 后再装一次）；
 - ⚠️ 仍待复验：T46（点击穿透 / 淡出淡回）、T47（挂 analyser 后听感）、T48（卡拉OK 观感）。
+## 三十五、T50：品牌名「Sanlos Music」的两套主题适配
+
+### 起因（用户原话）
+
+> 「你两个UI都要适配过吧，不然不好看」
+
+用户在 T49 的两套主题截图后发现：品牌名换成拉丁文之后，**两套主题下的排版完全一样**，
+而「飞牛音乐」四个字在两套主题里本来就是不同的观感 → 改名后这套「按主题各调各的」断了。
+
+### 实测：问题到底在哪（不是猜的）
+
+用隔离实例量了两套主题下的品牌名计算样式（`release/verify/t50-brand-metrics.mjs`）：
+
+| 指标 | Apple 风 | Fluent 风 | 结论 |
+| --- | --- | --- | --- |
+| `font-size` | 15px | 15px | **一模一样** |
+| `font-weight` | 600 | 600 | **一模一样** |
+| `font-family` | `Noto Sans SC` | `Noto Sans SC` | **一模一样** |
+| 实际宽 × 高 | 96.6 × 21 px | 96.6 × 21 px | **一模一样** |
+
+三个具体问题：
+
+1. **宽度暴涨 61%**：4 个汉字（60px）→ 12 个拉丁字符（96.6px）；
+2. **拉丁字母被中文字体接管**：实测本机系统默认 sans-serif 就是 `Noto Sans SC`
+   （中文字体的拉丁字腔偏宽、600 字重下 12 个字母连读偏重）→ 观感发糊；
+3. **两套主题共用一套值**：Apple 风的圆润柔和 vs Fluent 风的方正克制完全体现不出来
+   （用户看到的两张截图差异只是表面色）。
+
+⚠️ **但布局没有坏**：宽/窄窗口下顶栏都是 `scrollWidth == clientWidth` → **没有溢出**。
+所以这轮修的是**观感层级**，不是布局返工。
+
+### 决策
+
+**用户拍板**（ask_user）：
+
+| 决策 | 选择 |
+| --- | --- |
+| 大小写 | **「Sanlos Music」**（首字母大写）—— T49 定的「Sanlos music」偏弱 |
+| 形态 | **纯文字**（不加图标 / 渐变），**两套主题各调各的排版** |
+
+**令牌化**：新增 4 个品牌令牌（`src/styles/tokens.css`），排版值从组件挪到主题层：
+
+| 令牌 | Apple 风（`:root`） | Fluent 风（`[data-theme='fluent']`） |
+| --- | --- | --- |
+| `--brand-font-family` | `-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif` | `'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei', 'Noto Sans SC', sans-serif` |
+| `--brand-font-size` | `16px` | `15px` |
+| `--brand-font-weight` | `600` | `500` |
+| `--brand-letter-spacing` | `-0.3px` | `0px` |
+
+- **Apple 风 → 圆润柔和**：系统 UI 字体优先；字号略大（16px）、字重 600、负字距（拉丁文收紧）；
+- **Fluent 风 → 方正克制**：**优先 `Segoe UI Variable Text`**（Win11 的新 UI 字体，
+  才是 Fluent 语言的正脸；Win10 回退 `Segoe UI`）；字号 15px、字重 500、字距归零。
+
+⚠️ **字体栈顺序是硬要求**：**拉丁字体在前、中文字体在后** ——
+否则 `Noto Sans SC` 会接管拉丁字母，回到「字腔宽 + 600 偏重」的老问题。
+
+⚠️ **组件只消费令牌**：`.app-shell__brand` 不再写死任何字号 / 字重 / 字距
+→ 换主题只改令牌，组件零分支。
+⚠️ **T40 的护栏一个字不动**（`flex: 0 0 auto` + `white-space: nowrap`）——
+本轮只改**排版**，**不改布局**。
+
+### 品牌文案统一为「Sanlos Music」
+
+`src/App.tsx`、`shared/appInfo.ts`、`shared/constants.ts`（OAuth `app_name`）、
+`electron/tray.ts`、`electron/oauthWindow.ts`、三个 HTML `<title>`、
+`electron-builder.yml`（`productName`）、`package.json`、`src/pages/LoginPage.tsx`。
+
+⚠️ **刻意保持「Sanlos music」（小写 m）的地方**：`electron/downloadManager.ts` 的
+`DEFAULT_DOWNLOAD_SUBDIR`、设置页的下载目录 placeholder、以及相关注释 ——
+**那是路径，不是品牌文案**（避免「界面叫 A、路径叫 B」的困惑）。老目录不删。
+
+### 影响文件
+
+- **改**：`src/styles/tokens.css`、`src/styles/app-shell.css`、`src/App.tsx`、
+  `shared/appInfo.ts`、`shared/constants.ts`、`electron/tray.ts`、`electron/oauthWindow.ts`、
+  `electron/downloadManager.ts`（注释）、`index.html`、`lyric.html`、`island.html`、
+  `electron-builder.yml`、`package.json`、`src/pages/LoginPage.tsx`；
+- **改测试**：`test/app-info.test.ts`、`test/tray-tooltip.test.ts`、`test/oauth-window.test.ts`（3 处）、
+  `test/app-shell-css.test.ts`（**新增 4 条品牌排版契约**）、
+  `e2e/smoke.spec.ts`（套件名）、`e2e/narrow-window.spec.ts`（套件名）；
+- **文档**：`README.md`、`docs/changelog.md`、`docs/calibration.md`、`docs/packaging.md`、
+  `docs/build-verification.md`、设计规格（新）。
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1794 passed / 82 files**（基线 1790，+4）；
+  `playwright test` **24 passed**；`npm run build` exit 0；
+- **真机**（隔离实例，Playwright 驱动 Electron，截图见 `release/verify/t50-brand-*.png`）：
+
+| 场景 | Apple 风 | Fluent 风 |
+| --- | --- | --- |
+| `font-size` / `font-weight` / `letter-spacing` | **16px / 600 / -0.3px** | **15px / 500 / normal** |
+| `font-family` | 以 `-apple-system` / `Segoe UI` 起头 | 以 `Segoe UI Variable Text` 起头 |
+| 品牌名宽 × 高 | **90.6 × 21 px** | **88.3 × 21 px** |
+| 宽窗顶栏 `scrollWidth` vs `clientWidth` | 1184 == 1184（**不溢出**） | 1184 == 1184 |
+| 窄窗（784）顶栏 `scrollWidth` vs `clientWidth` | 784 == 784（**不溢出**） | 784 == 784 |
+
+  对比改名前：**96.6px → 90.6 / 88.3 px**，两套主题**终于各有一套值**。
+
+### 已知限制（如实标注）
+
+- ⚠️ **Electron 默认图标未处理**：标题栏左上角还是 Electron 的默认小圆球
+  （仓库里没有 `build/icon.ico`）→ 两套主题都如此，本轮**不在范围内**；
+- ⚠️ **Apple 风的字体栈在 Windows 上落到 `Segoe UI`**：
+  `-apple-system` / `BlinkMacSystemFont` 是 macOS 的别名，Windows 上不存在 →
+  实际渲染是 `Segoe UI`。这是**正常且预期**的（跨平台字体栈），
+  但意味着「Apple 风」在 Windows 上的品牌名观感 ≈ `Segoe UI` + 600 + `-0.3px`；
+- ⚠️ **未重新打包**：`Sanlos Music.exe` 的产物名变更**未真机验过**，
+  与 T49 的覆盖安装风险叠加。
+
+### 遗留 / 待办
+
+- ⚠️ **待用户复验**：两套主题下品牌名的**肉眼观感**（本轮只做了像素级量测与截图，
+  没有做主观审美判断）；
+- ⚠️ **待真机验**：装完 `Sanlos Music.exe` 后的**覆盖安装**行为
+  （旧的 `飞牛音乐.exe` / `Sanlos music.exe` 可能并存）；
+- ⚠️ **待用户拍板**：Electron 默认图标要不要换成品牌图标（需 `build/icon.ico`）；
+- ⚠️ 仍待复验：T46（点击穿透 / 淡出淡回）、T47（挂 analyser 后听感）、T48（卡拉OK 观感）。

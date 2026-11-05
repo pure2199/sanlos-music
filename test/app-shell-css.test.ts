@@ -53,3 +53,60 @@ describe('顶栏（外壳层）的 CSS 契约（T40）', () => {
     expect(css).not.toMatch(/rgba?\(/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// T50：品牌名换成「Sanlos Music」后的**排版契约**
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么要单独钉**：品牌名从「飞牛音乐」（4 个汉字）换成「Sanlos Music」
+//    （12 个拉丁字符）后：
+//    - 宽度从 60px 暴涨到 **96.6px**（+61%）；
+//    - **拉丁字母不能由中文字体渲染**（Noto Sans SC 字腔宽 → 12 个字母又宽又重）；
+//    - 两套主题（Apple 风圆润 / Fluent 风方正）**必须各调各的**，不能用一套值抹平。
+//    这些承诺**全在 CSS 里** → jsdom 量不到 → 只能钉**声明**。
+//
+// ⚠️ **契约测试要先剥注释再匹配**（否则匹配到的是注释正文 = 空断言）。
+// ---------------------------------------------------------------------------
+
+describe('品牌名的排版契约（T50）', () => {
+  const shellCss = readCss('src', 'styles', 'app-shell.css')
+  const tokensCss = readCss('src', 'styles', 'tokens.css')
+  const brand = blockOf(shellCss, '.app-shell__brand')
+
+  it('品牌名的排版**全部走令牌**（不再写死字号 / 字重）', () => {
+    expect(brand).toMatch(/font-family:\s*var\(--brand-font-family\)/)
+    expect(brand).toMatch(/font-size:\s*var\(--brand-font-size/)
+    expect(brand).toMatch(/font-weight:\s*var\(--brand-font-weight/)
+    expect(brand).toMatch(/letter-spacing:\s*var\(--brand-letter-spacing/)
+    // ⚠️ **不许**再写死具体值（否则又变成「一套值糊平两套主题」）。
+    expect(brand).not.toMatch(/font-size:\s*\d+px/)
+    expect(brand).not.toMatch(/font-weight:\s*\d{3}\s*;/)
+  })
+
+  it('**T40 的护栏一条都不能丢**（不缩 + 不折行）', () => {
+    expect(brand).toMatch(/flex:\s*0 0 auto/)
+    expect(brand).toMatch(/white-space:\s*nowrap/)
+  })
+
+  it('**两套主题各有一套**品牌令牌（Apple 风 / Fluent 风不是同一套值）', () => {
+    // 默认（Apple 风）
+    expect(tokensCss).toMatch(/--brand-font-size:\s*16px/)
+    expect(tokensCss).toMatch(/--brand-font-weight:\s*600/)
+    // Fluent 风
+    const fluent = blockOf(tokensCss, "[data-theme='fluent']")
+    expect(fluent).toMatch(/--brand-font-size:\s*15px/)
+    expect(fluent).toMatch(/--brand-font-weight:\s*500/)
+    // ⚠️ **字号 / 字重必须真的不同**（否则「适配」只是嘴上说说）。
+    const appleSize = /--brand-font-size:\s*(\d+)px/.exec(tokensCss)?.[1]
+    const fluentSize = /--brand-font-size:\s*(\d+)px/.exec(fluent)?.[1]
+    expect(appleSize).not.toBe(fluentSize)
+  })
+
+  it('字体栈里**拉丁字体排在中文前面**（否则拉丁字母被中文字体接管 → 字腔宽）', () => {
+    const stack = /--brand-font-family:\s*([^;]+);/.exec(tokensCss)?.[1] ?? ''
+    expect(stack).toMatch(/Segoe UI/)
+    // ⚠️ 中文字体必须在**后面**（回退位）。
+    expect(stack.indexOf('Segoe UI')).toBeGreaterThanOrEqual(0)
+    expect(stack.indexOf('Noto Sans SC')).toBeGreaterThan(stack.indexOf('Segoe UI'))
+  })
+})

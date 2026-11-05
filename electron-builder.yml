@@ -10,7 +10,7 @@
 # 版本锁定：见 `scripts/pack.cjs`（锁 electron 版本 + 复用本地二进制，离线可打包）。
 
 appId: com.fnmusic.desktop
-productName: Sanlos music
+productName: Sanlos Music
 # ⚠️ **版权信息与「设置 → 关于」里的软件信息同源**（`shared/appInfo.ts`）。
 copyright: Copyright © 2026 广西闪链时空网络科技有限公司
 

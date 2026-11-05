@@ -54,6 +54,11 @@ export const DOWNLOAD_INDEX_FILE_NAME = 'downloads.json'
  *
  * ⚠️ **只影响「新下载」落盘**：已下载的条目在索引（`downloads.json`）里存的是
  *    **绝对路径** → 改了默认名，**老歌照样能播、照样在列表里**。
+ *
+ * ⚠️ **这里是「路径」不是「品牌文案」**：品牌名是 `Sanlos Music`（首字母大写），
+ *    而目录名保持 `Sanlos music` —— 目录名会出现在**文件管理器**和
+ *    `downloads.json` 的路径里，是**用户会手工输入 / 对照**的东西，
+ *    不跟着界面文案的大小写变（少一处「界面叫 A、路径叫 B」的困惑）。
  */
 export const DEFAULT_DOWNLOAD_SUBDIR = 'Sanlos music'
 
