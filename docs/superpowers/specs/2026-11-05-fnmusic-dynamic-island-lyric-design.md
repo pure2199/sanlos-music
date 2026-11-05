@@ -247,12 +247,60 @@ export function islandBounds(
 
 ---
 
-## 7. T46 概览（词岛内容与动效）
+## 7. T46 详细设计（词岛内容与动效）
 
-- 逐字发光：复用 `findActiveWord` 定位当前字 → 当前字加发光样式
-  （`drop-shadow` + 轻微 scale），CSS 动画；**不逐帧改 DOM 结构**。
-- 内容布局：`曲名 │ 逐字歌词 │ 歌手`（左右两侧可留空）。
-- 鼠标进入隐藏：透明窗口能收 `mousemove` → 鼠标进入词岛区域时整体淡出。
+### 7.1 探针先行（`release/verify/t46-mouse-probe.js`，Electron 32.3.3 实测）
+
+词岛贴在**屏幕顶部** → 如果它吃掉鼠标事件，最大化应用的**标题栏中央就点不到**
+→ 必须「点击穿透」。但「鼠标进入隐藏」又要求能知道鼠标移没移进来。
+
+| 探针结果 | 含义 |
+| --- | --- |
+| `setIgnoreMouseEvents(true, { forward: true })` 后仍收到 **131 次 mousemove** | ✅ **点击可穿透** + 仍能感知鼠标 |
+| `movesInsideWindow: 131`，`clientX 258→244`（窗口 x=1020，屏幕 1280 → 258 恰好对上） | ✅ 坐标能定位指针是否在词岛上 |
+| ⚠️ 指针**移出后 0 个事件** | ⚠️ 渲染进程**收不到「离开」** → 恢复**不能**靠渲染层 |
+
+⇒ 「移出后恢复显示」只能由**主进程轮询**指针位置（`screen.getCursorScreenPoint()`）。
+
+### 7.2 关键决定
+
+| 决定 | 理由 |
+| --- | --- |
+| 词岛开 `setIgnoreMouseEvents(true, { forward: true })` | 它在屏幕顶部，不穿透就**挡住**下面的应用 |
+| 主进程 **10Hz 轮询**指针位置，变化时 `webContents.send('lyric:pointer', inside)` | 渲染进程收不到「离开」→ 恢复只能靠轮询 |
+| ⚠️ **不新增 ipcMain 通道** | `lyric:pointer` 走 `webContents.send`（与 `lyric:state` 同款）→ **不动**既有的通道集合断言 |
+| `LyricView` 加**可选** prop `activeWordClassName` | 缺省 = **不加任何类名** → 主界面歌词 / 全屏歌词舞台 / 经典悬浮窗的行为**一字不变** |
+| 只给**正在被唱的那一个词**加钩子；该行已走满 → **不加** | 已走满 = 整行都是唱过的状态，没有「当前」可言 |
+| 发光**只用 `text-shadow`** | 逐字着色层（overlay）与底层整行文本必须**字形严丝合缝** → `transform: scale` / 字重都会让两层**错位** |
+| 淡出**只降不透明度**，不用 `display:none` / `visibility:hidden` | 状态由主进程轮询驱动，与渲染层自身无关 |
+| 组件从入口里**拆出来**（`IslandApp.tsx`） | `main.tsx` 直接 `createRoot` → 测试没法 import；拆开后「指针进入 → 淡出」才**能测** |
+| ⚠️ **词岛不再响应点击**（去掉 `onSeek`） | 物理上不可能兼得：穿透 = 点击落到**下面的应用** → 词岛点不到。**点歌跳转仍在经典悬浮窗**（Lyricify 的词岛同样不可点） |
+
+### 7.3 影响文件
+
+- **新增**：`src/island/IslandApp.tsx`（词岛根组件）、`test/lyric-island-pointer.test.ts`、
+  `test/lyric-island-app.test.tsx`
+- **改**：`shared/islandAnchor.ts`（+ `isPointInsideRect` 纯函数）、`shared/playerBridge.ts`
+  （+ `onLyricPointer`）、`electron/preload.ts`（暴露桥方法）、`electron/main.ts`
+  （穿透 + 指针轮询）、`src/ui/lyrics/LyricView.tsx`（+ 可选 prop `activeWordClassName`）、
+  `src/island/main.tsx`（瘦身为入口）、`src/island/island-window.css`（发光 + 淡出）、
+  `test/lyric-view.test.tsx`（新增 3 条）、`test/media-session.test.ts`（假桥补空实现）
+
+### 7.4 验收点
+
+1. `tsc --noEmit` exit **0**；
+2. `vitest` 全绿且 **≥ 1726**（基线 1713 + 新增 13）；
+3. `playwright` 既有 **24 条**全绿；
+4. **变异自证** ≥ 4 处（先红后复原，哈希回基线）；
+5. **复原校验**：变异跑一轮 apply+revert 后文件 sha256 与基线**完全一致**；
+6. U+FFFD 0、无 BOM、行尾保持原样；
+7. 真机：指针移到词岛上淡出、移开淡回、**点击真的穿透**到下面的应用（**用户复验**）。
+
+### 7.5 已知限制（如实标注）
+
+- ⚠️ **词岛不可点**（点击穿透的代价）→ 点歌跳转只在**经典悬浮窗**有；
+- ⚠️ **浅色胶囊**（沿用 `--surface-raised`）：在浅色壁纸上存在感偏弱 → 若用户反馈太淡，
+  再给 `tokens.css` 加一组「词岛」专属语义变量（**本轮没做**，避免擅自扩范围）。
 - ⚠️ 窗口**不穿透鼠标**（要能点、能隐藏）→ 词岛区域会挡一点屏幕 → 位置在顶部，遮挡面积极小。
 
 ---
