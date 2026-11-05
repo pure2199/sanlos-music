@@ -593,7 +593,7 @@ describe('registerPlayerIpc', () => {
     return { ipcMain, handlers, listeners }
   }
 
-  it('注册了全部通道（含 Task 10 的悬浮歌词通道、Task 11 的下载通道、Task 12 的 FFmpeg 通道与 Task 41 的外部链接通道）', () => {
+  it('注册了全部通道（含 Task 10 的悬浮歌词通道、Task 11 的下载通道、Task 12 的 FFmpeg 通道、Task 41 的外部链接通道与 Task 45 的词岛样式通道）', () => {
     // ⚠️ T10（桌面悬浮歌词）新增了两个通道，T11（本地下载）又新增了四个，
     //    T12（FFmpeg 兜底解码）再新增两个：
     //    - `lyric:set-visible`（调用式）：开关悬浮窗；
@@ -608,6 +608,11 @@ describe('registerPlayerIpc', () => {
     //      （渲染层**不能**自己开网页 → 主窗口没配 `setWindowOpenHandler`，
     //        链接会把应用窗口整个导航走。）
     //    → 前提再次被推翻，这里**继续**改写为新的完整集合（不是放宽断言）。
+    //
+    // ⚠️ T45（灵动态词岛）又新增一个：
+    //    - `lyric:set-mode`（调用式）：切换桌面歌词的样式
+    //      （`classic` 经典悬浮窗 / `island` 灵动词岛）。
+    //    → 前提再次被推翻，这里**继续**改写为新的完整集合（不是放宽断言）。
     const { ipcMain, handlers, listeners } = fakeIpcMain()
     registerPlayerIpc({ ipcMain, prefs: new PrefsStore({ filePath: tempFile() }) })
     expect([...handlers.keys()].sort()).toEqual([
@@ -618,6 +623,7 @@ describe('registerPlayerIpc', () => {
       'download:start',
       'ffmpeg:fallback',
       'ffmpeg:status',
+      'lyric:set-mode',
       'lyric:set-visible',
       'prefs:get',
       'prefs:set',
@@ -782,6 +788,31 @@ describe('registerPlayerIpc', () => {
     handlers.get('lyric:set-visible')?.(undefined, 'yes')
     // 只有 `true` 算「开」，其余一律按「关」处理
     expect(setLyricVisible).toHaveBeenCalledWith(false)
+  })
+
+  it('lyric:set-mode 是调用：把桌面歌词样式交给主进程去切换窗口（T45）', () => {
+    const { ipcMain, handlers } = fakeIpcMain()
+    const setLyricMode = vi.fn()
+    registerPlayerIpc({
+      ipcMain,
+      prefs: new PrefsStore({ filePath: tempFile() }),
+      setLyricMode,
+    })
+
+    handlers.get('lyric:set-mode')?.(undefined, 'island')
+    expect(setLyricMode).toHaveBeenCalledWith('island')
+
+    setLyricMode.mockClear()
+    handlers.get('lyric:set-mode')?.(undefined, 'classic')
+    expect(setLyricMode).toHaveBeenCalledWith('classic')
+
+    setLyricMode.mockClear()
+    // 形状不对 → **一律按 'classic' 处理**（不抛、不当成 island）
+    handlers.get('lyric:set-mode')?.(undefined, 'nope')
+    handlers.get('lyric:set-mode')?.(undefined, undefined)
+    handlers.get('lyric:set-mode')?.(undefined, 42)
+    expect(setLyricMode).toHaveBeenCalledTimes(3)
+    expect(setLyricMode).toHaveBeenLastCalledWith('classic')
   })
 
   it('player:state 是推送：渲染进程推来 → 主进程消费（更新托盘）', () => {

@@ -30,7 +30,7 @@
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 
 import { APP_INFO } from '../../shared/appInfo'
-import type { CloseBehavior, PlayerBridge } from '../../shared/playerBridge'
+import type { CloseBehavior, LyricOverlayMode, PlayerBridge } from '../../shared/playerBridge'
 import type { FfmpegStatus } from '../../shared/ffmpeg'
 import type { LyricSource } from '../../shared/lyricProvider'
 import { useAppPrefsStore } from '../state/appPrefsStore'
@@ -71,6 +71,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const setCloseBehavior = useAppPrefsStore((state) => state.setCloseBehavior)
   const lyricOverlayVisible = useAppPrefsStore((state) => state.lyricOverlayVisible)
   const setLyricOverlayVisible = useAppPrefsStore((state) => state.setLyricOverlayVisible)
+  // --- 桌面歌词样式（T45）-------------------------------------------------
+  const lyricOverlayMode = useAppPrefsStore((state) => state.lyricOverlayMode)
+  const setLyricOverlayMode = useAppPrefsStore((state) => state.setLyricOverlayMode)
   const error = useAppPrefsStore((state) => state.error)
 
   const handleChange = useCallback(
@@ -85,6 +88,14 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
       void setLyricOverlayVisible(visible)
     },
     [setLyricOverlayVisible],
+  )
+
+  // --- 桌面歌词样式（T45）-------------------------------------------------
+  const handleSelectLyricMode = useCallback(
+    (mode: LyricOverlayMode) => {
+      void setLyricOverlayMode(mode)
+    },
+    [setLyricOverlayMode],
   )
 
   // --- 本地下载（Task 11）-------------------------------------------------
@@ -310,6 +321,36 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   onChange={(event) => handleToggleLyricOverlay(event.target.checked)}
                 />
                 <span>显示悬浮歌词（双行逐字，可拖动 / 点歌跳转）</span>
+              </label>
+            </fieldset>
+
+            <fieldset className="fnm-settings__group">
+              <legend className="fnm-settings__legend">桌面歌词样式</legend>
+              <p className="fnm-settings__hint">
+                「灵动态词岛」= 屏幕顶部居中的胶囊（像灵动岛）；「经典悬浮窗」= 可自由拖动的方框。
+                两种形态**互斥**，切换后立刻生效。
+              </p>
+              <label className="fnm-settings__option">
+                <input
+                  type="radio"
+                  name="fnm-lyric-overlay-mode"
+                  // ⚠️ **显式 aria-label**：`<label>` 包着 radio 时，可访问名会把
+                  //    整个说明文字都带进去 → 名字不稳定、没法精确选中。
+                  aria-label="经典悬浮窗"
+                  checked={lyricOverlayMode === 'classic'}
+                  onChange={() => handleSelectLyricMode('classic')}
+                />
+                <span>经典悬浮窗（可拖动 / 点歌跳转）</span>
+              </label>
+              <label className="fnm-settings__option">
+                <input
+                  type="radio"
+                  name="fnm-lyric-overlay-mode"
+                  aria-label="灵动态词岛"
+                  checked={lyricOverlayMode === 'island'}
+                  onChange={() => handleSelectLyricMode('island')}
+                />
+                <span>灵动态词岛（屏幕顶部居中的胶囊）</span>
               </label>
             </fieldset>
 

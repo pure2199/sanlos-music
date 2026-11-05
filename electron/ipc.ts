@@ -88,6 +88,7 @@ import type {
   DownloadTask,
   LyricOverlayLine,
   LyricOverlayMessage,
+  LyricOverlayMode,
   LyricOverlayTrack,
   PlayerCommand,
   PlayerStateSnapshot,
@@ -894,6 +895,13 @@ const CLOSE_BEHAVIORS: readonly CloseBehavior[] = ['hide', 'quit']
  */
 const PLAY_MODES: readonly PlayMode[] = ['sequence', 'shuffle', 'loop-one', 'loop-list']
 
+/**
+ * 桌面歌词的样式（T45）：**只认这两个值**。
+ *
+ * ⚠️ 偏好文件是用户手改也改得动的地方 → 陌生值一律**丢弃**，不写半截进文件。
+ */
+const LYRIC_OVERLAY_MODES: readonly LyricOverlayMode[] = ['classic', 'island']
+
 /** 取数字（非有限值 / 非数字 → `undefined`）。 */
 function readNumberOrUndefined(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
@@ -949,6 +957,12 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
     const overlay = asRecord(record['lyricOverlay'])
     if (overlay) {
       const entry: NonNullable<AppPrefs['lyricOverlay']> = { visible: overlay['visible'] === true }
+      // ⚠️ T45：样式**只认两个合法值**；陌生值**丢弃该字段**（不写半截进文件），
+      //    缺省则**不写** → 老用户升级后行为一字不变（仍是经典悬浮窗）。
+      const mode = overlay['mode']
+      if (typeof mode === 'string' && (LYRIC_OVERLAY_MODES as readonly string[]).includes(mode)) {
+        entry.mode = mode as LyricOverlayMode
+      }
       const overlayBounds = asRecord(overlay['bounds'])
       if (overlayBounds) {
         const width = readNumberOrUndefined(overlayBounds['width'])
@@ -1128,6 +1142,13 @@ export interface PlayerIpcOptions {
    */
   setLyricVisible?: (visible: boolean) => void
   /**
+   * 切换桌面歌词的**样式**（T45）。
+   *
+   * ⚠️ 由主进程负责**换成对应的窗口**并**落盘**（`prefs.lyricOverlay.mode`）。
+   *    两种形态**互斥**：切过去时另一种会收起。
+   */
+  setLyricMode?: (mode: LyricOverlayMode) => void
+  /**
    * 下载控制器（Task 11）。
    *
    * ⚠️ **落盘路径、文件名清洗、断点续传全在主进程**——
@@ -1226,6 +1247,12 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
   // 渲染进程 → 主进程：设置悬浮窗可见性（创建 / 隐藏 + 落盘）。
   ipcMain.handle('lyric:set-visible', (_event, arg) => {
     opts.setLyricVisible?.(arg === true)
+  })
+
+  // 渲染进程 → 主进程：切换桌面歌词**样式**（T45）。
+  // ⚠️ 形状不对的字符串**一律按 'classic' 处理**（不抛、不当成 island）。
+  ipcMain.handle('lyric:set-mode', (_event, arg) => {
+    opts.setLyricMode?.(arg === 'island' ? 'island' : 'classic')
   })
 
   // --- 下载（Task 11）-----------------------------------------------------

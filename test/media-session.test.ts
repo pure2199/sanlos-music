@@ -167,6 +167,9 @@ function fakeBridge(): {
     close: async () => {},
     // T41：用系统浏览器打开外部链接 —— 本用例不碰它，给个空实现即可。
     openExternal: async () => false,
+    // ⚠️ T45：桌面歌词样式的两个新桥方法 —— 本用例不碰它们，给空实现即可。
+    setLyricMode: async () => {},
+    onLyricMode: () => () => undefined,
     // 桌面悬浮歌词（Task 10）：本用例不碰它，给个空实现即可。
     pushLyricState: () => {},
     onLyricState: () => () => {},

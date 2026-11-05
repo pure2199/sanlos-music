@@ -1,8 +1,13 @@
-import { app, BrowserWindow, Menu, session as electronSession } from 'electron'
+import { app, BrowserWindow, Menu, screen, session as electronSession } from 'electron'
 import path from 'node:path'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 
-import type { LyricOverlayMessage, PlayerCommand, PlayerStateSnapshot } from '../shared/playerBridge'
+import type {
+  LyricOverlayMessage,
+  LyricOverlayMode,
+  PlayerCommand,
+  PlayerStateSnapshot,
+} from '../shared/playerBridge'
 import type { ThemeName } from '../shared/types'
 import { API_PREFIX } from '../shared/constants'
 import { resolveThemeName, themeSpec } from '../shared/themes'
@@ -27,6 +32,7 @@ import { buildUpstreamRequest, registerProxy } from './proxy'
 import { SessionManager } from './session'
 import { createCoverFetcher, createTray } from './tray'
 import { createBoundsSaver, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, resolveWindowBounds } from './windowBounds'
+import { islandBounds, ISLAND_WINDOW_HEIGHT, ISLAND_WINDOW_WIDTH } from './islandAnchor'
 import { createUpdateController } from './update'
 
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
@@ -69,6 +75,22 @@ let currentPlayerState: PlayerStateSnapshot | null = null
  */
 let lyricWindow: BrowserWindow | null = null
 
+/**
+ * 灵动态词岛窗口（T45）。
+ *
+ * ⚠️ 与经典悬浮窗**互斥**：同一时刻只有一个桌面歌词窗口可见。
+ * ⚠️ 位置**不落盘** —— 它按「主窗口所在显示器的 workArea」算出来
+ *    （用户拖不动它，它就该待在屏幕顶部）。
+ */
+let islandWindow: BrowserWindow | null = null
+
+/**
+ * 桌面歌词当前用哪种形态（T45）：`classic` 经典悬浮窗 / `island` 灵动态词岛。
+ *
+ * ⚠️ 缺省 `classic` → 老用户升级后行为**一字不变**。
+ */
+let lyricMode: LyricOverlayMode = 'classic'
+
 /** 悬浮窗当前是否可见（主进程侧的状态；与 `prefs.lyricOverlay.visible` 同步）。 */
 let lyricVisible = false
 
@@ -87,6 +109,42 @@ function showMainWindow(): void {
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
+}
+
+/** 词岛重新锚定的节流间隔（毫秒）。 */
+const ISLAND_REANCHOR_THROTTLE_MS = 200
+/** 上次重新锚定的时间戳（0 = 从没锚定过）。 */
+let lastIslandReanchorAt = 0
+/** 节流窗口末尾的补锚定时器（拖动停止后补算一次）。 */
+let islandReanchorTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * 把词岛摆到「主窗口所在显示器」的顶部居中（T45）。
+ *
+ * ⚠️ 跟随**主窗口**而不是鼠标：拖鼠标不该让词岛乱跳。
+ * ⚠️ **节流**：拖动窗口时 `move` 事件连珠炮发 → 不节流会狂 `setBounds`。
+ *    ⚠️ 节流窗口内的那次事件会**补算**（否则词岛会停在旧位置）。
+ */
+function reanchorIsland(): void {
+  const win = islandWindow
+  if (!win || win.isDestroyed()) return
+  if (!mainWindow || mainWindow.isDestroyed()) return
+
+  const now = Date.now()
+  if (now - lastIslandReanchorAt < ISLAND_REANCHOR_THROTTLE_MS) {
+    if (!islandReanchorTimer) {
+      islandReanchorTimer = setTimeout(() => {
+        islandReanchorTimer = null
+        lastIslandReanchorAt = 0
+        reanchorIsland()
+      }, ISLAND_REANCHOR_THROTTLE_MS)
+    }
+    return
+  }
+  lastIslandReanchorAt = now
+
+  const display = screen.getDisplayMatching(mainWindow.getBounds())
+  win.setBounds(islandBounds(display, { width: ISLAND_WINDOW_WIDTH, height: ISLAND_WINDOW_HEIGHT }))
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +299,9 @@ if (!isPrimaryInstance) {
       })
       win.on('resize', () => boundsSaver.schedule())
       win.on('move', () => boundsSaver.schedule())
+      // ⚠️ T45：主窗口换了屏 → 词岛要跟着重新锚定（节流在 `reanchorIsland` 里）。
+      win.on('resize', () => reanchorIsland())
+      win.on('move', () => reanchorIsland())
 
       win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
         console.error(`[fnmusic] 页面加载失败: ${errorCode} ${errorDescription} (${validatedURL})`)
@@ -522,21 +583,137 @@ if (!isPrimaryInstance) {
         return win
       }
 
-      /** 显示 / 隐藏悬浮窗（落盘 + 通知主窗口渲染进程）。 */
+      // 12c. 灵动态词岛窗口（T45）。
+      //
+      //     ⚠️ **与经典悬浮窗互斥**：同一时刻只有一个桌面歌词窗口可见
+      //     （主进程是唯一的分发者 → 只把歌词消息发给「当前那个」）。
+      //     ⚠️ **位置不落盘**：它按主窗口所在显示器的 workArea 算出来。
+      const createIslandWindow = (): BrowserWindow | null => {
+        if (islandWindow && !islandWindow.isDestroyed()) return islandWindow
+
+        const win = new BrowserWindow({
+          width: ISLAND_WINDOW_WIDTH,
+          height: ISLAND_WINDOW_HEIGHT,
+          show: false,
+          // 词岛：无边框 + 透明 + 不进任务栏 + 不可缩放 + 不提供拖动把手。
+          frame: false,
+          transparent: true,
+          resizable: false,
+          maximizable: false,
+          fullscreenable: false,
+          skipTaskbar: true,
+          alwaysOnTop: true,
+          hasShadow: false,
+          webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            contextIsolation: true,
+            sandbox: true,
+            nodeIntegration: false,
+          },
+        })
+        // 置顶到最高级（'screen-saver'）：连全屏应用都压得住它（与经典窗同款）。
+        win.setAlwaysOnTop(true, 'screen-saver')
+        // 所有工作区都可见（含全屏）。
+        win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+        islandWindow = win
+
+        // ⚠️ T36：菜单栏没了 → **Ctrl+C / Ctrl+V** 自己接回来。
+        attachAppShortcuts(win.webContents)
+
+        win.on('closed', () => {
+          islandWindow = null
+        })
+
+        // 页面加载完成 → 把缓存的消息补给它（否则要等到下一次切歌才有内容）。
+        win.webContents.on('did-finish-load', () => {
+          if (lastLyricMessage) {
+            win.webContents.send('lyric:state', lastLyricMessage)
+          }
+        })
+
+        if (devServerUrl) {
+          const url = `${devServerUrl.replace(/\/$/, '')}/island.html`
+          win.loadURL(url).catch((err: unknown) => {
+            console.error(`[fnmusic] 词岛页面加载失败 (${url}):`, err)
+          })
+        } else {
+          const islandPath = path.join(__dirname, '../dist/island.html')
+          win.loadFile(islandPath).catch((err: unknown) => {
+            console.error(`[fnmusic] 词岛页面加载失败 (${islandPath}):`, err)
+          })
+        }
+        return win
+      }
+
+      /** 当前形态的桌面歌词窗口（两种形态互斥 → 至多一个）。 */
+      const activeLyricWindow = (): BrowserWindow | null => {
+        if (lyricMode === 'island') {
+          return islandWindow && !islandWindow.isDestroyed() ? islandWindow : null
+        }
+        return lyricWindow && !lyricWindow.isDestroyed() ? lyricWindow : null
+      }
+
+      /**
+       * 切换桌面歌词的**形态**（T45）。
+       *
+       * ⚠️ 两种形态**互斥**：切过去时另一种收起；新窗口建好后
+       *    `did-finish-load` 会把缓存的歌词消息补给它。
+       */
+      const setLyricMode = (mode: LyricOverlayMode): void => {
+        const next: LyricOverlayMode = mode === 'island' ? 'island' : 'classic'
+        lyricMode = next
+
+        // 落盘（下次启动恢复）：**保留经典窗的位置**（切回去时还在原处）。
+        const overlay = prefs.read().lyricOverlay
+        const bounds = overlay?.bounds
+        prefs.write({
+          lyricOverlay: bounds ? { visible: lyricVisible, mode: next, bounds } : { visible: lyricVisible, mode: next },
+        })
+
+        // 收起旧的那个。
+        if (next === 'island') {
+          lyricWindow?.hide()
+        } else {
+          islandWindow?.hide()
+        }
+
+        if (!lyricVisible) return
+
+        if (next === 'island') {
+          const win = createIslandWindow()
+          reanchorIsland()
+          win?.show()
+        } else {
+          createLyricWindow()?.show()
+        }
+      }
+
+      /** 显示 / 隐藏桌面歌词窗（落盘 + 通知主窗口渲染进程）。 */
       const setLyricVisible = (visible: boolean): void => {
         lyricVisible = visible
         if (visible) {
-          createLyricWindow()?.show()
+          // ⚠️ 按**当前形态**建对应的窗口（T45：经典悬浮窗 ↔ 灵动态词岛）。
+          if (lyricMode === 'island') {
+            const island = createIslandWindow()
+            reanchorIsland()
+            island?.show()
+          } else {
+            createLyricWindow()?.show()
+          }
         } else {
+          // 两种形态都收起（用户只该看到「桌面歌词关了」）。
           lyricWindow?.hide()
+          islandWindow?.hide()
         }
-        // 落盘（下次启动恢复）：可见性 + 当前（或上次记住的）位置尺寸。
+        // 落盘（下次启动恢复）：可见性 + 形态 + 当前（或上次记住的）位置尺寸。
         const live = lyricWindow && !lyricWindow.isDestroyed() ? lyricWindow.getBounds() : null
         const previous = prefs.read().lyricOverlay?.bounds
         const bounds = live
           ? { width: live.width, height: live.height, x: live.x, y: live.y }
           : previous
-        prefs.write({ lyricOverlay: bounds ? { visible, bounds } : { visible } })
+        prefs.write({
+          lyricOverlay: bounds ? { visible, mode: lyricMode, bounds } : { visible, mode: lyricMode },
+        })
         // 通知主窗口渲染进程：它据此决定要不要拉歌词、要不要继续推进度。
         if (!win.isDestroyed()) win.webContents.send('lyric:visibility', visible)
       }
@@ -562,10 +739,13 @@ if (!isPrimaryInstance) {
         // 悬浮歌词（Task 10）：主进程**只转发**，不理解歌词内容。
         onLyricState: (message) => {
           lastLyricMessage = message
-          if (!lyricWindow || lyricWindow.isDestroyed()) return
-          lyricWindow.webContents.send('lyric:state', message)
+          // ⚠️ T45：**发给当前形态的那个窗口**（两种形态互斥 → 不会重复消费）。
+          const target = activeLyricWindow()
+          if (!target) return
+          target.webContents.send('lyric:state', message)
         },
         setLyricVisible,
+        setLyricMode,
         // 本地下载（Task 11）：落盘 / 断点续传 / 索引全在主进程。
         downloads,
         // FFmpeg 兜底解码（Task 12）：探测与转码全在主进程。
@@ -607,8 +787,11 @@ if (!isPrimaryInstance) {
         provider: createLyricProvider({ fetchImpl: http.fetch }),
       })
 
-      // 13b. 启动时按偏好恢复悬浮窗（上次是开着的就接着开）。
-      if (prefs.read().lyricOverlay?.visible === true) {
+      // 13b. 启动时按偏好恢复桌面歌词窗（上次是开着的就接着开）。
+      //     ⚠️ T45：先读**形态**（缺省 classic → 老用户升级后行为一字不变）。
+      const savedOverlay = prefs.read().lyricOverlay
+      lyricMode = savedOverlay?.mode === 'island' ? 'island' : 'classic'
+      if (savedOverlay?.visible === true) {
         setLyricVisible(true)
       }
 

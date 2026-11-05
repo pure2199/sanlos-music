@@ -123,6 +123,18 @@ const fnPlayer: PlayerBridge = {
     }
   },
   setLyricVisible: (visible) => ipcRenderer.invoke('lyric:set-visible', visible === true),
+  // ⚠️ T45：桌面歌词的**样式**（经典悬浮窗 / 灵动态词岛）。
+  //    形状不对的字符串一律按 'classic' 处理（不抛、不当成 island）。
+  setLyricMode: (mode) => ipcRenderer.invoke('lyric:set-mode', mode),
+  onLyricMode: (handler) => {
+    const listener = (_event: unknown, mode: unknown): void => {
+      handler(mode === 'island' ? 'island' : 'classic')
+    }
+    ipcRenderer.on('lyric:mode', listener)
+    return () => {
+      ipcRenderer.removeListener('lyric:mode', listener)
+    }
+  },
   // -------------------------------------------------------------------------
   // 下载（Task 11）
   // -------------------------------------------------------------------------

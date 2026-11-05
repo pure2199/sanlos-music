@@ -202,6 +202,16 @@ export interface WindowBounds {
 }
 
 /**
+ * 桌面歌词的**样式**（T45）。
+ *
+ * - `classic`：经典悬浮歌词窗（可自由拖动，位置会被记住）——**Task 10 的既有形态**；
+ * - `island`：灵动态词岛（屏幕顶部居中的胶囊，位置由显示器算出来）。
+ *
+ * ⚠️ **缺省 = `classic`** → 老用户升级后行为**一字不变**。
+ */
+export type LyricOverlayMode = 'classic' | 'island'
+
+/**
  * 应用偏好（主进程 `prefs.json` 的内容）。
  *
  * ⚠️ **这里只放非敏感偏好**：主题名、窗口位置、「关闭窗口的行为」。
@@ -224,15 +234,26 @@ export interface AppPrefs {
    */
   eq?: EqPrefsPayload
   /**
-   * 桌面悬浮歌词的偏好（Task 10）。
+   * 桌面悬浮歌词的偏好（Task 10；T45 加了样式）。
    *
-   * ⚠️ **非敏感**：只有「要不要显示」与「窗口在哪儿」——
+   * ⚠️ **非敏感**：只有「要不要显示」「哪种样式」与「窗口在哪儿」——
    *    与 `session.bin`（凭证）**无关**。
    */
   lyricOverlay?: {
     /** 是否显示悬浮窗。 */
     visible: boolean
-    /** 悬浮窗的位置与尺寸。 */
+    /**
+     * 样式（**缺省 = `classic`**）。
+     *
+     * ⚠️ 只认 `'classic'` / `'island'` 两个值，别的**一律丢弃**
+     *    （偏好文件是用户手改也改得动的地方）。
+     */
+    mode?: LyricOverlayMode
+    /**
+     * 悬浮窗的位置与尺寸。
+     *
+     * ⚠️ **只对 `classic` 有意义**：词岛的位置是按显示器**算**出来的，不落盘。
+     */
     bounds?: WindowBounds
   }
   /**
@@ -492,6 +513,18 @@ export interface PlayerBridge {
   onLyricVisibility(handler: (visible: boolean) => void): () => void
   /** 设置悬浮窗的可见性（`lyric:set-visible`；主进程据此创建 / 隐藏窗口并落盘）。 */
   setLyricVisible(visible: boolean): Promise<void>
+  /**
+   * 切换桌面歌词的**样式**（`lyric:set-mode`；主进程据此换成对应的窗口并落盘）。
+   *
+   * ⚠️ T45：两种形态**互斥** —— 切过去时另一种会收起。
+   */
+  setLyricMode(mode: LyricOverlayMode): Promise<void>
+  /**
+   * 订阅桌面歌词样式的变化（`lyric:mode`，`webContents.send`）。
+   *
+   * ⚠️ **主窗口渲染进程**用它同步自己知道的样子（例：词岛模式下不再走经典窗的老路）。
+   */
+  onLyricMode(handler: (mode: LyricOverlayMode) => void): () => void
   // -------------------------------------------------------------------------
   // 下载（Task 11）
   // -------------------------------------------------------------------------

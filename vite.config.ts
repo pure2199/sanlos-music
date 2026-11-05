@@ -26,6 +26,7 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         lyric: path.resolve(__dirname, 'lyric.html'),
+        island: path.resolve(__dirname, 'island.html'),
       },
     },
   },

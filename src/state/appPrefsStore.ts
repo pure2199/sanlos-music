@@ -29,11 +29,23 @@ import {
   normalizeLyricTemplate,
   type LyricSource,
 } from '../../shared/lyricProvider'
-import type { CloseBehavior, PlayerBridge } from '../../shared/playerBridge'
+import type { CloseBehavior, LyricOverlayMode, PlayerBridge } from '../../shared/playerBridge'
 import { applyTheme } from '../theme'
 
 /** 默认的「关闭窗口」行为（隐藏，播放继续）。 */
 export const DEFAULT_CLOSE_BEHAVIOR: CloseBehavior = 'hide'
+
+/**
+ * 默认的桌面歌词样式（T45）：**经典悬浮窗**。
+ *
+ * ⚠️ 老用户升级后行为必须**一字不变** → 缺省就是 `classic`。
+ */
+export const DEFAULT_LYRIC_OVERLAY_MODE: LyricOverlayMode = 'classic'
+
+/** 把任意输入压成合法的桌面歌词样式（陌生值 → `classic`）。 */
+export function normalizeLyricOverlayMode(value: unknown): LyricOverlayMode {
+  return value === 'island' ? 'island' : DEFAULT_LYRIC_OVERLAY_MODE
+}
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。 */
 function playerBridge(): PlayerBridge | null {
@@ -60,6 +72,14 @@ export interface AppPrefsStore {
   /** 显示 / 隐藏桌面悬浮歌词（乐观应用 + 写回主进程；失败则回滚）。 */
   setLyricOverlayVisible: (visible: boolean) => Promise<void>
   /**
+   * 桌面歌词的**样式**（T45）：经典悬浮窗 / 灵动态词岛。
+   *
+   * ⚠️ 缺省 = `'classic'` → 老用户升级后行为**一字不变**。
+   */
+  lyricOverlayMode: LyricOverlayMode
+  /** 切换桌面歌词样式（乐观应用 + 写回主进程；失败则回滚）。 */
+  setLyricOverlayMode: (mode: LyricOverlayMode) => Promise<void>
+  /**
    * 外部歌词源（Task 32）：用哪个源。
    *
    * ⚠️ `off` = **只用 NAS 自带的歌词**，不查外部。
@@ -81,6 +101,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
   theme: DEFAULT_THEME,
   closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
   lyricOverlayVisible: false,
+  lyricOverlayMode: DEFAULT_LYRIC_OVERLAY_MODE,
   lyricSource: DEFAULT_LYRIC_SOURCE,
   lyricTemplate: '',
   error: null,
@@ -93,6 +114,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         theme: applyTheme(DEFAULT_THEME),
         closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
         lyricOverlayVisible: false,
+        lyricOverlayMode: DEFAULT_LYRIC_OVERLAY_MODE,
         lyricSource: DEFAULT_LYRIC_SOURCE,
         lyricTemplate: '',
         error: null,
@@ -105,6 +127,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         theme: applyTheme(resolveThemeName(prefs.theme)),
         closeBehavior: prefs.closeBehavior === 'quit' ? 'quit' : DEFAULT_CLOSE_BEHAVIOR,
         lyricOverlayVisible: prefs.lyricOverlay?.visible === true,
+        lyricOverlayMode: normalizeLyricOverlayMode(prefs.lyricOverlay?.mode),
         lyricSource: normalizeLyricSource(prefs.lyric?.source),
         lyricTemplate: normalizeLyricTemplate(prefs.lyric?.template),
         error: null,
@@ -115,6 +138,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         theme: applyTheme(DEFAULT_THEME),
         closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
         lyricOverlayVisible: false,
+        lyricOverlayMode: DEFAULT_LYRIC_OVERLAY_MODE,
         lyricSource: DEFAULT_LYRIC_SOURCE,
         lyricTemplate: '',
         error: null,
@@ -169,6 +193,24 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
       await bridge.setLyricVisible(visible)
     } catch {
       set({ lyricOverlayVisible: previous, error: '悬浮歌词开关失败，已恢复原设置' })
+    }
+  },
+
+  setLyricOverlayMode: async (mode: LyricOverlayMode): Promise<void> => {
+    const next = normalizeLyricOverlayMode(mode)
+    const previous = get().lyricOverlayMode
+    // 乐观应用：换样式必须即时反馈（主进程那边还要**换窗口**）。
+    set({ lyricOverlayMode: next, error: null })
+
+    const bridge = playerBridge()
+    if (!bridge) return
+
+    try {
+      // ⚠️ 走**专用通道**：主进程要据此**换成对应的窗口**并落盘，
+      //    光改偏好是不够的（窗口不会凭空换形态）。
+      await bridge.setLyricMode(next)
+    } catch {
+      set({ lyricOverlayMode: previous, error: '桌面歌词样式切换失败，已恢复原设置' })
     }
   },
 

@@ -202,3 +202,53 @@ describe('设置页：「关于」分类（T41）', () => {
     expect(event.defaultPrevented).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// T45：桌面歌词**样式**二选一（经典悬浮窗 / 灵动态词岛）
+// ---------------------------------------------------------------------------
+
+describe('设置页：桌面歌词样式二选一（T45）', () => {
+  /** 真实的 setter（用例会临时替换它，结束后必须复位）。 */
+  const realSetMode = useAppPrefsStore.getState().setLyricOverlayMode
+
+  beforeEach(() => {
+    useAppPrefsStore.setState({
+      lyricOverlayMode: 'classic',
+      setLyricOverlayMode: realSetMode,
+    })
+  })
+
+  afterEach(() => {
+    useAppPrefsStore.setState({ setLyricOverlayMode: realSetMode })
+  })
+
+  it('「歌词」分类下有「桌面歌词样式」：两个单选（经典悬浮窗 / 灵动态词岛）', () => {
+    render(<SettingsPanel />)
+    pickCategory('歌词')
+
+    const group = screen.getByRole('group', { name: '桌面歌词样式' })
+    const classic = within(group).getByRole('radio', { name: '经典悬浮窗' })
+    const island = within(group).getByRole('radio', { name: '灵动态词岛' })
+    expect((classic as HTMLInputElement).checked).toBe(true)
+    expect((island as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('当前是词岛 → 选中项是「灵动态词岛」', () => {
+    useAppPrefsStore.setState({ lyricOverlayMode: 'island' })
+    render(<SettingsPanel />)
+    pickCategory('歌词')
+
+    const island = screen.getByRole('radio', { name: '灵动态词岛' }) as HTMLInputElement
+    expect(island.checked).toBe(true)
+  })
+
+  it('选中「灵动态词岛」→ 交给 store 的 setter（主进程去换窗口）', () => {
+    const setLyricOverlayMode = vi.fn()
+    useAppPrefsStore.setState({ setLyricOverlayMode })
+    render(<SettingsPanel />)
+    pickCategory('歌词')
+
+    fireEvent.click(screen.getByRole('radio', { name: '灵动态词岛' }))
+    expect(setLyricOverlayMode).toHaveBeenCalledWith('island')
+  })
+})
