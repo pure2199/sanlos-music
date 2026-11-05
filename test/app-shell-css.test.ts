@@ -110,3 +110,40 @@ describe('品牌名的排版契约（T50）', () => {
     expect(stack.indexOf('Noto Sans SC')).toBeGreaterThan(stack.indexOf('Segoe UI'))
   })
 })
+
+// ---------------------------------------------------------------------------
+// T52：连接徽标的候选面板**必须是浮层**
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么**：面板原来是 `position: static`（普通流内的块级元素），
+//    它是 `.fnm-badge`（纵向 flex）的第二个子元素 → 把徽标从 69px 撑到 **306px 宽**
+//    → 顶栏第一行放不下 → 徽标**整块换行到第二行** → 顶栏 **58px → 175px**
+//    → 面板还横在左边**盖住主区内容**
+//    ⇒ **点一下「中继」，整个界面就不对称了**（真机实测）。
+//
+// ⚠️ **契约测试要先剥注释再匹配**（否则匹配到的是注释正文 = 空断言）。
+// ---------------------------------------------------------------------------
+
+describe('连接徽标的候选面板是浮层（T52）', () => {
+  const badgeCss = readCss('src', 'components', 'connection-badge.css')
+  const panel = blockOf(badgeCss, '.fnm-badge__panel')
+
+  it('面板**绝对定位**（不占顶栏布局 → 顶栏恒为 58px 单行）', () => {
+    expect(panel).toMatch(/position:\s*absolute/)
+    // ⚠️ 锚点：徽标**正下方**、**右对齐**（徽标在顶栏最右 → 面板不会出窗口）。
+    expect(panel).toMatch(/top:\s*calc\(100% \+ \d+px\)/)
+    expect(panel).toMatch(/right:\s*0/)
+  })
+
+  it('面板**盖在主区内容之上**（必须显式 z-index）', () => {
+    expect(panel).toMatch(/z-index:\s*\d+/)
+  })
+
+  it('徽标本体是**定位参照系**（`position: relative`）', () => {
+    expect(blockOf(badgeCss, '.fnm-badge')).toMatch(/position:\s*relative/)
+  })
+
+  it('面板宽度**含 padding**（`box-sizing: border-box`，不然实际宽度会多出 26px）', () => {
+    expect(panel).toMatch(/box-sizing:\s*border-box/)
+  })
+})

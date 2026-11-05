@@ -52,7 +52,27 @@
 }
 
 .fnm-badge__panel {
-  min-width: 280px;
+  /*
+   * ⚠️ **必须是浮层**（T52 真机实测修的）。
+   *
+   * ⚠️ **原来的 bug**：面板是 `position: static`（普通流内的块级元素）
+   *    → 它是 `.fnm-badge`（纵向 flex）的**第二个子元素**，
+   *      于是把徽标从 69px 撑到 **306px 宽**；
+   *    → 顶栏第一行放不下 306px → 徽标**整块换行到第二行**；
+   *    → 顶栏高度 **58px → 175px**，面板还横在左边**盖住主区内容**
+   *    ⇒ 点一下「中继」，整个界面就不对称了（真机实测）。
+   *
+   * ⚠️ **现在**：绝对定位在徽标**正下方、右对齐** →
+   *    不占任何布局空间（顶栏恒为 58px），浮在内容之上。
+   */
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  /* ⚠️ 必须盖住下面的主区内容（顶栏与主区都没设 z-index）。 */
+  z-index: 30;
+  width: 280px;
+  /* ⚠️ `box-sizing: border-box` → 280px **含** padding 与边框（原来实际 306px）。 */
+  box-sizing: border-box;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
