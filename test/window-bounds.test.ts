@@ -8,7 +8,12 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 
-import { createBoundsSaver, resolveWindowBounds } from '../electron/windowBounds'
+import {
+  createBoundsSaver,
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH,
+  resolveWindowBounds,
+} from '../electron/windowBounds'
 import { PrefsStore } from '../electron/ipc'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -118,5 +123,53 @@ describe('保存窗口位置尺寸', () => {
       x: 33,
       y: 44,
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T40：窗口最小尺寸
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么要有下限**：窗口缩到极窄时，实测会出现三件事——
+//    1. 顶栏自己横向溢出（外框 600 时 `scrollWidth` 594 > `clientWidth` 567）；
+//    2. 品牌名被压成 15px 宽 / 4 行竖排；
+//    3. 整页出横向滚动条（**元凶是播放条**：它需要 717px，`.fnm-playerbar` 的
+//       `scrollWidth` 恒为 717）。
+// ⇒ 尺寸一律**夹紧到下限**；位置语义（缺位置就不给位置）**一字不改**。
+// ---------------------------------------------------------------------------
+
+describe('窗口最小尺寸（T40）', () => {
+  it('存下来的尺寸比下限还小 → **抬到下限**（位置照旧给）', () => {
+    // ⚠️ 旧版本可能存下了 400×300 这种尺寸（那时没有下限）→ 恢复时不能照搬。
+    const options = resolveWindowBounds({ width: 400, height: 300, x: 10, y: 20 }, {
+      width: 1200,
+      height: 800,
+    })
+    expect(options).toEqual({
+      width: MIN_WINDOW_WIDTH,
+      height: MIN_WINDOW_HEIGHT,
+      x: 10,
+      y: 20,
+    })
+  })
+
+  it('没有偏好时，**默认尺寸也要夹紧**（默认值不该小于下限）', () => {
+    const options = resolveWindowBounds(undefined, { width: 320, height: 240 })
+    expect(options.width).toBe(MIN_WINDOW_WIDTH)
+    expect(options.height).toBe(MIN_WINDOW_HEIGHT)
+    // 位置照旧**不给**。
+    expect(options.x).toBeUndefined()
+    expect(options.y).toBeUndefined()
+  })
+
+  it('尺寸不合法（<= 0）时回落到默认值（默认值本身合规）', () => {
+    const options = resolveWindowBounds({ width: 0, height: 0 }, { width: 1200, height: 800 })
+    expect(options).toEqual({ width: 1200, height: 800 })
+  })
+
+  it('下限**不能小于播放条所需的宽度**（否则整页出横向滚动条）', () => {
+    // ⚠️ 实测：Windows 上外框比内容宽 16px；播放条需要 717px
+    //    → 外框至少 733 才能让内容宽 ≥ 717（当前取 800，留了余量）。
+    expect(MIN_WINDOW_WIDTH - 16).toBeGreaterThanOrEqual(717)
   })
 })

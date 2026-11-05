@@ -26,7 +26,7 @@ import { createNasOAuthHandlers } from './oauthWindow'
 import { buildUpstreamRequest, registerProxy } from './proxy'
 import { SessionManager } from './session'
 import { createCoverFetcher, createTray } from './tray'
-import { createBoundsSaver, resolveWindowBounds } from './windowBounds'
+import { createBoundsSaver, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, resolveWindowBounds } from './windowBounds'
 import { createUpdateController } from './update'
 
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
@@ -204,6 +204,11 @@ if (!isPrimaryInstance) {
       const win = new BrowserWindow({
         width: boundsOptions.width,
         height: boundsOptions.height,
+        // ⚠️ T40：**最小尺寸**——用户拖不到比这更小。
+        //    数值与依据见 `electron/windowBounds.ts` 的 `MIN_WINDOW_WIDTH` / `MIN_WINDOW_HEIGHT`
+        //    （实测：内容宽必须 ≥ 播放条所需的 717px，否则整页出横向滚动条）。
+        minWidth: MIN_WINDOW_WIDTH,
+        minHeight: MIN_WINDOW_HEIGHT,
         x: boundsOptions.x,
         y: boundsOptions.y,
         show: false,

@@ -33,12 +33,28 @@
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-raised);
+  /*
+   * ⚠️ T40：**放不下就换行**（实测：外框窄到 600 时顶栏 `scrollWidth` 594 > `clientWidth` 567
+   *    → 顶栏自己溢出，页面出横向滚动条）。
+   *    ⇒ 右侧控件（主题 / 设置 / 连接徽标）换到下一行，**而不是**把顶栏顶出滚动条。
+   *    ⚠️ 宽窗口时**一行装得下** → 这条声明对常规布局**没有任何影响**。
+   */
+  flex-wrap: wrap;
 }
 
 .app-shell__brand {
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
+  /*
+   * ⚠️ T40：**品牌名永不被压扁**（实测：外框窄到 640 时它被挤成 15px 宽 / 84px 高
+   *    ——「飞牛音乐」四个字竖排 4 行，看着像坏了）。
+   *    ⇒ `flex: 0 0 auto` = 不缩不长（要缩就缩导航，不缩品牌）；
+   *      `white-space: nowrap` = 文字自己也不折行。
+   *    宁可让导航换行，也不压扁品牌。
+   */
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .app-shell__main {

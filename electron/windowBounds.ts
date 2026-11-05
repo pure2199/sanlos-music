@@ -40,19 +40,52 @@ export interface WindowBoundsOptions {
 }
 
 /**
+ * 窗口**最小宽度**（**外框**像素）。
+ *
+ * ⚠️ T40：为什么是 800 —— 全部来自本轮**实测**（真实 Electron + mock NAS，已登录态
+ *    顶栏 10 颗按钮），不是拍脑袋：
+ *    - Windows 上**外框比内容宽 16px**（外框 800 → 内容 784）；
+ *    - 播放条 `.fnm-playerbar` 需要 **717px**（`scrollWidth` 恒为 717）→ 内容宽
+ *      必须 ≥ 717，否则整页出横向滚动条。⚠️ 播放条本身是 T11 的老问题，
+ *      **本轮不修它**（用户拍板）→ 只能让**窗口缩不到那儿去**；
+ *    - 顶栏在内容宽 784 下**不横向溢出**（实测门槛：外框 600）。
+ *    ⇒ 800 留了 67px 余量（够主区再吃掉一条竖滚动条 17px）。
+ */
+export const MIN_WINDOW_WIDTH = 800
+
+/**
+ * 窗口**最小高度**（**外框**像素）。
+ *
+ * ⚠️ T40：实测外框比内容高 39px → 520 的外框 = 481 的内容高；
+ *    顶栏（最坏 2 行 ≈ 96px）+ 播放条（64px）之后，主区还剩 ≈ **320px** → 够看列表。
+ */
+export const MIN_WINDOW_HEIGHT = 520
+
+/**
  * 由「已保存的偏好 + 默认尺寸」算出建窗参数。
  *
  * ⚠️ **缺位置就不给位置**：只存了尺寸时**不要**硬塞一个 `x/y`
  *    （否则窗口会跑到某个历史坐标上，而不是用户当前期望的位置）。
+ *
+ * ⚠️ T40：尺寸一律**夹紧到下限**（`MIN_WINDOW_WIDTH` / `MIN_WINDOW_HEIGHT`）——
+ *    旧版本可能存下了比下限还小的窗口（例如 400px 宽）→ 恢复时直接**抬到下限**，
+ *    不依赖 Chromium 的隐式 clamp（那是隐式行为，不该当契约用）。
+ *    ⚠️ 只夹**尺寸**，**位置**照旧（缺位置就不给位置）。
  */
 export function resolveWindowBounds(
   saved: WindowBounds | undefined,
   fallback: { width: number; height: number },
 ): WindowBoundsOptions {
   if (!saved || saved.width <= 0 || saved.height <= 0) {
-    return { width: fallback.width, height: fallback.height }
+    return {
+      width: Math.max(fallback.width, MIN_WINDOW_WIDTH),
+      height: Math.max(fallback.height, MIN_WINDOW_HEIGHT),
+    }
   }
-  const options: WindowBoundsOptions = { width: saved.width, height: saved.height }
+  const options: WindowBoundsOptions = {
+    width: Math.max(saved.width, MIN_WINDOW_WIDTH),
+    height: Math.max(saved.height, MIN_WINDOW_HEIGHT),
+  }
   if (typeof saved.x === 'number' && Number.isFinite(saved.x)) options.x = Math.floor(saved.x)
   if (typeof saved.y === 'number' && Number.isFinite(saved.y)) options.y = Math.floor(saved.y)
   return options
