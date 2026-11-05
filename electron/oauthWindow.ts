@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 // 1. `GET <base>/api/v1/sys/config` → `data.nasOAuth.clientId`
 //    ⚠️ 实测：`nasOAuth` 里**没有 `url` 字段**，授权地址必须**自行拼装**：
-//    `<服务器根>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=飞牛音乐`
+//    `<服务器根>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=Sanlos music`
 // 2. 在**独立分区**的 Electron 窗口里打开该地址，等用户完成 fnOS 账号授权；
 // 3. 拦截跳回 `redirect_uri` 的请求，取 `code`（`error` 参数代表授权失败）；
 // 4. `POST <base>/api/v1/user/auth-login` `{ code, deviceId }` → `data.userToken`。
@@ -368,10 +368,10 @@ export function redirectUriOf(base: string): string {
  * 自行拼装授权地址（实测：`nasOAuth` 里**没有** `url` 字段）。
  *
  * ```
- * <服务器根>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=飞牛音乐
+ * <服务器根>/signin?client_id=<clientId>&redirect_uri=<base>/oauth/result&app_name=Sanlos music
  * ```
  *
- * ⚠️ `app_name` 里的中文与 `redirect_uri` 都必须 URL 编码
+ * ⚠️ `app_name` 里的内容与 `redirect_uri` 都必须 URL 编码
  * （`redirect_uri` 本身是 query 的值，不编码会被 `&` / `:` 截断）。
  */
 export function buildAuthorizeUrl(opts: { base: string; clientId: string }): string {
@@ -518,7 +518,7 @@ export async function runOAuthWindowWith(
     width: 520,
     height: 720,
     show: !silent,
-    title: '飞牛音乐 · NAS 账号授权',
+    title: 'Sanlos music · NAS 账号授权',
     autoHideMenuBar: true,
     webPreferences: {
       partition,

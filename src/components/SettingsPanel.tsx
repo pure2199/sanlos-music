@@ -431,7 +431,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 className="fnm-settings__input"
                 name="fnm-download-dir"
                 value={dirDraft}
-                placeholder="默认：我的音乐\飞牛音乐"
+                placeholder="默认：我的音乐\Sanlos music"
                 onChange={(event) => setDirDraft(event.target.value)}
               />
             </label>

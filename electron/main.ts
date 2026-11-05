@@ -383,7 +383,7 @@ if (!isPrimaryInstance) {
 
       /**
        * 下载目录：优先用用户设置的（`prefs.downloadDir`），
-       * 否则用「我的音乐\飞牛音乐」子目录。
+       * 否则用「我的音乐\Sanlos music」子目录。
        */
       const resolveDownloadDir = (): string => {
         const override = prefs.read().downloadDir

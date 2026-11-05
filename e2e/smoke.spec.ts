@@ -39,7 +39,7 @@ const OTHER_SONG = SONGS.find((song) => song.guid !== SONG_WITHOUT_NAS_LYRIC.gui
 // ⚠️ 全部数据都是 mock 的占位数据，不含真实 FN ID / 账号 / 口令 / 歌曲名。
 // ---------------------------------------------------------------------------
 
-test.describe.serial('飞牛音乐桌面端：E2E 冒烟', () => {
+test.describe.serial('Sanlos music 桌面端：E2E 冒烟', () => {
   let fixture: AppFixture
 
   test.beforeAll(async () => {

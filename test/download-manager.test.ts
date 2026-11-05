@@ -523,7 +523,7 @@ describe('下载：管理器', () => {
   })
 
   it('默认子目录名与索引文件名是常量（主进程据此落盘）', () => {
-    expect(DEFAULT_DOWNLOAD_SUBDIR).toBe('飞牛音乐')
+    expect(DEFAULT_DOWNLOAD_SUBDIR).toBe('Sanlos music')
     expect(DOWNLOAD_INDEX_FILE_NAME).toBe('downloads.json')
   })
 })

@@ -19,7 +19,7 @@ import { launchApp, login, type AppFixture } from './helpers/app'
 const MIN_WIDTH = 800
 const MIN_HEIGHT = 520
 
-test.describe.serial('飞牛音乐桌面端：窄窗口适配（T40）', () => {
+test.describe.serial('Sanlos music 桌面端：窄窗口适配（T40）', () => {
   let fixture: AppFixture
 
   test.beforeAll(async () => {

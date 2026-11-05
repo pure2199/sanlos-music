@@ -230,7 +230,7 @@ describe('trayTooltip', () => {
   })
 
   it('没有曲目时显示应用名', () => {
-    expect(trayTooltip({ title: '', artist: '', playing: false })).toBe('飞牛音乐')
+    expect(trayTooltip({ title: '', artist: '', playing: false })).toBe('Sanlos music')
   })
 
   it('emoji 不会被截成半个代理对', () => {

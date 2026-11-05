@@ -382,7 +382,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="app-shell__topbar">
-        <span className="app-shell__brand">飞牛音乐</span>
+        <span className="app-shell__brand">Sanlos music</span>
         <div className="app-shell__navs">
           <nav className="fnm-app__nav" aria-label="主导航">
             <NavButton

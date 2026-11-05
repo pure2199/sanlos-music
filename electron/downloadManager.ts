@@ -49,8 +49,13 @@ import { readFileTags, type AudioTags, type TagFileSystem } from './audioTags'
 /** 下载索引文件名（落在 `app.getPath('userData')` 下）。 */
 export const DOWNLOAD_INDEX_FILE_NAME = 'downloads.json'
 
-/** 下载目录的默认子目录名（挂在「我的音乐」下面）。 */
-export const DEFAULT_DOWNLOAD_SUBDIR = '飞牛音乐'
+/**
+ * 下载目录的默认子目录名（挂在「我的音乐」下面）。
+ *
+ * ⚠️ **只影响「新下载」落盘**：已下载的条目在索引（`downloads.json`）里存的是
+ *    **绝对路径** → 改了默认名，**老歌照样能播、照样在列表里**。
+ */
+export const DEFAULT_DOWNLOAD_SUBDIR = 'Sanlos music'
 
 /** 索引结构版本号（便于将来迁移格式）。 */
 export const DOWNLOAD_INDEX_VERSION = 1

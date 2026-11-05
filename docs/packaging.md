@@ -98,7 +98,7 @@ npm run pack:probe
 | `FN-Music-Setup-<version>.exe` | NSIS 安装包（`oneClick: false`，可改安装目录） |
 | `FN-Music-Portable-<version>.exe` | 便携版（免安装） |
 | `FN-Music-Setup-<version>.exe.blockmap` | 安装包差分更新用 |
-| `win-unpacked/` | 解包后的目录（`飞牛音乐.exe` + `resources/app.asar`） |
+| `win-unpacked/` | 解包后的目录（`Sanlos music.exe` + `resources/app.asar`） |
 
 **app.asar 内应只有**：`package.json`、`dist/**`、`dist-electron/**` —— **不含 `node_modules`**。
 
@@ -124,7 +124,7 @@ npm run pack       # 2. 打包
 
 1. `release/win-unpacked/resources/app.asar` 存在；
 2. asar 内文件清单**不含** `node_modules`；
-3. `release/win-unpacked/飞牛音乐.exe`（或 `electron.exe`）能双击启动，
+3. `release/win-unpacked/Sanlos music.exe`（或 `electron.exe`）能双击启动，
    打开登录页、连上 NAS、播放一首；
 4. `release/verify/*.log` 记录本次验证的实际输出（**不是空文件**）。
 

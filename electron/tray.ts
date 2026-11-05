@@ -70,7 +70,7 @@ export const TRAY_COVER_SIZE = 160
 export const DEFAULT_COVER_CACHE_ENTRIES = 32
 
 /** 没有曲目时的托盘提示（应用名）。 */
-const IDLE_TOOLTIP = '飞牛音乐'
+const IDLE_TOOLTIP = 'Sanlos music'
 
 // ---------------------------------------------------------------------------
 // Electron 惰性解析

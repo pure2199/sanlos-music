@@ -2555,3 +2555,90 @@ Lyricify Fusion 的**灵动词岛** = 屏幕顶部居中的圆角胶囊 + 逐字
 - ⚠️ **待用户肉眼复验**：真实歌曲下的卡拉OK 观感（长句 / 短句 / 英文歌词）；
 - ⚠️ **待用户复验 T46**：指针移上去淡出 / 移开淡回 / **点击穿透**；
 - ⚠️ **待用户复验 T47**：挂 analyser 后听感是否变化。
+
+## 三十四、T49：软件更名为「Sanlos music」
+
+### 起因
+
+用户要求：「软件名改成 Sanlos music」（并就两项有副作用的决策拍板：
+**默认下载目录一起改** / **fnOS 授权页上的 `app_name` 也改**）。
+
+### 关键判定：仓库里「飞牛音乐」有**两个完全不同的指代**
+
+| 指代 | 是什么 | 处理 |
+| --- | --- | --- |
+| **A. 本软件的品牌名** | 这个 Windows 客户端自己叫什么 | ✅ **改**（14 处代码） |
+| **B. NAS 上的服务端产品名** | fnOS 里那个音乐应用叫什么 | ❌ **一个字不改**（登录页大标题「**连接飞牛音乐**」/ `mock-server` / `src/api/types.ts` 注释） |
+| **C. 内部标识符与历史文档** | `package.json` 的 `name` / `appId` / `fnm://` 协议名 / `docs/superpowers/` 下的历史规格 | ❌ **不动**（部分有破坏性，见下） |
+
+⚠️ **不能全局替换**：把登录页标题改成「连接 Sanlos music」会让用户以为连的是别的服务。
+
+### 明确不动的（理由）
+
+- **`package.json` 的 `name: fnmusic-desktop`** → 它决定 **userData 目录**
+  `%APPDATA%\fnmusic-desktop` → 改了 = **登录态（`session.bin`）与偏好全丢**；
+- **`appId: com.fnmusic.desktop`** → 决定 **Windows 安装路径 / 注册表项 / 升级链**
+  → 改了会被当成另一个应用；
+- **`fnm://` / `fnml://` 协议名** → 对外契约。
+
+### 下载目录改名：**老文件不受影响**（关键结论）
+
+- 默认下载目录**只用于「新下载」落盘**；
+- 已下载条目在索引 `downloads.json` 里存的是**绝对路径** → **老歌照样能播、照样在列表里**；
+- 本地库登记的是「索引里的路径 + 用户手动添加的文件夹」，**不扫默认目录**
+  → 不存在「老歌凭空消失」；
+- 老目录 `我的音乐\飞牛音乐` **不删**（用户的数据，删不删由用户决定）。
+
+### 真机验证（`release/verify/t49-brand-probe.mjs`，隔离实例）
+
+| 读数 | 结果 |
+| --- | --- |
+| 主窗口 `document.title` | **`Sanlos music`** |
+| 顶栏 `.app-shell__brand` | **`Sanlos music`** |
+| 词岛窗口标题 | **`Sanlos music · 动态词岛`** |
+| 默认下载目录（走真实 IPC `download:list`） | **`<我的音乐>\Sanlos music`**（= 本机「我的音乐」+ 新子目录名） |
+
+⚠️ 另用 `EnumWindows` 复核了**主窗口标题**（`Get-Process | MainWindowTitle` 在 Electron
+**多窗口**进程里只报得下一个窗口 → 会漏掉主窗口，**不能**据此说「主窗口没标题」）。
+
+### 既有断言的处理（**改写，不放宽**，前提被用户显式推翻）
+
+- `test/app-info.test.ts`（应用名）、`test/tray-tooltip.test.ts`（托盘提示）、
+  `test/oauth-window.test.ts`（`app_name` ×2，含「URL 里不是明文」那半条）、
+  `test/download-manager.test.ts`（`DEFAULT_DOWNLOAD_SUBDIR`）→ 全部**改写为新值**；
+- ⚠️ **不动**：`test/favorite-writeback.test.ts` 的「连接飞牛音乐」（登录页标题）；
+  窄窗口 E2E 的品牌宽度断言是**下限**（`≥55px`）→ 拉丁文更宽，**仍然成立**。
+
+### 影响文件
+
+- **改**：`shared/appInfo.ts`、`shared/constants.ts`、`src/App.tsx`、`src/pages/LoginPage.tsx`、
+  `src/components/SettingsPanel.tsx`、`src/styles/app-shell.css`（注释）、
+  `index.html`、`lyric.html`、`island.html`、`electron/tray.ts`、`electron/oauthWindow.ts`、
+  `electron/downloadManager.ts`、`electron/main.ts`（注释）、`electron-builder.yml`、`package.json`；
+- **改测试**：`test/app-info.test.ts`、`test/tray-tooltip.test.ts`、`test/oauth-window.test.ts`、
+  `test/download-manager.test.ts`、`e2e/smoke.spec.ts`（套件名）、`e2e/narrow-window.spec.ts`（套件名）、
+  `e2e/helpers/app.ts`（注释）；
+- **文档**：`README.md`、`docs/changelog.md`、`docs/calibration.md`、`docs/packaging.md`、
+  `docs/build-verification.md`（产物名同步 + 注明「历史实测数据不变」）、设计规格（新）。
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1790 passed / 82 files**；`playwright test` **24 passed**；
+  `npm run build` exit 0；
+- ⚠️ **漏改的一条被测试逮住**：`test/oauth-window.test.ts` 里**另一处** URL 编码断言
+  （`arg.url` 里的 `app_name=%E9%A3%9E…`）—— 第一次跑 vitest **红了 1 条** → 补改后转绿
+  ⇒ 这条改名**确实被既有测试覆盖着**，不是「改完就没人管」。
+
+### 已知限制（如实标注）
+
+- ⚠️ **打包产物名变了**（`Sanlos music.exe`）→ **旧安装包与新产物同名冲突**时，
+  electron-builder 的覆盖安装行为需要真机验一次（**尚未验**）；
+- ⚠️ **用户数据目录名没变**（仍是 `fnmusic-desktop`）→ 老用户的登录态与偏好**继续有效**
+  （这是有意为之，见上文理由）；
+- ⚠️ **托盘 tooltip** 真机没法直接读（Electron 的 `Tray` 不暴露实例）→ 由单测覆盖。
+
+### 遗留 / 待办
+
+- ⚠️ **待用户复验**：改名后的观感（顶栏拉丁文品牌名的排版、开始菜单 / 任务栏显示）；
+- ⚠️ **待真机验**：覆盖安装（装完 `Sanlos music.exe` 后再装一次）；
+- ⚠️ 仍待复验：T46（点击穿透 / 淡出淡回）、T47（挂 analyser 后听感）、T48（卡拉OK 观感）。

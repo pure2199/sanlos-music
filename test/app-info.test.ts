@@ -16,7 +16,7 @@ import { APP_INFO, EXTERNAL_LINK_ALLOWED_HOSTS, isAllowedExternalUrl } from '../
 
 describe('软件信息（T41）', () => {
   it('开发者 / 公司 / 官网 / 备案号**齐全**', () => {
-    expect(APP_INFO.name).toBe('飞牛音乐')
+    expect(APP_INFO.name).toBe('Sanlos music')
     expect(APP_INFO.developer).toBe('pure2199')
     expect(APP_INFO.company).toBe('广西闪链时空网络科技有限公司')
     expect(APP_INFO.website).toBe('https://www.sanlos.cn')
