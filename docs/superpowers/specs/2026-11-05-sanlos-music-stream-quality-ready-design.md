@@ -91,7 +91,7 @@ prepare
   ↓
 loop（截止到 deadline）：
   ├─ status → word==='failed'          → 抛 transcode-failed（带服务端 errno/errmsg）
-  ├─ percent >= 100（或 status 词为 ready）
+  ├─ percent >= 100（**只信 percent** —— status 词**不**作为触发条件，沿用 T54 的既有纪律）
   │    ├─ 产物预检（Range bytes=0-1）
   │    ├─ 预检通过 → **返回可播产物地址**
   │    └─ 预检失败 → **不判死**：等 probeRetryInterval 再来一轮

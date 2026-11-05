@@ -162,8 +162,10 @@ function stubFetch(
   prepare: unknown,
   statuses: unknown[],
   file: Response | null = audioResponse([0x49, 0x44, 0x33]),
+  files?: (Response | null)[],
 ): void {
   let statusIndex = 0
+  let fileIndex = 0
   const mock = async (input: string, init?: { method?: string; body?: string }): Promise<Response> => {
     const method = init?.method ?? 'GET'
     let body: unknown = null
@@ -183,8 +185,12 @@ function stubFetch(
       return jsonResponse(statuses[index] ?? {})
     }
     if (input.includes('/transcode/file')) {
-      if (!file) throw new Error('服务端没响应')
-      return file
+      // ⚠️ T55：`files` 队列用来模拟「产物还没好 → 预检失败 → 过一会儿才好」。
+      //    用完最后一个就重复最后一个（与 `statuses` 同一套语义）。
+      const picked = files ? (files[Math.min(fileIndex, files.length - 1)] ?? null) : file
+      fileIndex += 1
+      if (!picked) throw new Error('服务端没响应')
+      return picked
     }
     if (input.includes('/transcode/delete')) {
       return jsonResponse({ code: 0, msg: '', data: { downloadId: DOWNLOAD_ID, deleted: true } })
@@ -263,14 +269,23 @@ describe('T54 服务端转码协议', () => {
     expect((error as TranscodeError).message).toContain('transcoding error')
   })
 
-  it('产物读不出来（文件端点挂死）→ `unavailable`（**不许**把挂死的地址交给播放器）', async () => {
+  // ⚠️ T55：标题里原来写的「文件端点挂死」是**误读**——实测服务端回的是
+  //    **业务错误信封**（HTTP 200 + JSON），203 ms 就到，**不是**挂起。
+  //    T55 的语义：产物读不到 → **重试**；重试到总时限仍读不到 → `unavailable`。
+  //    ⚠️ **断言一字未改**；只把客户端的等待预算从 5 000 ms 收到 200 ms
+  //    （新语义下客户端会一直重试到总时限，5 000 ms 会撞上 vitest 的 5 秒用例超时）。
+  it('产物读不出来（文件端点回业务错误）→ `unavailable`（**不许**把没验证过的地址交给播放器）', async () => {
     stubFetch(
       { code: 0, msg: '', data: { status: 'success', errno: '', errmsg: '', downloadId: DOWNLOAD_ID } },
       [{ code: 0, data: { status: 'ready', percent: 100 } }],
       null,
     )
     await expect(
-      prepareTranscode(SONG_ID, 'standard', { pollIntervalMs: 1, timeoutMs: 5_000 }),
+      prepareTranscode(SONG_ID, 'standard', {
+        pollIntervalMs: 1,
+        probeRetryIntervalMs: 1,
+        timeoutMs: 200,
+      }),
     ).rejects.toMatchObject({ reason: 'unavailable' })
   })
 
@@ -298,6 +313,118 @@ describe('T54 服务端转码协议', () => {
     const bad = await probeServerTranscode(SONG_ID, { pollIntervalMs: 1 })
     expect(bad.supported).toBe(false)
     expect(bad.detail).toContain('服务端拒绝了转码请求')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 3b. T55 就绪判定（产物预检重试）
+// ---------------------------------------------------------------------------
+
+/**
+ * 造一个「产物还没准备好」的业务错误信封。
+ *
+ * ⚠️ **这是服务端实测的真实现象**：产物未就绪时，文件端点回的是
+ *    HTTP 200 + `{"code":100002,"msg":"invalid arguments"}`（**不是**挂死）。
+ */
+function notReadyResponse(): Response {
+  return jsonResponse({ code: 100002, msg: 'invalid arguments', data: null })
+}
+
+describe('T55 就绪判定：产物预检失败**不判死**', () => {
+  it('percent=100 但产物前两次读不到 → **重试后成功**（T54 在这里会误判失败）', async () => {
+    stubFetch(
+      { code: 0, msg: '', data: { status: 'success', errno: '', errmsg: '', downloadId: DOWNLOAD_ID } },
+      [{ code: 0, data: { status: 'ready', percent: 100 } }],
+      undefined,
+      [notReadyResponse(), notReadyResponse(), audioResponse([0x49, 0x44, 0x33])],
+    )
+    const session = await prepareTranscode(SONG_ID, 'standard', {
+      pollIntervalMs: 1,
+      probeRetryIntervalMs: 1,
+    })
+    expect(session.url).toBe(transcodeFileUrl(DOWNLOAD_ID))
+    expect(session.downloadId).toBe(DOWNLOAD_ID)
+    // 预检至少打了三次（前两次失败、第三次成功）
+    expect(calls.filter((c) => c.url.includes('/transcode/file')).length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('percent=100 但产物**一直**读不到 → `unavailable`（**不是** timeout）', async () => {
+    stubFetch(
+      { code: 0, msg: '', data: { status: 'success', errno: '', errmsg: '', downloadId: DOWNLOAD_ID } },
+      [{ code: 0, data: { status: 'ready', percent: 100 } }],
+      undefined,
+      [notReadyResponse()],
+    )
+    await expect(
+      prepareTranscode(SONG_ID, 'standard', {
+        pollIntervalMs: 1,
+        probeRetryIntervalMs: 1,
+        timeoutMs: 50,
+      }),
+    ).rejects.toMatchObject({ reason: 'unavailable' })
+  })
+
+  it('服务端说完成、产物随后又掉回转码中 → **继续等**，直到真能读', async () => {
+    stubFetch(
+      { code: 0, msg: '', data: { status: 'success', errno: '', errmsg: '', downloadId: DOWNLOAD_ID } },
+      [
+        { code: 0, data: { status: 'ready', percent: 100 } },
+        { code: 0, data: { status: 'transcoding', percent: 40 } },
+        { code: 0, data: { status: 'ready', percent: 100 } },
+      ],
+      undefined,
+      [notReadyResponse(), audioResponse([0x49, 0x44, 0x33])],
+    )
+    const session = await prepareTranscode(SONG_ID, 'standard', {
+      pollIntervalMs: 1,
+      probeRetryIntervalMs: 1,
+    })
+    expect(session.downloadId).toBe(DOWNLOAD_ID)
+    // 至少预检了两次（第一次没读到 → 没有就此宣布成功）
+    expect(calls.filter((c) => c.url.includes('/transcode/file')).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('服务端明确 failed → **立刻** `transcode-failed`（**不**去做产物预检）', async () => {
+    stubFetch(
+      { code: 0, msg: '', data: { status: 'success', errno: '', errmsg: '', downloadId: DOWNLOAD_ID } },
+      [{ code: 0, data: { status: 'failed', errno: '68157441', errmsg: 'transcoding error', percent: 0 } }],
+    )
+    const error = await prepareTranscode(SONG_ID, 'standard', { pollIntervalMs: 1 }).catch((e) => e)
+    expect(error).toBeInstanceOf(TranscodeError)
+    expect((error as TranscodeError).reason).toBe('transcode-failed')
+    expect((error as TranscodeError).detail).toBe('68157441')
+    // 一次预检都不该打（服务端已经明说失败了）
+    expect(calls.some((c) => c.url.includes('/transcode/file'))).toBe(false)
+  })
+
+  it('产物一直读不到 → 顺手**删掉**服务端任务（别白占 NAS 的 CPU）', async () => {
+    stubFetch(
+      { code: 0, msg: '', data: { status: 'success', errno: '', errmsg: '', downloadId: DOWNLOAD_ID } },
+      [{ code: 0, data: { status: 'ready', percent: 100 } }],
+      undefined,
+      [notReadyResponse()],
+    )
+    await prepareTranscode(SONG_ID, 'standard', {
+      pollIntervalMs: 1,
+      probeRetryIntervalMs: 1,
+      timeoutMs: 50,
+    }).catch(() => undefined)
+    expect(calls.some((c) => c.url.includes('/transcode/delete'))).toBe(true)
+  })
+
+  it('能力探测走**同一条**带重试的链路（产物晚一点好 → 也算「支持」）', async () => {
+    stubFetch(
+      { code: 0, msg: '', data: { status: 'success', errno: '', errmsg: '', downloadId: DOWNLOAD_ID } },
+      [{ code: 0, data: { status: 'ready', percent: 100 } }],
+      undefined,
+      [notReadyResponse(), audioResponse([0x49, 0x44, 0x33])],
+    )
+    const capability = await probeServerTranscode(SONG_ID, {
+      pollIntervalMs: 1,
+      probeRetryIntervalMs: 1,
+    })
+    expect(capability.supported).toBe(true)
+    expect(capability.detail).toBeNull()
   })
 })
 

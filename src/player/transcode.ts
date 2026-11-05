@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// 服务端转码（**标准音质**）的渲染层接线（T54）
+// 服务端转码（**标准音质**）的渲染层接线（T54；T55 修正就绪判定）
 // ---------------------------------------------------------------------------
 //
-// 协议（2026-11-05 在真实 NAS 上逐条实测，官方服务端）：
+// 协议（官方旧下载协议；2026-11-05 在真实 NAS 上逐条实测，官方服务端）：
 //
 //   POST download/track/transcode/prepare  { trackGUID, quality }
 //        → { code: 0, data: { status: 'success', errno: '', errmsg: '', downloadId } }
@@ -15,17 +15,28 @@
 // ⚠️ **服务端只认两个 quality 值**：`standard` 与 `original`。
 //    `higher` / `exhigh` → `code=100002 invalid arguments`（实测）。
 //    官方旧下载协议里 `standard` = **MP3 320k**；服务端**没有** 192k 那一档。
+//    ⚠️ **T55 更正**：T54 曾写「服务端**没有** 192K 档」，实测**成立**；
+//       但 T54 当时把「服务端转码引擎不可用」也写成了结论 —— **那是误判**（见下）。
 //
 // ⚠️ **`status` 的 status 词不可信**：实测第一次查询就报 `ready`，
 //    随后又变回 `transcoding / percent=N`。
-//    ⇒ **真正可信的进度是 `percent`**；本模块一律按 `percent >= 100` 判定完成。
+//    ⇒ **真正可信的进度是 `percent`**；本模块一律按 `percent >= 100` 判定「可以试产物」。
 //
-// ⚠️ **转码可能失败**：实测服务端返回 `data.status='failed'` +
-//    `errno='68157441'` / `errmsg='transcoding error'`（NAS 侧转码器不可用）。
-//    ⇒ 失败必须**如实上报**并让上层回退原始音质，**不许**假装成功。
+// ⚠️ **T55：服务端转码一直是好的**（推翻 T54 的结论）。
+//    2026-11-05 的探针组实测（真实 NAS + 真实账号）：
+//    - 抽样 **14 首：14/14 成功**，平均就绪 **988 ms**（最慢 2 646 ms）；
+//    - 产物 = **MP3 320k**（7 005 165 B / 175 s），比原始 FLAC（62 228 801 B）**省 88.8 % 流量**；
+//    - 用户自建反代即可完成（比官方中继**快 11 倍**：7 MB / 1 154 ms vs 12 930 ms）。
+//    T54 当时判「转码不可用」的**真凶是客户端的就绪判定**：
+//    `percent>=100` → **单次**产物预检 → 预检不过就**立刻**判死。
+//    而 `percent>=100` 与「产物真能读」之间**有窗口期**
+//    （服务端在产物未就绪时回的是 `{"code":100002}`，**不是**挂死 —— T54 当时
+//    把「203 ms 就回来的业务错误信封」误读成了「45 秒拿不到响应头」）。
+//    ⇒ **本模块（T55）：预检失败不判死，与轮询交替重试。**
 //
-// ⚠️ **文件端点可能挂死**：任务标称 ready 时实测 `GET file` 45 秒拿不到响应头。
-//    ⇒ 起播前先做一次**产物预检**（Range 取首字节）；预检不过就当失败处理。
+// ⚠️ **服务端引擎对个别曲目真的失败**：实测《占位曲目二》《占位曲目三》6/6 失败，
+//    `errno=68157441 / errmsg='transcoding error'`（崩在转码进度 79 %~93 %）。
+//    那是 **NAS 侧**的缺陷 → 客户端**如实上报**并回退原始音质，**不许**假装成功。
 //
 // 只用浏览器 API（`fetch` + `AbortController`），不 import Node 内置模块或 Electron API。
 
@@ -53,14 +64,28 @@ const DELETE_PATH = 'download/track/transcode/delete'
 /** 单次 JSON 请求的默认时限（毫秒）。 */
 const REQUEST_TIMEOUT_MS = 20_000
 
-/** 转码轮询的默认间隔（毫秒）。 */
-const DEFAULT_POLL_INTERVAL_MS = 1500
+/**
+ * 转码轮询的默认间隔（毫秒）。
+ *
+ * ⚠️ **T55 由 1500 改成 500**：实测平均就绪 **988 ms** ⇒ 轮询粗一点就要多等半秒。
+ * 轮询很便宜（一次小 JSON），500 ms 间隔对 NAS 无压力。
+ */
+const DEFAULT_POLL_INTERVAL_MS = 500
 
 /** 转码轮询的默认总时限（毫秒）。 */
 const DEFAULT_TIMEOUT_MS = 90_000
 
 /** 产物预检的默认时限（毫秒）。 */
 const DEFAULT_PROBE_TIMEOUT_MS = 12_000
+
+/**
+ * **产物预检失败后的重试间隔**（毫秒，T55 新增）。
+ *
+ * ⚠️ **为什么单独一个间隔**：轮询阶段按 `pollIntervalMs` 走；
+ *    已经「服务端说完成、但产物还没可读」时，产物通常在**数百毫秒**内就可读
+ *    ⇒ 用一个**更短**的间隔重试预检，不必等满整个轮询周期。
+ */
+const DEFAULT_PROBE_RETRY_INTERVAL_MS = 500
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -70,9 +95,9 @@ const DEFAULT_PROBE_TIMEOUT_MS = 12_000
  * 转码失败的**可判别**原因（不要靠文案匹配）。
  *
  * - `prepare-rejected`：服务端拒绝了转码请求（协议形状不对 / 不支持该档位）；
- * - `transcode-failed`：服务端**转码引擎**失败（NAS 侧转码器不可用）；
+ * - `transcode-failed`：服务端**转码引擎**失败（带 `errno` / `errmsg`）；
  * - `timeout`：轮询超时（转码一直没完成）；
- * - `unavailable`：产物取不到（文件端点没响应）；
+ * - `unavailable`：服务端说完成了，但**产物一直读不到**（预检始终失败）；
  * - `network`：网络不可达 / 请求失败。
  */
 export type TranscodeFailureReason =
@@ -113,6 +138,10 @@ export interface PrepareTranscodeOptions {
   readonly pollIntervalMs?: number
   /** 轮询总时限（毫秒）。 */
   readonly timeoutMs?: number
+  /** **单次**产物预检的时限（毫秒，T55 新增）。 */
+  readonly probeTimeoutMs?: number
+  /** 产物预检失败后的重试间隔（毫秒，T55 新增）。 */
+  readonly probeRetryIntervalMs?: number
   /** 进度回调（`percent` 为 0~100）。 */
   readonly onProgress?: (percent: number) => void
 }
@@ -232,9 +261,15 @@ export async function deleteTranscode(downloadId: string): Promise<void> {
 /**
  * 预检转码产物**是不是真的能读**（取首字节）。
  *
- * ⚠️ 为什么必须预检：实测任务标称 `ready` 时，`GET file` **45 秒拿不到响应头**
- *    —— 直接把它塞给媒体元素，界面会一直停在「缓冲中…」，用户以为卡死了。
- *    ⇒ 起播前先花一次 Range 请求确认产物可读，**读不到就当失败**（回退原始音质）。
+ * ⚠️ **为什么必须预检**：起播前不验证产物，就可能把一个**读不出来**的地址塞给
+ *    `<audio>` → 界面一直停在「缓冲中…」，用户以为卡死了。
+ *    ⇒ 起播前先花一次 Range 请求确认产物可读。
+ *
+ * ⚠️ **T55 更正**：T54 在这里写的「任务标称 ready 时实测 `GET file` **45 秒拿不到
+ *    响应头**」是**误读**。重跑同一探针：全部请求 **88 ~ 203 ms** 返回，**零挂起**；
+ *    产物未就绪时服务端回的是**业务错误信封** `{"code":100002,"msg":"invalid arguments"}`
+ *    （HTTP 200 + `application/json`）—— 是「**还没好**」，不是「没响应」。
+ *    ⇒ 预检拿到 JSON 信封就判「暂时读不到」，**由调用方决定要不要重试**。
  *
  * @param url        产物地址（`transcodeFileUrl` 的结果）。
  * @param timeoutMs  时限（毫秒）。
@@ -251,7 +286,7 @@ export async function probeTranscodeOutput(
       headers: { range: 'bytes=0-1' },
       signal: controller.signal,
     })
-    // ⚠️ 服务端的**业务错误信封**也是 JSON（`{"code":100002,…}`）→ 那是「读不到」。
+    // ⚠️ 服务端的**业务错误信封**也是 JSON（`{"code":100002,…}`）→ 那是「还没好」。
     const contentType = res.headers.get('content-type') ?? ''
     if (contentType.includes('json')) {
       await res.text().catch(() => '')
@@ -277,6 +312,13 @@ export async function probeTranscodeOutput(
  * ⚠️ **失败一律抛 `TranscodeError`**（带可判别原因）——
  *    上层据此回退原始音质并如实说明，**不许**静默吞掉。
  *
+ * ⚠️ **T55 的核心修正（就绪判定）**：
+ *    - **`percent >= 100` 只代表「可以试产物了」**，不代表「产物已经能读」；
+ *    - **预检失败不判死** —— 继续轮询 + 重试预检，直到读通或超出总时限；
+ *    - 理由（实测）：服务端在产物未就绪时回 `{"code":100002}`，
+ *      而 `percent` 达到 100 与产物真正可读之间**有窗口期**。
+ *      T54 用**单次**预检判死 → 窗口期一命中就误判成「服务端转码不可用」。
+ *
  * @param songId   曲目的 guid（**不是**本地曲目 id）。
  * @param quality  目标档位（服务端只认 `standard` / `original`）。
  * @param options  轮询参数与进度回调。
@@ -288,6 +330,8 @@ export async function prepareTranscode(
 ): Promise<TranscodeSession> {
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS
+  const probeRetryIntervalMs = options.probeRetryIntervalMs ?? DEFAULT_PROBE_RETRY_INTERVAL_MS
   const onProgress = options.onProgress
 
   // --- 1. 准备 --------------------------------------------------------------
@@ -308,11 +352,17 @@ export async function prepareTranscode(
     )
   }
 
-  // --- 2. 等它转完 ----------------------------------------------------------
-  // ⚠️ **只看 `percent`**：`status` 词实测不可信（第一次就报 `ready`）。
+  const url = transcodeFileUrl(downloadId)
   const deadline = Date.now() + timeoutMs
   let percent = 0
+  /** 服务端是否报过「完成」（`percent >= 100`）—— 用来区分 timeout 与 unavailable。 */
+  let sawComplete = false
+  /** 预检失败次数（诊断用，进 `detail`）。 */
+  let probeFailures = 0
+
+  // --- 2. 等它转完（**percent >= 100 只代表「可以试产物」**） ------------------
   for (;;) {
+    // ⚠️ **只看 `percent`**：`status` 词实测不可信（第一次就报 `ready`）。
     const statusEnvelope = asRecord(
       await requestJson(
         `fnm://srv/${STATUS_PATH}?downloadId=${encodeURIComponent(downloadId)}`,
@@ -333,38 +383,43 @@ export async function prepareTranscode(
       )
     }
 
-    if (Number.isFinite(rawPercent) && rawPercent >= 100) {
-      percent = 100
-      break
-    }
-
     if (Number.isFinite(rawPercent) && rawPercent > percent) {
       percent = rawPercent
       onProgress?.(percent)
     }
 
+    if (percent >= 100) {
+      sawComplete = true
+      // ⚠️ **产物预检失败 ≠ 失败**（T55）：产物未就绪时服务端回的是
+      //    `{"code":100002}` 业务错误信封（HTTP 200 + JSON）——
+      //    这是「**还没好**」，等一会儿再试，**不判死**。
+      if (await probeTranscodeOutput(url, probeTimeoutMs)) {
+        return {
+          downloadId,
+          url,
+          dispose: async () => {
+            await deleteTranscode(downloadId)
+          },
+        }
+      }
+      probeFailures++
+    }
+
     if (Date.now() >= deadline) {
-      // ⚠️ 超时的任务可能**还在服务端跑着** → 顺手删掉，别白占 NAS 的 CPU。
+      // ⚠️ 超时/读不到的任务可能**还在服务端跑着** → 顺手删掉，别白占 NAS 的 CPU。
       await deleteTranscode(downloadId)
+      if (sawComplete) {
+        // 服务端说完成了、但产物一直读不到 → 与「还没转完」是**两回事**，文案要分开。
+        throw new TranscodeError(
+          'unavailable',
+          '服务端转码产物无法读取',
+          `预检 ${probeFailures} 次未读到字节`,
+        )
+      }
       throw new TranscodeError('timeout', '服务端转码超时', `${percent}%`)
     }
 
-    await sleep(pollIntervalMs)
-  }
-  onProgress?.(percent)
-
-  // --- 3. 产物预检 ----------------------------------------------------------
-  const url = transcodeFileUrl(downloadId)
-  if (!(await probeTranscodeOutput(url))) {
-    throw new TranscodeError('unavailable', '服务端转码产物无法读取')
-  }
-
-  return {
-    downloadId,
-    url,
-    dispose: async () => {
-      await deleteTranscode(downloadId)
-    },
+    await sleep(sawComplete ? probeRetryIntervalMs : pollIntervalMs)
   }
 }
 
@@ -373,6 +428,9 @@ export async function prepareTranscode(
  *
  * ⚠️ 探测会**真的建一个转码任务**（服务端转一遍）→ 所以只在用户点「检测」时才调，
  *    **不做启动时的自动探测**。
+ *
+ * ⚠️ **T55**：走的是与起播**同一条** `prepareTranscode`（含重试）→
+ *    不会因为「产物刚说完成、实际还没可读」而误报「不支持」。
  *
  * @param songId 用来探测的曲目 guid（**必须是一首 NAS 曲目**）。
  */
