@@ -4,6 +4,7 @@ import App from './App'
 import { installLocalHistory } from './state/historyStore'
 import { installMediaSession } from './player/mediaSession'
 import { installLyricOverlay } from './player/lyricOverlay'
+import { installSpectrum } from './player/spectrum'
 import { installDownloadStore } from './state/downloadStore'
 import { installLocalLibraryStore } from './state/localLibraryStore'
 
@@ -27,6 +28,11 @@ installLocalHistory()
 // 由主进程转发给**悬浮窗**的渲染进程。
 // ⚠️ **只在悬浮窗可见时才拉歌词**（关着就不多打 NAS）。
 installLyricOverlay()
+
+// 频谱（T47）：取当前这一曲的频谱（16 段），推给主进程 → 词岛窗渲染成两端的波形柱。
+// ⚠️ **只在桌面歌词可见且形态 = 词岛时才采样**（采样器自己判）——
+//    不给「顿卡」添新堵点。
+installSpectrum()
 
 // 本地下载（Task 11）：订阅下载进度 + 读一次本地索引（决定「本地优先播放」）。
 installDownloadStore()

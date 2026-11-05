@@ -565,17 +565,27 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
  *    端口在**没有桥**的环境（浏览器 / 单元测试）里自动降级为 no-op，
  *    不崩、不静默写盘。
  */
-export const usePlayerStore = createPlayerStore(
+/**
+ * 生产用的**播放引擎**实例（T47）。
+ *
+ * ⚠️ **为什么导出它**：频谱采样器（`src/player/spectrum.ts`）要拿到
+ *    `getAudioNodes()` 里的 `AnalyserNode`——那是**唯一**能取到频谱的入口。
+ *    ⚠️ 引擎本身**懒创建**音频图（用户还没播时**没有** `AudioContext`），
+ *    所以这里导出实例**不会**提前建上下文。
+ */
+export const playerEngine = new PlayerEngine({
   // ⚠️ **本地优先播放**（Task 11）：解析器在「本地有副本且开关打开」时
   //    返回 `fnml://local/track/<id>`，否则照旧返回 `fnm://srv/track/stream?guid=…`
   //    （**既有行为与既有断言一字不变**）。
-  new PlayerEngine({
-    resolveSource: resolvePlaybackSource,
-    // ⚠️ **兜底解码**（Task 12）：格式 Chromium 解不了时，请主进程把本地副本
-    //    转码成 Opus 再播。接缝**在这里接上**——不接的话引擎走的是既有的
-    //    「写可读错误、不播放」路径（既有行为与既有断言一字不变）。
-    prepareSource: prepareFallbackSource,
-  }),
+  resolveSource: resolvePlaybackSource,
+  // ⚠️ **兜底解码**（Task 12）：格式 Chromium 解不了时，请主进程把本地副本
+  //    转码成 Opus 再播。接缝**在这里接上**——不接的话引擎走的是既有的
+  //    「写可读错误、不播放」路径（既有行为与既有断言一字不变）。
+  prepareSource: prepareFallbackSource,
+})
+
+export const usePlayerStore = createPlayerStore(
+  playerEngine,
   {
     eqPrefs: eqPrefsPort,
     // ⚠️ **注入播放模式偏好端口**（T29）：播放模式要能**跨重启**保留，

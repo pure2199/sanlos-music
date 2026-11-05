@@ -172,6 +172,9 @@ function fakeBridge(): {
     onLyricMode: () => () => undefined,
     // ⚠️ T46：指针位置通知 —— 本用例不碰它，给空实现即可。
     onLyricPointer: () => () => undefined,
+    // ⚠️ T47：频谱 —— 本用例不碰它，给空实现即可。
+    pushSpectrum: () => {},
+    onSpectrum: () => () => undefined,
     // 桌面悬浮歌词（Task 10）：本用例不碰它，给个空实现即可。
     pushLyricState: () => {},
     onLyricState: () => () => {},

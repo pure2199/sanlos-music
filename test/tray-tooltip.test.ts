@@ -37,6 +37,7 @@ import { PrefsStore, registerPlayerIpc, type IpcMainEventsLike } from '../electr
 import type { HttpStack } from '../electron/http'
 import type { SessionManager, SessionState } from '../electron/session'
 import type { AppPrefs, PlayerCommand, PlayerStateSnapshot } from '../shared/playerBridge'
+import { SPECTRUM_BIN_COUNT } from '../shared/spectrum'
 
 // ---------------------------------------------------------------------------
 // 测试替身
@@ -593,7 +594,7 @@ describe('registerPlayerIpc', () => {
     return { ipcMain, handlers, listeners }
   }
 
-  it('注册了全部通道（含 Task 10 的悬浮歌词通道、Task 11 的下载通道、Task 12 的 FFmpeg 通道、Task 41 的外部链接通道与 Task 45 的词岛样式通道）', () => {
+  it('注册了全部通道（含 Task 10 的悬浮歌词通道、Task 11 的下载通道、Task 12 的 FFmpeg 通道、Task 41 的外部链接通道、Task 45 的词岛样式通道与 Task 47 的频谱通道）', () => {
     // ⚠️ T10（桌面悬浮歌词）新增了两个通道，T11（本地下载）又新增了四个，
     //    T12（FFmpeg 兜底解码）再新增两个：
     //    - `lyric:set-visible`（调用式）：开关悬浮窗；
@@ -612,6 +613,10 @@ describe('registerPlayerIpc', () => {
     // ⚠️ T45（灵动态词岛）又新增一个：
     //    - `lyric:set-mode`（调用式）：切换桌面歌词的样式
     //      （`classic` 经典悬浮窗 / `island` 灵动词岛）。
+    //    → 前提再次被推翻，这里**继续**改写为新的完整集合（不是放宽断言）。
+    //
+    // ⚠️ T47（频谱波形）又新增一个：
+    //    - `lyric:spectrum`（推送式）：主窗口渲染进程推频谱 → 主进程只转发给词岛窗。
     //    → 前提再次被推翻，这里**继续**改写为新的完整集合（不是放宽断言）。
     const { ipcMain, handlers, listeners } = fakeIpcMain()
     registerPlayerIpc({ ipcMain, prefs: new PrefsStore({ filePath: tempFile() }) })
@@ -632,7 +637,12 @@ describe('registerPlayerIpc', () => {
       'win:minimize',
       'win:toggle-maximize',
     ])
-    expect([...listeners.keys()].sort()).toEqual(['lyric:state', 'player:command', 'player:state'])
+    expect([...listeners.keys()].sort()).toEqual([
+      'lyric:spectrum',
+      'lyric:state',
+      'player:command',
+      'player:state',
+    ])
   })
 
   it('app:open-external：白名单里的官网 → 交给系统浏览器打开', async () => {
@@ -770,6 +780,27 @@ describe('registerPlayerIpc', () => {
     listeners.get('lyric:state')?.(undefined, { kind: 'bogus' })
     listeners.get('lyric:state')?.(undefined, null)
     expect(onLyricState).not.toHaveBeenCalled()
+  })
+
+  it('lyric:spectrum 是推送：主进程**只转发**，形状不对的数据被丢弃', () => {
+    const { ipcMain, listeners } = fakeIpcMain()
+    const onSpectrum = vi.fn()
+    registerPlayerIpc({
+      ipcMain,
+      prefs: new PrefsStore({ filePath: tempFile() }),
+      onSpectrum,
+    })
+
+    const bins = new Array<number>(SPECTRUM_BIN_COUNT).fill(0).map((_, index) => index * 15)
+    listeners.get('lyric:spectrum')?.(undefined, bins)
+    expect(onSpectrum).toHaveBeenCalledWith(bins)
+
+    // 形状不对 → **丢弃**（不转发给词岛窗；主进程**不修补**数据）
+    onSpectrum.mockClear()
+    listeners.get('lyric:spectrum')?.(undefined, [1, 2, 3])
+    listeners.get('lyric:spectrum')?.(undefined, null)
+    listeners.get('lyric:spectrum')?.(undefined, new Array<number>(SPECTRUM_BIN_COUNT).fill(999))
+    expect(onSpectrum).not.toHaveBeenCalled()
   })
 
   it('lyric:set-visible 是调用：交给主进程去创建 / 隐藏窗口', () => {

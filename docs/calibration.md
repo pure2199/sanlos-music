@@ -2380,3 +2380,97 @@ Lyricify Fusion 的**灵动词岛** = 屏幕顶部居中的圆角胶囊 + 逐字
 ### 遗留 / 待办
 
 - ⚠️ **T47**：频谱波形（`captureStream` + `AnalyserNode` + 限频 IPC）。
+
+---
+
+## 三十二、T47：灵动态词岛的频谱波形（真实频谱 + 两端各 8 根镜像柱）
+
+### 取数路线的**修正**（规格原文的前提已过时）
+
+规格第 2.1 节写「项目的 Web Audio 图**只在开 EQ 时才建**（`ensureAudioChain`）」，
+据此选了 `captureStream()` 路线（理由：别为了频谱去 `createMediaElementSource`，
+那会劫持 `<audio>` 的输出）。
+
+⚠️ **该前提与当前代码不符**：`src/player/engine.ts` 的 `ensureAudioGraph()` 在
+**每一次首次播放**时**无条件**建图（`createMediaElementSource` → `gain` → `destination`），
+**与 EQ 开没开无关** ⇒ **所有用户的音频本来就走 Web Audio**。
+
+⇒ 复用现有音频图挂 `AnalyserNode` **不新增任何劫持**（不新建 `AudioContext`、
+不新建解码路径），而且取到的是 **EQ + 音量之后**的信号 = 用户真正听到的。
+
+### 探针结论（`release/verify/t47-spectrum-probe.js`，Electron 32.3.3 实测）
+
+| 路线 | 做法 | 实测 |
+| --- | --- | --- |
+| **A（本方案）** | `source → gain → destination`，**额外** `gain → analyser`（不连 destination） | `peak = 249`；`stillPlaying = true` |
+| B（规格原文） | `captureStream()` → 独立 AudioContext → analyser | `peak = 249`，与 A **逐 bin 相同** |
+| C（对照） | `source → analyser`（不连 destination） | `peak = 236` |
+
+- 实测环境：`sampleRate = 48000`、`fftSize = 2048` → `frequencyBinCount = 1024`；
+- ⚠️ **T45 探针的 `captureStream` 是在 `createMediaElementSource` 之前测的**；
+  T47 探针改成**接管之后**再测 → 结论变了（**没有静音**）。
+
+⇒ 两条路都可用；**选 A**（零新增上下文 / 反映 EQ 后信号 / 不依赖 `captureStream`）。
+
+### 实现要点
+
+- **采样**：24fps（42ms/帧）读一次 `getByteFrequencyData` → 切成 **8 段对数分布**
+  （80Hz–8kHz，每段取区间**最大值**）→ IPC `lyric:spectrum`（载荷 `number[]`，长度 8）；
+- **只在「桌面歌词可见 **且** 形态 = `island`」时采样**（可见性走 `lyric:visibility` 事件 +
+  启动时 `getPrefs()` 兜底；形态走偏好 store）→ 不给「顿卡」添新堵点；
+- **分析节点挂在 `gain` 之后**（EQ + 音量之后），**不连 destination**；
+  ⚠️ **建它失败不许影响播放**（`createAnalyser` 缺失 → `analyser = null` → 没有频谱，不崩）；
+- **镜像**：左端 = 频谱**逆序**、右端 = 频谱**原序** ⇒ 整条胶囊「高频 → 低频 | 低频 → 高频」。
+
+### 真机验收（`release/verify/t47-spectrum-probe.mjs`，用户**真实会话**）
+
+- 播放真实歌曲「占位曲目一」→ 词岛两端柱子**随音乐跳动**；
+- 两次采样（间隔 1.5s）柱子高度**明显不同**（例：左 `[4,13,21,29,45,35,47,28]`
+  → `[4,11,25,32,42,36,36,39]`）；
+- ⚠️ **左右严格镜像**：右组 = 左组的**逐根逆序**（`[28,47,35,45,29,21,13,4]`）；
+- 截图 `release/verify/t47-spectrum-shot.png`。
+
+### ⚠️ 一次**真机才发现**的返工：右边「几乎是空的」
+
+初版按「16 段各分一半」（左 = 低频 8 段、右 = 高频 8 段）→ 真机截图显示
+**右边几乎全是 4% 的小点**（高频段能量天然远低于低频段：低频柱 46%、高频柱 4%），
+整条胶囊**左右不对称** ⇒ **不符合用户拍板的「镜像」**。
+
+⇒ 改成「**同一组 8 段 + 右端取逆序**」→ 左右显示的是同一组频段 ⇒ **两边永远一样饱满**。
+
+⚠️ **教训**：这类「视觉对称」的要求，**单测测不出来**（jsdom 没有布局），
+必须靠**真机截图**才能发现 ⇒ 验收探针要**截图 + 读数值**两样都做。
+
+### 验证
+
+- `tsc --noEmit` exit **0**；`vitest run` **1774 passed / 81 files**（基线 1734 / 80，**新增 40**）；
+  `playwright test` **24 passed**；`npm run build` exit 0；
+- **变异自证（七处全部先红后复原，sha256 回基线）**：
+  1. 采样器不启动 → **1 条红**；
+  2. bin 取平均（不是最大值）→ **1 条红**；
+  3. 主进程不转发频谱 → **1 条红**；
+  4. 左端不逆序 → **1 条红**；
+  5. 右端也逆序 → **1 条红**；
+  6. 分析节点不挂 gain → **1 条红**；
+  7. 载荷校验放行一切 → **2 条红**；
+- **复原校验**：apply+revert 跑一轮后五个文件 sha256 与基线**完全一致**。
+
+### 既有断言的处理（**改写，不放宽**）
+
+- `test/tray-tooltip.test.ts` 的「注册了全部通道」是**通道集合的精确断言**
+  → `listeners` 由 `['lyric:state','player:command','player:state']` 变成
+  `['lyric:spectrum','lyric:state','player:command','player:state']`
+  → **改写为新的完整集合**（与 T41 / T45 的处理一致）。
+
+### 已知限制（如实标注）
+
+- ⚠️ **挂 analyser 后听感是否变化**（音量 / 延迟）→ 探针只验了「音频还在播、currentTime 在走」，
+  **听感仍待用户复验**；
+- ⚠️ **jsdom 量不到布局** → 柱子的观感（居中 / 过渡 / 对称）只能靠
+  **CSS 契约 + 真机截图**双保险；
+- ⚠️ 采样器挂在 **EQ 之后** → 开 EQ 时柱子的形状会随 EQ 变化（这是**如实反映**，不是缺陷）。
+
+### 遗留 / 待办
+
+- ⚠️ **待用户复验**：① 挂 analyser 不改变听感；② 频谱柱在**真实场景**下的观感；
+- ⚠️ **待用户复验 T46**：指针移上去淡出 / 移开淡回 / **点击穿透**到下面应用。

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { FnBridge } from '../shared/bridge'
+import { sanitizeSpectrumBins } from '../shared/spectrum'
 import type {
   DownloadTask,
   LocalLibraryItem,
@@ -143,6 +144,20 @@ const fnPlayer: PlayerBridge = {
     ipcRenderer.on('lyric:pointer', listener)
     return () => {
       ipcRenderer.removeListener('lyric:pointer', listener)
+    }
+  },
+  // ⚠️ T47：频谱（一条频谱 = 8 个 0–255 的整数；纯数字，不含凭证）。
+  //    ⚠️ 收到的数据**不可信** → 一律过一遍校验再交给上层（形状不对就丢掉）。
+  pushSpectrum: (bins) => ipcRenderer.send('lyric:spectrum', bins),
+  onSpectrum: (handler) => {
+    const listener = (_event: unknown, raw: unknown): void => {
+      const bins = sanitizeSpectrumBins(raw)
+      if (!bins) return
+      handler(bins)
+    }
+    ipcRenderer.on('lyric:spectrum', listener)
+    return () => {
+      ipcRenderer.removeListener('lyric:spectrum', listener)
     }
   },
   // -------------------------------------------------------------------------

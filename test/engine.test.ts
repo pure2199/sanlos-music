@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   PlayerEngine,
+  type AnalyserNodeLike,
   type AudioContextLike,
   type AudioNodeLike,
   type EqChainBuilder,
@@ -696,6 +697,79 @@ describe('PlayerEngine：EQ 接缝（Task 21）', () => {
     expect(nodes.source).toBe(context.lastSource)
     expect(nodes.gain).toBe(context.lastGain)
     expect(nodes.eq).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T47：频谱分析节点
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **不变量**：
+// - 分析节点挂在 **gain 之后**（EQ + 音量之后 = 用户真正听到的信号）；
+// - 它**不连 destination**（只是旁路听一听 → 不出声、不改输出路径）；
+// - **建它失败不许影响播放**（老 Chromium / 测试替身没有 `createAnalyser`
+//   → `analyser = null` → 没有频谱，但**音乐照播**）。
+//
+// ⚠️ 既有断言**一条没动**：默认的 `FakeAudioContext` **没有** `createAnalyser`
+//    → 走的是「降级」那条路 → 老用例的行为一字不变。
+// ---------------------------------------------------------------------------
+
+/** 假分析节点。 */
+class FakeAnalyserNode extends FakeNode implements AnalyserNodeLike {
+  fftSize = 2048
+  smoothingTimeConstant = 0.7
+  frequencyBinCount = 1024
+  getByteFrequencyData(): void {
+    // 测试里不真的填数据。
+  }
+}
+
+/** 带分析节点的假 AudioContext。 */
+class FakeAnalyserContext extends FakeAudioContext {
+  lastAnalyser: FakeAnalyserNode | null = null
+
+  createAnalyser(): AnalyserNodeLike {
+    this.lastAnalyser = new FakeAnalyserNode()
+    return this.lastAnalyser
+  }
+}
+
+describe('PlayerEngine：频谱分析节点（T47）', () => {
+  it('建图后 → 分析节点挂在 **gain 之后**', () => {
+    const context = new FakeAnalyserContext()
+    const { engine } = createEngine({ context })
+    engine.play(song('a'))
+
+    const nodes = engine.getAudioNodes()!
+    expect(nodes.analyser).toBe(context.lastAnalyser)
+    // ⚠️ 挂在 gain 的**出边**上（gain 的入边仍然只有一路 → 音量不会被翻倍）。
+    expect(context.lastGain!.outputs.has(context.lastAnalyser)).toBe(true)
+    expect(context.lastGain!.inputs.size).toBe(1)
+  })
+
+  it('分析节点**不连 destination**（旁路听一听 → 不出声）', () => {
+    const context = new FakeAnalyserContext()
+    const { engine } = createEngine({ context })
+    engine.play(song('a'))
+
+    expect(context.destination.inputs.has(context.lastAnalyser)).toBe(false)
+    expect(context.lastAnalyser!.outputs.size).toBe(0)
+  })
+
+  it('环境没有 createAnalyser → **analyser 为 null**，但**音乐照播**（不崩）', () => {
+    const { engine, context } = createEngine()
+    let lastError: string | null | undefined
+    engine.onStateChange((state) => {
+      lastError = state.error
+    })
+
+    engine.play(song('a'))
+
+    expect(engine.getAudioNodes()!.analyser).toBeNull()
+    // ⚠️ 降级**不许**影响播放：增益节点照样连着输出端，音频图建成了。
+    expect(context.lastGain!.outputs.has(context.destination)).toBe(true)
+    expect(engine.getAudioNodes()).not.toBeNull()
+    expect(lastError ?? null).toBeNull()
   })
 })
 

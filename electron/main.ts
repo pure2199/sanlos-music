@@ -763,6 +763,14 @@ if (!isPrimaryInstance) {
           if (!target) return
           target.webContents.send('lyric:state', message)
         },
+        // 频谱（T47）：主进程**只转发**，不理解频谱内容。
+        onSpectrum: (bins) => {
+          // ⚠️ **发给当前形态的那个窗口**（与 `lyric:state` 同一风格）。
+          //    ⚠️ **不缓存**：频谱是高频的流式数据，缓存下来没有意义。
+          const target = activeLyricWindow()
+          if (!target) return
+          target.webContents.send('lyric:spectrum', bins)
+        },
         setLyricVisible,
         setLyricMode,
         // 本地下载（Task 11）：落盘 / 断点续传 / 索引全在主进程。

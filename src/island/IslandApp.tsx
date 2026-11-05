@@ -8,13 +8,15 @@
 //
 // ⚠️ 本组件**只负责显示**：不碰音频、不出网、不接触任何凭证。
 
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 
 import type { PlayerBridge } from '../../shared/playerBridge'
+import { SPECTRUM_BIN_COUNT } from '../../shared/spectrum'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import { LyricView } from '../ui/lyrics/LyricView'
 import { extrapolatePosition } from '../ui/lyrics/overlayClock'
 import { emptyOverlayState, mergeLyricMessage } from '../ui/lyrics/overlayState'
+import { SpectrumBars } from './SpectrumBars'
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览里为 `null`）。 */
 export function islandBridge(): PlayerBridge | null {
@@ -24,6 +26,9 @@ export function islandBridge(): PlayerBridge | null {
 
 /** 位置更新的最小步长（秒）：小于它就不重渲染（省掉无意义的 60fps 重绘）。 */
 const POSITION_EPSILON = 0.03
+
+/** 还没有频谱时的占位（全 0 → 柱子是最小高度的小点）。 */
+const EMPTY_BINS: number[] = new Array<number>(SPECTRUM_BIN_COUNT).fill(0)
 
 /** 词岛的根组件。 */
 export function IslandApp(): ReactElement {
@@ -36,6 +41,12 @@ export function IslandApp(): ReactElement {
    *    渲染进程收不到「鼠标离开」→ 由**主进程轮询**指针位置通知到这里。
    */
   const [pointerInside, setPointerInside] = useState(false)
+  /**
+   * 频谱数据（T47）：一条 **16 段**的频谱（0–255）。
+   *
+   * ⚠️ **主窗口渲染进程**取数 → 主进程转发 → 这里收到（~24fps）。
+   */
+  const [bins, setBins] = useState<number[]>(EMPTY_BINS)
 
   /** 最近一次进度采样（本地外推的基准；放在 ref 里避免每帧重建闭包）。 */
   const sampleRef = useRef(state.sample)
@@ -86,6 +97,30 @@ export function IslandApp(): ReactElement {
     return player.onLyricPointer((inside) => setPointerInside(inside))
   }, [])
 
+  // --- T47：订阅频谱（~24fps；主窗口取数 → 主进程转发）---------------------
+  useEffect(() => {
+    const player = islandBridge()
+    if (!player) return undefined
+    return player.onSpectrum((next) => setBins(next))
+  }, [])
+
+  /**
+   * 左端 8 根 = 频谱的**逆序**（高频 → 低频，DOM 顺序 = 由外缘向内）。
+   *
+   * ⚠️ **右组是左组的镜像** ⇒ 整条胶囊「高频 → 低频 | 低频 → 高频」，
+   *    **左右永远对称**（真机截图证实：若左右显示不同频段，
+   *    高频段能量天然偏低 → 右边几乎是空的 → 整条胶囊不对称）。
+   * ⚠️ **必须用 `useMemo`**：根组件的进度插值是 60fps 重渲染的，
+   *    而频谱只有 24fps → 数组引用不变，`memo` 出来的波形柱才不会白重画。
+   */
+  const leftBins = useMemo(() => bins.slice().reverse(), [bins])
+  /**
+   * 右端 8 根 = 频谱的**原序**（低频 → 高频，DOM 顺序 = 由内向外）。
+   *
+   * ⚠️ 与左端**互为镜像**（左端是逆序）。
+   */
+  const rightBins = useMemo(() => bins, [bins])
+
   const track = state.track
   const title = track?.title ?? ''
   const artist = track?.artist ?? ''
@@ -96,6 +131,8 @@ export function IslandApp(): ReactElement {
       data-testid="fnm-island"
       data-pointer-inside={pointerInside ? 'true' : 'false'}
     >
+      {/* ⚠️ T47：左端的频谱柱（**逆序**：高频 → 低频）。 */}
+      <SpectrumBars side="left" values={leftBins} />
       <div className="fnm-island__meta">
         <span className="fnm-island__title">{title}</span>
         <span className="fnm-island__artist">{artist}</span>
@@ -118,6 +155,8 @@ export function IslandApp(): ReactElement {
           activeWordClassName="fnm-lyricview__word--active"
         />
       </div>
+      {/* ⚠️ T47：右端的频谱柱（**原序**：低频 → 高频；与左端互为镜像）。 */}
+      <SpectrumBars side="right" values={rightBins} />
     </div>
   )
 }

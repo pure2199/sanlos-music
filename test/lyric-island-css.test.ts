@@ -46,3 +46,45 @@ describe('词岛的 CSS 契约（T46 补丁②：单行居中）', () => {
     expect(blockOf(css, '.fnm-island__lyrics .fnm-lyricview')).toMatch(/overflow:\s*hidden/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// T47：频谱波形柱的 CSS 契约
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么单独钉 CSS**：柱子的**观感**全在 CSS 里——
+//    `align-items: center` 决定「从中线上下对称生长」，
+//    `transition: height` 决定「平滑不抖」。
+//    这两样 jsdom **都量不到**（没有布局、没有动画）→ 只能钉**声明**。
+//
+// ⚠️ **契约测试要先剥注释再匹配**（否则匹配到的是注释正文 = 空断言）。
+// ---------------------------------------------------------------------------
+
+describe('词岛的 CSS 契约（T47：频谱波形柱）', () => {
+  const css = readCss('src', 'island', 'island-window.css')
+
+  it('柱子**垂直居中**（从胶囊中线上下对称生长，而不是贴着底边长）', () => {
+    expect(blockOf(css, '.fnm-island__spectrum')).toMatch(/align-items:\s*center/)
+  })
+
+  it('柱子高度**不许被挤扁**（`flex: 0 0 auto`）', () => {
+    expect(blockOf(css, '.fnm-island__spectrum')).toMatch(/flex:\s*0 0 auto/)
+  })
+
+  it('高度变化要有**过渡**（24fps 的数据裸奔会像在闪）', () => {
+    expect(blockOf(css, '.fnm-island__bar')).toMatch(/transition:\s*height/)
+  })
+
+  it('柱子颜色**只用语义变量**（不许硬编码色值）', () => {
+    const block = blockOf(css, '.fnm-island__bar')
+    expect(block).toMatch(/background:\s*var\(--accent\)/)
+    // ⚠️ `#hex` / `rgb()` / `hsl()` 一律不许（词岛窗支持明暗两套主题）。
+    expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}/)
+    expect(block).not.toMatch(/rgb\(|rgba\(|hsl\(/)
+  })
+
+  it('柱子**不许**出现会改变字形/布局的动画（只过渡 height）', () => {
+    const block = blockOf(css, '.fnm-island__bar')
+    expect(block).not.toMatch(/transform:\s*scale/)
+    expect(block).not.toMatch(/animation:/)
+  })
+})

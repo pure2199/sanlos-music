@@ -140,3 +140,36 @@ body {
 .fnm-island__lyrics .fnm-lyricview {
   overflow: hidden;
 }
+
+/* --------------------------------------------------------------------------
+ * 两端的频谱波形柱（T47）
+ * --------------------------------------------------------------------------
+ *
+ * ⚠️ **纯 CSS 高度**：柱子的高度由 JS 写成**内联百分比**（`style.height`），
+ *    这里只管**形状**与**过渡**。
+ *
+ * ⚠️ **`align-items: center` 是关键**：它让每根柱子**垂直居中**
+ *    → 柱子从胶囊的**中线上下对称生长**（Dynamic Island 的观感），
+ *    而不是「贴着底边长出来」。
+ */
+
+.fnm-island__spectrum {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* 柱子的活动高度（胶囊内容区 ≈76px 的一半左右）。 */
+  height: 34px;
+  /* ⚠️ **不许被挤扁**：频谱柱的尺寸是固定的。 */
+  flex: 0 0 auto;
+}
+
+.fnm-island__bar {
+  display: block;
+  width: 3px;
+  min-height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0.85;
+  /* ⚠️ 24fps 的数据配 80ms 过渡 → **平滑不抖**（逐帧跳会像在闪）。 */
+  transition: height 80ms linear;
+}

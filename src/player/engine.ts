@@ -42,6 +42,7 @@
 // 播放**只取当前这一曲的流**，不在播放时顺带拉列表（曲库 17.3 万首，严禁全量拉取）。
 
 import type { PlayMode, PlayerState, Song } from '../../shared/types'
+import { SPECTRUM_FFT_SIZE, SPECTRUM_SMOOTHING } from '../../shared/spectrum'
 import {
   describeMediaError,
   fallbackUnavailableMessage,
@@ -107,6 +108,22 @@ export interface GainNodeLike extends AudioNodeLike {
 export interface MediaElementSourceLike extends AudioNodeLike {}
 
 /**
+ * 频谱分析节点（T47）。
+ *
+ * 真实浏览器的 `AnalyserNode` 满足这个结构；单测里用假节点替换。
+ */
+export interface AnalyserNodeLike extends AudioNodeLike {
+  /** FFT 长度（**必须是 2 的幂**）。 */
+  fftSize: number
+  /** 平滑系数（0~1）。 */
+  smoothingTimeConstant: number
+  /** 频率 bin 的个数（= `fftSize / 2`）。 */
+  readonly frequencyBinCount: number
+  /** 取频谱数据（写入给定数组；长度须为 `frequencyBinCount`）。 */
+  getByteFrequencyData(array: Uint8Array): void
+}
+
+/**
  * peaking 滤波器节点（Task 21 的 EQ 链用）。
  *
  * 真实浏览器的 `BiquadFilterNode` 满足这个结构；单测里用假节点替换。
@@ -156,6 +173,8 @@ export interface AudioBufferSourceNodeLike extends AudioNodeLike {
 export interface AudioContextLike {
   /** 上下文状态（`running` / `suspended` / `closed`）。 */
   readonly state: string
+  /** 采样率（Hz）；**可选**（拿不到时用 `SPECTRUM_FALLBACK_SAMPLE_RATE` 兜底）。 */
+  readonly sampleRate?: number
   /** 输出端。 */
   readonly destination: AudioNodeLike
   /** 由媒体元素创建源节点（**同一个元素只能调一次**）。 */
@@ -177,6 +196,14 @@ export interface AudioContextLike {
    *    媒体元素那条路照常。
    */
   createBufferSource?(): AudioBufferSourceNodeLike
+  /**
+   * 创建频谱分析节点（**可选**，T47）。
+   *
+   * ⚠️ 做成**可选成员**：Task 13 已有的实现者与测试替身只实现了
+   *    `createGain` / `createMediaElementSource`，加成必填会把它们全弄红。
+   *    没有它时**没有频谱**（词岛照常显示歌词，**不崩**）。
+   */
+  createAnalyser?(): AnalyserNodeLike
   /** 恢复上下文（可选）。 */
   resume?(): Promise<void>
   /** 关闭上下文（可选）。 */
@@ -225,6 +252,15 @@ export interface PlayerAudioNodes {
   gain: GainNodeLike
   /** 当前 EQ 链（没装就是 `null`——此时是旁路）。 */
   eq: EqChainNodes | null
+  /**
+   * 频谱分析节点（T47）。
+   *
+   * ⚠️ **可选**：环境不支持 `createAnalyser`（老 Chromium / 测试替身）时为 `null`
+   *    → **没有频谱**（词岛照常显示歌词，**不崩**）。
+   * ⚠️ 它挂在 **gain 之后**（EQ + 音量之后 = 用户真正听到的信号），
+   *    且**不连 destination**（只是旁路听一听 → 不出声、不改输出路径）。
+   */
+  analyser?: AnalyserNodeLike | null
 }
 
 // ---------------------------------------------------------------------------
@@ -439,6 +475,8 @@ export class PlayerEngine implements PlayerEngineLike {
   private context: AudioContextLike | null = null
   private source: MediaElementSourceLike | null = null
   private gain: GainNodeLike | null = null
+  /** 频谱分析节点（T47）；建不出来时为 `null`（→ 没有频谱，不崩）。 */
+  private analyser: AnalyserNodeLike | null = null
   private eqChain: EqChainNodes | null = null
   /** 播放前就装好的 EQ builder（建图时补装）。 */
   private pendingEqBuilder: EqChainBuilder | null = null
@@ -811,7 +849,13 @@ export class PlayerEngine implements PlayerEngineLike {
    */
   getAudioNodes(): PlayerAudioNodes | null {
     if (!this.context || !this.source || !this.gain) return null
-    return { context: this.context, source: this.source, gain: this.gain, eq: this.eqChain }
+    return {
+      context: this.context,
+      source: this.source,
+      gain: this.gain,
+      eq: this.eqChain,
+      analyser: this.analyser,
+    }
   }
 
   /** 释放资源（关掉音频上下文、断开节点）。 */
@@ -839,6 +883,8 @@ export class PlayerEngine implements PlayerEngineLike {
     this.context = null
     this.source = null
     this.gain = null
+    // ⚠️ T47：`gain.disconnect()` 已经把 analyser 的那条支路一起断了（gain 的全部出边）。
+    this.analyser = null
     this.eqChain = null
     // ⚠️ **媒体元素必须一起丢掉**：同一个 `<audio>` 元素**只能** createMediaElementSource
     //    一次（真实浏览器第二次会抛 InvalidStateError）。`dispose()` 之后再 `play()` 时
@@ -904,6 +950,23 @@ export class PlayerEngine implements PlayerEngineLike {
       // 旁路：source → gain → destination（gain → destination 只连一次，不会翻倍）。
       source.connect(gain)
       gain.connect(context.destination)
+
+      // ⚠️ T47：频谱分析节点挂在 **gain 之后**（EQ + 音量之后 = 用户真正听到的信号），
+      //    且**不连 destination**（只是旁路听一听 → 不出声、不改输出路径）。
+      //    ⚠️ **建它失败不许影响播放**：老 Chromium / 测试替身没有 `createAnalyser`
+      //    → `analyser = null` → **没有频谱**（词岛照常显示歌词，不崩）。
+      this.analyser = null
+      try {
+        const analyser = context.createAnalyser?.()
+        if (analyser) {
+          analyser.fftSize = SPECTRUM_FFT_SIZE
+          analyser.smoothingTimeConstant = SPECTRUM_SMOOTHING
+          gain.connect(analyser)
+          this.analyser = analyser
+        }
+      } catch {
+        this.analyser = null
+      }
     } catch {
       this.context = null
       this.gain = null

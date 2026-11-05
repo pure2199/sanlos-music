@@ -407,8 +407,8 @@ export function islandBounds(
 
 ### 8.3 采样
 
-- **24fps**（每 42ms 一帧）读一次 `getByteFrequencyData` → 切成 **16 个对数分布 bin**（80Hz–8kHz，
-  每个 bin 取区间**最大值**）→ IPC `lyric:spectrum`（载荷 `number[]`，长度 16，值 0–255）。
+- **24fps**（每 42ms 一帧）读一次 `getByteFrequencyData` → 切成 **8 个对数分布 bin**（80Hz–8kHz，
+  每个 bin 取区间**最大值**）→ IPC `lyric:spectrum`（载荷 `number[]`，长度 8，值 0–255）。
 - ⚠️ **只在「桌面歌词可见 **且** 形态 = `island`」时采样**；不满足就**完全不采样**
   → 不给「顿卡」添新堵点。
   - 可见性 ← `lyric:visibility` 事件 + 启动时 `getPrefs()` 兜底（与 `lyricOverlay.ts` 同一套路）；
@@ -428,12 +428,17 @@ export function islandBounds(
   - `pushSpectrum(bins: number[])`（**主窗口**渲染进程用）；
   - `onSpectrum(handler: (bins: number[]) => void)`（**词岛**渲染进程用）。
 
-### 8.5 词岛渲染（**两端各 8 根，镜像**）
+### 8.5 词岛渲染（**两端各 8 根，真镜像**）
 
 - 布局：`[左 8 根] [曲名/歌手] [歌词] [右 8 根]`。
-- **镜像的定义**：整条频谱 = 16 段（低频 → 高频）；左端显示第 1–8 段、
-  右端显示第 9–16 段；**两组都从「外缘向内」按频率递增** ⇒ 左右呈镜像。
-  - 左组 DOM 顺序 = `bins[0..7]`；右组 DOM 顺序 = `bins[15..8]`（逆序）。
+- **镜像的定义**：整条频谱 = **8 段**（低频 → 高频）；
+  **左端显示逆序**（高频 → 低频）、**右端显示原序**（低频 → 高频）
+  ⇒ 整条胶囊「**高频 → 低频 | 低频 → 高频**」⇒ 左右**互为镜像、永远对称**。
+  - 左组 DOM 顺序 = `bins.slice().reverse()`；右组 DOM 顺序 = `bins`。
+- ⚠️ **为什么两端必须同源**（**真机截图教训**）：初版按「16 段各分一半」
+  （左 = 低频 8 段、右 = 高频 8 段）→ 高频段能量天然远低于低频段
+  （实测：低频柱 46%、高频柱 4%）→ **右边几乎是空的**、整条胶囊**左右不对称**。
+  ⇒ 改成「同一组 8 段 + 右端逆序」后，左右两边**永远一样饱满**。
 - 柱子的**高度**：`0` → 4%（留一个可见的小点），`255` → 100%；
   `align-items: center` ⇒ 柱子**从胶囊中线上下对称生长**（Dynamic Island 观感）。
 - ⚠️ **纯 CSS 高度**（不引新依赖、不用 canvas）；`transition: height 80ms linear`
@@ -444,7 +449,7 @@ export function islandBounds(
 
 | 文件 | 改动 |
 | --- | --- |
-| `shared/spectrum.ts`（新） | `SPECTRUM_BIN_COUNT` / `sanitizeSpectrumBins()`（纯逻辑，主进程与 preload 共用） |
+| `shared/spectrum.ts`（新） | `SPECTRUM_BIN_COUNT`（= 8）/ `sanitizeSpectrumBins()`（纯逻辑，主进程与 preload 共用） |
 | `shared/playerBridge.ts` | `pushSpectrum` / `onSpectrum` |
 | `electron/preload.ts` | 暴露两个桥方法 |
 | `electron/ipc.ts` | `lyric:spectrum` 通道 + 形状校验 + `onSpectrum` 选项 |

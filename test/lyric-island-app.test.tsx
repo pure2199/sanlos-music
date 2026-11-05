@@ -12,21 +12,24 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { IslandApp } from '../src/island/IslandApp'
+import { barHeightPercent } from '../src/island/SpectrumBars'
 import type { LyricOverlayMessage, LyricOverlayLine, PlayerBridge } from '../shared/playerBridge'
 
 /** 仓库根目录（源码断言用）。 */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 假桥：只实现词岛用到的两个订阅方法。 */
+/** 假桥：只实现词岛用到的几个订阅方法。 */
 interface FakeBridge {
   bridge: PlayerBridge
   emitPointer: (inside: boolean) => void
   emitLyricState: (message: LyricOverlayMessage) => void
+  emitSpectrum: (bins: number[]) => void
 }
 
 function fakeBridge(): FakeBridge {
   let pointerHandler: ((inside: boolean) => void) | null = null
   let lyricHandler: ((message: LyricOverlayMessage) => void) | null = null
+  let spectrumHandler: ((bins: number[]) => void) | null = null
   const bridge = {
     onLyricState: (handler: (message: LyricOverlayMessage) => void) => {
       lyricHandler = handler
@@ -40,6 +43,13 @@ function fakeBridge(): FakeBridge {
         pointerHandler = null
       }
     },
+    // ⚠️ T47：频谱 —— 词岛只**收**，不推。
+    onSpectrum: (handler: (bins: number[]) => void) => {
+      spectrumHandler = handler
+      return () => {
+        spectrumHandler = null
+      }
+    },
   } as unknown as PlayerBridge
   return {
     bridge,
@@ -48,6 +58,9 @@ function fakeBridge(): FakeBridge {
     },
     emitLyricState: (message: LyricOverlayMessage) => {
       lyricHandler?.(message)
+    },
+    emitSpectrum: (bins: number[]) => {
+      spectrumHandler?.(bins)
     },
   }
 }
@@ -247,5 +260,98 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
     expect(islandLyricLines(container)).toHaveLength(1)
     expect(currentLine(container)?.textContent).toContain('丙行丙')
     expect(currentLine(container)?.textContent).not.toContain('乙行乙')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T47：词岛两端的**频谱波形柱**
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **镜像的定义**：整条频谱 = 16 段（低频 → 高频）；
+//    左端显示第 1–8 段、右端显示第 9–16 段（**逆序**）
+//    ⇒ 两组都从「外缘向内」按频率递增 ⇒ 左右呈**镜像**。
+// ---------------------------------------------------------------------------
+
+/** 词岛里的某一侧波形柱（`.fnm-island__spectrum--<side>` 里的 `.fnm-island__bar`）。 */
+function barsOf(container: HTMLElement, side: 'left' | 'right'): Element[] {
+  return Array.from(container.querySelectorAll(`.fnm-island__spectrum--${side} .fnm-island__bar`))
+}
+
+/** 柱子的高度（百分比，去掉 % 号）。 */
+function heightsOf(container: HTMLElement, side: 'left' | 'right'): number[] {
+  return barsOf(container, side).map((bar) => Number.parseFloat(bar.getAttribute('style')?.match(/height:\s*([\d.]+)%/)?.[1] ?? '0'))
+}
+
+describe('T47 词岛：两端的频谱波形柱', () => {
+  it('两端各 **8 根**柱子（右组是左组的**镜像**）', () => {
+    const fake = fakeBridge()
+    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+
+    const { container } = render(<IslandApp />)
+
+    expect(barsOf(container, 'left')).toHaveLength(8)
+    expect(barsOf(container, 'right')).toHaveLength(8)
+  })
+
+  it('还没收到频谱 → 柱子是最小高度（**留一个小点**，不是空白）', () => {
+    const fake = fakeBridge()
+    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+
+    const { container } = render(<IslandApp />)
+
+    expect(heightsOf(container, 'left').every((h) => h === 4)).toBe(true)
+    expect(heightsOf(container, 'right').every((h) => h === 4)).toBe(true)
+  })
+
+  it('收到频谱 → 柱子高度跟着变（左 = **逆序**，右 = **原序** ⇒ 互为镜像）', () => {
+    const fake = fakeBridge()
+    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+
+    const { container } = render(<IslandApp />)
+    // 8 段，值各不相同 → 高度各不相同 → 顺序能被认出来。
+    const bins = [10, 20, 30, 40, 50, 60, 70, 80]
+
+    act(() => {
+      fake.emitSpectrum(bins)
+    })
+
+    // 右端：DOM 顺序 = 原序（低频 → 高频）。
+    expect(heightsOf(container, 'right')).toEqual(bins.map(barHeightPercent))
+    // 左端：DOM 顺序 = **逆序**（高频 → 低频）⇒ 与右端互为镜像。
+    expect(heightsOf(container, 'left')).toEqual(
+      [...bins].reverse().map(barHeightPercent),
+    )
+  })
+
+  it('左右两端显示**同一组**频段（否则高频侧几乎是空的 → 整条胶囊不对称）', () => {
+    const fake = fakeBridge()
+    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+
+    const { container } = render(<IslandApp />)
+    const bins = [10, 20, 30, 40, 50, 60, 70, 80]
+
+    act(() => {
+      fake.emitSpectrum(bins)
+    })
+
+    // ⚠️ **鉴别力**：左右是同一组值（只是顺序相反）→ 把左端倒过来必须等于右端。
+    //    若实现成「左半低频 + 右半高频」，这个断言**必红**。
+    expect([...heightsOf(container, 'left')].reverse()).toEqual(heightsOf(container, 'right'))
+  })
+
+  it('柱高映射：`0` → 4%、`255` → 100%（中间线性）', () => {
+    expect(barHeightPercent(0)).toBe(4)
+    expect(barHeightPercent(255)).toBe(100)
+    expect(barHeightPercent(128)).toBe(52)
+    // 越界不许越界（负数按 0 算、超 255 按 255 算）。
+    expect(barHeightPercent(-10)).toBe(4)
+    expect(barHeightPercent(999)).toBe(100)
+  })
+
+  it('经典悬浮窗**不显示**频谱柱（它的显示内容一字不变）', () => {
+    const source = readFileSync(resolve(REPO_ROOT, 'src', 'lyric', 'main.tsx'), 'utf8')
+    // ⚠️ 经典窗**不订阅** `onSpectrum` → 它拿不到频谱 → 显示内容一字不变。
+    expect(source).not.toMatch(/onSpectrum/)
+    expect(source).not.toMatch(/fnm-island__spectrum/)
   })
 })

@@ -95,6 +95,7 @@ import type {
   WindowBounds,
 } from '../shared/playerBridge'
 import type { ConnectionInfo, ConnectionKind, PlayMode, ThemeName } from '../shared/types'
+import { sanitizeSpectrumBins } from '../shared/spectrum'
 import { buildCandidates, fetchConnectionParams, hostOf, normalizeBase } from './connection'
 import { TrustedHosts } from './cert'
 import { openExternalUrl } from './externalLinks'
@@ -1136,6 +1137,13 @@ export interface PlayerIpcOptions {
    */
   onLyricState?: (message: LyricOverlayMessage) => void
   /**
+   * 渲染进程推来**频谱数据**时的回调（T47）。
+   *
+   * ⚠️ 主进程**只转发**：把 16 个 0–255 的整数原样转给词岛窗的渲染进程。
+   *    形状不对的数据**在通道那一层就被丢弃**（到这里的一定是合法的）。
+   */
+  onSpectrum?: (bins: number[]) => void
+  /**
    * 设置悬浮窗的可见性（Task 10）。
    *
    * ⚠️ 由主进程负责**创建 / 隐藏窗口**并**落盘**（`prefs.lyricOverlay.visible`）。
@@ -1242,6 +1250,14 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
     const message = sanitizeLyricMessage(arg)
     if (!message) return
     opts.onLyricState?.(message)
+  })
+
+  // 渲染进程 → 主进程：频谱数据 → **转发**给词岛窗（T47）。
+  // ⚠️ 形状不对的数据**直接丢弃**（不转发、不修补）。
+  ipcMain.on('lyric:spectrum', (_event, arg) => {
+    const bins = sanitizeSpectrumBins(arg)
+    if (!bins) return
+    opts.onSpectrum?.(bins)
   })
 
   // 渲染进程 → 主进程：设置悬浮窗可见性（创建 / 隐藏 + 落盘）。
