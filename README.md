@@ -1,4 +1,11 @@
-# Sanlos Music 桌面客户端
+# Sanlos Music
+
+[![CI](https://github.com/pure2199/sanlos-music/actions/workflows/ci.yml/badge.svg)](https://github.com/pure2199/sanlos-music/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Electron](https://img.shields.io/badge/Electron-32-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
+[![React](https://img.shields.io/badge/React-18-087EA4?logo=react&logoColor=white)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0078D6?logo=windows&logoColor=white)](https://learn.microsoft.com/windows/)
 
 直连 **fnOS 飞牛音乐**（NAS）的 Windows 桌面客户端。
 
@@ -6,6 +13,48 @@
 
 > 技术栈：Electron 32 + React 18 + TypeScript 5（`strict`）+ Vite 5 + Zustand 4 + Vitest 2 + Playwright。
 > 目标平台：Windows 10 1809 及以上 / x64。
+
+---
+
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="docs/screenshots/library.png" alt="曲库「歌曲」页" /></td>
+    <td width="50%" align="center"><img src="docs/screenshots/lyric-stage.png" alt="全屏歌词「歌词舞台」" /></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="docs/screenshots/lyric-island.png" alt="灵动态词岛（屏幕顶部胶囊）" width="520" /></td>
+  </tr>
+</table>
+
+> 截图取自仓库内置的 **mock NAS**（`mock-server/`）——用的是占位曲库，**不含任何真实数据**。
+> 界面为 **Apple 风**主题，另一套是 **Windows 11 Fluent 风**（顶栏一键切换）。
+
+---
+
+## English summary
+
+**Sanlos Music** is a Windows desktop client for **fnOS / 飞牛音乐** NAS servers — it talks to your
+own NAS directly, with no cloud account and no third-party server in the middle.
+
+- **Library & playback** — songs / albums / artists / genres / playlists / favorites / history, queue, four
+  play modes, system media-session integration.
+- **Lyrics** — LRC parsing, per-character karaoke highlight, translation merge, offset correction, a
+  draggable always-on-top lyrics window, a **Dynamic-Island-style capsule** (click-through, live spectrum
+  bars), and a full-screen **lyric stage** that scrolls with the music.
+- **Write-back** — favorites, playlists and playlist membership are written back to the NAS; local-only
+  playback history lives on this machine.
+- **Local library** — import local files/folders (ID3v2 / FLAC / Ogg / MP4 / WAV / AIFF tags parsed
+  **without any extra dependency**), or play already-downloaded tracks.
+- **Software EQ** — 10 / 15 bands, 10 presets.
+- **Security model** — the renderer process never sees a credential; tokens are encrypted with Windows
+  DPAPI (`safeStorage`), and the **only** outbound channel is the main process's own NAS proxy.
+
+Windows 10 1809+ / x64. MIT licensed.
+
+> This is an **unofficial third-party client**. It is not affiliated with, endorsed by, or supported by
+> fnOS / 飞牛 / the Sanlos Music publisher.
 
 ---
 
@@ -50,6 +99,8 @@
 ## 三、快速开始
 
 ### 开发
+
+前置：**Windows 10 1809+**、**Node.js ≥ 20**、**npm**。
 
 ```bash
 npm install       # postinstall 会兜底安装 electron 二进制
@@ -108,7 +159,7 @@ e2e/               Playwright E2E（真实 Electron + mock NAS）
 test/              Vitest 单元测试
 scripts/           构建与打包脚本
 tools/             联调探针脚本（读环境变量取凭证，不落盘）
-docs/              设计与计划文档、打包与验证文档
+docs/              设计与计划文档、打包与验证文档、界面截图
 ```
 
 ---
@@ -125,6 +176,7 @@ docs/              设计与计划文档、打包与验证文档
   → 该分区对它走 Chromium **默认**证书校验（自签**不会**被放行）；
   安装包还必须 **SHA-512 相符** + **Authenticode 签名者与用户配置的预期一致**才允许启动。
 - 自定义协议特权**整个进程只注册一次**（`fnm` 与 `fnml` 必须合并注册，见 `electron/schemes.ts`）—— Electron 的 `registerSchemesAsPrivileged()` 第二次调用会**静默覆盖**第一次。
+- **仓库里不写任何真实凭证**：`tools/` 下的联调探针**一律**从环境变量（`FNM_USER` / `FNM_PASS` / `FNM_FNID`）取账号口令，**不落盘、不进测试、不进提交历史**。
 
 ---
 
@@ -157,6 +209,9 @@ A：先看 NAS 自带的歌词有没有 —— **NAS 优先**，有就直接用�
 **Q：关闭窗口后应用还在吗？**
 A：默认**隐藏窗口、播放继续**，可在「设置 → 通用 → 关闭窗口时」改成「直接退出应用」。
 
+**Q：怎么贡献？**
+A：见下面「九、开发与贡献」；动手前请先读 [`docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md`](./docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md) 与 [`docs/calibration.md`](./docs/calibration.md)（真机校准清单：哪些已验证、哪些还待真机确认）。
+
 ---
 
 ## 八、文档索引
@@ -172,7 +227,21 @@ A：默认**隐藏窗口、播放继续**，可在「设置 → 通用 → 关�
 
 ---
 
-## 九、软件信息
+## 九、开发与贡献
+
+- **规格先行**：每个功能先在 `docs/superpowers/specs/` 落一份设计规格（**规格一个 commit、实现一个 commit**），再写代码。
+- **闸门**：`npm run typecheck`（`strict` + `noUnusedLocals` + `noUnusedParameters` + `noUncheckedIndexedAccess`）、`npm test`、`npm run e2e` 全绿才算完成；**既有测试一条不许删、断言一条不许削弱**。
+- **不引新依赖**：音频标签解析、歌词解析等能力都手写实现（见「本地音乐」一节）。
+- **别提交凭证**：账号口令、FN ID、真实域名与内网地址**一律不进仓库**（含提交历史）；联调探针只从环境变量取值。
+- 真机联调结论记在 [`docs/calibration.md`](./docs/calibration.md)，用户可见的变化记在 [`docs/changelog.md`](./docs/changelog.md)。
+
+---
+
+## 十、许可证与声明
+
+- **许可证**：[MIT](./LICENSE) —— 详见 `LICENSE` 文件。
+- **免责声明**：本项目是**第三方非官方客户端**，与 fnOS / 飞牛 / 本软件发行方**无隶属、无背书关系**；「fnOS」「飞牛音乐」等名称归其各自权利人所有。仓库内不包含任何 NAS 服务端代码。
+- **软件信息**：
 
 | 项 | 内容 |
 |---|---|

@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+# 最小权限：CI 只需要读仓库内容。
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # 应用是 Windows 专属（托盘 / DPAPI / safeStorage / `fnm://` 自定义协议）。
+    name: typecheck + unit tests + build
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    env:
+      # 仓库的 `.npmrc` 把 Electron 的下载镜像指向 npmmirror（面向国内网络）。
+      # GitHub Runner 在境外 → 这里显式指回官方 release 源，避免拉不动。
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/v
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # 不用 Node 26：electron@32 的 install.js 依赖的 extract-zip@2 在 Node 26 上
+          # 解压会挂起（详见 scripts/ensure-electron.cjs 的注释）。
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
