@@ -14,6 +14,10 @@
 > 技术栈：Electron 32 + React 18 + TypeScript 5（`strict`）+ Vite 5 + Zustand 4 + Vitest 2 + Playwright。
 > 目标平台：Windows 10 1809 及以上 / x64。
 
+> **⬇️ 不想自己编译？直接下载现成的安装包** —— 当前版本 **v0.1.0**（安装版 / 便携版）在
+> [Releases · 最新版](https://github.com/pure2199/sanlos-music/releases/latest)，
+> **免登录直接下载**，装完连上你自己的 NAS 就能用（不连 NAS 也能当本地播放器用）。
+
 ---
 
 ## 界面预览
@@ -97,6 +101,32 @@ Windows 10 1809+ / x64. MIT licensed.
 ---
 
 ## 三、快速开始
+
+### 下载安装
+
+**普通用户看这一节就够了**（要自己编译的往下翻「开发」）。Windows 10 1809+ / x64，
+到 [Releases · v0.1.0](https://github.com/pure2199/sanlos-music/releases/tag/v0.1.0) 下载：
+
+| 文件 | 大小 | 说明 |
+|---|---|---|
+| `FN-Music-Setup-0.1.0.exe` | 86,065,585 字节 | **安装版**（NSIS，可改安装目录） |
+| `FN-Music-Portable-0.1.0.exe` | 78,973,187 字节 | **便携版**（免安装，双击即用） |
+
+下完可用 sha256 自行核对（与本仓库发布产物**逐字节一致**）：
+
+| 文件 | sha256 |
+|---|---|
+| `FN-Music-Setup-0.1.0.exe` | `d96bb61378b41e867f29c2ac3ced18fc1b125ea89ac9600b827f26c98731c5df` |
+| `FN-Music-Portable-0.1.0.exe` | `d7317c6b5890d183a612d75614df749bff6fcb71ad45032c47164a2720fda3f8` |
+
+> ⚠️ **产物未做代码签名**：Windows SmartScreen 会拦（蓝色「Windows 已保护你的电脑」）→
+> 点「更多信息」→「仍要运行」。需要静默安装可用 `FN-Music-Setup-0.1.0.exe /S`。
+
+- **首次使用**：装完打开 → 顶栏「连接」→ 用 **FN ID 探测**（推荐）或 **地址 + 账号口令**
+  登录，详见「[二、两种登录方式](#二两种登录方式)」；
+- **没 NAS 也能用**：未登录时主区默认就是「本地音乐」页，可「添加文件 / 添加文件夹」
+  直接播本机音乐；
+- `latest.yml` 与 `FN-Music-Setup-0.1.0.exe.blockmap` 是**自动更新用的清单**，**不用手动下载**。
 
 ### 开发
 
