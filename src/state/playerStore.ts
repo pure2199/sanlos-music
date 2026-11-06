@@ -91,6 +91,13 @@ export interface PlayerStore {
    *    这里只是**如实说明为什么没走标准音质**（界面显示**灰字**）。
    */
   qualityNote?: string | null
+  /**
+   * **可听延迟**（秒）：媒体内容渲染完成 → 用户真正听到之间的延迟（T66）。
+   *
+   * ⚠️ 歌词据此**整体延后**（换输出设备后会自动重算）。
+   * ⚠️ **可选**：拿不到时是 `0` ⇒ **不补偿**。
+   */
+  outputLatencySec?: number
 
   /**
    * 播放一首曲目。
@@ -556,6 +563,7 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       fallbackActive: state.fallbackActive ?? false,
       qualityPreparing: state.qualityPreparing ?? false,
       qualityNote: state.qualityNote ?? null,
+      outputLatencySec: state.outputLatencySec ?? 0,
     })
   })
 

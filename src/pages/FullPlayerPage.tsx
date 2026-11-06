@@ -36,6 +36,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -56,6 +57,7 @@ import {
 } from '../player/lyricSource'
 import { LyricView } from '../ui/lyrics/LyricView'
 import { parseLyricEntries, type LyricLine } from '../ui/lyrics/parse'
+import { applyAudibleLatency } from '../ui/lyrics/timing'
 import './full-player.css'
 
 // ---------------------------------------------------------------------------
@@ -242,7 +244,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   const canRemove = queue.length > 1
 
   const [tab, setTab] = useState<'lyrics' | 'queue'>('lyrics')
-  const [lines, setLines] = useState<LyricLine[]>([])
+  /** **原始**歌词行（**未**施加可听延迟补偿；见下面的 `lines`）。 */
+  const [rawLines, setRawLines] = useState<LyricLine[]>([])
   const [lyricStatus, setLyricStatus] = useState<LyricStatus>('idle')
   /** 歌词取不到时的**可读原因**（Task 32：外部源失败要如实说，不能装作「暂无」）。 */
   const [lyricReason, setLyricReason] = useState<string | null>(null)
@@ -252,6 +255,26 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
 
   const songId = current?.id ?? ''
   const coverId = current?.coverId ?? ''
+
+  /**
+   * **可听延迟**（秒）：媒体渲染完成 → 用户真正听到之间的延迟（T66）。
+   *
+   * ⚠️ 拿不到时是 0 ⇒ **不补偿**（歌词行为与本任务之前完全一致）。
+   */
+  const outputLatencySec = state.outputLatencySec ?? 0
+
+  /**
+   * 界面真正用的歌词行 = **原始行 + 可听延迟补偿**。
+   *
+   * ⚠️ **为什么要派生而不是在拉歌词时一次算完**：
+   *    延迟**只在换输出设备时**才变 ⇒ 若把补偿烤进「拉回来那一份」，
+   *    换设备后就得**切歌**才生效。⇒ 这里按延迟**派生**：
+   *    延迟一变，歌词自动重算，**不重新拉 NAS**。
+   */
+  const lines = useMemo(
+    () => applyAudibleLatency(rawLines, outputLatencySec),
+    [rawLines, outputLatencySec],
+  )
 
   /**
    * 匹配外部源要用的信息（**只取标量**）。
@@ -282,14 +305,14 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   // --- 歌词：拉取 + 用 Task 12 的入口解析合并 --------------------------------
   useEffect(() => {
     if (!songId) {
-      setLines([])
+      setRawLines([])
       setLyricStatus('idle')
       setLyricReason(null)
       return
     }
     let cancelled = false
     setLyricStatus('loading')
-    setLines([])
+    setRawLines([])
     setLyricReason(null)
     // ⚠️ **NAS 优先 → 缺了才查外部**（Task 32）；外部源只回 LRC 文本，
     //    这里包成条目后仍交给**现有**的 `parseLyricEntries`（解析逻辑一行不改）。
@@ -300,7 +323,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     )
       .then((result) => {
         if (cancelled) return
-        setLines(parseLyricEntries(result.entries))
+        setRawLines(parseLyricEntries(result.entries))
         setLyricReason(result.reason)
         // ⚠️ 有歌词 → `ready`；没歌词**且有原因** → `error`（如实显示原因）；
         //    没歌词**也没原因** → `ready` + 空行 → 界面显示「暂无歌词」。
@@ -308,7 +331,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
       })
       .catch(() => {
         if (cancelled) return
-        setLines([])
+        setRawLines([])
         setLyricReason(null)
         setLyricStatus('error')
       })

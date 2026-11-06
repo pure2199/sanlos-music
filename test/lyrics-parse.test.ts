@@ -508,3 +508,121 @@ describe('splitIntoWords', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// T66：伪逐字按音节加权
+//
+// ⚠️ **切分规则一字不改**（CJK 逐字 / 拉丁整串 / 标点并入邻词），
+//    只把「按词数均分」换成「按音节权重分配」。
+// ---------------------------------------------------------------------------
+
+describe('伪逐字：按音节加权（T66）', () => {
+  it('英文行：多音节词分到**更长时间**（不是按词数均分）', () => {
+    const lines = parseLrc('[00:10.00]hello world\n[00:20.00]下一句')
+    const words = lines[0]!.words
+    expect(words.map((word) => word.text)).toEqual(['hello', 'world'])
+    const hello = words[0]!
+    const world = words[1]!
+    // hello = 2 音节、world = 1 音节 → hello 的时长严格更长。
+    expect(hello.end - hello.start).toBeGreaterThan(world.end - world.start)
+  })
+
+  it('**总量严格等于行时长**（首词起点 = 行时间，末词终点 = 下一行时间）', () => {
+    const lines = parseLrc('[00:10.00]hello world\n[00:20.00]下一句')
+    const words = lines[0]!.words
+    expect(words[0]!.start).toBe(lines[0]!.time)
+    expect(words[words.length - 1]!.end).toBe(lines[1]!.time)
+    expect(words[words.length - 1]!.end - words[0]!.start).toBeCloseTo(10, 6)
+  })
+
+  it('词起点**严格递增**、每个词 end > start', () => {
+    const lines = parseLrc('[00:10.00]hello world\n[00:20.00]下一句')
+    const words = lines[0]!.words
+    for (let i = 1; i < words.length; i++) {
+      expect(words[i]!.start).toBeGreaterThan(words[i - 1]!.start)
+      expect(words[i]!.end).toBeGreaterThan(words[i - 1]!.end)
+    }
+    for (const word of words) {
+      expect(word.end).toBeGreaterThan(word.start)
+    }
+  })
+
+  it('中英混排：汉字按字、英文按音节（各算各的权重）', () => {
+    const lines = parseLrc('[00:10.00]占beautiful\n[00:20.00]下一句')
+    const words = lines[0]!.words
+    expect(words.map((word) => word.text)).toEqual(['占', 'beautiful'])
+    // 占位汉字 = 1 音节；beautiful = 3 音节 → 英文词分到更长时间。
+    expect(words[1]!.end - words[1]!.start).toBeGreaterThan(words[0]!.end - words[0]!.start)
+    expect(words[words.length - 1]!.end - words[0]!.start).toBeCloseTo(10, 6)
+  })
+
+  it('**纯中文行**：每个字 1 音节 → 分配与旧实现**逐字相同**（仍是均匀的）', () => {
+    const lines = parseLrc('[00:10.00]占位歌词\n[00:20.00]下一句')
+    const words = lines[0]!.words
+    const expected = 10 / words.length
+    for (const word of words) {
+      expect(word.end - word.start).toBeCloseTo(expected, 3)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T66：LRC 的 `[offset:±N]` 同步校正标签
+//
+// 规范：`[offset:+N]` = 所有时间戳整体加 N 毫秒（歌词延后），
+//       `[offset:-N]` = 整体减 N 毫秒（歌词提前）。
+// ⚠️ 与服务端 `LyricEntry.offset` **同向叠加**（文件内先、服务端后）。
+// ---------------------------------------------------------------------------
+
+describe('LRC [offset:] 标签（T66）', () => {
+  it('正偏移 = **延后**（时间戳整体加 N 毫秒）', () => {
+    const lines = parseLrc('[offset:+500]\n[00:10.00]甲\n[00:20.00]乙')
+    expect(lines).toHaveLength(2)
+    expect(lines[0]!.time).toBeCloseTo(10.5, 6)
+    expect(lines[1]!.time).toBeCloseTo(20.5, 6)
+  })
+
+  it('负偏移 = **提前**', () => {
+    const lines = parseLrc('[offset:-200]\n[00:10.00]甲')
+    expect(lines[0]!.time).toBeCloseTo(9.8, 6)
+  })
+
+  it('不带符号 = 正偏移', () => {
+    const lines = parseLrc('[offset:300]\n[00:10.00]甲')
+    expect(lines[0]!.time).toBeCloseTo(10.3, 6)
+  })
+
+  it('标签本身**不产生歌词行**', () => {
+    expect(parseLrc('[offset:+500]\n[00:10.00]甲')).toHaveLength(1)
+  })
+
+  it('畸形标签被**忽略**（不报错、不产生行、不改时间）', () => {
+    const lines = parseLrc('[offset:abc]\n[00:10.00]甲')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]!.time).toBeCloseTo(10, 6)
+  })
+
+  it('**词级**时间戳也跟着偏移', () => {
+    const lines = parseLrc('[offset:+500]\n[00:10.00]<00:10.00>甲')
+    expect(lines[0]!.words[0]!.start).toBeCloseTo(10.5, 6)
+  })
+
+  it('与服务端 offset **同向叠加**（文件内先、服务端后）', () => {
+    const lines = parseLyricEntries([entry({ content: '[offset:+500]\n[00:10.00]甲', offset: 200 })])
+    expect(lines[0]!.time).toBeCloseTo(10.7, 6)
+  })
+
+  it('标签只在**行首**才算（歌词正文里的同形文本**不误判**）', () => {
+    const lines = parseLrc('[00:10.00]正文[offset:+500]后面')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]!.time).toBeCloseTo(10, 6)
+    expect(lines[0]!.text).toBe('正文[offset:+500]后面')
+  })
+
+  it('标签可以与时间标签**同一行**（行首）', () => {
+    const lines = parseLrc('[offset:+500][00:10.00]甲')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]!.time).toBeCloseTo(10.5, 6)
+    expect(lines[0]!.text).toBe('甲')
+  })
+})

@@ -34,6 +34,25 @@ const TIME_TAG = /\[(\d+):(\d{1,2})(?:[.:](\d{1,9}))?\]/
 /** 逐字标签：`<mm:ss.xx>`（A2 增强 LRC 格式）；小数位规则同 `TIME_TAG`。 */
 const WORD_TAG = /<(\d+):(\d{1,2})(?:[.:](\d{1,9}))?>/g
 
+/**
+ * LRC 的**同步校正标签**：`[offset:+N]` / `[offset:-N]` / `[offset:N]`（毫秒）。
+ *
+ * - **正数 = 时间戳整体加 N** ⇒ 歌词**延后** N 毫秒（与 `applyOffset` 同向）；
+ * - **负数 = 提前** N 毫秒；
+ * - **只在**行首**认**（LRC 的头标签就在那儿）⇒ 歌词正文里的同形文本**不误判**；
+ * - 取**第一个**出现的标签；
+ * - 畸形标签（`[offset:abc]` / `[offset:]`）**忽略**（不报错、不产生歌词行）。
+ */
+const OFFSET_TAG = /\[offset:\s*([+-]?\d+)\s*\]/i
+
+/**
+ * 文件里 `[offset:±N]` 的**取值上限**（毫秒）。
+ *
+ * ⚠️ 标签来自**外部文件**（NAS / 外部歌词源）⇒ 钳到 ±60 秒，
+ *    防畸形文件把整份歌词推到天边。
+ */
+const MAX_FILE_OFFSET_MS = 60_000
+
 /** 钳到 0 后的最小步进（1ms）：保证钳平后的时间序列仍然**严格单调递增**。 */
 const MIN_STEP = 0.001
 
@@ -162,12 +181,30 @@ function parseWordSegments(content: string, lineTime: number): { text: string; w
 }
 
 /** 扫描原始文本 → 原始行列表（一个时间标签一行，多时间标签展开成多行）。 */
-function parseRawLines(raw: string, enhanced: boolean): RawEntry[] {
+function parseRawLines(raw: string, enhanced: boolean): { entries: RawEntry[]; offsetMs: number } {
   const entries: RawEntry[] = []
-  if (typeof raw !== 'string' || raw === '') return entries
+  if (typeof raw !== 'string' || raw === '') return { entries, offsetMs: 0 }
+  /** 文件自带的同步校正量（毫秒）；取**第一个**出现的标签。 */
+  let offsetMs = 0
+  let offsetSeen = false
   for (const rawLine of raw.split(/\r\n|\r|\n/)) {
-    const trimmed = rawLine.trim()
+    let trimmed = rawLine.trim()
     if (!trimmed) continue
+    // ⚠️ `[offset:±N]` 必须是**行首**（LRC 的头标签就在那儿）：
+    //    ⇒ 歌词**正文里**的同形文本不会被误当成校正标签。
+    const tagMatch = OFFSET_TAG.exec(trimmed)
+    if (tagMatch && tagMatch.index === 0) {
+      if (!offsetSeen) {
+        const value = Number(tagMatch[1])
+        offsetMs = Number.isFinite(value)
+          ? Math.max(-MAX_FILE_OFFSET_MS, Math.min(MAX_FILE_OFFSET_MS, value))
+          : 0
+        offsetSeen = true
+      }
+      // 把标签摘掉，剩下的部分照常按时间标签解析（`[offset:+500][00:12.00]词` 也认）。
+      trimmed = trimmed.slice(tagMatch[0].length).trim()
+      if (!trimmed) continue
+    }
     let rest = trimmed
     const times: number[] = []
     for (;;) {
@@ -185,7 +222,7 @@ function parseRawLines(raw: string, enhanced: boolean): RawEntry[] {
       entries.push({ time, text: parsed.text, words: parsed.words })
     }
   }
-  return entries
+  return { entries, offsetMs }
 }
 
 /**
@@ -212,17 +249,130 @@ export function isSameText(a: string, b: string): boolean {
   return left === right
 }
 
-/** 在 `[time, end]` 区间内按词数均匀切分出伪逐字。 */
+// ---------------------------------------------------------------------------
+// 伪逐字：按**音节权重**分配行时长（T66）
+// ---------------------------------------------------------------------------
+
+/**
+ * 估算一个拉丁词的音节数（**启发式**，不追求英语 phonology 精确）。
+ *
+ * 规则（定死）：
+ * 1. 只保留 `a-z`（其余字符丢掉）；
+ * 2. 长度 ≤ 3 ⇒ **1**（`the` / `a` / `you` 之类）；
+ * 3. 去掉词尾的**哑 e / 哑 es**（`make`→`mak`、`makes`→`mak`）；
+ * 4. 去掉词首的 `y`（不算音节：`yes`→`es`）；
+ * 5. 数**元音组**（连续的元音字母算 1 个音节：`ea` / `eau` / `io` 各算 1）。
+ *
+ * ⚠️ 个别词会差 1 个音节（如 `away` 估成 3）——**方向正确比绝对精确更重要**：
+ *    长词分到更长时间，这正是本任务要的。
+ */
+function estimateSyllables(word: string): number {
+  const letters = word.toLowerCase().replace(/[^a-z]/g, '')
+  if (!letters) return 1
+  if (letters.length <= 3) return 1
+  // 词尾哑 e / 哑 es（`make`→`mak`、`makes`→`mak`）。
+  const stripped = letters.replace(/(?:[^laeiouy]es|[^laeiouy]e)$/, '')
+  // 词首 y 不算音节（`yes`→`es`）。
+  const body = stripped.replace(/^y/, '')
+  const groups = body.match(/[aeiouy]+/g)
+  const count = groups ? groups.length : 0
+  return count > 0 ? count : 1
+}
+
+/**
+ * 一个词的「音节权重」。
+ *
+ * - **汉字**：1 字 = 1 音节（`占位` → 权重 2）；
+ * - **拉丁词**：按 `estimateSyllables` 估（`hello` → 2、`beautiful` → 3）；
+ * - **数字 / 纯标点**：1 份（读不出来就别瞎猜）。
+ */
+function tokenWeight(token: string): number {
+  let cjk = 0
+  for (const ch of token) {
+    if (isCjk(ch)) cjk += 1
+  }
+  if (cjk > 0) return cjk
+  const latin = token.replace(/[^\p{Script=Latin}]/gu, '')
+  if (!latin) return 1
+  return estimateSyllables(latin)
+}
+
+/**
+ * 把总毫秒按权重分给各词。
+ *
+ * - `floor` 之后按**小数部分从大到小**补齐（平局靠前）
+ *   ⇒ 总量**精确等于**总毫秒（不多不少）；
+ * - 预算够时（总毫秒 ≥ 词数）保证**每词至少 1ms**
+ *   （从最宽裕的词里扣回来，总量不变）
+ *   ⇒ 词起点**严格递增**、每个词 `end > start`；
+ * - 预算不够时（总毫秒 < 词数，现实中不可达）**如实退化**：不保证严格递增。
+ */
+function allocateMs(totalMs: number, weights: number[], totalWeight: number): number[] {
+  const count = weights.length
+  const exact = weights.map((weight) => (totalMs * weight) / totalWeight)
+  const allocations = exact.map((value) => Math.floor(value))
+  let rest = totalMs - allocations.reduce((sum, value) => sum + value, 0)
+  const order = exact
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((a, b) => b.fraction - a.fraction || a.index - b.index)
+  let cursor = 0
+  while (rest > 0) {
+    const target = order[cursor % count]!
+    allocations[target.index] = allocations[target.index]! + 1
+    rest -= 1
+    cursor += 1
+  }
+  if (totalMs >= count) {
+    let deficit = 0
+    for (let i = 0; i < count; i++) {
+      if (allocations[i]! < 1) {
+        allocations[i] = 1
+        deficit += 1
+      }
+    }
+    const donors = allocations
+      .map((value, index) => ({ index, value }))
+      .sort((a, b) => b.value - a.value || a.index - b.index)
+    for (const donor of donors) {
+      while (deficit > 0 && allocations[donor.index]! > 1) {
+        allocations[donor.index] = allocations[donor.index]! - 1
+        deficit -= 1
+      }
+      if (deficit === 0) break
+    }
+  }
+  return allocations
+}
+
+/**
+ * 在 `[time, end]` 区间内按**音节权重**切出伪逐字。
+ *
+ * ⚠️ 与旧实现（按**词数**均分）的差别**只在分配比例**：
+ *    - 切分规则（`splitIntoWords`）**一字不改**；
+ *    - 「总量 = 行时长」「首词起点 = 行时间」「末词终点 = 下一行时间」**一字不改**；
+ *    ⇒ **纯中文行每个字 1 音节 ⇒ 分配结果与旧实现逐字相同**。
+ */
 function pseudoWords(text: string, time: number, end: number): LyricWord[] {
   const tokens = splitIntoWords(text)
   if (!tokens.length) return []
-  const duration = end - time
-  const count = tokens.length
-  return tokens.map((token, index) => ({
-    text: token,
-    start: round3(time + (duration * index) / count),
-    end: round3(time + (duration * (index + 1)) / count),
-  }))
+  const startMs = Math.round(time * 1000)
+  const endMs = Math.round(end * 1000)
+  const totalMs = Math.max(0, endMs - startMs)
+  const weights = tokens.map(tokenWeight)
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0)
+  const allocations = allocateMs(totalMs, weights, totalWeight)
+  const words: LyricWord[] = []
+  let cursor = startMs
+  for (let i = 0; i < tokens.length; i++) {
+    const span = allocations[i]!
+    words.push({
+      text: tokens[i]!,
+      start: round3(cursor / 1000),
+      end: round3((cursor + span) / 1000),
+    })
+    cursor += span
+  }
+  return words
 }
 
 /**
@@ -310,12 +460,19 @@ export function parseLrc(raw: string, options?: { offsetMs?: number }): LyricLin
  * `parseLrc` 直接委托到这里——两者行为一致（要求 I：行级输入逐字一致，
  * 有逐字标签的输入也都要正确解析逐字）。
  *
+ * **偏移（T66）**：文件自带的 `[offset:±N]`（毫秒）与 `options.offsetMs`
+ * **同向叠加**（正数 = 延后），且**一次**施加。
+ *
  * @param raw LRC 原文；`null` / `undefined` / 空串 → 返回空数组。
  * @param options.offsetMs 可选的时间偏移（毫秒），语义见 `applyOffset`。
  */
 export function parseEnhancedLrc(raw: string, options?: { offsetMs?: number }): LyricLine[] {
-  const lines = assemble(parseRawLines(raw, true))
-  return options?.offsetMs ? applyOffset(lines, options.offsetMs) : lines
+  const parsed = parseRawLines(raw, true)
+  const lines = assemble(parsed.entries)
+  // 偏移 = 文件自带的 `[offset:±N]` **加** 调用方给的（服务端 `LyricEntry.offset`）。
+  // ⚠️ **一次**施加（不是分两次）⇒ 不会因为中途钳零而走形。
+  const totalOffset = parsed.offsetMs + (options?.offsetMs ?? 0)
+  return totalOffset ? applyOffset(lines, totalOffset) : lines
 }
 
 /**
@@ -509,7 +666,9 @@ export function parseLyricEntries(entries: LyricEntry[]): LyricLine[] {
   )
   if (!usable.length) return []
   const [original, ...rest] = usable
-  const originalLines = applyOffset(parseEnhancedLrc(original!.content), original!.offset ?? 0)
+  // ⚠️ 文件自带的 `[offset:±N]` 与服务端 `offset` 在**同一次**偏移里叠加
+  //    （`parseEnhancedLrc` 内部求和）⇒ 两者的正负语义天然一致（正 = 延后）。
+  const originalLines = parseEnhancedLrc(original!.content, { offsetMs: original!.offset ?? 0 })
   // ⚠️ **冗余副本要整条丢掉**（真机踩过的坑，2026-11-04）：
   //    实测 NAS 对**同一首歌**返回**两条 `source` 不同（1 / 2）但内容逐字相同**的记录
   //    ——它们是**同一份 LRC 的两份拷贝**，不是「原文 + 翻译」。
@@ -524,7 +683,7 @@ export function parseLyricEntries(entries: LyricEntry[]): LyricLine[] {
   if (!translationEntries.length) return originalLines
   const translationLines: LyricLine[] = []
   for (const item of translationEntries) {
-    for (const line of applyOffset(parseEnhancedLrc(item.content), item.offset ?? 0)) {
+    for (const line of parseEnhancedLrc(item.content, { offsetMs: item.offset ?? 0 })) {
       translationLines.push(line)
     }
   }

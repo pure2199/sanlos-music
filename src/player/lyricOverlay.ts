@@ -27,7 +27,8 @@ import { lyricApi } from '../api/lyric'
 import { usePlayerStore } from '../state/playerStore'
 import type { Song } from '../../shared/types'
 import type { LyricOverlayMessage, PlayerBridge, AppPrefs } from '../../shared/playerBridge'
-import { parseLyricEntries } from '../ui/lyrics/parse'
+import { parseLyricEntries, type LyricLine } from '../ui/lyrics/parse'
+import { applyAudibleLatency } from '../ui/lyrics/timing'
 import {
   defaultExternalLyricFetcher,
   loadLyricEntries,
@@ -63,6 +64,12 @@ export interface LyricOverlayPlayerState {
   position: number
   /** 是否正在播放。 */
   isPlaying: boolean
+  /**
+   * **可听延迟**（秒）：媒体渲染完成 → 用户真正听到之间的延迟（T66）。
+   *
+   * ⚠️ **可选**：拿不到时按 0 处理（**不补偿**）。
+   */
+  outputLatencySec?: number
 }
 
 /** 播放器 store 的最小接口。 */
@@ -144,6 +151,15 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
   let visibilityKnown = false
   /** 已经推过歌词的曲目 id（换歌才重新拉）。 */
   let loadedSongId: string | null = null
+  /**
+   * 已解析好的**原始**歌词行（**未**施加可听延迟补偿）。
+   *
+   * ⚠️ 为什么要缓存：换输出设备 → 延迟变了 → 需要**重推**一份带新偏移的歌词。
+   *    若每次都重新解析/重新拉 NAS ⇒ 白花一次请求。缓存后**只重推，不重取**。
+   */
+  let cachedLines: LyricLine[] = []
+  /** 当前缓存的曲目（重推时用）；`null` = 没有歌。 */
+  let cachedTrack: { id: string; title: string; artist: string } | null = null
   /** 拉歌词的令牌：切歌后旧请求回来时直接丢弃。 */
   let fetchToken = 0
 
@@ -151,12 +167,29 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
     bridge.pushLyricState(message)
   }
 
+  /**
+   * 推一次「曲目 + 歌词」（**已施加**当前的可听延迟补偿）。
+   *
+   * ⚠️ **补偿施加在歌词行上**（不是进度上）⇒ 悬浮窗 / 词岛的进度条与时间
+   *    仍然是**媒体真实位置**，只有歌词跟着延迟走。
+   */
+  function pushTrack(): void {
+    const latency = store.getState().outputLatencySec ?? 0
+    push({
+      kind: 'track',
+      track: cachedTrack,
+      lines: applyAudibleLatency(cachedLines, latency),
+    })
+  }
+
   /** 拉当前曲目的歌词并推送（`kind: 'track'`）。 */
   async function publishTrack(force = false): Promise<void> {
     const song = store.getState().current
     if (!song || song.id.length === 0) {
       loadedSongId = null
-      push({ kind: 'track', track: null, lines: [] })
+      cachedLines = []
+      cachedTrack = null
+      pushTrack()
       return
     }
     // ⚠️ `force` = 悬浮窗**刚打开**（可能刚创建，缓存里什么都没有）→ 必须重推。
@@ -179,19 +212,15 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
       )
       // 期间又切了歌 → 这份歌词已经过时，丢弃。
       if (token !== fetchToken) return
-      push({
-        kind: 'track',
-        track: { id: song.id, title: song.title, artist: song.artist },
-        lines: parseLyricEntries(result.entries),
-      })
+      cachedLines = parseLyricEntries(result.entries)
+      cachedTrack = { id: song.id, title: song.title, artist: song.artist }
+      pushTrack()
     } catch {
       if (token !== fetchToken) return
       // 取不到歌词不是致命错误：推一份空的（悬浮窗显示「暂无歌词」）。
-      push({
-        kind: 'track',
-        track: { id: song.id, title: song.title, artist: song.artist },
-        lines: [],
-      })
+      cachedLines = []
+      cachedTrack = { id: song.id, title: song.title, artist: song.artist }
+      pushTrack()
     }
   }
 
@@ -209,6 +238,11 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
     }
     if (state.position !== previous.position || state.isPlaying !== previous.isPlaying) {
       publishProgress()
+    }
+    // ⚠️ **换输出设备**（换耳机 / 换声卡 / 蓝牙连上）→ 可听延迟变了
+    //    ⇒ **重推**一份带新偏移的歌词（**不重新取歌词**，不花 NAS 请求）。
+    if (state.outputLatencySec !== previous.outputLatencySec) {
+      pushTrack()
     }
   })
 

@@ -93,6 +93,12 @@ export interface MediaElementLike {
   volume: number
   /** 是否静音。 */
   muted: boolean
+  /**
+   * 输出延迟（秒）：媒体内容渲染完成 → 用户**真正听到**之间的延迟（T66）。
+   *
+   * ⚠️ **可选**：浏览器不支持 / 拿不到时是 `undefined` ⇒ 按 **0** 处理（不补偿）。
+   */
+  readonly outputLatency?: number
   /** 开始播放。 */
   play(): Promise<void> | void
   /** 暂停。 */
@@ -188,6 +194,16 @@ export interface AudioContextLike {
   readonly state: string
   /** 采样率（Hz）；**可选**（拿不到时用 `SPECTRUM_FALLBACK_SAMPLE_RATE` 兜底）。 */
   readonly sampleRate?: number
+  /**
+   * 输出设备延迟（秒）；**可选**（T66：拿不到时按 0 处理）。
+   *
+   * ⚠️ 这是**设备级**的延迟（音频真正从声卡/蓝牙出去要多久）。
+   */
+  readonly outputLatency?: number
+  /**
+   * 音频图的处理延迟（秒）；**可选**（T66：拿不到时按 0 处理）。
+   */
+  readonly baseLatency?: number
   /** 输出端。 */
   readonly destination: AudioNodeLike
   /** 由媒体元素创建源节点（**同一个元素只能调一次**）。 */
@@ -639,7 +655,34 @@ export class PlayerEngine implements PlayerEngineLike {
       fallbackActive: this.fallbackActive,
       qualityPreparing: this.qualityPreparing,
       qualityNote: this.qualityNote,
+      outputLatencySec: this.readOutputLatencySec(),
     }
+  }
+
+  /**
+   * 读「**可听延迟**」（秒）：媒体内容渲染完成 → 用户真正听到之间的延迟（T66）。
+   *
+   * **取值规则（定死，勿改）**——**取第一个非零的可用值**，**绝不叠加**、**绝不猜**：
+   * 1. `AudioContext.outputLatency + AudioContext.baseLatency`
+   *    （音频走 WebAudio 图时的**设备级**延迟；我们的引擎起播时**一定**建图）；
+   * 2. `HTMLMediaElement.outputLatency`（**没有**上下文时的元素级兜底）；
+   * 3. 都拿不到 / 非法 / ≤ 0 ⇒ **0**（不补偿，歌词行为与本任务之前完全一致）。
+   *
+   * ⚠️ **为什么不相加**：Chromium 在元素被 `createMediaElementSource` 接管后，
+   *    `element.outputLatency` 与 `context.outputLatency` 的包含关系**随音频栈而变**
+   *    ⇒ 相加会**双重补偿**（歌词飘太晚）。取其一最稳。
+   * ⚠️ **哪个更准待真机校准**（见 `docs/superpowers/specs/2026-11-06-sanlos-music-lyric-timing-design.md`）。
+   */
+  private readOutputLatencySec(): number {
+    const context = this.context
+    if (context) {
+      const device = (context.outputLatency ?? 0) + (context.baseLatency ?? 0)
+      if (Number.isFinite(device) && device > 0) return device
+    }
+    const element = this.element
+    const value = element?.outputLatency ?? 0
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+    return 0
   }
 
   /**

@@ -272,4 +272,11 @@ export interface PlayerState {
    * ⚠️ **可选**：没有说明时是 `null` / `undefined`。
    */
   qualityNote?: string | null
+  /**
+   * **可听延迟**（秒）：媒体内容渲染完成 → 用户真正听到之间的延迟（T66）。
+   *
+   * ⚠️ 歌词据此**整体延后**（详见 `src/ui/lyrics/timing.ts`）。
+   * ⚠️ **可选**：拿不到 / 未播放时是 `0` 或 `undefined` ⇒ **不补偿**。
+   */
+  outputLatencySec?: number
 }
