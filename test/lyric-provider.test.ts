@@ -31,8 +31,11 @@ import {
   renderLyricTemplate,
   stripHighlightTags,
   validateLyricTemplate,
+  yrcToEnhancedLrc,
   type LyricProvider,
 } from '../electron/lyricProvider'
+import { toExternalEntries } from '../src/player/lyricSource'
+import { parseLyricEntries } from '../src/ui/lyrics/parse'
 import { PrefsStore, registerLyricIpc, type IpcMainEventsLike } from '../electron/ipc'
 
 // ---------------------------------------------------------------------------
@@ -745,5 +748,210 @@ describe('registerLyricIpc', () => {
     await handlers.get('lyric:fetch')?.({}, { title: '占位歌名' })
     const source = (provider.calls[0] as [string])[0]
     expect(source).toBe(DEFAULT_LYRIC_SOURCE)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T67：网易云 yrc（真逐字）→ 增强 LRC
+// ---------------------------------------------------------------------------
+//
+// ⚠️ yrc 样本是**按实测格式**造的，**歌词文本是占位**（不是真实歌词）。
+//    实测结构（2026-11-06，匿名请求）：
+//      [行开始ms,行时长ms](词开始ms,词时长ms,0)词文本…
+//    - 词时间是**绝对毫秒**、跨行连续递增；
+//    - 词元组**之间没有分隔符**；
+//    - **词时长可以为 0**（标点 / 停顿占位）。
+// ---------------------------------------------------------------------------
+
+/** 按实测结构造的 yrc 样本（文本是占位）。 */
+const YRC_SAMPLE = [
+  '[0,1000](0,1000,0)占位首行',
+  '[6190,4440](6190,2190,0)甲(8380,540,0)乙(9280,1350,0)丙',
+].join('\n')
+
+/** 带**零时长词**（标点占位）的 yrc 样本。 */
+const YRC_ZERO_DURATION = '[0,1000](0,600,0)甲(600,0,0),(600,400,0)乙'
+
+/** 剥掉全部结构字符（行头 / 词元组 / 逐字标签 / 行标签 / 数字 / 空白）→ 只剩文字。 */
+function textOnly(text: string): string {
+  return text
+    .replace(/\[\d+,\d+\]/g, '')
+    .replace(/\(\d+,\d+,\d+\)/g, '')
+    .replace(/<\d+:\d{1,2}([.:]\d{1,3})?>/g, '')
+    .replace(/\[\d+:\d{1,2}([.:]\d{1,3})?\]/g, '')
+    .replace(/[\s\d]/g, '')
+}
+
+/** 从增强 LRC 里读出全部逐字时间（毫秒）。 */
+function wordTimesMs(enhanced: string): number[] {
+  const out: number[] = []
+  const re = /<(\d+):(\d{1,2})(?:[.:](\d{1,3}))?>/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(enhanced)) !== null) {
+    const frac = m[3] ? Number(m[3]) / 10 ** m[3].length : 0
+    out.push(Math.round((Number(m[1]) * 60 + Number(m[2]) + frac) * 1000))
+  }
+  return out
+}
+
+describe('yrc → 增强 LRC 转换（T67）', () => {
+  it('行数与行时间：与 yrc 的行头一致（I-1）', () => {
+    const out = yrcToEnhancedLrc(YRC_SAMPLE)
+    const rows = out.split('\n')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.startsWith('[00:00.00]')).toBe(true)
+    expect(rows[1]!.startsWith('[00:06.19]')).toBe(true)
+  })
+
+  it('词时间**严格递增**（I-2）', () => {
+    const times = wordTimesMs(yrcToEnhancedLrc(YRC_SAMPLE))
+    expect(times).toEqual([0, 6190, 8380, 9280])
+    for (let i = 1; i < times.length; i++) {
+      expect(times[i]!).toBeGreaterThan(times[i - 1]!)
+    }
+  })
+
+  it('**不丢字**（I-3）：转换前后的纯文字逐字相同', () => {
+    expect(textOnly(yrcToEnhancedLrc(YRC_SAMPLE))).toBe(textOnly(YRC_SAMPLE))
+  })
+
+  it('零时长词**并入前一个词**（I-4），不单独成词', () => {
+    const out = yrcToEnhancedLrc(YRC_ZERO_DURATION)
+    // 行头 1 个标签 + **2** 个有效词（零时长的标点并进了前一个词）
+    expect(out.split('<').length - 1).toBe(2)
+    expect(out).toContain('<00:00.00>甲,')
+    expect(out).toContain('<00:00.60>乙')
+  })
+
+  it('输出**能被 looksLikeLrc 接受**（I-5）', () => {
+    expect(looksLikeLrc(yrcToEnhancedLrc(YRC_SAMPLE))).toBe(true)
+  })
+
+  it('空串 / 非串 → 空串（不抛异常）', () => {
+    expect(yrcToEnhancedLrc('')).toBe('')
+    expect(yrcToEnhancedLrc(null as unknown as string)).toBe('')
+    expect(yrcToEnhancedLrc(undefined as unknown as string)).toBe('')
+  })
+
+  it('畸形输入不抛异常、不产生坏行', () => {
+    for (const bad of ['[0,1000]', '[abc,def](x)词', '(0,100,0)没有行头', '[(0,100,0)缺右括号']) {
+      expect(() => yrcToEnhancedLrc(bad)).not.toThrow()
+      expect(typeof yrcToEnhancedLrc(bad)).toBe('string')
+    }
+  })
+
+  it('词文本里含括号**不会错位**', () => {
+    const out = yrcToEnhancedLrc('[0,2000](0,1000,0)括号(测试)(2000,1000,0)后')
+    expect(out).toContain('括号(测试)')
+    expect(out).toContain('<00:02.00>后')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 网易云适配器 · 真逐字
+// ---------------------------------------------------------------------------
+
+describe('网易云适配器 · 真逐字（T67）', () => {
+  const searchBody = JSON.stringify({
+    result: {
+      songCount: 1,
+      songs: [{ id: 111, name: '占位歌名', duration: 180_000, artists: [{ name: '占位歌手' }] }],
+    },
+  })
+
+  it('请求**带 yv=-1**（逐字参数；不带就永远拿不到 yrc）', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      { match: 'music.163.com/api/song/lyric', body: JSON.stringify({ lrc: { lyric: LRC_SAMPLE } }) },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(calls[1]).toContain('yv=-1')
+  })
+
+  it('响应带 yrc → 原文用**真逐字**（含 <mm:ss.xx>），翻译照旧', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({
+          lrc: { lyric: LRC_SAMPLE },
+          tlyric: { lyric: '[00:10.00]占位翻译' },
+          yrc: { version: 1, lyric: YRC_SAMPLE },
+        }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.original).toContain('<00:06.19>')
+    expect(result.translation).toBe('[00:10.00]占位翻译')
+  })
+
+  it('**只有 yrc、没有 lrc** → 也能出歌词（此前会被判成 not-found）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({ yrc: { version: 1, lyric: YRC_SAMPLE } }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.original).toContain('<00:06.19>')
+  })
+
+  it('**没有 yrc** → 行为与从前**一字不变**（仍用 lrc）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({
+          lrc: { lyric: LRC_SAMPLE },
+          tlyric: { lyric: '[00:10.00]占位翻译' },
+        }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.original).toBe(LRC_SAMPLE)
+    expect(result.translation).toBe('[00:10.00]占位翻译')
+  })
+
+  it('yrc **畸形** → 回退 lrc（不丢掉整首歌）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({ lrc: { lyric: LRC_SAMPLE }, yrc: { lyric: '这不是 yrc' } }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.original).toBe(LRC_SAMPLE)
+  })
+
+  it('端到端：yrc 产物经解析后**某行的词数 > 1**（真逐字，不是伪逐字）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({ yrc: { version: 1, lyric: YRC_SAMPLE } }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    const lines = parseLyricEntries(toExternalEntries('song-1', result))
+    expect(lines.length).toBeGreaterThan(0)
+    expect(lines.some((line) => line.words.length > 1)).toBe(true)
   })
 })

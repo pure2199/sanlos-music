@@ -154,6 +154,117 @@ export function isLoopbackHost(hostname: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
 }
 
+// ---------------------------------------------------------------------------
+// 网易云 yrc（真逐字）→ 增强 LRC（T67）
+// ---------------------------------------------------------------------------
+//
+// 为什么要有它
+// ---------------------------------------------------------------------------
+// 官方飞牛 APP 与 Lyricify 这类工具拿到的**逐字**歌词（enhanced LRC / yrc / qrc），
+// 才有**真的跟嘴**的卡拉OK 填色。我们此前只有**行级** LRC ⇒ 逐字是**推算**的。
+//
+// 网易云的 `yrc` 字段就是**真逐字**（实测 2026-11-06，匿名请求）：
+//
+//     [行开始ms,行时长ms](词开始ms,词时长ms,0)词文本(词开始ms,词时长ms,0)词文本
+//
+// - 词时间是**绝对毫秒**（从歌开头算起），**跨行连续递增**；
+// - 词元组**之间没有分隔符**；
+// - **词时长可以为 0**（标点 / 停顿占位）。
+//
+// ⇒ 这里把它转成**标准增强 LRC**（`<mm:ss.xx>` 逐字标签），
+//   交给**现有**解析器（`parseWordSegments` 早就在等喂）⇒ **渲染层零改动**。
+// ---------------------------------------------------------------------------
+
+/**
+ * yrc 的**词元组**：`(开始ms, 时长ms, 0)`。
+ *
+ * ⚠️ **只认数字形状**的元组 ⇒ 词文本里含 `(` / `)` 也不会错位
+ *    （实测样本的词文本里就有标点）。
+ */
+const YRC_WORD_PATTERN = /\((-?\d+),(-?\d+),(-?\d+)\)/g
+
+/**
+ * 毫秒 → LRC 时间标签。
+ *
+ * - 整除 10 ⇒ 用**厘秒**（`[mm:ss.xx]`），否则用**毫秒**（`[mm:ss.xxx]`）
+ *   ⇒ **既短又不丢精度**（实测 yrc 的时间基本都是 10 的倍数）。
+ */
+function msToLrcTag(ms: number): string {
+  const total = Math.max(0, Math.round(ms))
+  const minutes = Math.floor(total / 60_000)
+  const seconds = Math.floor((total % 60_000) / 1000)
+  const rest = total % 1000
+  const fraction =
+    rest % 10 === 0 ? String(rest / 10).padStart(2, '0') : String(rest).padStart(3, '0')
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${fraction}`
+}
+
+/**
+ * 把网易云的 **yrc（真逐字）** 转成**增强 LRC**（`<mm:ss.xx>` 逐字标签）。
+ *
+ * **规则（定死）**：
+ * 1. **逐行**扫描；行头用 `^\[(\d+),(\d+)\]` 取「行开始 ms」；
+ * 2. 行内按**顺序扫描**找词元组（只认数字形状）⇒ 词文本里的括号**不会错位**；
+ * 3. 每个词 → `<mm:ss.xx>`（词开始 ms）+ **原样**的词文本
+ *    （**不 trim 词内的空格**：英文歌的词间空格要靠它；
+ *    渲染层的整行底层文本本来就会保留空格）；
+ * 4. **零时长词**（实测是标点 / 停顿占位）→ **并入前一个词**，不单独成词
+ *    （没有前词可并 ⇒ 丢弃）；
+ * 5. 词开始早于行开始（异常数据）→ **钳到行开始**；
+ * 6. 一行里**没有有效词** → **跳过该行**（不产生歌词行）；
+ * 7. 空串 / 非串 → 返回空串（**不抛异常**）。
+ *
+ * @returns 标准增强 LRC（多行，行间 `\n`）。
+ */
+export function yrcToEnhancedLrc(yrc: string): string {
+  if (typeof yrc !== 'string' || yrc === '') return ''
+  const out: string[] = []
+  for (const rawLine of yrc.split(/\r\n|\r|\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const head = /^\[(\d+),(\d+)\]/.exec(line)
+    if (!head) continue
+    const lineStart = Number(head[1])
+    const rest = line.slice(head[0].length)
+
+    // 行内按**顺序扫描**找词元组（只认数字形状 ⇒ 词文本里的括号不会错位）。
+    const pattern = new RegExp(YRC_WORD_PATTERN.source, 'g')
+    const marks: { start: number; dur: number; from: number; to: number }[] = []
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(rest)) !== null) {
+      marks.push({
+        start: Number(match[1]),
+        dur: Number(match[2]),
+        from: match.index + match[0].length,
+        to: match.index,
+      })
+    }
+    if (!marks.length) continue
+
+    // 零时长词**并入前一个词**（实测是标点 / 停顿占位），不单独成词。
+    const words: { start: number; text: string }[] = []
+    for (let i = 0; i < marks.length; i++) {
+      const mark = marks[i]!
+      const textEnd = i + 1 < marks.length ? marks[i + 1]!.to : rest.length
+      const text = rest.slice(mark.from, textEnd)
+      if (mark.dur === 0) {
+        const previous = words[words.length - 1]
+        if (previous) previous.text += text
+        continue
+      }
+      words.push({ start: Math.max(lineStart, mark.start), text })
+    }
+    if (!words.length) continue
+
+    // 第一个词元组**之前**的文本（实测通常为空）→ 放在行标签之后
+    //    ⇒ 渲染层的 `parseWordSegments` 会把它当成该行的首段。
+    const leading = rest.slice(0, marks[0]!.to).trim()
+    const body = words.map((word) => `<${msToLrcTag(word.start)}>${word.text}`).join('')
+    out.push(`[${msToLrcTag(lineStart)}]${leading}${body}`)
+  }
+  return out.join('\n')
+}
+
 /**
  * 判断一段文本**是不是 LRC**（含 `[mm:ss` 或 `[mm:ss.xx` 时间戳）。
  *
@@ -317,6 +428,13 @@ function readNeteaseCandidates(payload: unknown): Candidate[] {
 interface NeteaseLyricPayload {
   lrc?: { lyric?: unknown }
   tlyric?: { lyric?: unknown }
+  /**
+   * **逐字**歌词（yrc）。
+   *
+   * ⚠️ **必须请求 `yv=-1` 才有**（实测：带 → 有；不带 → 根本没有这个字段）。
+   * ⚠️ 形状实测 = `{ version, lyric }`。
+   */
+  yrc?: { lyric?: unknown }
 }
 
 /**
@@ -345,9 +463,13 @@ async function fetchNetease(
   const candidate = pickCandidate(readNeteaseCandidates(searchPayload), query)
   if (!candidate) return { status: 'not-found' }
 
-  const lyricRes = await fetchImpl(`${NETEASE_LYRIC_URL}?id=${encodeURIComponent(candidate.id)}&lv=1&kv=1&tv=-1`, {
-    headers: { accept: 'application/json', 'user-agent': USER_AGENT },
-  })
+  // ⚠️ `yv=-1` = **要逐字**（yrc）。实测：不带这个参数，网易云**根本不会**回 yrc 字段。
+  const lyricRes = await fetchImpl(
+    `${NETEASE_LYRIC_URL}?id=${encodeURIComponent(candidate.id)}&lv=1&kv=1&tv=-1&yv=-1`,
+    {
+      headers: { accept: 'application/json', 'user-agent': USER_AGENT },
+    },
+  )
   if (!lyricRes.ok) {
     return { status: 'error', message: `网易云歌词返回 ${lyricRes.status}` }
   }
@@ -358,8 +480,13 @@ async function fetchNetease(
   } catch {
     return { status: 'error', message: '网易云歌词返回的不是 JSON' }
   }
-  const original = typeof lyricPayload.lrc?.lyric === 'string' ? lyricPayload.lrc.lyric : ''
   const translation = typeof lyricPayload.tlyric?.lyric === 'string' ? lyricPayload.tlyric.lyric : ''
+  // ⚠️ **逐字优先**（T67）：有 yrc 就用它（真逐字 ⇒ 卡拉OK 填色真的跟嘴）；
+  //    没有 yrc ⇒ 回退行级 lrc（**行为与本任务之前一字不变**）。
+  //    ⚠️ yrc 畸形（转换出空串）⇒ **回退 lrc**，不因此丢掉整首歌。
+  const yrc = typeof lyricPayload.yrc?.lyric === 'string' ? lyricPayload.yrc.lyric : ''
+  const lrc = typeof lyricPayload.lrc?.lyric === 'string' ? lyricPayload.lrc.lyric : ''
+  const original = yrc ? yrcToEnhancedLrc(yrc) || lrc : lrc
   if (!looksLikeLrc(original)) return { status: 'not-found' }
   return { status: 'ok', source: 'netease', original, translation }
 }
