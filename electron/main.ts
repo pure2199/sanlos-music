@@ -108,12 +108,41 @@ let lyricVisible = false
 let lyricPlaying = false
 
 /**
- * 主进程缓存的**最后一条**悬浮歌词消息。
+ * 主进程缓存的**最后一条「曲目 + 歌词」**消息（`kind: 'track'`）。
  *
  * ⚠️ 悬浮窗**刚创建**时，渲染进程可能还没推过消息 →
- *    页面加载完成后把这条缓存补给它（否则它要等到下一次切歌才有内容）。
+ *    页面加载完成后把缓存补给它（否则它要等到下一次切歌才有内容）。
  */
-let lastLyricMessage: LyricOverlayMessage | null = null
+let lastTrackMessage: LyricOverlayMessage | null = null
+
+/**
+ * 主进程缓存的**最后一条「播放进度」**消息（`kind: 'progress'`）。
+ *
+ * ⚠️ **为什么必须与 `lastTrackMessage` 分开缓存**（T71 真机验证发现）：
+ *    「曲目 + 歌词」与「播放位置」是**两条不同的消息**
+ *    （见 `shared/playerBridge.ts` 的判别联合），而新建的歌词窗口
+ *    **只拿得到最后一条** ⇒ 它拿到了歌词却**没有位置** ⇒ 位置停在 0
+ *    ⇒ 当前词不在任何被渲染的行里 ⇒ **卡拉OK 不推进**
+ *    （播放时靠后续 ~4Hz 的 `progress` 才会追上 ⇒ 平时不易察觉；
+ *    **暂停时永远停在 0**）。
+ */
+let lastProgressMessage: LyricOverlayMessage | null = null
+
+/**
+ * 把缓存的歌词消息**补发**给一个刚加载完的歌词窗口
+ * （经典悬浮窗 / 灵动态词岛共用）。
+ *
+ * ⚠️ **必须补发两条**（T71 真机验证发现的缺陷）：
+ *    - `track`：曲目 + 歌词（没有它，窗口是空的）；
+ *    - `progress`：播放位置 + 是否在播（**没有它，位置停在 0**）。
+ *
+ * ⚠️ 只补发「最后一条」**不够**：那两条是**不同的消息**，而窗口创建时
+ *    渲染进程推的消息**早于页面加载完成** → 已被丢弃。
+ */
+const replayLyricState = (target: BrowserWindow): void => {
+  if (lastTrackMessage) target.webContents.send('lyric:state', lastTrackMessage)
+  if (lastProgressMessage) target.webContents.send('lyric:state', lastProgressMessage)
+}
 
 /** 调出主窗口（托盘左键、单实例 `second-instance`、IPC `win:*` 都走它）。 */
 function showMainWindow(): void {
@@ -577,11 +606,9 @@ if (!isPrimaryInstance) {
           lyricWindow = null
         })
 
-        // 页面加载完成 → 把缓存的消息补给它（否则要等到下一次切歌才有内容）。
+        // 页面加载完成 → 把缓存的消息**补发**给它：曲目 + 歌词 **和** 播放位置（缺一不可，见 `replayLyricState`）。
         win.webContents.on('did-finish-load', () => {
-          if (lastLyricMessage) {
-            win.webContents.send('lyric:state', lastLyricMessage)
-          }
+          replayLyricState(win)
         })
 
         if (devServerUrl) {
@@ -656,11 +683,9 @@ if (!isPrimaryInstance) {
           islandWindow = null
         })
 
-        // 页面加载完成 → 把缓存的消息补给它（否则要等到下一次切歌才有内容）。
+        // 页面加载完成 → 把缓存的消息**补发**给它：曲目 + 歌词 **和** 播放位置（缺一不可，见 `replayLyricState`）。
         win.webContents.on('did-finish-load', () => {
-          if (lastLyricMessage) {
-            win.webContents.send('lyric:state', lastLyricMessage)
-          }
+          replayLyricState(win)
         })
 
         if (devServerUrl) {
@@ -800,7 +825,10 @@ if (!isPrimaryInstance) {
         },
         // 悬浮歌词（Task 10）：主进程**只转发**，不理解歌词内容。
         onLyricState: (message) => {
-          lastLyricMessage = message
+          // ⚠️ T71 真机补丁：**按 `kind` 分别缓存** ——「曲目 + 歌词」与「播放位置」
+          //    是**两条不同的消息**，新建的歌词窗口**两条都要**（见 `replayLyricState`）。
+          if (message.kind === 'track') lastTrackMessage = message
+          else if (message.kind === 'progress') lastProgressMessage = message
           // ⚠️ T69：更新**播放状态**（临时态，不落盘）⇒ 顺带更新词岛可见性。
           //    ⚠️ 必须在转发**之前**做：转发用的是「当前形态的那个窗口」，
           //    而判定可能刚刚把词岛窗口**建出来**（先建、先转发）。
