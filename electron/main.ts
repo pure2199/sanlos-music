@@ -33,6 +33,7 @@ import { SessionManager } from './session'
 import { createCoverFetcher, createTray } from './tray'
 import { createBoundsSaver, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, resolveWindowBounds } from './windowBounds'
 import { islandBounds, isPointInsideRect, ISLAND_WINDOW_HEIGHT, ISLAND_WINDOW_WIDTH } from './islandAnchor'
+import { playingFromLyricMessage, shouldShowIsland } from './islandVisibility'
 import { createUpdateController } from './update'
 
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
@@ -93,6 +94,18 @@ let lyricMode: LyricOverlayMode = 'classic'
 
 /** 悬浮窗当前是否可见（主进程侧的状态；与 `prefs.lyricOverlay.visible` 同步）。 */
 let lyricVisible = false
+
+/**
+ * 主进程侧的**播放状态**（T69 的临时态，**不落盘**）。
+ *
+ * ⚠️ **它不是用户偏好**：它只决定「词岛胶囊现在该不该挂着」。
+ *    「没有歌 / 暂停 ⇒ 词岛隐藏」靠它 ⇒ 它**绝不能**被写进 `prefs.json`。
+ * ⚠️ **绝不能用 `setLyricVisible(false)` 实现「暂停隐藏」**：那会发
+ *    `lyric:visibility(false)` ⇒ 渲染层 `enabled = false` ⇒ **不再推任何
+ *    `lyric:state`** ⇒ 主进程再也收不到 `isPlaying: true`
+ *    ⇒ **恢复播放后词岛永不再现（死锁）**。
+ */
+let lyricPlaying = false
 
 /**
  * 主进程缓存的**最后一条**悬浮歌词消息。
@@ -673,6 +686,37 @@ if (!isPrimaryInstance) {
       }
 
       /**
+       * 按「应显示」更新**词岛**的显隐（T69 的唯一入口）。
+       *
+       * ⚠️ **经典悬浮窗（classic）完全不受本函数影响** —— 形态不是词岛就直接返回。
+       * ⚠️ **只在「应显示」与「当前是否可见」不一致时才动手**：
+       *    `lyric:state` 的 `progress` 是 ~4Hz 的高频消息 ⇒ 无守卫就会反复
+       *    `show()` / `hide()`（闪屏 + 无谓的开销）。
+       * ⚠️ **不落盘、不发 `lyric:visibility`** ⇒ 渲染层继续推 `isPlaying`，
+       *    我们才知道什么时候该把词岛收回来（否则就是死锁）。
+       */
+      const applyIslandVisibility = (): void => {
+        // 经典形态：本函数**只管词岛** ⇒ 一字不动经典窗的行为。
+        if (lyricMode !== 'island') return
+
+        const shouldShow = shouldShowIsland({
+          visible: lyricVisible,
+          mode: lyricMode,
+          playing: lyricPlaying,
+        })
+        const win = islandWindow && !islandWindow.isDestroyed() ? islandWindow : null
+
+        if (shouldShow) {
+          if (win && win.isVisible()) return
+          const created = createIslandWindow()
+          reanchorIsland()
+          created?.show()
+          return
+        }
+        if (win && win.isVisible()) win.hide()
+      }
+
+      /**
        * 切换桌面歌词的**形态**（T45）。
        *
        * ⚠️ 两种形态**互斥**：切过去时另一种收起；新窗口建好后
@@ -699,9 +743,9 @@ if (!isPrimaryInstance) {
         if (!lyricVisible) return
 
         if (next === 'island') {
-          const win = createIslandWindow()
-          reanchorIsland()
-          win?.show()
+          // ⚠️ T69：切到词岛 ⇒ 走**统一**的可见性判定
+          //    （「用户开着」+「正在播放」两个条件都归它管）。
+          applyIslandVisibility()
         } else {
           createLyricWindow()?.show()
         }
@@ -713,9 +757,8 @@ if (!isPrimaryInstance) {
         if (visible) {
           // ⚠️ 按**当前形态**建对应的窗口（T45：经典悬浮窗 ↔ 灵动态词岛）。
           if (lyricMode === 'island') {
-            const island = createIslandWindow()
-            reanchorIsland()
-            island?.show()
+            // ⚠️ T69：走**统一**的可见性判定 ⇒ 当前没在播，词岛**不显示**。
+            applyIslandVisibility()
           } else {
             createLyricWindow()?.show()
           }
@@ -758,6 +801,11 @@ if (!isPrimaryInstance) {
         // 悬浮歌词（Task 10）：主进程**只转发**，不理解歌词内容。
         onLyricState: (message) => {
           lastLyricMessage = message
+          // ⚠️ T69：更新**播放状态**（临时态，不落盘）⇒ 顺带更新词岛可见性。
+          //    ⚠️ 必须在转发**之前**做：转发用的是「当前形态的那个窗口」，
+          //    而判定可能刚刚把词岛窗口**建出来**（先建、先转发）。
+          lyricPlaying = playingFromLyricMessage(message, lyricPlaying)
+          applyIslandVisibility()
           // ⚠️ T45：**发给当前形态的那个窗口**（两种形态互斥 → 不会重复消费）。
           const target = activeLyricWindow()
           if (!target) return
