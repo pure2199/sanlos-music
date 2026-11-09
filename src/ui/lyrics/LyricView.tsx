@@ -90,10 +90,12 @@ export interface LyricViewProps {
   /**
    * 呈现模式：
    * - `single`：单行（当前行居中放大，**窗口裁剪**——只渲染当前行附近若干行）；
-   * - `double`：双行（两行同时在场）；
+   * - `double`：双行（两行同时在场；**上一行 / 下一行**，换行按**行末时间**）；
+   * - `current`：**当前句 + 下一句**（T79：当前句 = **行首时间戳**，
+   *   与 `all` 模式**同一个判定源** ⇒ 与全屏歌词舞台**同一时刻同一行**）；
    * - `all`：全量（**歌词舞台**——所有歌词行都在场，当前行放大并逐字高亮，随播放滚动跟随）。
    */
-  mode: 'single' | 'double' | 'all'
+  mode: 'single' | 'double' | 'current' | 'all'
   /** 单行模式下当前行上下各渲染几行（缺省 `LYRIC_WINDOW_RADIUS`）。 */
   windowRadius?: number
   /** 没有歌词时的文案。 */
@@ -435,6 +437,69 @@ export function LyricView(props: LyricViewProps): ReactElement {
   }
 
   // -----------------------------------------------------------------------
+  // 「当前句 + 下一句」模式（T79：桌面悬浮歌词）
+  // -----------------------------------------------------------------------
+  //
+  // ⚠️ **为什么要新开一档**（而不是改 `double` 的语义）：
+  //    `double` 判「正在唱的那行」靠**行末时间**（`computeDoubleLineState`），
+  //    且它显示的是 **[上一句, 正在唱的句]** ⇒
+  //    - 上面那行是**已经唱完**的（与全屏歌词舞台的「当前行高亮」不是同一行）；
+  //    - 推进的行在 `phase='before'` / `'after'` 之间**换位** ⇒ 扫光每句上下跳；
+  //    ⇒ 与全屏歌词舞台（`mode="all"`，按**行首时间戳** `findActiveLine`）
+  //      **同一时刻对不上**（实测：提前开扫 / 落后 1.5 秒都出现过）。
+  //
+  // ⚠️ **本档与 `all` 模式同源**：当前句 = `findActiveLine(safeLines, time)`
+  //    ⇒ **同一个函数、同一个结果** ⇒ 两处**同一时刻同一行**在推进。
+  //
+  // ⚠️ **`double` 一字未动**（沿用 T34「加新模式再切过去」的老套路）
+  //    ⇒ 它的既有语义与既有测试**一条不改**；只是生产代码不再用它。
+  if (mode === 'current') {
+    // ⚠️ **当前句 = 行首时间戳**（与 `mode="all"` 完全同一个判定）。
+    const currentIndex = activeIndex
+    const currentLine = currentIndex >= 0 ? safeLines[currentIndex] : undefined
+    const nextIndex = currentIndex + 1
+    const nextLine = nextIndex < safeLines.length ? safeLines[nextIndex] : undefined
+
+    return (
+      <div
+        className={`${classes} fnm-lyricview--current`}
+        data-testid="lyric-view"
+        // ⚠️ **换行信号**：当前句的下标变了 = 换行了（与 `all` 的 `data-active-index` 同源）。
+        data-current-index={currentIndex}
+        role="list"
+        aria-label="歌词"
+      >
+        {currentLine &&
+          renderLine({
+            line: currentLine,
+            index: currentIndex,
+            // ⚠️ **只有当前句推进**。
+            progress: computeLineProgress(currentLine, time),
+            active: true,
+            onSeek,
+            activeWordClassName,
+            karaoke,
+            slot: 'current',
+          })}
+
+        {nextLine &&
+          renderLine({
+            line: nextLine,
+            index: nextIndex,
+            // ⚠️ **下一句不给 progress** —— 否则下一句的**词级时间戳**若早于它自己的
+            //    行首（真实歌词常见），它会**提前开扫** ⇒ 桌面上**两行同时在动**。
+            progress: null,
+            active: false,
+            onSeek,
+            activeWordClassName,
+            karaoke,
+            slot: 'next',
+          })}
+      </div>
+    )
+  }
+
+  // -----------------------------------------------------------------------
   // 双行模式
   // -----------------------------------------------------------------------
   const state = doubleState!
@@ -493,7 +558,7 @@ interface RenderLineOptions {
   progress: LyricWordProgress | null
   active: boolean
   onSeek?: (t: number) => void
-  slot?: 'previous' | 'next'
+  slot?: 'previous' | 'next' | 'current'
   style?: CssVars
   /** 「当前词」要额外挂的类名（见 `LyricViewProps.activeWordClassName`）。 */
   activeWordClassName?: string

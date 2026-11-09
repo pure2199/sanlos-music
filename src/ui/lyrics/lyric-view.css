@@ -41,7 +41,15 @@
   height: var(--fnm-lyricview__canvas-height, auto);
 }
 
-.fnm-lyricview--double {
+/*
+ * 双行版式：`double`（上一行 / 下一行）与 `current`（当前句 / 下一句）**同款**。
+ *
+ * ⚠️ **为什么要两档同款**（T79）：`current` 是桌面悬浮歌词那一档
+ *    （当前句在上、下一句在下），排版必须与既有两行观感**一致**
+ *    ⇒ 两行字号相同、等粗、居中、间距相同。
+ */
+.fnm-lyricview--double,
+.fnm-lyricview--current {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -82,7 +90,8 @@
 }
 
 /* 双行模式：两行字号一致、等粗（不把上一行降级成更弱的样子）。 */
-.fnm-lyricview--double .fnm-lyricview__line {
+.fnm-lyricview--double .fnm-lyricview__line,
+.fnm-lyricview--current .fnm-lyricview__line {
   height: auto;
   font-size: 20px;
   line-height: 32px;

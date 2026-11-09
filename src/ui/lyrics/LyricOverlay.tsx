@@ -24,10 +24,13 @@
 // 分工（与已有模块的关系）
 // ---------------------------------------------------------------------------
 //
-// - **双行推进逻辑**不重写：直接复用 `src/ui/lyrics/doubleLine.ts` 的
-//   `computeDoubleLineState`——它本来就被设计成 Task 19（桌面悬浮歌词）复用的
-//   纯函数（见该文件头注释）。
-// - **逐字渲染**不重写：直接复用 `LyricView` 的 `mode="double"`。
+// - **「当前句 + 下一句」的判定**：用 `LyricView` 的 **`mode="current"`**（T79）——
+//   当前句 = `findActiveLine()`（**行首时间戳**）⇒ 与全屏歌词舞台（`mode="all"`）
+//   **同一个判定源** ⇒ 两处**同一时刻同一行**在推进；
+//   下一句**不给 progress** ⇒ 不会提前开扫（桌面上只会有**一行**在动）。
+//   ⚠️ 早先用 `mode="double"`（上一句 / 正在唱的句，换行按**行末时间**）
+//      ⇒ 与全屏**对不上**、且扫光每句在两行间上下跳 ⇒ T79 换档。
+// - **逐字渲染**不重写：直接复用 `LyricView` 的逐字与卡拉OK。
 // - **播放位置**由调用方给（本组件是纯展示，不自己取时间）。
 //
 // ---------------------------------------------------------------------------
@@ -92,7 +95,7 @@ export function LyricOverlay(props: LyricOverlayProps): ReactElement {
         <LyricView
           lines={safeLines}
           currentTime={position}
-          mode="double"
+          mode="current"
           emptyLabel={track ? '暂无歌词' : '未在播放'}
         />
       </div>

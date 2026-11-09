@@ -105,7 +105,7 @@ describe('悬浮歌词：内容与交互（T77：纯歌词）', () => {
     expect(container.querySelector('.fnm-lyricview__line')).toBeTruthy()
   })
 
-  it('渲染双行逐字歌词（复用 LyricView 的双行推进：第 0 页 = 第一行 + 第二行）', () => {
+  it('渲染**当前句 + 下一句**（T79：当前句按**行首时间戳** ⇒ 与全屏歌词舞台同源）', () => {
     render(
       <LyricOverlay
         track={{ id: 'song-1', title: '示例歌名', artist: '示例歌手' }}
@@ -115,7 +115,10 @@ describe('悬浮歌词：内容与交互（T77：纯歌词）', () => {
     )
 
     const view = screen.getByTestId('lyric-view')
-    expect(view.className).toContain('fnm-lyricview--double')
+    // ⚠️ T79：浮窗从 `double`（上一句 / 正在唱的句，换行按**行末时间**）
+    //    换成 `current`（**当前句 / 下一句**，换行按**行首时间戳**）
+    //    ⇒ 前提被用户指令**显式推翻** ⇒ 这里改写为新行为断言（**断言强度不减**）。
+    expect(view.className).toContain('fnm-lyricview--current')
     expect(screen.getByText('歌一')).toBeTruthy()
     expect(screen.getByText('歌二')).toBeTruthy()
   })

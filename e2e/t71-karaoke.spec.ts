@@ -355,7 +355,9 @@ test.describe.serial('T71：卡拉OK —— 所有歌词页面一致（真实 El
     // ⚠️ **T71 真机补丁的验收点**：新建的窗口会收到主进程**补发的两条**
     //    （曲目 + 歌词 **和** 播放位置）⇒ 位置不是 0 ⇒ 当前词在**被渲染的行里**。
     //    （补丁前：只有「曲目 + 歌词」⇒ 位置停在 0 ⇒ `--karaoke` 数量 = 0。）
-    await expectRealKaraoke(classic!.locator('.fnm-lyricview--double'), window)
+    // ⚠️ **T79**：经典浮窗用 `mode="current"`（当前句 / 下一句）⇒ 定位器跟着换。
+    //    **断言强度不变**：仍然验「卡拉OK 填色真的跟着音频走」。
+    await expectRealKaraoke(classic!.locator('.fnm-lyricview--current'), window)
   })
 
   test('灵动态词岛：同样按**词级时间**连续填色', async () => {
