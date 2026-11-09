@@ -34,6 +34,7 @@ import { createCoverFetcher, createTray } from './tray'
 import { resolveAppIconPath } from './appIcon'
 import { createBoundsSaver, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, resolveWindowBounds } from './windowBounds'
 import { islandBounds, isPointInsideRect, ISLAND_WINDOW_HEIGHT, ISLAND_WINDOW_WIDTH } from './islandAnchor'
+import { lyricFloatBounds, type LyricFloatDisplayLike } from '../shared/lyricFloatAnchor'
 import { playingFromLyricMessage, shouldShowIsland } from './islandVisibility'
 import { createUpdateController } from './update'
 
@@ -69,8 +70,13 @@ const devServerUrl = process.env.VITE_DEV_SERVER_URL
 
 /** 悬浮窗的默认宽度（像素）。 */
 const LYRIC_WINDOW_WIDTH = 560
-/** 悬浮窗的默认高度（像素）。 */
-const LYRIC_WINDOW_HEIGHT = 200
+/**
+ * 悬浮窗的默认高度（像素）。
+ *
+ * ⚠️ T77：纯歌词后**只放得下双行歌词**
+ *    （32 + 32 行高 + 18 行间距 = 82px）+ 上下留白 12px ⇒ **120px 足够**。
+ */
+const LYRIC_WINDOW_HEIGHT = 120
 
 // ---------------------------------------------------------------------------
 // 进程级状态（托盘 / 单实例 / 关闭拦截都要用）
@@ -212,6 +218,22 @@ function reanchorIsland(): void {
 
   const display = screen.getDisplayMatching(mainWindow.getBounds())
   win.setBounds(islandBounds(display, { width: ISLAND_WINDOW_WIDTH, height: ISLAND_WINDOW_HEIGHT }))
+}
+
+/**
+ * 桌面歌词（经典悬浮窗）默认落在**哪个显示器**（T77）。
+ *
+ * ⚠️ **优先主窗口所在的那块** —— 多屏切换时，歌词不该留在另一块屏幕上。
+ *
+ * ⚠️ **为什么需要它**：T77 起经典窗是**点穿透**的 ⇒ **不能再用鼠标拖动**
+ *    ⇒ 「第一次打开时落在哪儿」必须给对（见 `lyricFloatBounds`）。
+ */
+function lyricFloatDisplay(): LyricFloatDisplayLike {
+  const win = mainWindow
+  if (win && !win.isDestroyed()) {
+    return { workArea: screen.getDisplayMatching(win.getBounds()).workArea }
+  }
+  return { workArea: screen.getPrimaryDisplay().workArea }
 }
 
 // ---------------------------------------------------------------------------
@@ -588,13 +610,20 @@ if (!isPrimaryInstance) {
         if (lyricWindow && !lyricWindow.isDestroyed()) return lyricWindow
 
         const saved = prefs.read().lyricOverlay?.bounds
-        const win = new BrowserWindow({
+        const size = {
           width: saved?.width ?? LYRIC_WINDOW_WIDTH,
           height: saved?.height ?? LYRIC_WINDOW_HEIGHT,
+        }
+        // ⚠️ T77：点穿透 ⇒ **不能再用鼠标拖动** ⇒ 「第一次落在哪儿」必须给对
+        //    （没有记忆位置时：工作区水平居中、垂直偏下 —— 见 `lyricFloatBounds`）。
+        const fallback = lyricFloatBounds(lyricFloatDisplay(), size)
+        const win = new BrowserWindow({
+          width: size.width,
+          height: size.height,
           // ⚠️ T75：标题栏 / Alt-Tab 显示**应用图标**（这窗 `skipTaskbar`，不进任务栏）。
           icon: appIcon(),
-          x: saved?.x,
-          y: saved?.y,
+          x: saved?.x ?? fallback.x,
+          y: saved?.y ?? fallback.y,
           show: false,
           // 悬浮窗：无边框 + 透明 + 不进任务栏 + 不可缩放。
           frame: false,
@@ -616,6 +645,11 @@ if (!isPrimaryInstance) {
         win.setAlwaysOnTop(true, 'screen-saver')
         // 所有工作区都可见（含全屏）。
         win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+        // ⚠️ **T77：点穿透**（与词岛同款）—— 歌词窗是**压在桌面上的透明文字**，
+        //    不能挡住下面的应用（酷狗桌面歌词即如此）。
+        //    ⚠️ 代价（用户**知情并接受**）：窗口收不到鼠标 ⇒ **不能拖动、不能点击**。
+        //    ⇒ 「落在哪儿」必须一次给对（见上面的 `fallback`）。
+        win.setIgnoreMouseEvents(true, { forward: true })
         lyricWindow = win
 
         // ⚠️ T36：菜单栏没了 → **Ctrl+C / Ctrl+V** 自己接回来（悬浮歌词也可复制）。

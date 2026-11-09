@@ -111,7 +111,6 @@ describe('T71：卡拉OK —— 所有歌词页面一致', () => {
         track={{ id: 'song-1', title: '占位歌名', artist: '占位歌手' }}
         lines={LINES}
         position={1.5}
-        isPlaying
       />,
     )
 

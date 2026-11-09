@@ -371,14 +371,14 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   checked={lyricOverlayVisible}
                   onChange={(event) => handleToggleLyricOverlay(event.target.checked)}
                 />
-                <span>显示悬浮歌词（双行逐字，可拖动 / 点歌跳转）</span>
+                <span>显示悬浮歌词（双行逐字 · 透明背景 · 点击穿透）</span>
               </label>
             </fieldset>
 
             <fieldset className="fnm-settings__group">
               <legend className="fnm-settings__legend">桌面歌词样式</legend>
               <p className="fnm-settings__hint">
-                「灵动态词岛」= 屏幕顶部居中的胶囊（像灵动岛）；「经典悬浮窗」= 可自由拖动的方框。
+                「灵动态词岛」= 屏幕顶部居中的胶囊（像灵动岛）；「经典悬浮窗」= 透明背景的纯歌词（像酷狗桌面歌词）。
                 两种形态**互斥**，切换后立刻生效。
               </p>
               <label className="fnm-settings__option">
@@ -391,7 +391,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   checked={lyricOverlayMode === 'classic'}
                   onChange={() => handleSelectLyricMode('classic')}
                 />
-                <span>经典悬浮窗（可拖动 / 点歌跳转）</span>
+                <span>经典悬浮窗（透明背景 · 纯歌词 · 点击穿透）</span>
               </label>
               <label className="fnm-settings__option">
                 <input

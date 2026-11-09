@@ -10,8 +10,13 @@
 //
 // ⚠️ 本窗口**不碰音频**：两个 `<audio>` 会双解码、双倍流量、还要对同步。
 //
+// ⚠️ **T77：纯歌词 + 透明背景 + 点穿透**（酷狗桌面歌词样式）——
+//    曲名/歌手、播放控制、点击跳转**全部没有**；
+//    ⇒ 本窗口**不再**发任何播放命令（`sendCommand` 也不用）。
+//
 // ⚠️ 主题跟随全局（`prefs.json` 的 `theme`）——经 `useAppPrefsStore.load()`
 //    读回并应用（与主窗口同一套机制）。
+//    ⚠️ 但**歌词文字不跟主题走**（固定白字 + 深色描边，见 `lyric-overlay.css`）。
 // ---------------------------------------------------------------------------
 
 import { StrictMode, useEffect, useRef, useState, type ReactElement } from 'react'
@@ -81,23 +86,11 @@ function LyricWindowApp(): ReactElement {
     void useAppPrefsStore.getState().load()
   }, [])
 
-  // --- 交互：点歌词跳转 / 播放控制 ------------------------------------------
-  const handleSeek = (seconds: number): void => {
-    bridge()?.sendCommand({ type: 'seek', seconds })
-  }
-
-  const handleCommand = (command: Parameters<NonNullable<PlayerBridge['sendCommand']>>[0]): void => {
-    bridge()?.sendCommand(command)
-  }
-
   return (
     <LyricOverlay
       track={state.track}
       lines={state.lines}
       position={position}
-      isPlaying={state.sample.isPlaying}
-      onSeek={handleSeek}
-      onCommand={handleCommand}
     />
   )
 }

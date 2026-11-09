@@ -4,8 +4,8 @@
 // 覆盖三条：
 // - **本地插值时钟**（`overlayClock.ts`）：悬浮窗不逐帧收 IPC，
 //   而是用「最近一次进度采样 + 经过时间」在本地推出当前位置；
-// - **悬浮窗内容组件**（`LyricOverlay.tsx`）：双行逐字歌词 + 歌名/歌手 +
-//   点歌词跳转 + 播放控制（可拖动区域由样式表表达）；
+// - **悬浮窗内容组件**（`LyricOverlay.tsx`）：**纯歌词**（T77）——
+//   双行逐字歌词；**没有**曲名/歌手、**没有**播放控制、**不能**点歌词跳转；
 // - **IPC 消息清洗**（`electron/ipc.ts`）：主进程**只转发、不解析**歌词内容，
 //   但形状不对的消息必须被丢弃。
 //
@@ -13,7 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 
 import type { Song } from '../shared/types'
 import type { LyricEntry } from '../src/api/types'
@@ -86,19 +86,23 @@ describe('悬浮歌词：本地插值时钟', () => {
 // 悬浮窗内容组件
 // ---------------------------------------------------------------------------
 
-describe('悬浮歌词：内容与交互', () => {
-  it('显示歌名与歌手', () => {
-    render(
+describe('悬浮歌词：内容与交互（T77：纯歌词）', () => {
+  // ⚠️ T77：桌面歌词改成「酷狗桌面歌词」样式 —— **纯歌词**。
+  //    下面三条断言的前提（曲名/歌手、播放控制、点击跳转**存在**）被用户指令
+  //    **显式推翻** ⇒ 改写为新行为断言（**一条不删**，强度只增）。
+  it('**不再显示**曲名与歌手（纯歌词）', () => {
+    const { container } = render(
       <LyricOverlay
         track={{ id: 'song-1', title: '示例歌名', artist: '示例歌手' }}
         lines={LINES}
         position={0}
-        isPlaying
       />,
     )
 
-    expect(screen.getByText('示例歌名')).toBeTruthy()
-    expect(screen.getByText('示例歌手')).toBeTruthy()
+    expect(screen.queryByText('示例歌名')).toBeNull()
+    expect(screen.queryByText('示例歌手')).toBeNull()
+    // ⚠️ 「纯歌词」≠ 什么都不显示：**歌词仍在**。
+    expect(container.querySelector('.fnm-lyricview__line')).toBeTruthy()
   })
 
   it('渲染双行逐字歌词（复用 LyricView 的双行推进：第 0 页 = 第一行 + 第二行）', () => {
@@ -107,7 +111,6 @@ describe('悬浮歌词：内容与交互', () => {
         track={{ id: 'song-1', title: '示例歌名', artist: '示例歌手' }}
         lines={LINES}
         position={0}
-        isPlaying
       />,
     )
 
@@ -126,7 +129,6 @@ describe('悬浮歌词：内容与交互', () => {
           track={{ id: 'song-1', title: '示例歌名', artist: '示例歌手' }}
           lines={LINES}
           position={1.5}
-          isPlaying
         />,
       )
 
@@ -139,43 +141,33 @@ describe('悬浮歌词：内容与交互', () => {
     },
   )
 
-  it('点歌词行 → 回调跳转秒数', () => {
-    const onSeek = vi.fn()
-    render(
+  it('点歌词**不再**跳转（纯歌词：没有 `onSeek` ⇒ 行不是 `<button>`）', () => {
+    const { container } = render(
       <LyricOverlay
         track={{ id: 'song-1', title: '示例歌名', artist: '示例歌手' }}
         lines={LINES}
         position={0}
-        isPlaying
-        onSeek={onSeek}
       />,
     )
 
-    fireEvent.click(screen.getByText('歌二'))
-
-    expect(onSeek).toHaveBeenCalledWith(2)
+    // ⚠️ `LyricView` 只有拿到 `onSeek` 才会把行渲染成 `<button>`（`--clickable`）。
+    expect(container.querySelector('.fnm-lyricview__line--clickable')).toBeNull()
+    expect(container.querySelector('button')).toBeNull()
   })
 
-  it('播放控制按钮 → 回调播放命令', () => {
-    const onCommand = vi.fn()
-    render(
+  it('**不再有**播放控制按钮（纯歌词）', () => {
+    const { container } = render(
       <LyricOverlay
         track={{ id: 'song-1', title: '示例歌名', artist: '示例歌手' }}
         lines={LINES}
         position={0}
-        isPlaying
-        onCommand={onCommand}
       />,
     )
 
-    fireEvent.click(screen.getByTestId('fnm-lyricoverlay-prev'))
-    expect(onCommand).toHaveBeenCalledWith({ type: 'prev' })
-
-    fireEvent.click(screen.getByTestId('fnm-lyricoverlay-toggle'))
-    expect(onCommand).toHaveBeenCalledWith({ type: 'toggle' })
-
-    fireEvent.click(screen.getByTestId('fnm-lyricoverlay-next'))
-    expect(onCommand).toHaveBeenCalledWith({ type: 'next' })
+    expect(container.querySelector('.fnm-lyricoverlay__controls')).toBeNull()
+    expect(screen.queryByTestId('fnm-lyricoverlay-prev')).toBeNull()
+    expect(screen.queryByTestId('fnm-lyricoverlay-toggle')).toBeNull()
+    expect(screen.queryByTestId('fnm-lyricoverlay-next')).toBeNull()
   })
 
   it('没有歌词时显示空态（不白屏、不崩）', () => {
@@ -184,7 +176,6 @@ describe('悬浮歌词：内容与交互', () => {
         track={{ id: 'song-1', title: '示例歌名', artist: '示例歌手' }}
         lines={[]}
         position={0}
-        isPlaying={false}
       />,
     )
 
@@ -192,7 +183,7 @@ describe('悬浮歌词：内容与交互', () => {
   })
 
   it('没有曲目时显示占位文案（不白屏）', () => {
-    render(<LyricOverlay track={null} lines={[]} position={0} isPlaying={false} />)
+    render(<LyricOverlay track={null} lines={[]} position={0} />)
 
     expect(screen.getByTestId('fnm-lyricoverlay')).toBeTruthy()
     expect(screen.getByText('未在播放')).toBeTruthy()
