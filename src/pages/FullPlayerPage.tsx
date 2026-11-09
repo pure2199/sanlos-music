@@ -322,7 +322,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     setLyricStatus('loading')
     setRawLines([])
     setLyricReason(null)
-    // ⚠️ **NAS 优先 → 缺了才查外部**（Task 32）；外部源只回 LRC 文本，
+    // ⚠️ **优先级由 `lyricPriority` 决定**（T70：缺省「线上优先」，
+    //    线上匹配不上 / 报错 / 超时就回落本地）；线上源只回 LRC 文本，
     //    这里包成条目后仍交给**现有**的 `parseLyricEntries`（解析逻辑一行不改）。
     loadLyricEntries(
       songId,
