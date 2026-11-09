@@ -75,9 +75,11 @@ import type { AuthSessionInfo, CandidateInfo, ServerInfo } from '../shared/bridg
 import { sanitizeEqPrefsPayload } from '../shared/eqPrefs'
 import type { FfmpegFallbackResult, FfmpegStatus } from '../shared/ffmpeg'
 import {
+  LYRIC_PRIORITIES,
   LYRIC_SOURCES,
   normalizeLyricSource,
   type ExternalLyricQuery,
+  type LyricPriority,
   type LyricSource,
 } from '../shared/lyricProvider'
 import type {
@@ -1068,6 +1070,14 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
         !/[\u0000-\u001f]/.test(template)
       ) {
         entry.template = template.trim()
+      }
+      // ⚠️ T70：优先级**只认两个合法值**（陌生值整段丢弃，不落盘）。
+      const priority = lyric['priority']
+      if (
+        typeof priority === 'string' &&
+        (LYRIC_PRIORITIES as readonly string[]).includes(priority)
+      ) {
+        entry.priority = priority as LyricPriority
       }
       if (Object.keys(entry).length > 0) out.lyric = entry
     }

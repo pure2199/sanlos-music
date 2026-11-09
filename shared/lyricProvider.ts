@@ -42,6 +42,18 @@
 export type LyricSource = 'off' | 'netease' | 'lrclib' | 'qq' | 'custom'
 
 /**
+ * 歌词来源的**优先级**（T70）。
+ *
+ * - `online-first`：**线上优先** —— 线上（外部源）匹配上就用线上的；
+ *   线上匹配不上 / 源不可用 / 超时 ⇒ **回落本地**（NAS 自带的歌词）；
+ * - `local-first`：**本地优先** —— NAS 自带的歌词先用，NAS 没有才查外部
+ *   （Task 32 的老口径）。
+ *
+ * ⚠️ **缺省 = `online-first`**（用户显式要求）⇒ 老用户升级后行为**会变**。
+ */
+export type LyricPriority = 'online-first' | 'local-first'
+
+/**
  * 歌词来源偏好（落在主进程 `prefs.json` 的 `lyric` 键下）。
  *
  * ⚠️ **非敏感**：源名与地址模板都是公开信息，与 `session.bin`（凭证）**无关**。
@@ -62,6 +74,13 @@ export interface LyricPrefs {
    *    没有时间戳，解析出来是空的。
    */
   template?: string
+  /**
+   * 歌词来源的**优先级**（T70）：`online-first`（线上优先，缺省）/ `local-first`（本地优先）。
+   *
+   * ⚠️ **只有合法值才落盘**（主进程白名单）：`prefs.json` 是用户可编辑的文件，
+   *    写进去的陌生值一律丢弃 → 读回来时按「线上优先」处理。
+   */
+  priority?: LyricPriority
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +141,16 @@ export const LYRIC_SOURCES: readonly LyricSource[] = ['off', 'netease', 'lrclib'
  */
 export const DEFAULT_LYRIC_SOURCE: LyricSource = 'netease'
 
+/** 合法的歌词优先级（**白名单**）。 */
+export const LYRIC_PRIORITIES: readonly LyricPriority[] = ['online-first', 'local-first']
+
+/**
+ * 缺省的歌词优先级（T70）：**线上优先**。
+ *
+ * ⚠️ 用户显式要求：「优先使用线上歌词，线上匹配不上再使用本地歌词」。
+ */
+export const DEFAULT_LYRIC_PRIORITY: LyricPriority = 'online-first'
+
 /**
  * 把任意输入归一成**合法的歌词源**。
  *
@@ -136,6 +165,22 @@ export function normalizeLyricSource(value: unknown): LyricSource {
     return value as LyricSource
   }
   return DEFAULT_LYRIC_SOURCE
+}
+
+/**
+ * 把任意输入归一成**合法的歌词优先级**。
+ *
+ * ⚠️ `prefs.json` 是**用户可编辑的文件** → 陌生值一律当默认值
+ *    （与 `normalizeLyricSource` 同一套纪律）。
+ *
+ * @param value 任意值。
+ * @returns 合法时返回该优先级；否则返回 `DEFAULT_LYRIC_PRIORITY`。
+ */
+export function normalizeLyricPriority(value: unknown): LyricPriority {
+  if (typeof value === 'string' && (LYRIC_PRIORITIES as readonly string[]).includes(value)) {
+    return value as LyricPriority
+  }
+  return DEFAULT_LYRIC_PRIORITY
 }
 
 /**

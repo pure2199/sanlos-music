@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 
 import type { AppPrefs, PlayerBridge } from '../shared/playerBridge'
-import { DEFAULT_LYRIC_SOURCE } from '../shared/lyricProvider'
+import { DEFAULT_LYRIC_PRIORITY, DEFAULT_LYRIC_SOURCE } from '../shared/lyricProvider'
 import { SettingsPanel } from '../src/components/SettingsPanel'
 import { useAppPrefsStore, DEFAULT_CLOSE_BEHAVIOR } from '../src/state/appPrefsStore'
 
@@ -77,6 +77,7 @@ beforeEach(() => {
     closeBehavior: DEFAULT_CLOSE_BEHAVIOR,
     lyricSource: DEFAULT_LYRIC_SOURCE,
     lyricTemplate: '',
+    lyricPriority: DEFAULT_LYRIC_PRIORITY,
     error: null,
   })
 })
@@ -122,7 +123,9 @@ describe('设置面板：歌词来源', () => {
     fireEvent.click(saveButton())
 
     await waitFor(() =>
-      expect(setPrefs).toHaveBeenCalledWith({ lyric: { source: 'qq', template: '' } }),
+      expect(setPrefs).toHaveBeenCalledWith({
+        lyric: { source: 'qq', template: '', priority: DEFAULT_LYRIC_PRIORITY },
+      }),
     )
     expect(useAppPrefsStore.getState().lyricSource).toBe('qq')
   })
@@ -158,6 +161,7 @@ describe('设置面板：歌词来源', () => {
         lyric: {
           source: 'custom',
           template: 'https://example.com/lyric?title={title}&artist={artist}',
+          priority: DEFAULT_LYRIC_PRIORITY,
         },
       }),
     )
@@ -175,7 +179,11 @@ describe('设置面板：歌词来源', () => {
 
     await waitFor(() =>
       expect(setPrefs).toHaveBeenCalledWith({
-        lyric: { source: 'off', template: 'https://example.com/{title}' },
+        lyric: {
+          source: 'off',
+          template: 'https://example.com/{title}',
+          priority: DEFAULT_LYRIC_PRIORITY,
+        },
       }),
     )
   })
@@ -208,5 +216,98 @@ describe('设置面板：歌词来源', () => {
     fireEvent.click(saveButton())
 
     await waitFor(() => expect(useAppPrefsStore.getState().lyricSource).toBe('off'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T70：「歌词优先级」这一组
+// ---------------------------------------------------------------------------
+
+describe('设置面板：歌词优先级', () => {
+  /** 取「线上优先」那个 radio。 */
+  function onlineRadio(): HTMLInputElement {
+    return screen.getByRole('radio', { name: '线上优先' }) as HTMLInputElement
+  }
+
+  /** 取「本地优先」那个 radio。 */
+  function localRadio(): HTMLInputElement {
+    return screen.getByRole('radio', { name: '本地优先' }) as HTMLInputElement
+  }
+
+  it('渲染出「歌词优先级」这一组，且**默认选中线上优先**', () => {
+    installBridge()
+    renderLyricSettings()
+
+    expect(screen.getByText('歌词优先级')).toBeTruthy()
+    expect(onlineRadio().checked).toBe(true)
+    expect(localRadio().checked).toBe(false)
+    expect(DEFAULT_LYRIC_PRIORITY).toBe('online-first')
+  })
+
+  it('点「本地优先」→ **立刻写回**主进程（不必点保存）', async () => {
+    const { setPrefs } = installBridge()
+    renderLyricSettings()
+
+    fireEvent.click(localRadio())
+
+    await waitFor(() =>
+      expect(setPrefs).toHaveBeenCalledWith({
+        lyric: { source: DEFAULT_LYRIC_SOURCE, template: '', priority: 'local-first' },
+      }),
+    )
+    // 乐观应用：界面状态也变了。
+    expect(useAppPrefsStore.getState().lyricPriority).toBe('local-first')
+  })
+
+  it('切回「线上优先」→ 写回 `priority: "online-first"`', async () => {
+    const { setPrefs } = installBridge()
+    useAppPrefsStore.setState({ lyricPriority: 'local-first' })
+    renderLyricSettings()
+
+    fireEvent.click(onlineRadio())
+
+    await waitFor(() =>
+      expect(setPrefs).toHaveBeenCalledWith({
+        lyric: { source: DEFAULT_LYRIC_SOURCE, template: '', priority: 'online-first' },
+      }),
+    )
+    expect(useAppPrefsStore.getState().lyricPriority).toBe('online-first')
+  })
+
+  it('改优先级**不会**把歌词源 / 模板抹掉（整组一起写）', async () => {
+    const { setPrefs } = installBridge()
+    useAppPrefsStore.setState({ lyricSource: 'qq', lyricTemplate: 'https://example.com/{title}' })
+    renderLyricSettings()
+
+    fireEvent.click(localRadio())
+
+    await waitFor(() =>
+      expect(setPrefs).toHaveBeenCalledWith({
+        lyric: { source: 'qq', template: 'https://example.com/{title}', priority: 'local-first' },
+      }),
+    )
+  })
+
+  it('写回失败 → **回滚**到原优先级并给出提示', async () => {
+    installBridge({
+      setPrefs: vi.fn(async () => Promise.reject(new Error('写盘失败'))),
+    })
+    renderLyricSettings()
+
+    fireEvent.click(localRadio())
+
+    await waitFor(() =>
+      expect(useAppPrefsStore.getState().lyricPriority).toBe(DEFAULT_LYRIC_PRIORITY),
+    )
+    expect(useAppPrefsStore.getState().error).toContain('歌词优先级保存失败')
+    expect(screen.getByRole('alert').textContent).toContain('歌词优先级保存失败')
+  })
+
+  it('没有桥时不崩：优先级只在本地生效', async () => {
+    renderLyricSettings()
+
+    fireEvent.click(localRadio())
+
+    await waitFor(() => expect(useAppPrefsStore.getState().lyricPriority).toBe('local-first'))
   })
 })

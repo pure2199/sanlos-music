@@ -50,6 +50,7 @@ import { coverUrl } from '../components/coverUrl'
 import type { PlayerStoreLike } from '../components/PlayerBar'
 import { QUEUE_ONLY_ONE_HINT, removeSongFromQueue } from '../components/PlayerBar'
 import { usePlayerStore } from '../state/playerStore'
+import { useAppPrefsStore } from '../state/appPrefsStore'
 import {
   defaultExternalLyricFetcher,
   loadLyricEntries,
@@ -257,6 +258,13 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   const coverId = current?.coverId ?? ''
 
   /**
+   * 歌词来源的**优先级**（T70）：线上优先（缺省）/ 本地优先。
+   *
+   * ⚠️ 改了优先级 ⇒ **重新取词**（见下面的 effect 依赖）。
+   */
+  const lyricPriority = useAppPrefsStore((state) => state.lyricPriority)
+
+  /**
    * **可听延迟**（秒）：媒体渲染完成 → 用户真正听到之间的延迟（T66）。
    *
    * ⚠️ 拿不到时是 0 ⇒ **不补偿**（歌词行为与本任务之前完全一致）。
@@ -319,7 +327,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     loadLyricEntries(
       songId,
       { title: songTitle, artist: songArtist, album: songAlbum, duration: songDuration },
-      { api, external: externalFetcher },
+      { api, external: externalFetcher, priority: lyricPriority },
     )
       .then((result) => {
         if (cancelled) return
@@ -342,6 +350,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     api,
     songId,
     externalFetcher,
+    lyricPriority,
     songTitle,
     songArtist,
     songAlbum,

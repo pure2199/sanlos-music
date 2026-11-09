@@ -34,6 +34,8 @@ import {
   loadLyricEntries,
   type ExternalLyricFetcher,
 } from './lyricSource'
+import { useAppPrefsStore } from '../state/appPrefsStore'
+import type { LyricPriority } from '../../shared/lyricProvider'
 
 /** 歌词接口的最小子集（便于单测注入假实现）。 */
 export interface LyricOverlayApi {
@@ -107,6 +109,13 @@ export interface LyricOverlayOptions {
    * ⚠️ 不传时走**默认取法**（IPC 到主进程）；桌面壳里桥存在 → 默认会查。
    */
   external?: ExternalLyricFetcher | null
+  /**
+   * 歌词来源的**优先级**（T70）：`online-first`（线上优先）/ `local-first`（本地优先）。
+   *
+   * ⚠️ 缺省 = 读 `useAppPrefsStore` 的当前值（**每次取词时读一次**——
+   *    用户在设置里改了优先级，下一首歌就生效）。
+   */
+  priority?: () => LyricPriority
 }
 
 /** 装配结果（供单测断言）。 */
@@ -138,6 +147,14 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
    */
   const external: ExternalLyricFetcher | null =
     options.external === undefined ? defaultExternalLyricFetcher() : options.external
+  /**
+   * 歌词来源优先级（T70）。
+   *
+   * ⚠️ **每次取词时读一次**（不是只在装配时读一次）—— 用户在设置里改了优先级，
+   *    下一首歌就该生效（与 `spectrum.ts` 读 `lyricOverlayMode` 同一套路）。
+   */
+  const priority: () => LyricPriority =
+    options.priority ?? ((): LyricPriority => useAppPrefsStore.getState().lyricPriority)
 
   /** 悬浮窗是否可见（关着就不拉歌词、不推进度）。 */
   let enabled = false
@@ -208,7 +225,7 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
           album: song.album,
           duration: song.duration,
         },
-        { api, external: external },
+        { api, external: external, priority: priority() },
       )
       // 期间又切了歌 → 这份歌词已经过时，丢弃。
       if (token !== fetchToken) return

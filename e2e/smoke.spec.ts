@@ -706,7 +706,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
   //    单测里够不到（那里没有 Electron 主进程、没有 Chromium 分区栈）。
   //
   // ⚠️ mock 的 `t2` **故意没有歌词**（`mock-server/fixtures.ts` 的 `LYRICS` 里没有它）
-  //    → 走「NAS 优先 → 缺了再查外部」这条链路 → 外部源（mock 的 `/mock-lyric`）
+  //    → 走「**线上优先** → 线上匹配不上再回落本地」这条链路 → 外部源（mock 的 `/mock-lyric`）
   //    返回的**纯文本 LRC** 会显示出来。
   //
   test('歌词来源设为自定义 → NAS 没歌词的歌**由外部源补齐**', async () => {
@@ -840,6 +840,9 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     await expect(settingsPage).toHaveCount(0)
 
     // --- 2. 播一首 **NAS 没有歌词** 的歌（→ 歌词只能靠外部源补齐） ----------------
+  //
+  // ⚠️ T70：缺省口径已是「**线上优先**」⇒ 线上（mock 的 `/mock-lyric-long`）
+  //    匹配上 ⇒ **直接用线上的那份**（本地那份根本没被读）。
     //
     // ⚠️ **必须按「歌名」定位，不能按行号**：歌曲列表是**虚拟列表**
     //    （只渲染可视窗口）→ 行号会随窗口漂移。

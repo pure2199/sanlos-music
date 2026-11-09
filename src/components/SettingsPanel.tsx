@@ -214,6 +214,12 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const lyricSource = useAppPrefsStore((state) => state.lyricSource)
   const lyricTemplate = useAppPrefsStore((state) => state.lyricTemplate)
   const setLyricSource = useAppPrefsStore((state) => state.setLyricSource)
+  // --- 歌词来源优先级（T70）------------------------------------------------
+  //
+  // ⚠️ 与「源 / 模板」不同：优先级**即时生效**（不点保存）——
+  //    改了下一首歌就该用新口径（与「桌面歌词样式」同一套交互）。
+  const lyricPriority = useAppPrefsStore((state) => state.lyricPriority)
+  const setLyricPriority = useAppPrefsStore((state) => state.setLyricPriority)
 
   /** 歌词源的**输入草稿**。 */
   const [lyricSourceDraft, setLyricSourceDraft] = useState<LyricSource>(lyricSource)
@@ -402,7 +408,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             <fieldset className="fnm-settings__group">
               <legend className="fnm-settings__legend">歌词来源</legend>
               <p className="fnm-settings__hint">
-                NAS 自带的歌词**优先**；NAS 没有歌词时，才去外部歌词源补一份。
+                这里是**用哪个外部源**；谁优先（线上还是 NAS 自带的），见下一组「歌词优先级」。
               </p>
               <label className="fnm-settings__option fnm-settings__option--stack">
                 <span>外部歌词源</span>
@@ -453,6 +459,37 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 占位符：{'{title}'} {'{artist}'} {'{album}'} {'{duration}'}；
                 地址必须是 https（不许带账号密码）；返回的正文必须是**带时间戳的 LRC**。
               </p>
+            </fieldset>
+
+            <fieldset className="fnm-settings__group">
+              <legend className="fnm-settings__legend">歌词优先级</legend>
+              <p className="fnm-settings__hint">
+                线上 = 上面的外部歌词源（多数能给出**真逐字**时间戳，卡拉OK 填色更跟嘴）；
+                本地 = NAS 自带的歌词（断网也有，但多半只有行级时间戳）。
+                选了「线上优先」而线上没匹配上时，**自动回落到本地**。
+              </p>
+              <label className="fnm-settings__option">
+                <input
+                  type="radio"
+                  name="fnm-lyric-priority"
+                  // ⚠️ **显式 aria-label**：`<label>` 包着 radio 时，可访问名会把
+                  //    整个说明文字都带进去 → 名字不稳定、没法精确选中。
+                  aria-label="线上优先"
+                  checked={lyricPriority === 'online-first'}
+                  onChange={() => void setLyricPriority('online-first')}
+                />
+                <span>线上优先（默认）</span>
+              </label>
+              <label className="fnm-settings__option">
+                <input
+                  type="radio"
+                  name="fnm-lyric-priority"
+                  aria-label="本地优先"
+                  checked={lyricPriority === 'local-first'}
+                  onChange={() => void setLyricPriority('local-first')}
+                />
+                <span>本地优先（先用 NAS 自带的歌词）</span>
+              </label>
             </fieldset>
           </>
         )}

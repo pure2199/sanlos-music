@@ -24,9 +24,12 @@ import { create } from 'zustand'
 import type { StreamQuality, ThemeName } from '../../shared/types'
 import { DEFAULT_THEME, resolveThemeName } from '../../shared/themes'
 import {
+  DEFAULT_LYRIC_PRIORITY,
   DEFAULT_LYRIC_SOURCE,
+  normalizeLyricPriority,
   normalizeLyricSource,
   normalizeLyricTemplate,
+  type LyricPriority,
   type LyricSource,
 } from '../../shared/lyricProvider'
 import type { CloseBehavior, LyricOverlayMode, PlayerBridge } from '../../shared/playerBridge'
@@ -96,6 +99,14 @@ export interface AppPrefsStore {
   /** 改外部歌词源（乐观应用 + 写回主进程；失败则回滚）。 */
   setLyricSource: (source: LyricSource, template?: string) => Promise<void>
   /**
+   * 歌词来源的**优先级**（T70）：`online-first`（线上优先）/ `local-first`（本地优先）。
+   *
+   * ⚠️ 缺省 = `'online-first'`（线上优先）。
+   */
+  lyricPriority: LyricPriority
+  /** 切换歌词来源优先级（乐观应用 + 写回主进程；失败则回滚）。 */
+  setLyricPriority: (priority: LyricPriority) => Promise<void>
+  /**
    * 音质偏好（T54）：`original`（原始音质）/ `standard`（标准音质，服务端转码）。
    *
    * ⚠️ **缺省 = `original`** → 老用户升级后行为**一字不变**。
@@ -113,6 +124,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
   lyricOverlayMode: DEFAULT_LYRIC_OVERLAY_MODE,
   lyricSource: DEFAULT_LYRIC_SOURCE,
   lyricTemplate: '',
+  lyricPriority: DEFAULT_LYRIC_PRIORITY,
   streamQuality: DEFAULT_STREAM_QUALITY,
   error: null,
 
@@ -127,6 +139,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricOverlayMode: DEFAULT_LYRIC_OVERLAY_MODE,
         lyricSource: DEFAULT_LYRIC_SOURCE,
         lyricTemplate: '',
+        lyricPriority: DEFAULT_LYRIC_PRIORITY,
         streamQuality: DEFAULT_STREAM_QUALITY,
         error: null,
       })
@@ -141,6 +154,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricOverlayMode: normalizeLyricOverlayMode(prefs.lyricOverlay?.mode),
         lyricSource: normalizeLyricSource(prefs.lyric?.source),
         lyricTemplate: normalizeLyricTemplate(prefs.lyric?.template),
+        lyricPriority: normalizeLyricPriority(prefs.lyric?.priority),
         // ⚠️ 外部数据**不可信**：`prefs.json` 是用户可编辑的文件 → 陌生值压成缺省档。
         streamQuality: normalizeStreamQuality(prefs.streamQuality),
         error: null,
@@ -154,6 +168,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricOverlayMode: DEFAULT_LYRIC_OVERLAY_MODE,
         lyricSource: DEFAULT_LYRIC_SOURCE,
         lyricTemplate: '',
+        lyricPriority: DEFAULT_LYRIC_PRIORITY,
         streamQuality: DEFAULT_STREAM_QUALITY,
         error: null,
       })
@@ -240,7 +255,12 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
     if (!bridge) return
 
     try {
-      await bridge.setPrefs({ lyric: { source: nextSource, template: nextTemplate } })
+      // ⚠️ T70：`prefs.json` 的 `lyric` 组是**整体替换**的（`PrefsStore.write`
+      //    只在**顶层**合并）⇒ 这里必须把 `priority` **一起写**，
+      //    否则改一次歌词源就会把用户的优先级选择**悄悄抹掉**。
+      await bridge.setPrefs({
+        lyric: { source: nextSource, template: nextTemplate, priority: get().lyricPriority },
+      })
     } catch {
       // 写回失败 → 回滚（界面不能停在一个「没被记住」的歌词源上）。
       set({
@@ -248,6 +268,30 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricTemplate: previousTemplate,
         error: '歌词源设置保存失败，已恢复原设置',
       })
+    }
+  },
+
+  setLyricPriority: async (priority: LyricPriority): Promise<void> => {
+    const next = normalizeLyricPriority(priority)
+    const previous = get().lyricPriority
+    // 乐观应用：换优先级必须**即时反馈**（下一首歌就用新口径）。
+    set({ lyricPriority: next, error: null })
+
+    const bridge = playerBridge()
+    if (!bridge) return
+
+    try {
+      // ⚠️ 同上：`lyric` 组**整体替换** ⇒ 源与模板也要**一起写**，否则会被抹掉。
+      await bridge.setPrefs({
+        lyric: {
+          source: get().lyricSource,
+          template: get().lyricTemplate,
+          priority: next,
+        },
+      })
+    } catch {
+      // 写回失败 → 回滚（界面不能停在一个「没被记住」的优先级上）。
+      set({ lyricPriority: previous, error: '歌词优先级保存失败，已恢复原设置' })
     }
   },
 

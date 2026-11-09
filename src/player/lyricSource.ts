@@ -5,14 +5,19 @@
 // 这个模块回答一个问题：**「这首歌的歌词，从哪儿来？」**
 //
 // ---------------------------------------------------------------------------
-// 优先级（用户拍板）
+// 优先级（T70：用户拍板「线上优先，线上匹配不上再回落本地」）
 // ---------------------------------------------------------------------------
-// **NAS 优先 → NAS 没有才查外部**。
+// 两档，**缺省 = 线上优先**：
 //
-// 理由：
-// - NAS 自带的歌词是**本地已有的**，最准、也**不依赖外网**（断网照样有歌词）；
-// - 外部源只做**补齐**，不抢 NAS 的活；
-// - 于是「NAS 有歌词的歌 → **完全不发外部请求**」。
+// - `online-first`（**线上优先**）：线上（外部源）匹配上就用线上的；
+//   线上匹配不上 / 源不可用 / 卡住超时就**回落本地**（NAS 自带的歌词）。
+//   理由：线上（网易云 yrc 等）能给出**真逐字**时间戳 ⇒ 卡拉OK 填色更跟嘴；
+// - `local-first`（**本地优先**）：NAS 自带的先用，NAS 没有才查外部
+//   —— **Task 32 的老口径，代码路径一字保留**。
+//
+// ⚠️ **优先级的口径与「用哪个源」是两件事**：
+//    「用哪个源」= 网易云 / lrclib / QQ / 自定义 / 不用外部；
+//    「谁优先」= 线上优先 / 本地优先。
 //
 // ---------------------------------------------------------------------------
 // 为什么外部源只回 LRC 文本
@@ -28,7 +33,7 @@
 //
 // ---------------------------------------------------------------------------
 
-import type { ExternalLyricResult } from '../../shared/lyricProvider'
+import type { ExternalLyricResult, LyricPriority } from '../../shared/lyricProvider'
 import type { LyricEntry } from '../api/types'
 
 // ---------------------------------------------------------------------------
@@ -90,6 +95,20 @@ export interface LyricLoadDeps {
    *    这样既有的单元测试（只注入 `api`）**行为完全不变**。
    */
   external?: ExternalLyricFetcher | null
+  /**
+   * 歌词来源的**优先级**（T70）。
+   *
+   * ⚠️ **缺省 = `'online-first'`**（线上优先）—— 用户显式要求。
+   * ⚠️ `'local-first'` = Task 32 的老口径（本地优先）。
+   */
+  priority?: LyricPriority
+  /**
+   * 线上查询的**超时**（毫秒）。
+   *
+   * ⚠️ 缺省 = {@link ONLINE_LYRIC_TIMEOUT_MS}（5 秒）——
+   *    外网不通时不能让人干等（主进程的 http 超时是 30 秒，太久）。
+   */
+  timeoutMs?: number
 }
 
 /** 外部歌词包成 `LyricEntry` 用的前缀（保证 guid 不与 NAS 的撞）。 */
@@ -137,41 +156,95 @@ export function toExternalEntries(songId: string, result: ExternalLyricResult): 
 }
 
 /**
- * 取一首歌的歌词（**NAS 优先 → 缺了再查外部**）。
+ * 线上查询的**超时上限**（毫秒）—— 超过就回落本地（T70）。
  *
- * ⚠️ **外部取失败不抛异常**：返回 `origin: 'none'` + `reason`，
- *    由界面如实显示 —— 不能让外部源的抖动把整个歌词功能带崩。
- *
- * @param songId 歌曲 guid。
- * @param target 匹配外部源要用的信息（歌名 / 歌手 / 专辑 / 时长）。
- * @param deps 依赖（NAS 接口 + 可选的外部取法）。
+ * ⚠️ 为什么不是主进程那个 30 秒：主进程的 http 超时是**通用**的，
+ *    30 秒用来等一个「下歌」不算离谱；但歌词是**要立刻显示**的东西
+ *    ⇒ 外网挂住时最多空窗 5 秒，然后立刻回落到本地那份。
  */
-export async function loadLyricEntries(
+export const ONLINE_LYRIC_TIMEOUT_MS = 5000
+
+/** 线上超时时的原因文案（如实告诉用户「不是没歌词，是源没回话」）。 */
+export const ONLINE_TIMEOUT_REASON = '歌词源响应超时'
+
+/**
+ * 线上查询的结果 —— 除了三种源状态，还多一种「**超时**」。
+ */
+type OnlineOutcome =
+  | { kind: 'result'; result: ExternalLyricResult }
+  | { kind: 'timeout' }
+
+/**
+ * 读本地（NAS）的歌词条目。
+ *
+ * ⚠️ **读取失败 ≠ 没有歌词**：前者是「连不上 / 没权限」，后者是「确实没有」。
+ *    两者要分开记 —— 界面的文案不一样。
+ */
+async function readNas(
+  api: NasLyricApi,
+  songId: string,
+): Promise<{ entries: LyricEntry[]; failed: boolean }> {
+  try {
+    return { entries: (await api.list(songId)) ?? [], failed: false }
+  } catch {
+    // ⚠️ NAS 取失败**不直接放弃**：线上（本地优先时是外部源）可能是唯一有歌词的地方。
+    return { entries: [], failed: true }
+  }
+}
+
+/**
+ * 查线上歌词，**带超时**。
+ *
+ * ⚠️ **抛异常也当成一种结果**（`status: 'error'`）—— 不能让 IPC 断了
+ *    把整个取词流程炸掉。
+ * ⚠️ **超时后那个请求还在跑**：它的结果被丢弃即可（主进程那边有缓存）。
+ */
+async function fetchOnline(
+  external: ExternalLyricFetcher,
+  target: LyricMatchTarget,
+  timeoutMs: number,
+): Promise<OnlineOutcome> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const timeoutPromise = new Promise<OnlineOutcome>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: 'timeout' }), timeoutMs)
+  })
+  try {
+    const resultPromise: Promise<OnlineOutcome> = external(target).then(
+      (result): OnlineOutcome => ({ kind: 'result', result }),
+      (cause): OnlineOutcome => ({
+        kind: 'result',
+        result: {
+          status: 'error',
+          message: cause instanceof Error ? cause.message : '连接歌词源失败',
+        },
+      }),
+    )
+    return await Promise.race([resultPromise, timeoutPromise])
+  } finally {
+    if (timer !== null) clearTimeout(timer)
+  }
+}
+
+/**
+ * 「本地优先」（Task 32 的老口径）—— **代码路径一字不改**。
+ *
+ * ⚠️ NAS 有歌词 → 直接用（**完全不发外部请求**）；NAS 没有 → 才查外部。
+ */
+async function loadLocalFirst(
   songId: string,
   target: LyricMatchTarget,
   deps: LyricLoadDeps,
 ): Promise<LyricLoadResult> {
-  // --- 1. NAS 优先 ---------------------------------------------------------
-  let nasEntries: LyricEntry[] = []
-  /** NAS 这次是**读取失败**（区别于「读到了，但本来就没歌词」）。 */
-  let nasFailed = false
-  try {
-    nasEntries = (await deps.api.list(songId)) ?? []
-  } catch {
-    // ⚠️ NAS 取失败**不直接放弃**：接着问外部源（它可能是唯一有歌词的地方）。
-    nasFailed = true
-    nasEntries = []
-  }
-  if (nasEntries.length > 0) {
-    return { entries: nasEntries, origin: 'nas', reason: null }
+  const nas = await readNas(deps.api, songId)
+  if (nas.entries.length > 0) {
+    return { entries: nas.entries, origin: 'nas', reason: null }
   }
 
-  // --- 2. 外部补齐 ---------------------------------------------------------
   const external = deps.external
   if (!external) {
     // ⚠️ **保住既有语义**：NAS 读取失败 → 界面显示「歌词加载失败」；
     //    NAS 读到了但本来就没歌词 → 界面显示「暂无歌词」。
-    return { entries: [], origin: 'none', reason: nasFailed ? '歌词加载失败' : null }
+    return { entries: [], origin: 'none', reason: nas.failed ? '歌词加载失败' : null }
   }
   let result: ExternalLyricResult
   try {
@@ -189,13 +262,91 @@ export async function loadLyricEntries(
   if (result.status === 'not-found') {
     // ⚠️ 外部源**确实没有**这首歌的歌词 → 不是错误，是「没有」。
     //    但如果 NAS 这次是**读取失败**，那还是得说「歌词加载失败」。
-    return { entries: [], origin: 'none', reason: nasFailed ? '歌词加载失败' : null }
+    return { entries: [], origin: 'none', reason: nas.failed ? '歌词加载失败' : null }
   }
   const entries = toExternalEntries(songId, result)
   if (!entries.length) {
     return { entries: [], origin: 'none', reason: null }
   }
   return { entries, origin: 'external', reason: null }
+}
+
+/**
+ * 「线上优先」（T70 的新口径）—— 线上匹配不上就**回落本地**。
+ */
+async function loadOnlineFirst(
+  songId: string,
+  target: LyricMatchTarget,
+  deps: LyricLoadDeps,
+): Promise<LyricLoadResult> {
+  const external = deps.external
+  // ⚠️ **没有外部取法** ⇒ **零外部请求**，直接用本地。
+  if (!external) {
+    const nas = await readNas(deps.api, songId)
+    if (nas.entries.length > 0) {
+      return { entries: nas.entries, origin: 'nas', reason: null }
+    }
+    return { entries: [], origin: 'none', reason: nas.failed ? '歌词加载失败' : null }
+  }
+
+  const outcome = await fetchOnline(external, target, deps.timeoutMs ?? ONLINE_LYRIC_TIMEOUT_MS)
+
+  if (outcome.kind === 'result' && outcome.result.status === 'ok') {
+    const entries = toExternalEntries(songId, outcome.result)
+    if (entries.length > 0) {
+      // ⚠️ 线上匹配上 ⇒ **用线上的**（本地那份**不用**）。
+      //    代价：线上没翻译时，这首歌就没翻译（用户已拍板接受）。
+      return { entries, origin: 'external', reason: null }
+    }
+    // ⚠️ `ok` 但原文与翻译**都为空** ⇒ 视同**匹配不上** ⇒ 回落本地。
+  }
+
+  // --- 线上匹配不上（not-found / error / 超时 / ok 但内容空）⇒ 回落本地 -----
+  const nas = await readNas(deps.api, songId)
+  if (nas.entries.length > 0) {
+    // ⚠️ 线上坏**不该**让用户看不到本地已有的歌词 ⇒ `reason = null`。
+    return { entries: nas.entries, origin: 'nas', reason: null }
+  }
+
+  // 两边都没有 ⇒ **如实带出原因**（不假装成「暂无歌词」）。
+  // ⚠️ 优先级：本地读取失败 > 线上报错 > 线上超时 > 无。
+  const onlineReason =
+    outcome.kind === 'timeout'
+      ? ONLINE_TIMEOUT_REASON
+      : outcome.kind === 'result' && outcome.result.status === 'error'
+        ? outcome.result.message
+        : null
+  return {
+    entries: [],
+    origin: 'none',
+    reason: nas.failed ? '歌词加载失败' : onlineReason,
+  }
+}
+
+/**
+ * 取一首歌的歌词。
+ *
+ * ⚠️ **优先级**由 `deps.priority` 决定（缺省 `'online-first'`，T70）：
+ * - `'online-first'`：线上匹配上就用线上的；匹配不上 / 报错 / 超时 ⇒ **回落本地**；
+ * - `'local-first'`：本地优先（Task 32 的老口径）。
+ *
+ * ⚠️ **取不到不抛异常**：返回 `origin: 'none'` + `reason`，
+ *    由界面如实显示 —— 不能让外部源的抖动把整个歌词功能带崩。
+ *
+ * @param songId 歌曲 guid。
+ * @param target 匹配外部源要用的信息（歌名 / 歌手 / 专辑 / 时长）。
+ * @param deps 依赖（NAS 接口 + 可选的外部取法 + 优先级）。
+ */
+export async function loadLyricEntries(
+  songId: string,
+  target: LyricMatchTarget,
+  deps: LyricLoadDeps,
+): Promise<LyricLoadResult> {
+  const priority = deps.priority ?? 'online-first'
+  if (priority === 'local-first') {
+    return await loadLocalFirst(songId, target, deps)
+  }
+  return await loadOnlineFirst(songId, target, deps)
 }
 
 /**

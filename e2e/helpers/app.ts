@@ -127,7 +127,15 @@ export async function launchApp(opts?: LaunchAppOptions): Promise<AppFixture> {
     mkdirSync(downloadDir, { recursive: true })
     writeFileSync(
       prefsPath,
-      JSON.stringify({ version: 1, prefs: { downloadDir } }),
+      JSON.stringify({
+        version: 1,
+        // ⚠️ T70：**预置 `lyric.source = 'off'`**（不用外部）。
+        //    歌词优先级缺省是「**线上优先**」⇒ 每首歌都会去查外部源
+        //    ⇒ E2E 就会**打到真实外网**（网易云…）⇒ 既慢又不确定（还会被限流降级）。
+        //    `off` ⇒ 主进程**一次网络请求都不发**（直接回 not-found）
+        //    ⇒ E2E 默认只走本地那条路；要用外部源的用例**自己**改成 `custom`。
+        prefs: { downloadDir, lyric: { source: 'off' } },
+      }),
       'utf8',
     )
   }
