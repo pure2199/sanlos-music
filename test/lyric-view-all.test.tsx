@@ -21,6 +21,20 @@ import { attachTranslations, parseLrc } from '../src/ui/lyrics/parse'
 /** 两行占位歌词：甲行 10~20s、乙行 20~30s。 */
 const LINES = parseLrc('[00:10.00]甲行甲\n[00:20.00]乙行乙')
 
+/**
+ * 两行**真逐字**歌词（T81 的测试数据）。
+ *
+ * ⚠️ **为什么要另造一份**：`LINES` 是**行级** LRC ⇒ 走**伪逐字**
+ *    ⇒ T81 起**不渲染词级元素** ⇒ 断言**词级**高亮必须用真逐字数据。
+ * 词时间：甲行 10/15/18s、乙行 20/25/28s（t=13 时第一个词正好唱到 **60%**）。
+ */
+const WORD_TIMED_LINES = parseLrc(
+  [
+    '[00:10.00]<00:10.00>甲<00:15.00>行<00:18.00>甲',
+    '[00:20.00]<00:20.00>乙<00:25.00>行<00:28.00>乙',
+  ].join('\n'),
+)
+
 /** 带翻译的两行占位歌词。 */
 const LINES_WITH_TRANSLATION = attachTranslations(
   parseLrc('[00:10.00]甲行甲\n[00:20.00]乙行乙'),
@@ -60,19 +74,23 @@ describe('LyricView：全量模式（歌词舞台）', () => {
     expect(container.querySelectorAll('[data-index]')).toHaveLength(40)
   })
 
-  it('当前行：放大 + 逐字高亮；**非**当前行没有逐字高亮', () => {
-    const { container } = render(<LyricView lines={LINES} currentTime={12} mode="all" />)
+  // ⚠️ **前提已被推翻**（T81：伪逐字**不**渲染词级元素）→ 本断言改写为**新行为**。
+  //    旧断言用的是**行级** LRC（`LINES` ⇒ 伪逐字）⇒ 那里**没有词元素**
+  //    ⇒ 改用**真逐字**数据（`WORD_TIMED_LINES`），断言的**原意**一字不减。
+  it('当前行：放大 + 逐字高亮；**非**当前行没有逐字高亮（真逐字）', () => {
+    const { container } = render(<LyricView lines={WORD_TIMED_LINES} currentTime={13} mode="all" />)
 
     const active = lineAt(container, 0)
     expect(active.className).toMatch(/active/)
-    // ⚠️ 逐字高亮是**词**级别的：t=12 时甲行的**第一个词正在唱**。
+    // ⚠️ 逐字高亮是**词**级别的：t=13 时甲行的**第一个词**（10~15s）正在唱。
     //
     // ⚠️ T71：卡拉OK 是**默认观感** ⇒ 当前词挂 `--karaoke`（**不再**整词上色），
     //    **已唱过的词**才挂 `--sung`。
-    //    ⚠️ 本用例里 t=12 恰好落在**第一个词**上 ⇒ 「已唱过的词」为 0 个
+    //    ⚠️ 本用例里 t=13 恰好落在**第一个词**上 ⇒ 「已唱过的词」为 0 个
     //    ⇒ 原断言「有 `--sung`」的前提被 T71 **显式推翻** ⇒ 拆成两条更强的事实：
     const karaoke = active.querySelectorAll('.fnm-lyricview__word--karaoke')
     expect(karaoke).toHaveLength(1)
+    // (13-10)/(15-10) = 60%
     expect(karaoke[0]!.getAttribute('data-karaoke-progress')).toBe('60.0')
 
     const other = lineAt(container, 1)
@@ -80,6 +98,22 @@ describe('LyricView：全量模式（歌词舞台）', () => {
     expect(other.querySelectorAll('.fnm-lyricview__word--sung')).toHaveLength(0)
     // ⚠️ **非**当前行**也没有**卡拉OK（只有当前行在推进）。
     expect(other.querySelectorAll('.fnm-lyricview__word--karaoke')).toHaveLength(0)
+  })
+
+  // ⚠️ **T81 新增**：伪逐字（行级 LRC）下**不假装逐字**。
+  it('伪逐字（行级 LRC）⇒ 当前行**整行**强调色，**零**词级元素', () => {
+    const { container } = render(<LyricView lines={LINES} currentTime={12} mode="all" />)
+
+    const active = lineAt(container, 0)
+    // ⚠️ 鉴别力：当前行**整行**是强调色（`--whole`）。
+    expect(active.className).toContain('fnm-lyricview__line--whole')
+    // ⚠️ 鉴别力：**零**词元素 ⇒ 没有任何词级高亮（假扫光不可能出现）。
+    expect(active.querySelectorAll('[data-word]')).toHaveLength(0)
+    expect(active.querySelectorAll('.fnm-lyricview__word--karaoke')).toHaveLength(0)
+    expect(container.querySelector('.fnm-lyricview__overlay')).toBeNull()
+
+    const other = lineAt(container, 1)
+    expect(other.className).not.toContain('fnm-lyricview__line--whole')
   })
 
   it('**翻译只给当前行看**（每行都挂翻译 → 槽位等高的前提就破了）', () => {

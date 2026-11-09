@@ -193,10 +193,15 @@ describe('T71：行/字时间戳贯通', () => {
     expect(karaoke?.getAttribute('data-karaoke-progress')).toBe('25.0')
   })
 
-  it('反向钉子：词级时间戳**真的**决定了推进（同一个 t，伪逐字推进到**别的词**）', () => {
-    // ⚠️ **反向钉子**：证明上面那条断言真的依赖「词级时间戳活着」，
-    //    而不是「只要有 karaoke 类名就一定过」。
-    //    手法：只给行时间、不给词时间 ⇒ 解析器走**伪逐字**兜底（按行时长均分）。
+  // ⚠️ **前提已被推翻**（T81：伪逐字**不**渲染词级元素）→ 本断言改写为**新行为**。
+  //    旧断言是「伪逐字下也有 karaoke 填色、比例 75%」（拿它当「反向钉子」）。
+  //    新行为：伪逐字 ⇒ **没有** karaoke 词、**没有**词元素、**没有**着色层
+  //    ⇒ **假扫光不可能出现**；当前行改为**整行**强调色。
+  //
+  //    ⚠️ 「推进由**真实词级时间**决定」的鉴别力**没丢**：上一条用例
+  //    （真逐字 ⇒ 25% vs 均分 33.3%）仍然在钉它。
+  it('反向钉子：**伪逐字**下**没有**卡拉OK 填色（不假装逐字）', () => {
+    // 只给行时间、不给词时间 ⇒ 解析器走**伪逐字**兜底（按行时长均分）。
     const noWords = parseLyricEntries([
       {
         guid: 'external:song-1:original',
@@ -208,15 +213,21 @@ describe('T71：行/字时间戳贯通', () => {
         offset: 0,
       },
     ])
+    // ⚠️ 伪逐字的**数据**仍在（双行推进等纯函数还要用）。
     expect(noWords[0]?.words.length).toBeGreaterThan(0)
+    // ⚠️ 但它被**标记**成伪逐字 ⇒ 渲染层据此分流。
+    expect(noWords[0]?.wordTimed).toBe(false)
 
     const { container } = render(
       <LyricView lines={noWords} currentTime={1.5} mode="single" windowRadius={0} />,
     )
-    const karaoke = container.querySelector('.fnm-lyricview__word--karaoke')
-    // ⚠️ 伪逐字：行 0~4s → 甲(0~2s) / 乙(2~4s) ⇒ t=1.5 唱的是「甲」、比例 75%；
-    //    而**真逐字**那一次（同一个 t=1.5）唱的是「乙」、比例 25%。
-    expect(karaoke?.textContent).toBe('甲')
-    expect(karaoke?.getAttribute('data-karaoke-progress')).toBe('75.0')
+    // ⚠️ **鉴别力**：DOM 里**一个词元素都没有** ⇒ 卡拉OK 不可能出现在伪逐字上。
+    expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
+    expect(container.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
+    expect(container.querySelector('.fnm-lyricview__overlay')).toBeNull()
+    // ⚠️ **鉴别力**：当前行**整行**是强调色（不假装逐字）。
+    expect(container.querySelector('[data-index="0"]')?.className).toContain(
+      'fnm-lyricview__line--whole',
+    )
   })
 })

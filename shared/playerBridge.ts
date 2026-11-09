@@ -169,6 +169,13 @@ export interface LyricOverlayLine {
   words: Array<{ text: string; start: number; end: number }>
   /** 翻译（副行；没有就是空串）。 */
   translation: string
+  /**
+   * 这一行的**词级时间戳是不是源给的**（**真逐字**）。T81。
+   *
+   * ⚠️ **可选**、**缺省视为 `true`**（老消息 / 外部构造的行不带这个键 ⇒ 按「有逐字」处理）。
+   * ⚠️ `false` ⇒ 词级时间是**插值编造**的 ⇒ 渲染层**不假装逐字**，改走「整行显示」。
+   */
+  wordTimed?: boolean
 }
 
 /**

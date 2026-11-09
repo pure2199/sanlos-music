@@ -89,6 +89,22 @@
   color: var(--text-primary);
 }
 
+/*
+ * 伪逐字 ⇒ 当前行**整行**强调色（T81）。
+ *
+ * ⚠️ **为什么需要它**：只有行级时间戳的歌词，词级时间是**插值编造的**
+ *    ⇒ 卡拉OK 填色是在**假装**逐字推进 ⇒ 边界必然对不上人声。
+ *    与其假装，不如**整行一个色**：语义与真逐字下的「已唱过的词是强调色」一致，
+ *    只是粒度从**词**退化成**行**。
+ *
+ * ⚠️ **必须排在 `--active` 之后**：两者特异性相同 ⇒ 后者胜
+ *    （`--active` 的 `color: var(--text-primary)` 会把它盖掉）。
+ * ⚠️ **只用语义变量**（`--accent`）⇒ 两套主题自动一致。
+ */
+.fnm-lyricview__line--whole {
+  color: var(--accent);
+}
+
 /* 双行模式：两行字号一致、等粗（不把上一行降级成更弱的样子）。 */
 .fnm-lyricview--double .fnm-lyricview__line,
 .fnm-lyricview--current .fnm-lyricview__line {

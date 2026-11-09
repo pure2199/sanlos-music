@@ -17,7 +17,25 @@ import type { LyricEntry } from '../../api/types'
 export type LyricWord = { text: string; start: number; end: number }
 
 /** 一行歌词：行时间（秒）+ 文本 + 逐字 + 翻译。 */
-export type LyricLine = { time: number; text: string; words: LyricWord[]; translation: string }
+export type LyricLine = {
+  time: number
+  text: string
+  words: LyricWord[]
+  translation: string
+  /**
+   * 这一行的**词级时间戳是不是源给的**（**真逐字**）。
+   *
+   * - `true`：**有**显式逐字标签（`<mm:ss.xx>`）⇒ 词边界是**真的** ⇒ 走卡拉OK 填色；
+   * - `false`：**只有**行级标签 ⇒ 词级时间是 `pseudoWords()` **插值编造**的
+   *   ⇒ **不假装逐字**，改走「整行显示」（见 `LyricView` 的 `renderLine`）。
+   *
+   * ⚠️ **可选字段、缺省视为 `true`**：既有代码与测试里**手写**的 `LyricLine`
+   *    （以及外部构造的）都不带这个键 ⇒ 一律按「有逐字」处理 ⇒ **既有行为一条不变**。
+   * ⚠️ **逐行**而不是逐文件：真实文件里两种行可以**混存**
+   *    （外部源的增强 LRC 里，逐字标签只覆盖部分行是常见形态）。
+   */
+  wordTimed?: boolean
+}
 
 /**
  * 行时间标签：`[mm:ss]` / `[mm:ss.xx]` / `[mm:ss.xxx]` / `[mm:ss:xx]`。
@@ -407,6 +425,13 @@ function assemble(entries: RawEntry[]): LyricLine[] {
     // 行区间：下一行的时间；最后一行 → 自身 time + 0.5
     const lineEnd = next ? next.time : current.time + 0.5
     let words: LyricWord[]
+    // ⚠️ **T81：词级时间戳是「源给的」还是「我们插值编的」？**
+    //    这是**卡拉OK 与整行显示的分水岭** —— 见 `LyricLine.wordTimed`。
+    //    - `current.words` 非空 ⇒ 来自 `parseWordSegments`（**显式逐字标签**）⇒ **真逐字**；
+    //    - 否则走 `pseudoWords` ⇒ 字级时间是**按音节权重插值编造的** ⇒ **伪逐字**。
+    //    ⚠️ 伪逐字的 `words` **照旧算出来**（双行推进等纯函数还要用），
+    //    本任务只改**呈现**，不改**数据管线**。
+    const wordTimed = Boolean(current.words && current.words.length)
     if (current.words && current.words.length) {
       words = current.words.map((word, index) => {
         const nextWord = current.words![index + 1]
@@ -425,6 +450,8 @@ function assemble(entries: RawEntry[]): LyricLine[] {
       text: current.text,
       words,
       translation: current.translation,
+      // ⚠️ **T81**：显式写出来（不靠「缺省即真逐字」）⇒ 解析器产出的行**自带**这个事实。
+      wordTimed,
     })
   }
   return lines

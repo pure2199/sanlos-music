@@ -55,6 +55,23 @@ const LINES = parseLrc('[00:10.00]甲行甲\n[00:20.00]乙行乙')
 /** 三行占位歌词：甲行 10~20s、乙行 20~30s、丙行 30~30.5s。 */
 const THREE_LINES = parseLrc('[00:10.00]甲行甲\n[00:20.00]乙行乙\n[00:30.00]丙行丙')
 
+/**
+ * 三行**真逐字**歌词（T81 的测试数据）。
+ *
+ * ⚠️ **为什么要另造一份**：`THREE_LINES` 是**行级** LRC ⇒ 走**伪逐字**
+ *    ⇒ T81 起**不渲染词级元素** ⇒ 词级断言（`--sung` / 词级钩子）在它上面
+ *    **测不到东西**（会「空过」）⇒ 凡是断言**词级**行为的用例，一律改用这一份。
+ *
+ * 词时间：甲行 10/15/18s、乙行 20/25/28s、丙行 30/30.5s。
+ */
+const WORD_TIMED_THREE_LINES = parseLrc(
+  [
+    '[00:10.00]<00:10.00>甲<00:15.00>行<00:18.00>甲',
+    '[00:20.00]<00:20.00>乙<00:25.00>行<00:28.00>乙',
+    '[00:30.00]<00:30.00>丙<00:30.50>丙',
+  ].join('\n'),
+)
+
 /** 带翻译的两行占位歌词（用 Task 12 的合并入口挂上翻译）。 */
 const LINES_WITH_TRANSLATION = attachTranslations(
   parseLrc('[00:10.00]甲行甲\n[00:20.00]乙行乙'),
@@ -205,27 +222,37 @@ describe('LyricView：简报 Step 1', () => {
 // ---------------------------------------------------------------------------
 
 describe('LyricView：双行模式', () => {
-  it('上一行走满后停在全满态（该行所有词都处于高亮态，不清空）', () => {
+  // ⚠️ **前提已被推翻**（T81：伪逐字**不**渲染词级元素）→ 本断言改写为**新行为**。
+  //    旧断言是「该行所有词都处于高亮态」（逐词 `--sung`）。
+  //    新行为：伪逐字 ⇒ **零词元素** ⇒ 「已走满」表现为**整行**强调色（`--whole`）。
+  //    ⚠️ 「真逐字下仍是逐词 `--sung`」的鉴别力由 `test/lyric-word-timed.test.ts` 补上。
+  it('上一行走满后停在全满态（伪逐字 ⇒ **整行**强调色，不清空）', () => {
     // 三行歌词：甲行 10~20s、乙行 20~30s、丙行 30~30.5s
     // t=25 时甲行早已唱完（走满），乙行正在唱
     const { container } = render(<LyricView lines={THREE_LINES} currentTime={25} mode="double" />)
 
     const previous = lineAt(container, 0)
-    const words = Array.from(previous.querySelectorAll('[data-word]'))
-    expect(words.length).toBeGreaterThan(0)
-    for (const word of words) {
-      expect(word.className).toMatch(/fnm-lyricview__word--sung/)
-    }
+    // ⚠️ 鉴别力：伪逐字 ⇒ **一个词元素都没有**（不假装逐字）。
+    expect(previous.querySelectorAll('[data-word]')).toHaveLength(0)
+    // ⚠️ 鉴别力：已走满的那一行**整行**是强调色。
+    expect(previous.className).toContain('fnm-lyricview__line--whole')
   })
 
-  it('下一行同时在走（未唱到的词不高亮）', () => {
-    const { container } = render(<LyricView lines={THREE_LINES} currentTime={25} mode="double" />)
+  // ⚠️ **前提已被推翻**（T81）→ 本断言改写为**新行为**。
+  //    旧断言是「下一行里至少有一个词已唱到」（逐词 `--sung`）。
+  //    新行为：伪逐字 ⇒ 没有词元素 ⇒ 「唱到没有」表现为**整行**有没有 `--whole`。
+  it('下一行还没开始唱 → **不高亮**（伪逐字 ⇒ 整行没有 `--whole`）', () => {
+    // ⚠️ 取 t=15：甲行（10~20s）正在唱，乙行（20~30s）**还没开始**。
+    const { container } = render(<LyricView lines={THREE_LINES} currentTime={15} mode="double" />)
 
+    const previous = lineAt(container, 0)
     const next = lineAt(container, 1)
-    const words = Array.from(next.querySelectorAll('[data-word]'))
-    expect(words.length).toBeGreaterThan(0)
-    // 至少有一个词已经唱到
-    expect(words.some((word) => word.className.match(/fnm-lyricview__word--sung/))).toBe(true)
+    // 正在唱的那一行：整行强调色
+    expect(previous.className).toContain('fnm-lyricview__line--whole')
+    // 还没唱的那一行：**没有** `--whole`
+    expect(next.className).not.toContain('fnm-lyricview__line--whole')
+    // ⚠️ 两行都**没有**词元素（不假装逐字）。
+    expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
   })
 
   it('整页走完才一起换行（下一行走满后两行整体换成新的一页）', () => {
@@ -284,10 +311,14 @@ describe('LyricView：双行模式', () => {
 // ---------------------------------------------------------------------------
 
 describe('LyricView：当前词高亮钩子（T46）', () => {
+  // ⚠️ **前提已被推翻**（T81：伪逐字**不**渲染词级元素）→ 本断言改写为**新行为**。
+  //    旧断言用的是**行级** LRC（`THREE_LINES` ⇒ 伪逐字）⇒ 现在那里**没有词元素**
+  //    ⇒ 钩子无从挂起 ⇒ 改用**真逐字**数据（`WORD_TIMED_THREE_LINES`），
+  //    断言的**原意**（「当前正在唱的词带上这个类」）**一字不减**。
   it('给了 activeWordClassName → **当前正在唱的词**带上这个类', () => {
     const { container } = render(
       <LyricView
-        lines={THREE_LINES}
+        lines={WORD_TIMED_THREE_LINES}
         currentTime={25}
         mode="double"
         activeWordClassName="fnm-lyricview__word--active"
@@ -299,20 +330,26 @@ describe('LyricView：当前词高亮钩子（T46）', () => {
     const words = Array.from(next.querySelectorAll('[data-word]'))
     const active = words.filter((word) => word.className.includes('fnm-lyricview__word--active'))
     expect(active).toHaveLength(1)
+    // ⚠️ 鉴别力：当前词确实是**正在唱的那一个**（行@25s），不是别的词。
+    expect(active[0]!.textContent).toBe('行')
   })
 
   it('不给 → **不加**任何额外类名（既有行为一字不变）', () => {
-    const { container } = render(<LyricView lines={THREE_LINES} currentTime={25} mode="double" />)
+    const { container } = render(
+      <LyricView lines={WORD_TIMED_THREE_LINES} currentTime={25} mode="double" />,
+    )
 
     const next = lineAt(container, 1)
     const words = Array.from(next.querySelectorAll('[data-word]'))
+    // ⚠️ 鉴别力：词元素**确实存在**（真逐字）⇒ 「没加钩子」不是因为「没东西可加」。
+    expect(words.length).toBeGreaterThan(0)
     expect(words.some((word) => /fnm-lyricview__word--active/.test(word.className))).toBe(false)
   })
 
   it('该行已走满 → **不给**当前词加钩子（整行都是唱过的状态）', () => {
     const { container } = render(
       <LyricView
-        lines={THREE_LINES}
+        lines={WORD_TIMED_THREE_LINES}
         currentTime={25}
         mode="double"
         activeWordClassName="fnm-lyricview__word--active"
@@ -322,6 +359,8 @@ describe('LyricView：当前词高亮钩子（T46）', () => {
     // t=25 时甲行（10~20s）早已走满 → 它的词**全是** sung，不该再有「当前词」。
     const previous = lineAt(container, 0)
     const words = Array.from(previous.querySelectorAll('[data-word]'))
+    // ⚠️ 鉴别力：词元素**确实存在**（真逐字）⇒ 「没加钩子」不是因为「没东西可加」。
+    expect(words.length).toBeGreaterThan(0)
     expect(words.some((word) => /fnm-lyricview__word--active/.test(word.className))).toBe(false)
   })
 })
@@ -1251,15 +1290,19 @@ describe('LyricView：真逐字填充的词/文本对齐（T68）', () => {
     expect(container.textContent).toContain('ab')
   })
 
-  it('行级 LRC 的伪逐字路径**行为一字不变**（词元素与空白还原都照旧）', () => {
+  // ⚠️ **前提已被推翻**（T81：伪逐字**不**渲染词级元素）→ 本断言改写为**新行为**。
+  //    旧断言是「词元素 2 个 + 空格片段 1 个」（伪逐字照旧渲染词级元素）。
+  //    新行为：伪逐字 ⇒ **零词元素、零空格片段**，但**行文本一字不少**（不白屏）。
+  it('行级 LRC 的伪逐字路径 ⇒ **不渲染词级元素**（整行纯文本，行文本一字不少）', () => {
     const lines = parseLrc('[00:00.00]甲 乙')
     const { container } = render(<LyricView lines={lines} currentTime={0.5} mode="single" />)
 
-    const words = Array.from(container.querySelectorAll('[data-word]'))
-    expect(words.length).toBe(2)
-    expect(words.map((w) => w.getAttribute('data-word'))).toEqual(['0', '1'])
-    const spaces = Array.from(container.querySelectorAll('.fnm-lyricview__space'))
-    expect(spaces.map((s) => s.textContent)).toEqual([' '])
+    // ⚠️ 鉴别力：**零**词元素、零空格片段 ⇒ DOM 里根本没有词级钩子。
+    expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
+    expect(container.querySelectorAll('.fnm-lyricview__space')).toHaveLength(0)
+    // ⚠️ 鉴别力：**行文本照旧完整显示**（不白屏、不丢字）。
     expect(baseText(container)).toBe('甲 乙')
+    // ⚠️ 当前行**整行**强调色（不假装逐字）。
+    expect(lineAt(container, 0).className).toContain('fnm-lyricview__line--whole')
   })
 })

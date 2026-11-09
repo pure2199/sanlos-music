@@ -1696,6 +1696,12 @@ export function sanitizeLyricMessage(value: unknown): LyricOverlayMessage | null
       text: readString(line['text']),
       words,
       translation: readString(line['translation']),
+      // ⚠️ **T81：必须透传 `wordTimed`** —— 本函数是**白名单式重建**
+      //    （只认 time / text / words / translation）⇒ 不显式带过去，
+      //    「这行是伪逐字」这个事实会在 IPC 边界**被洗掉**
+      //    ⇒ 悬浮窗与词岛会把伪逐字**误判成真逐字** ⇒ **假扫光复活**。
+      //    ⚠️ 缺省（老消息没这个键）⇒ `undefined` ⇒ 渲染层按「有逐字」处理（既有行为不变）。
+      wordTimed: typeof line['wordTimed'] === 'boolean' ? line['wordTimed'] : undefined,
     })
   }
 

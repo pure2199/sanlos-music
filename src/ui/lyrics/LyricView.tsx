@@ -601,7 +601,21 @@ interface RenderLineOptions {
 function renderLine(options: RenderLineOptions): ReactElement {
   const { line, index, progress, active, onSeek, slot, style } = options
 
-  const segments = buildSegments(line)
+  // ⚠️ **T81：这一行的词级时间戳是「源给的」还是「我们插值编的」？**
+  //    - `wordTimed !== false` ⇒ **真逐字** ⇒ 现有卡拉OK 填色**一字不变**；
+  //    - `wordTimed === false` ⇒ **伪逐字**（`pseudoWords()` 编的）⇒
+  //      **不假装逐字**：不渲染逐字着色层，当前行**整行**用强调色。
+  //
+  // ⚠️ **缺省视为真逐字**（`!== false`）⇒ 既有代码与测试里**手写**的 `LyricLine`
+  //    （不带这个键）⇒ 行为**一条不变**。
+  const wordTimed = line.wordTimed !== false
+  // ⚠️ 伪逐字时整行强调色的判据 = 「该行**已经开始**或**已走满**」
+  //    ⇒ 与真逐字下「已唱过的词是强调色」**语义一致**（只是粒度从词退化成行）。
+  const wholeLine =
+    !wordTimed && progress !== null && (progress.completed || progress.wordIndex >= 0)
+
+  // ⚠️ 伪逐字 ⇒ **不切片段**（切了也只会造出假的词级钩子）。
+  const segments = wordTimed ? buildSegments(line) : []
 
   const overlayContent: ReactElement[] = []
   segments.forEach((segment, position) => {
@@ -658,6 +672,8 @@ function renderLine(options: RenderLineOptions): ReactElement {
   if (active) classNames.push('fnm-lyricview__line--active')
   if (slot) classNames.push(`fnm-lyricview__line--${slot}`)
   if (onSeek) classNames.push('fnm-lyricview__line--clickable')
+  // ⚠️ **T81**：伪逐字 ⇒ 当前行 / 已唱行**整行**强调色（不假装逐字）。
+  if (wholeLine) classNames.push('fnm-lyricview__line--whole')
 
   // 翻译：有才渲染（**不渲染空的第二行**）。
   const showTranslation = options.showTranslation ?? true
@@ -685,10 +701,16 @@ function renderLine(options: RenderLineOptions): ReactElement {
     //    `getByText(整行文本)` 只看直接文本节点，包一层就取不到整行了。
     //    Fragment 不产生 DOM 节点 → 文本节点仍然是行元素的直接子节点。
     <Fragment key="base">{line.text}</Fragment>,
-    <span key="overlay" className="fnm-lyricview__overlay" aria-hidden="true">
-      <span className="fnm-lyricview__overlay-inner">{overlayContent}</span>
-    </span>,
   ]
+  // ⚠️ **T81**：伪逐字 ⇒ **不渲染**逐字着色层
+  //    ⇒ DOM 里没有 `[data-word]` 元素 ⇒ 没有任何词级钩子 ⇒ **假扫光不可能出现**。
+  if (wordTimed) {
+    body.push(
+      <span key="overlay" className="fnm-lyricview__overlay" aria-hidden="true">
+        <span className="fnm-lyricview__overlay-inner">{overlayContent}</span>
+      </span>,
+    )
+  }
   if (translationNode) body.push(translationNode)
 
   if (!onSeek) {

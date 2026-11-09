@@ -74,3 +74,32 @@ describe('卡拉OK 填色的 CSS 契约（T48）', () => {
     expect(karaoke).not.toMatch(/rgb\(|rgba\(|hsl\(/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// T81：伪逐字 ⇒ 当前行**整行**强调色
+// ---------------------------------------------------------------------------
+
+describe('伪逐字整行强调色的 CSS 契约（T81）', () => {
+  const css = readCss('src', 'ui', 'lyrics', 'lyric-view.css')
+  const whole = blockOf(css, '.fnm-lyricview__line--whole')
+
+  it('这条规则**存在**（否则伪逐字时当前行没有任何区分）', () => {
+    expect(whole).not.toBe('')
+  })
+
+  it('颜色是**强调色**（与真逐字下「已唱过的词」同一个色 ⇒ 语义一致）', () => {
+    expect(whole).toMatch(/color:\s*var\(--accent\)/)
+  })
+
+  it('颜色**只用语义变量**（不许硬编码色值）', () => {
+    expect(whole).not.toMatch(/#[0-9a-fA-F]{3,8}/)
+    expect(whole).not.toMatch(/rgb\(|rgba\(|hsl\(/)
+  })
+
+  it('⚠️ **必须排在 `--active` 之后**（两者特异性相同 ⇒ 后者胜，否则被盖掉）', () => {
+    const activeIndex = css.indexOf('.fnm-lyricview__line--active')
+    const wholeIndex = css.indexOf('.fnm-lyricview__line--whole')
+    expect(activeIndex).toBeGreaterThanOrEqual(0)
+    expect(wholeIndex).toBeGreaterThan(activeIndex)
+  })
+})

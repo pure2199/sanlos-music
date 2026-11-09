@@ -240,6 +240,31 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
     expect(karaoke?.getAttribute('data-karaoke-progress')).toBe('50.0')
   })
 
+  it('**伪逐字**（只有行级时间戳）⇒ **不假装逐字**：词岛也没有卡拉OK 填色（T81）', async () => {
+    const fake = fakeBridge()
+    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+
+    const { container } = render(<IslandApp />)
+    act(() => {
+      fake.emitLyricState({
+        kind: 'track',
+        track: { id: 't1', title: '歌名', artist: '歌手' },
+        // ⚠️ `wordTimed: false` = 「这行的词级时间是插值编造的」⇒ 不走卡拉OK。
+        lines: THREE_LINES.map((line) => ({ ...line, wordTimed: false })),
+      })
+      fake.emitLyricState({ kind: 'progress', position: 15, isPlaying: false })
+    })
+
+    await waitFor(() => {
+      expect(currentLine(container)?.getAttribute('data-index')).toBe('1')
+    })
+    // ⚠️ 鉴别力：**零**词级元素 ⇒ 词岛也不会假装逐字（假扫光不可能出现）。
+    expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
+    expect(container.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
+    // ⚠️ 当前行**整行**是强调色（不假装逐字）。
+    expect(currentLine(container)?.className).toContain('fnm-lyricview__line--whole')
+  })
+
   it('词岛**不再**用整词发光（T46 的旧机制，已被卡拉OK 取代）', async () => {
     const fake = fakeBridge()
     ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
