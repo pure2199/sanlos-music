@@ -90,8 +90,36 @@ describe('loadLyricEntries：线上优先（T70 的缺省口径）', () => {
     expect(external).toHaveBeenCalledTimes(1)
   })
 
-  it('线上查询的**缺省上限** = 10 秒（用户拍板：5 秒太短）', () => {
-    expect(ONLINE_LYRIC_TIMEOUT_MS).toBe(10000)
+  it('线上查询的**缺省上限** = 12 秒（T73：源链最多 4 个源 × 每个 3 秒）', () => {
+    expect(ONLINE_LYRIC_TIMEOUT_MS).toBe(12000)
+  })
+
+  it('命中线上时**如实带出实际命中的那个源**（T73：源链依次试，未必是首选源）', async () => {
+    const external = vi.fn<ExternalLyricFetcher>(async () => ({
+      status: 'ok',
+      source: 'lrclib',
+      original: '[00:01.00]线上原文',
+      translation: '',
+    }))
+    const result = await loadLyricEntries('song-1', TARGET, {
+      api: makeApi([nasEntry('[00:01.00]NAS 歌词')]),
+      external,
+    })
+    expect(result.origin).toBe('external')
+    // ⚠️ **必须带出实际命中的源** ⇒ 界面才能如实显示（不装作是首选源）。
+    expect(result.externalSource).toBe('lrclib')
+  })
+
+  it('用的是本地那份时 → **没有** externalSource（不是线上来的）', async () => {
+    const result = await loadLyricEntries('song-1', TARGET, {
+      api: makeApi([nasEntry('[00:01.00]NAS 歌词')]),
+      external: vi.fn<ExternalLyricFetcher>(async () => ({
+        status: 'not-found',
+      })),
+      priority: 'local-first',
+    })
+    expect(result.origin).toBe('nas')
+    expect(result.externalSource).toBeUndefined()
   })
 
   it('线上**匹配不上**（not-found）⇒ **回落到本地**', async () => {

@@ -33,7 +33,7 @@
 //
 // ---------------------------------------------------------------------------
 
-import type { ExternalLyricResult, LyricPriority } from '../../shared/lyricProvider'
+import type { ExternalLyricResult, LyricPriority, LyricSource } from '../../shared/lyricProvider'
 import type { LyricEntry } from '../api/types'
 
 // ---------------------------------------------------------------------------
@@ -75,6 +75,14 @@ export interface LyricLoadResult {
   entries: LyricEntry[]
   /** 实际用到的来源。 */
   origin: 'nas' | 'external' | 'none'
+  /**
+   * **实际命中的那个线上源**（T73）。
+   *
+   * ⚠️ 只在 `origin === 'external'` 时有值 —— 因为源链是「**依次试**」的
+   *    ⇒ 命中的**未必**是用户选的那个（如：选了网易云没匹配上 → 用了 lrclib）。
+   *    ⇒ 界面要**如实显示它**，不能装作是首选源。
+   */
+  externalSource?: LyricSource
   /**
    * 失败原因（**只有**在「NAS 没有 + 外部也没取到」时才有值）。
    *
@@ -163,7 +171,7 @@ export function toExternalEntries(songId: string, result: ExternalLyricResult): 
  *    30 秒用来等一个「下歌」不算离谱；但歌词是**要立刻显示**的东西
  *    ⇒ 外网挂住时最多空窗 **10 秒**，然后立刻回落到本地那份。
  */
-export const ONLINE_LYRIC_TIMEOUT_MS = 10000
+export const ONLINE_LYRIC_TIMEOUT_MS = 12000
 
 /** 线上超时时的原因文案（如实告诉用户「不是没歌词，是源没回话」）。 */
 export const ONLINE_TIMEOUT_REASON = '歌词源响应超时'
@@ -269,7 +277,7 @@ async function loadLocalFirst(
   if (!entries.length) {
     return { entries: [], origin: 'none', reason: null }
   }
-  return { entries, origin: 'external', reason: null }
+  return { entries, origin: 'external', externalSource: result.source, reason: null }
 }
 
 /**
@@ -297,7 +305,8 @@ async function loadOnlineFirst(
     if (entries.length > 0) {
       // ⚠️ 线上匹配上 ⇒ **用线上的**（本地那份**不用**）。
       //    代价：线上没翻译时，这首歌就没翻译（用户已拍板接受）。
-      return { entries, origin: 'external', reason: null }
+      // ⚠️ T73：带上**实际命中的那个源**（源链是依次试的，未必是首选源）。
+      return { entries, origin: 'external', externalSource: outcome.result.source, reason: null }
     }
     // ⚠️ `ok` 但原文与翻译**都为空** ⇒ 视同**匹配不上** ⇒ 回落本地。
   }

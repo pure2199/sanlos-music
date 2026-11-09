@@ -23,6 +23,7 @@ import type { ExternalLyricQuery } from '../shared/lyricProvider'
 import { DEFAULT_LYRIC_SOURCE } from '../shared/lyricProvider'
 import type { AppPrefs } from '../shared/playerBridge'
 import {
+  buildSourceChain,
   createLyricProvider,
   decodeMaybeBase64,
   DURATION_TOLERANCE_SECONDS,
@@ -546,12 +547,14 @@ describe('自定义模板适配器', () => {
     expect(result.message).toContain('LRC')
   })
 
-  it('模板不合法 → `error`，且**一个请求都不发**', async () => {
+  it('模板不合法 → `error`，且**绝不给这个地址发请求**', async () => {
     const { fetchImpl, calls } = makeFetch([])
     const provider = createLyricProvider({ fetchImpl })
     const result = await provider.fetchExternalLyric('custom', 'http://example.com/{title}', QUERY)
     expect(result.status).toBe('error')
-    expect(calls).toHaveLength(0)
+    // ⚠️ T73：源链会**继续试别的线上源**（模板坏了不该让整条链断掉），
+    //    但**绝不给这个不合法模板发请求**（不外发到奇怪的地方）。
+    expect(calls.some((url) => url.includes('example.com'))).toBe(false)
   })
 })
 
@@ -568,14 +571,18 @@ describe('缓存与开关', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('同一首歌连查两次 → **只发一次**请求（成功结果一直缓存）', async () => {
+  it('同一首歌连查两次 → **第二次一个请求都不发**（结果一直缓存）', async () => {
     const { fetchImpl, calls } = makeFetch([
       { match: 'music.163.com/api/search', body: JSON.stringify({ result: { songs: [] } }) },
     ])
     const provider = createLyricProvider({ fetchImpl })
     await provider.fetchExternalLyric('netease', '', QUERY)
+    // ⚠️ T73：缓存里存的是**整条源链**的结果 ⇒ 第一次可能打了几个请求。
+    //    断言的是「第二次**零新增**请求」（旧断言「只发一次」在源链下不再成立）。
+    const afterFirst = calls.length
+    expect(afterFirst).toBeGreaterThan(0)
     await provider.fetchExternalLyric('netease', '', QUERY)
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(afterFirst)
   })
 
   it('失败结果也缓存（连续切歌**不会**把外部源打爆）', async () => {
@@ -584,8 +591,11 @@ describe('缓存与开关', () => {
     ])
     const provider = createLyricProvider({ fetchImpl })
     await provider.fetchExternalLyric('netease', '', QUERY)
+    // ⚠️ T73：同一条源链 ⇒ 第一次打了几个请求，第二次就**一个都不打**。
+    const afterFirst = calls.length
+    expect(afterFirst).toBeGreaterThan(0)
     await provider.fetchExternalLyric('netease', '', QUERY)
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(afterFirst)
   })
 
   it('失败的缓存**过期后**会重新试（过期按注入的时钟算）', async () => {
@@ -595,9 +605,12 @@ describe('缓存与开关', () => {
     let clock = 1_000_000
     const provider = createLyricProvider({ fetchImpl, now: () => clock })
     await provider.fetchExternalLyric('netease', '', QUERY)
+    // ⚠️ T73：过期后要**把整条源链重跑一遍** ⇒ 请求数翻倍。
+    const afterFirst = calls.length
+    expect(afterFirst).toBeGreaterThan(0)
     clock += 10 * 60 * 1000
     await provider.fetchExternalLyric('netease', '', QUERY)
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(afterFirst * 2)
   })
 
   it('自定义源**改了模板** → 不再命中旧缓存（换源要**立刻**生效）', async () => {
@@ -640,6 +653,94 @@ describe('缓存与开关', () => {
     expect(result.status).toBe('error')
     if (result.status !== 'error') return
     expect(result.message).toContain('连不上')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 源链（T73）：匹配不到就换下一个源
+// ---------------------------------------------------------------------------
+
+describe('源链（T73）', () => {
+  it('首选源匹配不上 → **自动试下一个源**，命中就用它', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      { match: 'music.163.com/api/search', body: JSON.stringify({ result: { songs: [] } }) },
+      {
+        match: 'lrclib.net/api/get',
+        body: JSON.stringify({ syncedLyrics: LRC_SAMPLE, plainLyrics: '' }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    // ⚠️ 命中的**未必**是用户选的那个 ⇒ 结果要**如实**带上它。
+    expect(result.source).toBe('lrclib')
+    expect(calls.some((url) => url.includes('lrclib.net'))).toBe(true)
+  })
+
+  it('命中即停：后面的源**一个请求都不发**', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      {
+        match: 'lrclib.net/api/get',
+        body: JSON.stringify({ syncedLyrics: LRC_SAMPLE, plainLyrics: '' }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    await provider.fetchExternalLyric('lrclib', '', QUERY)
+    expect(calls.some((url) => url.includes('music.163.com'))).toBe(false)
+  })
+
+  it('每个源**各自**限时：某个源卡住 → 换下一个源', async () => {
+    const { fetchImpl } = makeFetch([
+      {
+        match: 'lrclib.net/api/get',
+        body: JSON.stringify({ syncedLyrics: LRC_SAMPLE, plainLyrics: '' }),
+      },
+    ])
+    const provider = createLyricProvider({
+      fetchImpl: async (input: string): Promise<Response> => {
+        if (input.includes('music.163.com')) {
+          // ⚠️ 首选源**永远不回应**（模拟挂住）。
+          return await new Promise<Response>(() => undefined)
+        }
+        return await fetchImpl(input)
+      },
+      perSourceTimeoutMs: 30,
+    })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.source).toBe('lrclib')
+  })
+
+  it('链走完都没匹配上 → 最终是 `not-found`（不是错误）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: JSON.stringify({ result: { songs: [] } }) },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('not-found')
+  })
+
+  it('`off` → 源链是空的（一个请求都不发）', () => {
+    expect(buildSourceChain('off', '')).toEqual([])
+  })
+
+  it('首选源排第一，其余按固定顺序跟上', () => {
+    expect(buildSourceChain('lrclib', '')).toEqual(['lrclib', 'netease', 'qq'])
+  })
+
+  it('`custom` 没有模板 → 不进链', () => {
+    expect(buildSourceChain('netease', '')).toEqual(['netease', 'lrclib', 'qq'])
+  })
+
+  it('`custom` 有模板 → 进链，且排在**用户选的位置**', () => {
+    expect(buildSourceChain('custom', 'https://x.example.com/{title}')).toEqual([
+      'custom',
+      'netease',
+      'lrclib',
+      'qq',
+    ])
   })
 })
 

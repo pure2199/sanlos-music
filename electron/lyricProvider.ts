@@ -758,6 +758,12 @@ export interface LyricProviderOptions {
   fetchImpl: FetchLike
   /** 现在的时刻（毫秒）；单测可注入以验证缓存过期。 */
   now?: () => number
+  /**
+   * 每个源**各自**的限时（毫秒）；缺省 {@link PER_SOURCE_TIMEOUT_MS}。
+   *
+   * ⚠️ 单测可注入一个很小的值来验「超时就换下一个源」。
+   */
+  perSourceTimeoutMs?: number
 }
 
 /** 歌词源提供器。 */
@@ -774,6 +780,44 @@ export interface LyricProvider {
     template: string,
     query: ExternalLyricQuery,
   ): Promise<ExternalLyricResult>
+}
+
+/**
+ * 线上源的**尝试顺序**（T73）。
+ *
+ * ⚠️ **用户选的源排第一**，其余按这个固定顺序跟上
+ *    （匹配不到就换下一个 ⇒ 最后才回落 NAS 本地）。
+ * ⚠️ `off`（不用外部）**不在链里** —— 它意味着「一次请求都不发」。
+ */
+export const ONLINE_SOURCE_ORDER: readonly LyricSource[] = ['netease', 'lrclib', 'qq', 'custom']
+
+/**
+ * 每个源**各自**的限时（毫秒）（T73）。
+ *
+ * ⚠️ 实测正常的源 < 500ms ⇒ 3 秒足够区分「慢」与「挂」。
+ * ⚠️ 链上最多 4 个源 ⇒ 线上**总**预算 4 × 3 = 12 秒（渲染层那边也是 12 秒）。
+ */
+export const PER_SOURCE_TIMEOUT_MS = 3000
+
+/**
+ * 按「首选源 + 其余线上源」排出**要试的源链**（T73）。
+ *
+ * @param source 用户选的源（`off` ⇒ 空链 = 一次请求都不发）。
+ * @param template 自定义模板（`custom` 没有模板 ⇒ 不进链）。
+ * @returns 要依次尝试的源（**首选源一定在第一个**）。
+ */
+export function buildSourceChain(source: LyricSource, template: string): LyricSource[] {
+  if (source === 'off') return []
+  const chain: LyricSource[] = []
+  const push = (candidate: LyricSource): void => {
+    if (chain.includes(candidate)) return
+    // ⚠️ `custom` 没有模板 = 没法用 ⇒ 不进链（别去请求一个空地址）。
+    if (candidate === 'custom' && template.trim() === '') return
+    chain.push(candidate)
+  }
+  push(source)
+  for (const candidate of ONLINE_SOURCE_ORDER) push(candidate)
+  return chain
 }
 
 /** 缓存里的一条。 */
@@ -794,6 +838,8 @@ interface CacheEntry {
 export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
   const now = opts.now ?? ((): number => Date.now())
   const cache = new Map<string, CacheEntry>()
+  // ⚠️ 每个源**各自**的限时（T73）—— 实测正常的源 < 500ms。
+  const perSourceTimeoutMs = opts.perSourceTimeoutMs ?? PER_SOURCE_TIMEOUT_MS
 
   /** 缓存的键。 */
   function cacheKey(source: LyricSource, query: ExternalLyricQuery, template: string): string {
@@ -838,35 +884,74 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
     cache.set(key, { at: now(), result })
   }
 
+  /**
+   * 抓**一个**源（带**该源自己的**限时）（T73）。
+   *
+   * ⚠️ **超时的请求继续跑**，结果丢弃即可（与渲染层那条 `fetchOnline` 同一套路）。
+   * ⚠️ **不抛异常**：任何失败都变成 `error` 结果 ⇒ 源链才能继续试下一个。
+   */
+  async function fetchOne(
+    candidate: LyricSource,
+    template: string,
+    query: ExternalLyricQuery,
+  ): Promise<ExternalLyricResult> {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const timeoutPromise = new Promise<ExternalLyricResult>((resolve) => {
+      timer = setTimeout(() => {
+        resolve({ status: 'error', message: `歌词源 ${candidate} 响应超时` })
+      }, perSourceTimeoutMs)
+    })
+    try {
+      const work = (async (): Promise<ExternalLyricResult> => {
+        if (candidate === 'netease') return await fetchNetease(opts.fetchImpl, query)
+        if (candidate === 'lrclib') return await fetchLrclib(opts.fetchImpl, query)
+        if (candidate === 'qq') return await fetchQq(opts.fetchImpl, query)
+        return await fetchCustom(opts.fetchImpl, template, query)
+      })().catch((cause: unknown): ExternalLyricResult => ({
+        status: 'error',
+        message: `连接歌词源失败：${readableError(cause)}`,
+      }))
+      return await Promise.race([work, timeoutPromise])
+    } finally {
+      if (timer !== null) clearTimeout(timer)
+    }
+  }
+
   return {
     async fetchExternalLyric(
       source: LyricSource,
       template: string,
       query: ExternalLyricQuery,
     ): Promise<ExternalLyricResult> {
-      // ⚠️ `off` = 明确不用外部 → **一次网络请求都不发**。
-      if (source === 'off') return { status: 'not-found' }
+      // ⚠️ `off`（或链为空）= 明确不用外部 → **一次网络请求都不发**。
+      const chain = buildSourceChain(source, template)
+      if (chain.length === 0) return { status: 'not-found' }
 
       const key = cacheKey(source, query, template)
       const cached = readCache(key)
       if (cached) return cached
 
-      let result: ExternalLyricResult
-      try {
-        if (source === 'netease') {
-          result = await fetchNetease(opts.fetchImpl, query)
-        } else if (source === 'lrclib') {
-          result = await fetchLrclib(opts.fetchImpl, query)
-        } else if (source === 'qq') {
-          result = await fetchQq(opts.fetchImpl, query)
-        } else {
-          result = await fetchCustom(opts.fetchImpl, template, query)
+      // ⚠️ **链走完**才返回：命中即停；一个源坏了也**继续试下一个**。
+      let preferredResult: ExternalLyricResult | null = null
+      for (const candidate of chain) {
+        const result = await fetchOne(candidate, template, query)
+        // ⚠️ 记下**首选源**的结果（它才是这次查询的「口径」）。
+        if (candidate === source) preferredResult = result
+        // ⚠️ 命中（`ok` 且原文非空）⇒ **立刻返回**，不再问后面的源。
+        if (result.status === 'ok' && result.original.trim() !== '') {
+          writeCache(key, result)
+          return result
         }
-      } catch (cause) {
-        result = { status: 'error', message: `连接歌词源失败：${readableError(cause)}` }
       }
-      writeCache(key, result)
-      return result
+      // ⚠️ **首选源说了算**（T73）：
+      //    首选源说「没有」⇒ 最终就是「没有」（后面那些源**也没匹配上**）；
+      //    首选源**坏了** ⇒ 报它的错（源不可用 ≠ 没歌词，用户要看到原因）。
+      const finalResult: ExternalLyricResult =
+        preferredResult !== null && preferredResult.status === 'error'
+          ? preferredResult
+          : { status: 'not-found' }
+      writeCache(key, finalResult)
+      return finalResult
     },
   }
 }

@@ -264,6 +264,24 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
     }
   })
 
+  // --- 订阅偏好变化：切源 / 切优先级 / 改模板 ⇒ 立刻**重新取词并重推**（T73） ---
+  //
+  // ⚠️ **为什么必须订阅**：桌面歌词（经典窗 + 词岛）**自己**取词，
+  //    而取词只在「切歌 / 从关变开 / 输出延迟变化」时发生 ⇒ 用户在设置里
+  //    换了歌词源，桌面歌词**一直停在旧内容**（全屏页有自己的 effect，会重取）
+  //    ⇒ 同一个应用里两处歌词对不上（T73 的真机现象）。
+  const unsubscribePrefs = useAppPrefsStore.subscribe((state, previous) => {
+    // ⚠️ 关着桌面歌词时**不多打 NAS**（与既有口径一致）。
+    if (!enabled) return
+    if (
+      state.lyricSource === previous.lyricSource &&
+      state.lyricPriority === previous.lyricPriority &&
+      state.lyricTemplate === previous.lyricTemplate
+    ) return
+    // ⚠️ `force = true` ⇒ 强制重新取词（缓存里的旧结果不算数）。
+    void publishTrack(true)
+  })
+
   // 订阅悬浮窗可见性：开 → 立刻把当前曲目与进度推过去；关 → 停止推送。
   const unsubscribeVisibility = bridge.onLyricVisibility((visible) => {
     visibilityKnown = true
@@ -298,6 +316,7 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
     dispose(): void {
       unsubscribeStore()
       unsubscribeVisibility()
+      unsubscribePrefs()
     },
   }
 }

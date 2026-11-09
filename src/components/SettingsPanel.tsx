@@ -408,7 +408,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             <fieldset className="fnm-settings__group">
               <legend className="fnm-settings__legend">歌词来源</legend>
               <p className="fnm-settings__hint">
-                这里是**用哪个外部源**；谁优先（线上还是 NAS 自带的），见下一组「歌词优先级」。
+                这里是先用哪个外部源；这个源匹配不上时，会自动按顺序试下一个线上源
+                （网易云 → lrclib → QQ → 自定义模板），全都试完才回落到 NAS 自带的。
+                谁优先（线上还是 NAS 自带的），见下一组「歌词优先级」。
               </p>
               <label className="fnm-settings__option fnm-settings__option--stack">
                 <span>外部歌词源</span>

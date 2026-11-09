@@ -49,6 +49,7 @@ import { CoverImage } from '../components/Cards'
 import { coverUrl } from '../components/coverUrl'
 import type { PlayerStoreLike } from '../components/PlayerBar'
 import { QUEUE_ONLY_ONE_HINT, removeSongFromQueue } from '../components/PlayerBar'
+import type { LyricSource } from '../../shared/lyricProvider'
 import { usePlayerStore } from '../state/playerStore'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import {
@@ -210,6 +211,17 @@ export function extractCoverColor(url: string): Promise<string | null> {
 /** 歌词加载状态。 */
 type LyricStatus = 'idle' | 'loading' | 'ready' | 'error'
 
+/**
+ * 线上源的**可读名字**（T73）—— 如实显示**实际命中的那个**。
+ */
+const SOURCE_LABEL: Record<LyricSource, string> = {
+  netease: '网易云音乐',
+  lrclib: 'lrclib.net',
+  qq: 'QQ 音乐',
+  custom: '自定义 API',
+  off: '不用外部',
+}
+
 /** 允许写 CSS 自定义属性的 style 对象。 */
 type CssVars = CSSProperties & Record<`--${string}`, string | number | undefined>
 
@@ -250,6 +262,10 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   const [lyricStatus, setLyricStatus] = useState<LyricStatus>('idle')
   /** 歌词取不到时的**可读原因**（Task 32：外部源失败要如实说，不能装作「暂无」）。 */
   const [lyricReason, setLyricReason] = useState<string | null>(null)
+  /**
+   * **实际命中的那个线上源**（T73）—— 如实显示，不装作是首选源。
+   */
+  const [lyricSourceUsed, setLyricSourceUsed] = useState<LyricSource | null>(null)
   const [tint, setTint] = useState<string | null>(null)
   /** 取色重试次数（失败后延迟重试；见 `MAX_TINT_ATTEMPTS`）。 */
   const [tintAttempt, setTintAttempt] = useState(0)
@@ -263,6 +279,15 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
    * ⚠️ 改了优先级 ⇒ **重新取词**（见下面的 effect 依赖）。
    */
   const lyricPriority = useAppPrefsStore((state) => state.lyricPriority)
+
+  /**
+   * 歌词源与模板（T73）：**源变了要立刻重新取词**（页面开着也要变）。
+   *
+   * ⚠️ 这两个值只进 `useEffect` 的依赖 —— 取词本身在**主进程**按偏好走，
+   *    渲染层不传源（IPC 契约不变）。
+   */
+  const lyricSource = useAppPrefsStore((state) => state.lyricSource)
+  const lyricTemplate = useAppPrefsStore((state) => state.lyricTemplate)
 
   /**
    * **可听延迟**（秒）：媒体渲染完成 → 用户真正听到之间的延迟（T66）。
@@ -316,12 +341,14 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
       setRawLines([])
       setLyricStatus('idle')
       setLyricReason(null)
+      setLyricSourceUsed(null)
       return
     }
     let cancelled = false
     setLyricStatus('loading')
     setRawLines([])
     setLyricReason(null)
+    setLyricSourceUsed(null)
     // ⚠️ **优先级由 `lyricPriority` 决定**（T70：缺省「线上优先」，
     //    线上匹配不上 / 报错 / 超时就回落本地）；线上源只回 LRC 文本，
     //    这里包成条目后仍交给**现有**的 `parseLyricEntries`（解析逻辑一行不改）。
@@ -334,6 +361,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
         if (cancelled) return
         setRawLines(parseLyricEntries(result.entries))
         setLyricReason(result.reason)
+        // ⚠️ T73：源链是「依次试」的 ⇒ 命中的**未必**是用户选的那个 ⇒ 如实显示。
+        setLyricSourceUsed(result.externalSource ?? null)
         // ⚠️ 有歌词 → `ready`；没歌词**且有原因** → `error`（如实显示原因）；
         //    没歌词**也没原因** → `ready` + 空行 → 界面显示「暂无歌词」。
         setLyricStatus(result.entries.length > 0 || !result.reason ? 'ready' : 'error')
@@ -352,6 +381,9 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     songId,
     externalFetcher,
     lyricPriority,
+    // ⚠️ T73：源 / 模板变了 ⇒ **重新取词**（页面开着也要变）。
+    lyricSource,
+    lyricTemplate,
     songTitle,
     songArtist,
     songAlbum,
@@ -481,7 +513,13 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
           </nav>
 
           {tab === 'lyrics' ? (
-            lyricBody
+            <>
+              {lyricBody}
+              {/* ⚠️ T73：如实显示**实际命中的那个源**（源链依次试，未必是首选）。 */}
+              {lyricSourceUsed ? (
+                <p className="fnm-fullplayer__status">歌词来源：{SOURCE_LABEL[lyricSourceUsed]}</p>
+              ) : null}
+            </>
           ) : (
             <ul className="fnm-fullplayer__queue">
               {queue.length === 0 ? (
