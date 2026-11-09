@@ -33,9 +33,11 @@
 // - 封面取回**必须异步**，且**不能阻塞托盘创建**（先建托盘、封面到了再 `setImage`）；
 // - **取不到封面 / 取失败** → 保持默认图标。
 //
-// ⚠️ 当前项目**没有打包应用图标**（`electron-builder` 打包时警告过
-//    `default Electron icon is used`），所以默认图标用 **`nativeImage.createEmpty()`**
-//    （见报告）；Task 24 补上 `build/icon.ico` 后可在这里换成真图标。
+// ⚠️ T75：**应用图标资源已补上**（`build/icon.png` / `build/tray.png`，
+//    由 `scripts/make-app-icon.mjs` **零依赖**生成）。
+//    ⇒ 「**没有封面**」（= 没在播放）时托盘显示**应用图标**，不再是空白；
+//    「**播放中**」仍显示专辑封面（用户拍板的行为）。
+//    ⚠️ **没注入 `appIcon`** 时退回到 `nativeImage.createEmpty()`（单测的老用法）。
 
 import { Buffer } from 'node:buffer'
 
@@ -376,6 +378,13 @@ export interface TrayDeps {
   quit?: () => void
   /** 封面字节来源（主进程自己去 NAS 取）。 */
   cover?: CoverFetcher
+  /**
+   * **应用图标**（T75）：没有封面 / 封面取失败时托盘显示它。
+   *
+   * ⚠️ **不注入就没有**（退回到 `nativeImage.createEmpty()`）——
+   *    这样单测的既有老用法**行为一字不变**。
+   */
+  appIcon?: NativeImageLike
   /** 托盘工厂；缺省用 Electron 的 `Tray`。 */
   createTray?: (icon: NativeImageLike) => TrayLike
   /** 图标工厂；缺省用 Electron 的 `nativeImage`。 */
@@ -398,7 +407,7 @@ export interface TrayController {
  * 造一个系统托盘。
  *
  * 流程：
- * 1. **立刻**建托盘（默认图标 = `nativeImage.createEmpty()`）——**不阻塞**在封面下载上；
+ * 1. **立刻**建托盘（默认图标 = **应用图标**；没有则 `nativeImage.createEmpty()`）——**不阻塞**在封面下载上；
  * 2. 装右键菜单（播放/暂停、上一首、下一首、显示窗口、退出）与左键「显示窗口」；
  * 3. 之后每次 `update(state)`：刷新 tooltip；**封面 id 变了**才异步取封面，
  *    取到了再 `setImage`（取不到就保持默认图标）。
@@ -413,7 +422,8 @@ export function createTray(deps: TrayDeps): TrayController {
   /** 封面请求的令牌：旧的请求回来时若令牌已变，直接丢弃（避免旧封面盖掉新封面）。 */
   let coverToken = 0
 
-  const tray = createTrayImpl(nativeImage.createEmpty())
+  // ⚠️ T75：建托盘时就用**应用图标**（没在播放时不再是空白）。
+  const tray = createTrayImpl(deps.appIcon ?? nativeImage.createEmpty())
 
   const menu = buildMenu(buildMenuTemplate())
   // 右键 → 菜单；左键 → 显示窗口。
@@ -476,8 +486,8 @@ export function createTray(deps: TrayDeps): TrayController {
     lastCoverId = coverId
 
     if (coverId.length === 0) {
-      // 没有封面 → 默认图标。
-      tray.setImage(nativeImage.createEmpty())
+      // 没有封面（= **没在播放**）→ **应用图标**（T75：不再是空白）。
+      tray.setImage(deps.appIcon ?? nativeImage.createEmpty())
       return
     }
 
@@ -485,17 +495,26 @@ export function createTray(deps: TrayDeps): TrayController {
     const bytes = await deps.cover?.fetch(coverId)
     // 期间又切了歌 → 这份封面已经过时，丢弃。
     if (token !== coverToken) return
-    if (!bytes) return
+    if (!bytes) {
+      // 封面没取到 → **应用图标**（T75：不是空白）。
+      tray.setImage(deps.appIcon ?? nativeImage.createEmpty())
+      return
+    }
 
     try {
       const image = nativeImage.createFromBuffer(bytes).resize({
         width: TRAY_ICON_SIZE,
         height: TRAY_ICON_SIZE,
       })
-      if (image.isEmpty()) return
+      if (image.isEmpty()) {
+        // 封面字节解不出图 → **应用图标**。
+        tray.setImage(deps.appIcon ?? nativeImage.createEmpty())
+        return
+      }
       tray.setImage(image)
     } catch {
-      // 字节不是合法图片 → 保持默认图标。
+      // 字节不是合法图片 → **应用图标**（不是空白）。
+      tray.setImage(deps.appIcon ?? nativeImage.createEmpty())
     }
   }
 

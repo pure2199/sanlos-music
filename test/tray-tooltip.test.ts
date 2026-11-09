@@ -62,6 +62,10 @@ const fakeNativeImage: NativeImageFactory = {
 
 /** 假托盘（记录事件与调用）。 */
 interface FakeTray extends TrayLike {
+  /**
+   * 建托盘时传进去的图标（T75：用来断言「建托盘时用的是**应用图标**」）。
+   */
+  icon: NativeImageLike | null
   /** 记录 `setToolTip` 的每一次调用。 */
   tooltips: string[]
   /** 记录 `setImage` 的每一次调用。 */
@@ -74,6 +78,7 @@ interface FakeTray extends TrayLike {
 
 function fakeTray(): FakeTray {
   const tray: FakeTray = {
+    icon: null,
     tooltips: [],
     images: [],
     listeners: new Map(),
@@ -376,22 +381,35 @@ describe('createTray', () => {
       clear: () => {},
     }
     const controller = createTray({
-      createTray: () => tray,
+      createTray: (icon) => {
+        tray.icon = icon
+        return tray
+      },
       nativeImage: fakeNativeImage,
       buildMenu: () => ({ popup: () => {} }),
       cover,
+      // ⚠️ T75：注入**应用图标** —— 没在播放时托盘显示它（**不是空白**）。
+      appIcon: new FakeImage('app-icon'),
     })
     controller.update(state())
-    // 封面还没到 → 只设过默认（空）图标。
-    expect(tray.images.every((image) => image.isEmpty())).toBe(true)
+    // 封面还没到 → 托盘当前显示的是**应用图标**（**非空**）。
+    // ⚠️ 这条断言的前提（T75 前是「默认 = 空图」）被用户指令**显式推翻**
+    //    ⇒ 改写为新行为断言（**不删**）。
+    expect(tray.icon?.isEmpty()).toBe(false)
+    expect(String((tray.icon as unknown as { label: string }).label)).toBe('app-icon')
+    // 封面还没到 ⇒ **一次 setImage 都还没发生**（封面才是第二个图标）。
+    expect(tray.images).toHaveLength(0)
 
     resolveCover(new Uint8Array([1, 2, 3]))
     await vi.waitFor(() => {
       expect(tray.images.some((image) => !image.isEmpty())).toBe(true)
     })
+    // 封面到了 ⇒ 设上去的是**封面**，不是应用图标。
+    const last = tray.images[tray.images.length - 1]
+    expect(String((last as unknown as { label: string }).label)).toContain('bytes:')
   })
 
-  it('取不到封面时降级为默认图标（不崩）', async () => {
+  it('取不到封面时降级为**应用图标**（不崩，也不是空白）', async () => {
     const tray = fakeTray()
     const cover = {
       fetch: vi.fn(async () => null),
@@ -399,16 +417,29 @@ describe('createTray', () => {
       clear: () => {},
     }
     const controller = createTray({
-      createTray: () => tray,
+      createTray: (icon) => {
+        tray.icon = icon
+        return tray
+      },
       nativeImage: fakeNativeImage,
       buildMenu: () => ({ popup: () => {} }),
       cover,
+      // ⚠️ T75：注入**应用图标** —— 封面取失败时托盘显示它（**不是空白**）。
+      appIcon: new FakeImage('app-icon'),
     })
     controller.update(state())
     await vi.waitFor(() => {
       expect(cover.fetch).toHaveBeenCalled()
     })
-    expect(tray.images.every((image) => image.isEmpty())).toBe(true)
+    await vi.waitFor(() => {
+      expect(tray.images.length).toBeGreaterThan(0)
+    })
+    // ⚠️ 这条断言的前提（T75 前是「降级成空图」）被用户指令**显式推翻**
+    //    ⇒ 改写为新行为断言（**不删**，且**更强**：原来那条是空数组上的恒真断言）。
+    expect(tray.images.every((image) => !image.isEmpty())).toBe(true)
+    expect(
+      tray.images.map((image) => String((image as unknown as { label: string }).label)),
+    ).toEqual(['app-icon'])
   })
 
   it('图标被缩到托盘尺寸', async () => {

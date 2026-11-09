@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, screen, session as electronSession } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, screen, session as electronSession } from 'electron'
 import path from 'node:path'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 
@@ -31,6 +31,7 @@ import { createNasOAuthHandlers } from './oauthWindow'
 import { buildUpstreamRequest, registerProxy } from './proxy'
 import { SessionManager } from './session'
 import { createCoverFetcher, createTray } from './tray'
+import { resolveAppIconPath } from './appIcon'
 import { createBoundsSaver, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, resolveWindowBounds } from './windowBounds'
 import { islandBounds, isPointInsideRect, ISLAND_WINDOW_HEIGHT, ISLAND_WINDOW_WIDTH } from './islandAnchor'
 import { playingFromLyricMessage, shouldShowIsland } from './islandVisibility'
@@ -38,6 +39,28 @@ import { createUpdateController } from './update'
 
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
 // 生产模式（npm start / 打包后的应用）加载随包发布的 dist/index.html。
+
+// ---------------------------------------------------------------------------
+// 应用图标（T75）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **懒加载**：第一次用到时才读文件 ⇒ 启动路径上不多一次 IO。
+// ⚠️ 找不到资源 ⇒ 返回 `undefined` ⇒ Electron 用默认图标（**不报错、不崩**）。
+type AppIconImage = ReturnType<typeof nativeImage.createFromPath>
+
+let appIconCache: AppIconImage | null | undefined
+
+function appIcon(): AppIconImage | undefined {
+  if (appIconCache !== undefined) return appIconCache ?? undefined
+  const file = resolveAppIconPath({ moduleDir: __dirname, appRoot: app.getAppPath() })
+  if (file === null) {
+    appIconCache = null
+    return undefined
+  }
+  const image = nativeImage.createFromPath(file)
+  appIconCache = image.isEmpty() ? null : image
+  return appIconCache ?? undefined
+}
 const devServerUrl = process.env.VITE_DEV_SERVER_URL
 
 // ---------------------------------------------------------------------------
@@ -306,6 +329,8 @@ if (!isPrimaryInstance) {
       const win = new BrowserWindow({
         width: boundsOptions.width,
         height: boundsOptions.height,
+        // ⚠️ T75：任务栏按钮显示**应用图标**（之前是 Electron 默认图标）。
+        icon: appIcon(),
         // ⚠️ T40：**最小尺寸**——用户拖不到比这更小。
         //    数值与依据见 `electron/windowBounds.ts` 的 `MIN_WINDOW_WIDTH` / `MIN_WINDOW_HEIGHT`
         //    （实测：内容宽必须 ≥ 播放条所需的 717px，否则整页出横向滚动条）。
@@ -536,6 +561,8 @@ if (!isPrimaryInstance) {
       const cover = createCoverFetcher({ http, session })
       const tray = createTray({
         cover,
+        // ⚠️ T75：**没有封面（没在播放）时托盘显示应用图标**，不再是空白。
+        appIcon: appIcon(),
         getState: () => currentPlayerState,
         // 托盘菜单 → 主进程 → 渲染进程执行（主进程是唯一的命令路由）。
         sendCommand: (command: PlayerCommand) => {
@@ -564,6 +591,8 @@ if (!isPrimaryInstance) {
         const win = new BrowserWindow({
           width: saved?.width ?? LYRIC_WINDOW_WIDTH,
           height: saved?.height ?? LYRIC_WINDOW_HEIGHT,
+          // ⚠️ T75：标题栏 / Alt-Tab 显示**应用图标**（这窗 `skipTaskbar`，不进任务栏）。
+          icon: appIcon(),
           x: saved?.x,
           y: saved?.y,
           show: false,
@@ -637,6 +666,8 @@ if (!isPrimaryInstance) {
           width: ISLAND_WINDOW_WIDTH,
           height: ISLAND_WINDOW_HEIGHT,
           show: false,
+          // ⚠️ T75：标题栏 / Alt-Tab 显示**应用图标**（这窗 `skipTaskbar`，不进任务栏）。
+          icon: appIcon(),
           // 词岛：无边框 + 透明 + 不进任务栏 + 不可缩放 + 不提供拖动把手。
           frame: false,
           transparent: true,

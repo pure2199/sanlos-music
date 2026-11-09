@@ -43,6 +43,10 @@ asar: true
 removePackageScripts: true
 
 win:
+  # ⚠️ T75：应用图标 —— exe / 安装包 / 快捷方式 / 任务栏都用它
+  #    （之前没有这一行 ⇒ 用的是 Electron 默认图标）。
+  # ⚠️ 用 PNG（不手工拼 ICO）—— electron-builder 自己转成 exe 需要的尺寸。
+  icon: build/icon.png
   target:
     - target: nsis
       arch:

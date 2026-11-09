@@ -45,6 +45,15 @@ function main() {
       sourcemap: false,
     })
     .then(() => {
+      // T75：把应用图标复制进输出目录 ⇒ 随 `dist-electron/**/*` 进 asar
+      //      （主进程按 `__dirname/icon.png` 解析，见 `electron/appIcon.ts`）。
+      const iconSrc = path.join(repoRoot, 'build', 'icon.png')
+      if (fs.existsSync(iconSrc)) {
+        fs.copyFileSync(iconSrc, path.join(outdir, 'icon.png'))
+      } else {
+        // ⚠️ **如实说明**：没有图标 ⇒ 产物用 Electron 默认图标（**不阻断构建**）。
+        console.warn('[build-electron] ⚠️ 找不到 build/icon.png ⇒ 产物将没有应用图标')
+      }
       const files = fs.readdirSync(outdir).sort()
       console.log(`[build-electron] 输出目录已清空并重建：${files.join(', ')}`)
     })
