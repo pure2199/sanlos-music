@@ -152,10 +152,22 @@ function buildSegments(line: LyricLine): WordSegment[] {
   if (!words.length || !text) return []
 
   // 去掉空白后的每个字符属于哪个词。
+  //
+  // ⚠️ **必须按「去空白后」的字符数构建**（T68）：
+  //    ① 下面的早退判据拿 `owner.length` 去比「行文本**去空白后**的长度」；
+  //    ② 第二遍循环里空白字符 `continue`、**不消耗 cursor**
+  //       ⇒ `owner` 的下标语义就是「**非空白字符序号**」。
+  //    ⇒ 三处必须是**同一个语义**，否则：
+  //    - 词文本**含空格**时（本项目 T67 接的网易云 yrc 就有：英文歌词间空格；
+  //      整行只有**一个**词元组时那个「词」= 整行文本），
+  //      `owner.length` 会**大于**行文本去空白后的长度 ⇒ **早退触发 ⇒ 整行不填色**；
+  //    - 词文本不含空格时（行级 LRC 的伪逐字走 `splitIntoWords`，**永不含空格**）
+  //      ⇒ 去空白前后长度相同 ⇒ `owner` 与修复前**逐位相同** ⇒ 行为一字不变。
   const owner: number[] = []
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index]!
-    for (let i = 0; i < word.text.length; i += 1) owner.push(index)
+    const chars = word.text.replace(/\s+/g, '')
+    for (let i = 0; i < chars.length; i += 1) owner.push(index)
   }
   const stripped = text.replace(/\s+/g, '')
   if (owner.length !== stripped.length) return []

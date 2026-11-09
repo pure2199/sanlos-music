@@ -1134,3 +1134,118 @@ describe('FullPlayerPage：队列移除', () => {
     expect(screen.getByText('队列里只有一首歌，不能移除')).toBeTruthy()
   })
 })
+
+// T68：真逐字填充的「词 / 行文本」对齐（buildSegments 语义一致性）
+//
+// 背景：T67 接进网易云 yrc（真逐字）后，词文本**可能含空格**
+// （英文歌词间空格；整行只有**一个**词元组时那个「词」= 整行文本）。
+// 修复前 `buildSegments` 的 `owner` 按「含空格长度」建、却拿它跟「去空白长度」比
+// ⇒ 早退触发 ⇒ **整行退化成纯文本、完全不填色**。
+//
+// ⚠️ 一律用占位文本，不含真实歌词 / 真实歌曲名。
+// ---------------------------------------------------------------------------
+
+/**
+ * 取行元素的**直接文本节点**（= 底层整行原文）。
+ *
+ * ⚠️ overlay 层（`.fnm-lyricview__overlay`）是 aria-hidden 的**着色副本**，
+ *    空白在它内部是独立的 `.fnm-lyricview__space` 片段（**不带** `data-word`）
+ *    ⇒ 只拼 `[data-word]` 的文本会**丢空格**，那不是缺陷、也不是回归。
+ */
+function baseText(container: HTMLElement): string {
+  const line = container.querySelector('.fnm-lyricview__line')
+  let text = ''
+  for (const node of Array.from(line?.childNodes ?? [])) {
+    if (node.nodeType === 3) text += node.textContent ?? ''
+  }
+  return text
+}
+
+/** 一个「整行只有一个词、且词文本含内部空格」的行（T68 的触发形态）。 */
+const SPACED_WORD_LINE: LyricLine = {
+  time: 0,
+  text: 'Some text here',
+  words: [{ text: 'Some text here', start: 0, end: 4 }],
+  translation: '',
+}
+
+/** 两个词、词间有空格（yrc 形态：词文本各自 trim 过，行文本保留空格）。 */
+const SPACED_TWO_WORDS_LINE: LyricLine = {
+  time: 0,
+  text: 'Hello world',
+  words: [
+    { text: 'Hello', start: 0, end: 1 },
+    { text: 'world', start: 1, end: 2 },
+  ],
+  translation: '',
+}
+
+describe('LyricView：真逐字填充的词/文本对齐（T68）', () => {
+  it('词文本含内部空格的行**照样逐字填充**（修复前整行不填色）', () => {
+    const { container } = render(
+      <LyricView lines={[SPACED_WORD_LINE]} currentTime={1} mode="single" karaoke />,
+    )
+
+    const words = Array.from(container.querySelectorAll('[data-word]'))
+    // ⚠️ 修复前：`owner.length`(12) != 行文本去空白长度(10) ⇒ 早退 ⇒ **一个词元素都没有**
+    expect(words.length).toBe(3)
+    // 三个片段同属 yrc 的**同一个**词（wordIndex 0）⇒ 一起染色
+    expect(words.map((w) => w.getAttribute('data-word'))).toEqual(['0', '0', '0'])
+    // 空白被还原成独立片段（**不是**塞进词里）
+    const spaces = Array.from(container.querySelectorAll('.fnm-lyricview__space'))
+    expect(spaces.map((s) => s.textContent)).toEqual([' ', ' '])
+    // 底层整行原文与 `line.text` 一致
+    expect(baseText(container)).toBe('Some text here')
+  })
+
+  it('整行一个词时，填色比例按**真实词级时间戳**推进（1s / 4s = 25%）', () => {
+    const { container } = render(
+      <LyricView lines={[SPACED_WORD_LINE]} currentTime={1} mode="single" karaoke />,
+    )
+
+    const current = container.querySelector('[data-word="0"]')
+    expect(current).not.toBeNull()
+    expect(current!.getAttribute('data-karaoke-progress')).toBe('25.0')
+  })
+
+  it('词间的空格被还原成独立片段（拉丁文**不会**显示成「Helloworld」）', () => {
+    const { container } = render(
+      <LyricView lines={[SPACED_TWO_WORDS_LINE]} currentTime={0.5} mode="single" karaoke />,
+    )
+
+    const words = Array.from(container.querySelectorAll('[data-word]'))
+    expect(words.length).toBe(2)
+    expect(words.map((w) => w.getAttribute('data-word'))).toEqual(['0', '1'])
+    const spaces = Array.from(container.querySelectorAll('.fnm-lyricview__space'))
+    expect(spaces.map((s) => s.textContent)).toEqual([' '])
+    expect(baseText(container)).toBe('Hello world')
+  })
+
+  it('词与行文本**确实对不上**时仍保守退化（整行纯文本，不崩、不乱填）', () => {
+    const mismatched: LyricLine = {
+      time: 0,
+      text: 'ab',
+      words: [{ text: 'xyz', start: 0, end: 1 }],
+      translation: '',
+    }
+    const { container } = render(
+      <LyricView lines={[mismatched]} currentTime={0.5} mode="single" karaoke />,
+    )
+
+    // 对不上 ⇒ 早退 ⇒ 不产生任何词元素（但整行文本照旧渲染，不白屏）
+    expect(container.querySelectorAll('[data-word]').length).toBe(0)
+    expect(container.textContent).toContain('ab')
+  })
+
+  it('行级 LRC 的伪逐字路径**行为一字不变**（词元素与空白还原都照旧）', () => {
+    const lines = parseLrc('[00:00.00]甲 乙')
+    const { container } = render(<LyricView lines={lines} currentTime={0.5} mode="single" />)
+
+    const words = Array.from(container.querySelectorAll('[data-word]'))
+    expect(words.length).toBe(2)
+    expect(words.map((w) => w.getAttribute('data-word'))).toEqual(['0', '1'])
+    const spaces = Array.from(container.querySelectorAll('.fnm-lyricview__space'))
+    expect(spaces.map((s) => s.textContent)).toEqual([' '])
+    expect(baseText(container)).toBe('甲 乙')
+  })
+})
