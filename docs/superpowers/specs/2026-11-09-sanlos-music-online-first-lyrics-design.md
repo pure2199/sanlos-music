@@ -19,7 +19,7 @@
 | 岔口 | 决定 |
 | --- | --- |
 | 线上那份**没有翻译**、本地那份**有翻译** | **直接用线上的**（逐字优先；不跨源接翻译） |
-| 线上源**卡住 / 很慢** | **等 5 秒后回落本地** |
+| 线上源**卡住 / 很慢** | **等 10 秒后回落本地**（初版写 5 秒，用户拍板太短） |
 | 这个优先级要不要**做成设置项** | **做成设置项**（默认线上优先，可切回本地优先） |
 
 ---
@@ -64,7 +64,7 @@
 | `not-found` | 匹配不上 |
 | `error` | 源不可用 ⇒ **同样回落本地**（线上坏不该让你看不到本地已有的歌词） |
 | 抛异常 | 同 `error` |
-| 超过 **5 秒**没回来 | 超时 ⇒ 回落本地 |
+| 超过 **10 秒**没回来 | 超时 ⇒ 回落本地 |
 | `ok` 但原文与翻译**都为空** | 视同匹配不上 |
 
 ⚠️ **没有外部取法**（`external` 为 `null`）⇒ **零外部请求**，直接用本地。
@@ -98,7 +98,7 @@
 | `electron/ipc.ts` | 偏好白名单认 `priority`（**只认两个合法值**，陌生值丢弃） |
 | `src/state/appPrefsStore.ts` | 加 `lyricPriority` + `setLyricPriority`；⚠️ `setLyricSource` 必须**连同 priority 一起写**（否则会把 priority 抹掉） |
 | `src/components/SettingsPanel.tsx` | 「歌词来源」组里加「歌词优先级」二选一 + 改提示文案 |
-| `src/player/lyricSource.ts` | **核心**：优先级判定 + 回落 + 5 秒超时 + 原因语义 |
+| `src/player/lyricSource.ts` | **核心**：优先级判定 + 回落 + 10 秒超时 + 原因语义 |
 | `src/player/lyricOverlay.ts` | 取词时读 `useAppPrefsStore.getState().lyricPriority`（与 `spectrum.ts` 读 `lyricOverlayMode` 同一套路） |
 | `src/pages/FullPlayerPage.tsx` | 从 `useAppPrefsStore` 读优先级并传进去（改了优先级 ⇒ 重新取词） |
 | `test/lyric-source.test.ts` | 「NAS 优先」那组断言**改写**为新行为（前提被用户显式推翻）+ 新增回落 / 超时 / 本地优先用例 |

@@ -105,8 +105,9 @@ export interface LyricLoadDeps {
   /**
    * 线上查询的**超时**（毫秒）。
    *
-   * ⚠️ 缺省 = {@link ONLINE_LYRIC_TIMEOUT_MS}（5 秒）——
-   *    外网不通时不能让人干等（主进程的 http 超时是 30 秒，太久）。
+   * ⚠️ 缺省 = {@link ONLINE_LYRIC_TIMEOUT_MS}（**10 秒**）——
+   *    外网不通时不能让人干等（主进程的 http 超时是 30 秒，太久）；
+   *    但也不能太短（用户拍板：**5 秒太短**，慢一点的词源会被误判成「没有」）。
    */
   timeoutMs?: number
 }
@@ -160,9 +161,9 @@ export function toExternalEntries(songId: string, result: ExternalLyricResult): 
  *
  * ⚠️ 为什么不是主进程那个 30 秒：主进程的 http 超时是**通用**的，
  *    30 秒用来等一个「下歌」不算离谱；但歌词是**要立刻显示**的东西
- *    ⇒ 外网挂住时最多空窗 5 秒，然后立刻回落到本地那份。
+ *    ⇒ 外网挂住时最多空窗 **10 秒**，然后立刻回落到本地那份。
  */
-export const ONLINE_LYRIC_TIMEOUT_MS = 5000
+export const ONLINE_LYRIC_TIMEOUT_MS = 10000
 
 /** 线上超时时的原因文案（如实告诉用户「不是没歌词，是源没回话」）。 */
 export const ONLINE_TIMEOUT_REASON = '歌词源响应超时'

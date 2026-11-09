@@ -32,6 +32,7 @@ import type { LyricEntry } from '../src/api/types'
 import {
   loadLyricEntries,
   toExternalEntries,
+  ONLINE_LYRIC_TIMEOUT_MS,
   type ExternalLyricFetcher,
   type NasLyricApi,
 } from '../src/player/lyricSource'
@@ -87,6 +88,10 @@ describe('loadLyricEntries：线上优先（T70 的缺省口径）', () => {
     expect(result.entries[0]!.content).toBe('[00:01.00]线上原文')
     // ⚠️ 线上优先 ⇒ **每首歌都查一次线上**（这是与 T32 的**行为差异**）。
     expect(external).toHaveBeenCalledTimes(1)
+  })
+
+  it('线上查询的**缺省上限** = 10 秒（用户拍板：5 秒太短）', () => {
+    expect(ONLINE_LYRIC_TIMEOUT_MS).toBe(10000)
   })
 
   it('线上**匹配不上**（not-found）⇒ **回落到本地**', async () => {
