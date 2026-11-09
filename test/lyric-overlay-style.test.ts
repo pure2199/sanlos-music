@@ -92,6 +92,41 @@ describe('T77 桌面歌词：样式契约（透明 + 白字）', () => {
       expect(win).toBe(apple)
     }
   })
+
+  // -------------------------------------------------------------------------
+  // T78：卡拉OK 扫光色（**固定亮蓝**，不跟主题走）
+  // -------------------------------------------------------------------------
+
+  it('卡拉OK 扫光用**固定亮蓝**（真机上不该整行是主题蓝）', () => {
+    // 已唱词：整词染色
+    expect(blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__word--sung')).toMatch(
+      /color:\s*var\(--lyric-float-accent\)/,
+    )
+    // 当前词：词内扫光渐变
+    const karaoke = blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__word--karaoke')
+    expect(karaoke).toMatch(/background-image:\s*linear-gradient\(/)
+    expect(karaoke).toContain('var(--lyric-float-accent)')
+    // ⚠️ **鉴别力**：不许回退到主题色（真机实测过：整行主题蓝、白字几乎看不见）
+    expect(karaoke).not.toContain('var(--accent)')
+    expect(blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__word--sung')).not.toContain(
+      'var(--accent)',
+    )
+  })
+
+  it('**共享组件一字未改**（词岛 / 歌词舞台 / 主界面仍是主题色 —— T71「三处一致」）', () => {
+    const shared = readCss('src', 'ui', 'lyrics', 'lyric-view.css')
+    expect(blockOf(shared, '.fnm-lyricview__word--sung')).toMatch(/color:\s*var\(--accent\)/)
+    expect(blockOf(shared, '.fnm-lyricview__word--karaoke')).toContain('var(--accent)')
+  })
+
+  it('扫光令牌**两套主题同值**（不跟主题走 ⇒ 两边必须一样）', () => {
+    const tokensCss = readCss('src', 'styles', 'tokens.css')
+    const fluent = blockOf(tokensCss, "[data-theme='fluent']")
+    const apple = new RegExp(`--lyric-float-accent:\\s*([^;]+);`).exec(tokensCss)?.[1]?.trim()
+    const win = new RegExp(`--lyric-float-accent:\\s*([^;]+);`).exec(fluent)?.[1]?.trim()
+    expect(apple).toBeTruthy()
+    expect(win).toBe(apple)
+  })
 })
 
 // ---------------------------------------------------------------------------

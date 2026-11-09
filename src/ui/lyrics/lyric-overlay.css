@@ -119,3 +119,36 @@
 .fnm-lyricoverlay .fnm-lyricview__overlay {
   text-shadow: none;
 }
+
+/* --------------------------------------------------------------------------
+ * 卡拉OK 扫光色：**固定亮蓝**（T78，**不跟主题走**）
+ * -------------------------------------------------------------------------- */
+
+/*
+ * ⚠️ **T78**：T77 把**基础文字**改成了固定白字 + 深描边，但**着色层**
+ *    （已唱词 / 当前词扫光）仍用 `var(--accent)` = **主题色**
+ *    ⇒ 真机实测：整行都是主题蓝，白字几乎看不见
+ *    ⇒ 与「固定白字、任何壁纸都一个样」的口径冲突。
+ *
+ * ⚠️ **为什么只在**本窗**覆盖**：`.fnm-lyricview__word--sung` /
+ *    `.fnm-lyricview__word--karaoke` 住在**共享组件** `lyric-view.css`
+ *    （词岛 / 歌词舞台 / 主界面**都在用**）⇒ 直接改共享文件会**连带改掉**
+ *    另外三处的卡拉OK 颜色（那是 T71「三处一致」的承诺）。
+ *    ⇒ 只在本窗用 `.fnm-lyricoverlay …` 前缀覆盖 ⇒ **作用域最小**。
+ */
+.fnm-lyricoverlay .fnm-lyricview__word--sung {
+  color: var(--lyric-float-accent);
+}
+
+/*
+ * ⚠️ **只覆盖 `background-image`**：`background-size`（= 词内进度）、
+ *    `background-repeat` / `background-position` 与 `color: transparent`
+ *    都仍由共享规则提供 ⇒ **扫光推进逻辑一字不改**。
+ */
+.fnm-lyricoverlay .fnm-lyricview__word--karaoke {
+  background-image: linear-gradient(
+    90deg,
+    var(--lyric-float-accent) 0%,
+    var(--lyric-float-accent) 100%
+  );
+}
