@@ -145,6 +145,13 @@ export interface LyricOverlayTrack {
   title: string
   /** 歌手名。 */
   artist: string
+  /**
+   * 封面 id（T76）。
+   *
+   * ⚠️ **可选**：老消息 / 经典悬浮窗**不带**这个键；无封面时是**空串**
+   *    （与 `Song.coverId` 的既有约定一致）⇒ 调用方一律按「拿不到封面」处理。
+   */
+  coverId?: string
 }
 
 /**

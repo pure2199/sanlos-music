@@ -227,3 +227,51 @@ body {
   /* ⚠️ 24fps 的数据配 80ms 过渡 → **平滑不抖**（逐帧跳会像在闪）。 */
   transition: height 80ms linear;
 }
+
+/* --------------------------------------------------------------------------
+ * 左端：专辑封面（T76）
+ * --------------------------------------------------------------------------
+ *
+ * ⚠️ 用户指令：「灵动歌词的左边音效动画换成专辑封面」
+ *    ⇒ 左端从「8 根频谱柱」变成「一张专辑封面」。
+ *
+ * ⚠️ **只用语义变量**（`src/styles/tokens.css`）——
+ *    词岛窗支持明暗两套主题，硬编码色值会漏掉其中一套。
+ *
+ * ⚠️ **显示尺寸写在 CSS 里**，与**服务端** `size` 参数**无关**
+ *    （服务端尺寸见 `src/island/IslandCover.tsx` 的 `ISLAND_COVER_SIZE`）。
+ */
+
+.fnm-island__cover {
+  display: block;
+  width: 56px;
+  height: 56px;
+  /* ⚠️ `border-box`：否则 56px + 1px 边框 = 实际 58px。 */
+  box-sizing: border-box;
+  /* ⚠️ **不许被挤扁**（与频谱柱同口径：`flex: 0 0 auto`）。 */
+  flex: 0 0 auto;
+  /* 圆角方形（与整体方角语言一致；不做圆形，免得和胶囊两端打架）。
+     ⚠️ 走**令牌**：词岛是固定形态，封面圆角**不跟主题走**
+        （`--radius-island-cover` 两套主题都是 12px）。 */
+  border-radius: var(--radius-island-cover);
+  /* 封面不是正方形时**裁切**，不拉伸变形。 */
+  object-fit: cover;
+  overflow: hidden;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+}
+
+/*
+ * 没有封面 / 封面加载失败 → 占位块。
+ *
+ * ⚠️ 与 `src/components/Cards.tsx` 的 `CoverImage` 同一口径：
+ *    **不渲染 `<img>`**，不留浏览器默认破图。
+ */
+.fnm-island__cover--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 20px;
+  line-height: 1;
+}

@@ -16,6 +16,7 @@ import { useAppPrefsStore } from '../state/appPrefsStore'
 import { LyricView } from '../ui/lyrics/LyricView'
 import { extrapolatePosition } from '../ui/lyrics/overlayClock'
 import { emptyOverlayState, mergeLyricMessage } from '../ui/lyrics/overlayState'
+import { IslandCover } from './IslandCover'
 import { SpectrumBars } from './SpectrumBars'
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览里为 `null`）。 */
@@ -105,19 +106,12 @@ export function IslandApp(): ReactElement {
   }, [])
 
   /**
-   * 左端 8 根 = 频谱的**逆序**（高频 → 低频，DOM 顺序 = 由外缘向内）。
-   *
-   * ⚠️ **右组是左组的镜像** ⇒ 整条胶囊「高频 → 低频 | 低频 → 高频」，
-   *    **左右永远对称**（真机截图证实：若左右显示不同频段，
-   *    高频段能量天然偏低 → 右边几乎是空的 → 整条胶囊不对称）。
-   * ⚠️ **必须用 `useMemo`**：根组件的进度插值是 60fps 重渲染的，
-   *    而频谱只有 24fps → 数组引用不变，`memo` 出来的波形柱才不会白重画。
-   */
-  const leftBins = useMemo(() => bins.slice().reverse(), [bins])
-  /**
    * 右端 8 根 = 频谱的**原序**（低频 → 高频，DOM 顺序 = 由内向外）。
    *
-   * ⚠️ 与左端**互为镜像**（左端是逆序）。
+   * ⚠️ **必须用 `useMemo`**：根组件的进度插值是 60fps 重渲染的，
+   *    而频谱只有 24fps → 数组引用不变，`memo` 出来的波形柱才不会白重画。
+   * ⚠️ **T76：左端已换成专辑封面**（用户指令）⇒ 频谱柱只剩右端一组，
+   *    「左右互为镜像」的老约束**不再适用**（组件本身仍支持 `side="left"`）。
    */
   const rightBins = useMemo(() => bins, [bins])
 
@@ -131,8 +125,10 @@ export function IslandApp(): ReactElement {
       data-testid="fnm-island"
       data-pointer-inside={pointerInside ? 'true' : 'false'}
     >
-      {/* ⚠️ T47：左端的频谱柱（**逆序**：高频 → 低频）。 */}
-      <SpectrumBars side="left" values={leftBins} />
+      {/* ⚠️ T76：左端 = **专辑封面**（原先是频谱柱；用户指令：
+          「灵动歌词的左边音效动画换成专辑封面」）。
+          没有封面 / 加载失败 ⇒ `IslandCover` 内部渲染占位块（♪）。 */}
+      <IslandCover coverId={track?.coverId} />
       <div className="fnm-island__meta">
         <span className="fnm-island__title">{title}</span>
         <span className="fnm-island__artist">{artist}</span>

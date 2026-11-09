@@ -295,9 +295,12 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
 // T47：词岛两端的**频谱波形柱**
 // ---------------------------------------------------------------------------
 //
-// ⚠️ **镜像的定义**：整条频谱 = 16 段（低频 → 高频）；
-//    左端显示第 1–8 段、右端显示第 9–16 段（**逆序**）
-//    ⇒ 两组都从「外缘向内」按频率递增 ⇒ 左右呈**镜像**。
+// ⚠️ **T76：左端已换成专辑封面**（用户指令：「灵动歌词的左边音效动画换成专辑封面」）
+//    ⇒ 频谱柱**只剩右端**一组；下面这些断言的前提被显式推翻 ⇒ **改写**（不删），
+//    改写后仍保留鉴别力（谁把左端柱子加回来，谁就红）。
+//
+// ⚠️ 镜像的定义（T47 老规矩，**右端仍然成立**）：整条频谱 = 16 段（低频 → 高频），
+//    右端显示**原序**（低频 → 高频）。
 // ---------------------------------------------------------------------------
 
 /** 词岛里的某一侧波形柱（`.fnm-island__spectrum--<side>` 里的 `.fnm-island__bar`）。 */
@@ -310,28 +313,29 @@ function heightsOf(container: HTMLElement, side: 'left' | 'right'): number[] {
   return barsOf(container, side).map((bar) => Number.parseFloat(bar.getAttribute('style')?.match(/height:\s*([\d.]+)%/)?.[1] ?? '0'))
 }
 
-describe('T47 词岛：两端的频谱波形柱', () => {
-  it('两端各 **8 根**柱子（右组是左组的**镜像**）', () => {
+describe('T47 词岛：两端的频谱波形柱（T76：左端换成封面，只剩右端）', () => {
+  it('**右端**仍是 8 根柱子；**左端**不再是频谱柱（换成专辑封面）', () => {
     const fake = fakeBridge()
     ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
 
-    expect(barsOf(container, 'left')).toHaveLength(8)
     expect(barsOf(container, 'right')).toHaveLength(8)
+    // ⚠️ T76：左端**没有**频谱柱了（它的位置现在是封面）。
+    expect(barsOf(container, 'left')).toHaveLength(0)
+    expect(container.querySelector('.fnm-island__spectrum--left')).toBeNull()
   })
 
-  it('还没收到频谱 → 柱子是最小高度（**留一个小点**，不是空白）', () => {
+  it('还没收到频谱 → **右端**柱子是最小高度（**留一个小点**，不是空白）', () => {
     const fake = fakeBridge()
     ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
 
-    expect(heightsOf(container, 'left').every((h) => h === 4)).toBe(true)
     expect(heightsOf(container, 'right').every((h) => h === 4)).toBe(true)
   })
 
-  it('收到频谱 → 柱子高度跟着变（左 = **逆序**，右 = **原序** ⇒ 互为镜像）', () => {
+  it('收到频谱 → **右端**柱子高度跟着变（DOM 顺序 = **原序**：低频 → 高频）', () => {
     const fake = fakeBridge()
     ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
 
@@ -345,13 +349,11 @@ describe('T47 词岛：两端的频谱波形柱', () => {
 
     // 右端：DOM 顺序 = 原序（低频 → 高频）。
     expect(heightsOf(container, 'right')).toEqual(bins.map(barHeightPercent))
-    // 左端：DOM 顺序 = **逆序**（高频 → 低频）⇒ 与右端互为镜像。
-    expect(heightsOf(container, 'left')).toEqual(
-      [...bins].reverse().map(barHeightPercent),
-    )
+    // ⚠️ T76：左端**不再**显示任何频段（只剩右端有柱）。
+    expect(heightsOf(container, 'left')).toEqual([])
   })
 
-  it('左右两端显示**同一组**频段（否则高频侧几乎是空的 → 整条胶囊不对称）', () => {
+  it('左端**彻底不显示**频段（频谱柱只剩右端一组）', () => {
     const fake = fakeBridge()
     ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
 
@@ -362,9 +364,10 @@ describe('T47 词岛：两端的频谱波形柱', () => {
       fake.emitSpectrum(bins)
     })
 
-    // ⚠️ **鉴别力**：左右是同一组值（只是顺序相反）→ 把左端倒过来必须等于右端。
-    //    若实现成「左半低频 + 右半高频」，这个断言**必红**。
-    expect([...heightsOf(container, 'left')].reverse()).toEqual(heightsOf(container, 'right'))
+    // ⚠️ **鉴别力**：左端一根柱都没有，且整个胶囊里**只有一组**频谱柱。
+    //    若有人把左端柱子加回来（哪怕只有一根），这个断言**必红**。
+    expect(container.querySelectorAll('.fnm-island__spectrum')).toHaveLength(1)
+    expect(barsOf(container, 'left')).toHaveLength(0)
   })
 
   it('柱高映射：`0` → 4%、`255` → 100%（中间线性）', () => {

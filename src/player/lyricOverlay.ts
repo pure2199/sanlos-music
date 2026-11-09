@@ -175,8 +175,14 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
    *    若每次都重新解析/重新拉 NAS ⇒ 白花一次请求。缓存后**只重推，不重取**。
    */
   let cachedLines: LyricLine[] = []
-  /** 当前缓存的曲目（重推时用）；`null` = 没有歌。 */
-  let cachedTrack: { id: string; title: string; artist: string } | null = null
+  /**
+   * 当前缓存的曲目（重推时用）；`null` = 没有歌。
+   *
+   * ⚠️ **带 `coverId`**（T76）：词岛左端要显示**专辑封面** ⇒ 封面 id 必须
+   *    跟着曲目一起推过去（渲染层**不碰网络**，封面地址由 `coverUrl()` 拼、
+   *    凭证由主进程代理附加）。
+   */
+  let cachedTrack: { id: string; title: string; artist: string; coverId: string } | null = null
   /** 拉歌词的令牌：切歌后旧请求回来时直接丢弃。 */
   let fetchToken = 0
 
@@ -231,13 +237,13 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
       // 期间又切了歌 → 这份歌词已经过时，丢弃。
       if (token !== fetchToken) return
       cachedLines = parseLyricEntries(result.entries)
-      cachedTrack = { id: song.id, title: song.title, artist: song.artist }
+      cachedTrack = { id: song.id, title: song.title, artist: song.artist, coverId: song.coverId }
       pushTrack()
     } catch {
       if (token !== fetchToken) return
       // 取不到歌词不是致命错误：推一份空的（悬浮窗显示「暂无歌词」）。
       cachedLines = []
-      cachedTrack = { id: song.id, title: song.title, artist: song.artist }
+      cachedTrack = { id: song.id, title: song.title, artist: song.artist, coverId: song.coverId }
       pushTrack()
     }
   }

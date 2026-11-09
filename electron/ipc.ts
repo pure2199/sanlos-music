@@ -1609,6 +1609,31 @@ export function sanitizeDownloadRequest(value: unknown): DownloadRequest | null 
 }
 
 /**
+ * 封面 id 的形状（T76）。
+ *
+ * ⚠️ **与 `src/api/client.ts` 的 `normalizeCoverId` 同口径**：`xxx_<hex>`
+ *    （`track_` / `album_` / `artist_` …）。
+ *
+ * ⚠️ **为什么主进程还要再过滤一遍**（纵深防御）：主进程的净化器是
+ *    **渲染层 → 主进程**这条外部输入的**唯一闸门**；封面 id 最终会被拼进
+ *    封面地址（渲染层的 `coverUrl()` 已 `encodeURIComponent`），这里再按形状
+ *    过滤 ⇒ 即使渲染层被绕过，也不会把任意字符串塞进封面地址。
+ */
+const COVER_ID_RE = /^[^_]+_[0-9a-fA-F]+$/
+
+/**
+ * 读一个封面 id；形状不对一律当「没有封面」（空串）。
+ *
+ * @param value 渲染层发来的原始值。
+ * @returns 合法封面 id，或空串。
+ */
+export function readCoverId(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  return COVER_ID_RE.test(trimmed) ? trimmed : ''
+}
+
+/**
  * 把渲染进程发来的悬浮歌词消息压成合法消息（Task 10）。
  *
  * ⚠️ 主进程**只转发、不解析**歌词内容；但**形状不对的消息必须丢弃**
@@ -1641,7 +1666,9 @@ export function sanitizeLyricMessage(value: unknown): LyricOverlayMessage | null
     const title = obj['title']
     const artist = obj['artist']
     if (typeof id !== 'string' || typeof title !== 'string' || typeof artist !== 'string') return null
-    track = { id, title, artist }
+    // ⚠️ T76：封面 id 一路透传（词岛左端要显示专辑封面）；
+    //    形状不对就当「没有封面」（空串）—— 绝不放行任意字符串。
+    track = { id, title, artist, coverId: readCoverId(obj['coverId']) }
   }
 
   const linesRaw = record['lines']

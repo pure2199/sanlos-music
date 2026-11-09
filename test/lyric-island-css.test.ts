@@ -18,6 +18,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 // ⚠️ T53：跨文件不等式要用**词岛窗口的真实高度**（不是写死的 96）。
 import { ISLAND_WINDOW_HEIGHT } from '../shared/islandAnchor'
+// ⚠️ T76：封面的**显示**边长只有一个取值点（跨文件一致性）。
+import { ISLAND_COVER_BOX } from '../src/island/IslandCover'
 
 /** 读 CSS 并**剥掉注释**（剥完再匹配，否则会匹配到注释正文）。 */
 function readCss(...parts: string[]): string {
@@ -113,6 +115,62 @@ describe('词岛的 CSS 契约（T48：不再整词发光）', () => {
 
   it('词岛样式里**没有**任何 `text-shadow`（光晕会把填色边界糊掉）', () => {
     expect(css).not.toMatch(/text-shadow:/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T76：词岛左端的**专辑封面**（CSS 契约）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 用户指令：「灵动歌词的左边音效动画换成专辑封面」。
+//
+// ⚠️ **为什么单独钉 CSS**：封面在词岛里的**观感**全在 CSS 里——
+//    尺寸（不许被歌词挤扁）、`object-fit`（不变形）、占位块的居中方式。
+//    这些 jsdom **都量不到**（没有布局）⇒ 只能钉**声明**。
+//
+// ⚠️ **契约测试要先剥注释再匹配**（否则会匹配到注释正文）。
+// ---------------------------------------------------------------------------
+
+describe('词岛的 CSS 契约（T76：左端专辑封面）', () => {
+  const css = readCss('src', 'island', 'island-window.css')
+  const coverBlock = blockOf(css, '.fnm-island__cover')
+
+  it('封面**尺寸固定**（不许被歌词挤扁）', () => {
+    // ⚠️ 跨文件一致性：显示边长只有一个取值点（`ISLAND_COVER_BOX`）。
+    expect(coverBlock).toMatch(new RegExp(`width:\\s*${ISLAND_COVER_BOX}px`))
+    expect(coverBlock).toMatch(new RegExp(`height:\\s*${ISLAND_COVER_BOX}px`))
+    expect(coverBlock).toMatch(/flex:\s*0 0 auto/)
+  })
+
+  it('封面**不变形**（`object-fit: cover`，不是拉伸）', () => {
+    expect(coverBlock).toMatch(/object-fit:\s*cover/)
+  })
+
+  it('封面**只用语义变量**（不许硬编码色值 —— 词岛窗有两套主题）', () => {
+    // ⚠️ `#hex` / `rgb()` / `hsl()` 一律不许。
+    expect(coverBlock).not.toMatch(/#[0-9a-fA-F]{3,8}/)
+    expect(coverBlock).not.toMatch(/rgb\(|rgba\(|hsl\(/)
+  })
+
+  it('封面圆角**走令牌**且**不跟主题走**（词岛是固定形态）', () => {
+    // ⚠️ 项目约定：业务 CSS 里不许写死圆角（`test/theme-radius-css.test.tsx` 钉着）。
+    expect(coverBlock).toMatch(/border-radius:\s*var\(--radius-island-cover\)/)
+    // ⚠️ 两套主题的令牌值必须相同（词岛固定形态）。
+    const tokensCss = readCss('src', 'styles', 'tokens.css')
+    expect(tokensCss).toMatch(/--radius-island-cover:\s*12px/)
+    expect(blockOf(tokensCss, "[data-theme='fluent']")).toMatch(/--radius-island-cover:\s*12px/)
+  })
+
+  it('封面**不许**出现会改变布局的动画（只过渡 height 的是频谱柱）', () => {
+    expect(coverBlock).not.toMatch(/animation:/)
+    expect(coverBlock).not.toMatch(/transform:\s*scale/)
+  })
+
+  it('占位块**居中显示 ♪**（没有封面 / 加载失败时不留破图）', () => {
+    const block = blockOf(css, '.fnm-island__cover--placeholder')
+    expect(block).toMatch(/display:\s*flex/)
+    expect(block).toMatch(/align-items:\s*center/)
+    expect(block).toMatch(/justify-content:\s*center/)
   })
 })
 
