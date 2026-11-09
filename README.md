@@ -14,7 +14,7 @@
 > 技术栈：Electron 32 + React 18 + TypeScript 5（`strict`）+ Vite 5 + Zustand 4 + Vitest 2 + Playwright。
 > 目标平台：Windows 10 1809 及以上 / x64。
 
-> **⬇️ 不想自己编译？直接下载现成的安装包** —— 当前版本 **v0.1.0**（安装版 / 便携版）在
+> **⬇️ 不想自己编译？直接下载现成的安装包** —— 当前版本 **v0.2.0**（安装版 / 便携版）在
 > [Releases · 最新版](https://github.com/pure2199/sanlos-music/releases/latest)，
 > **免登录直接下载**，装完连上你自己的 NAS 就能用（不连 NAS 也能当本地播放器用）。
 
@@ -105,22 +105,22 @@ Windows 10 1809+ / x64. MIT licensed.
 ### 下载安装
 
 **普通用户看这一节就够了**（要自己编译的往下翻「开发」）。Windows 10 1809+ / x64，
-到 [Releases · v0.1.0](https://github.com/pure2199/sanlos-music/releases/tag/v0.1.0) 下载：
+到 [Releases · v0.2.0](https://github.com/pure2199/sanlos-music/releases/tag/v0.2.0) 下载：
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| `FN-Music-Setup-0.1.0.exe` | 86,065,585 字节 | **安装版**（NSIS，可改安装目录） |
-| `FN-Music-Portable-0.1.0.exe` | 78,973,187 字节 | **便携版**（免安装，双击即用） |
+| `FN-Music-Setup-0.2.0.exe` | 86,101,719 字节 | **安装版**（NSIS，可改安装目录） |
+| `FN-Music-Portable-0.2.0.exe` | 79,004,867 字节 | **便携版**（免安装，双击即用） |
 
 下完可用 sha256 自行核对（与本仓库发布产物**逐字节一致**）：
 
 | 文件 | sha256 |
 |---|---|
-| `FN-Music-Setup-0.1.0.exe` | `d96bb61378b41e867f29c2ac3ced18fc1b125ea89ac9600b827f26c98731c5df` |
-| `FN-Music-Portable-0.1.0.exe` | `d7317c6b5890d183a612d75614df749bff6fcb71ad45032c47164a2720fda3f8` |
+| `FN-Music-Setup-0.2.0.exe` | `9048b27e6ee3976b5f620a3a0d95aa1d9306129b8734c488577c3e6308d86ee9` |
+| `FN-Music-Portable-0.2.0.exe` | `12afcbd93d3352b238552f061d7abb6c1e4dd2f9dbaef6af7844ac1b2c093b7a` |
 
 > ⚠️ **产物未做代码签名**：Windows SmartScreen 会拦（蓝色「Windows 已保护你的电脑」）→
-> 点「更多信息」→「仍要运行」。需要静默安装可用 `FN-Music-Setup-0.1.0.exe /S`。
+> 点「更多信息」→「仍要运行」。需要静默安装可用 `FN-Music-Setup-0.2.0.exe /S`。
 
 - **首次使用**：装完打开 → 顶栏「连接」→ 用 **FN ID 探测**（推荐）或 **地址 + 账号口令**
   登录，详见「[二、两种登录方式](#二两种登录方式)」；
@@ -252,6 +252,7 @@ A：见下面「九、开发与贡献」；动手前请先读 [`docs/superpowers
 | [`docs/build-verification.md`](./docs/build-verification.md) | 实际跑过的构建/打包验证记录与证据 |
 | [`docs/calibration.md`](./docs/calibration.md) | 真机联调校准清单（哪些已验证、哪些待真机确认） |
 | [`docs/changelog.md`](./docs/changelog.md) | 版本号变更说明 |
+| [`docs/releases/`](./docs/releases/) | 各版本的发布说明（更新内容 / 下载与校验 / 升级注意） |
 | [`docs/superpowers/specs/`](./docs/superpowers/specs/) | 设计规格 |
 | [`docs/superpowers/plans/`](./docs/superpowers/plans/) | 实施计划 |
 
