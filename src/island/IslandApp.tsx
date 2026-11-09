@@ -151,6 +151,9 @@ export function IslandApp(): ReactElement {
             ⚠️ 填色的**数据源**是现成的 `LyricWordProgress.wordProgress`（词内连续比例）。
             ⚠️ `activeWordClassName`（整词发光钩子）**保留不动**（通用钩子），
                 但词岛**不再**用它 —— 发光与填色同时存在会让「填色边界」被光晕糊掉。 */}
+        {/* ⚠️ T71：卡拉OK 已从「词岛专属」提升为「歌词视图的**默认观感**」
+            ⇒ 这里的 `karaoke` 与**缺省**同值（显式写出来是为了让参考实现一眼可见）；
+            经典悬浮窗 / 全屏歌词舞台**同样**是卡拉OK。 */}
         <LyricView
           lines={state.lines}
           currentTime={position}

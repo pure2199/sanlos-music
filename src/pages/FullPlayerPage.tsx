@@ -426,6 +426,10 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
       )
     }
     return (
+      // ⚠️ T71：歌词舞台**也是卡拉OK**（当前词按词内连续比例从左到右染色）。
+      //    ⚠️ **不显式传 `karaoke`** —— `LyricView` 的缺省已是**开**（T71）
+      //        ⇒ 行为只由**一处**决定，将来新增歌词页面自动一致，不会漏一处。
+      //    ⚠️ 词级时间戳（真逐字 / 伪逐字）由 `lines` 带进来（本页自己取词）。
       <LyricView
         lines={lines}
         currentTime={position}

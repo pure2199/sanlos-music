@@ -418,15 +418,29 @@ describe('LyricView：卡拉OK 渐进填色（T48）', () => {
     expect(words.every((word) => /fnm-lyricview__word--sung/.test(word.className))).toBe(true)
   })
 
-  it('**没开** karaoke → 行为**一字不变**（当前词照旧整词上色，没有填色钩子）', () => {
+  it('**显式** `karaoke={false}` → 行为**一字不变**（当前词照旧整词上色，没有填色钩子）', () => {
     const { container } = render(
-      <LyricView lines={[KARAOKE_LINE]} currentTime={3} mode="single" />,
+      <LyricView lines={[KARAOKE_LINE]} currentTime={3} mode="single" karaoke={false} />,
     )
 
     const current = wordAt(container, 1)
     expect(current.className).toContain('fnm-lyricview__word--sung')
     expect(current.className).not.toContain('fnm-lyricview__word--karaoke')
     expect(current.getAttribute('data-karaoke-progress')).toBeNull()
+  })
+
+  // ⚠️ T71：卡拉OK 从「词岛专属」提升为「歌词视图的**默认观感**」
+  //    ⇒ **缺省就是开的**（不再需要显式传 `karaoke`）。
+  //    ⚠️ 「缺省」这条断言的鉴别力：把 `LyricView` 的缺省改回 `false` ⇒ 本条立刻红。
+  it('**缺省**（不传 karaoke）就是卡拉OK（T71：推广到所有歌词页面）', () => {
+    const { container } = render(
+      <LyricView lines={[KARAOKE_LINE]} currentTime={3} mode="single" />,
+    )
+
+    const current = wordAt(container, 1)
+    expect(current.className).toContain('fnm-lyricview__word--karaoke')
+    expect(current.className).not.toContain('fnm-lyricview__word--sung')
+    expect(current.getAttribute('data-karaoke-progress')).toBe('50.0')
   })
 })
 

@@ -117,6 +117,28 @@ describe('悬浮歌词：内容与交互', () => {
     expect(screen.getByText('歌二')).toBeTruthy()
   })
 
+  // ⚠️ T71：经典悬浮窗**也是卡拉OK**（当前词按词内连续比例从左到右染色）。
+  it(
+    '卡拉OK 渐进填色（T71）：当前词填色、**不再**整词跳变',
+    () => {
+      const { container } = render(
+        <LyricOverlay
+          track={{ id: 'song-1', title: '示例歌名', artist: '示例歌手' }}
+          lines={LINES}
+          position={1.5}
+          isPlaying
+        />,
+      )
+
+      const karaoke = container.querySelector('.fnm-lyricview__word--karaoke')
+      // ⚠️ LINES 第 0 行：'歌'(0~1s) + '一'(1~2s) ⇒ t=1.5 正在唱「一」。
+      expect(karaoke?.textContent).toBe('一')
+      expect(karaoke?.className).not.toContain('fnm-lyricview__word--sung')
+      // 词内比例 = (1.5 - 1) / (2 - 1) = 50%
+      expect(karaoke?.getAttribute('data-karaoke-progress')).toBe('50.0')
+    },
+  )
+
   it('点歌词行 → 回调跳转秒数', () => {
     const onSeek = vi.fn()
     render(

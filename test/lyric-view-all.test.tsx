@@ -65,12 +65,21 @@ describe('LyricView：全量模式（歌词舞台）', () => {
 
     const active = lineAt(container, 0)
     expect(active.className).toMatch(/active/)
-    // ⚠️ 逐字高亮是**词**级别的：t=12 时甲行的第一个词已经唱到。
-    expect(active.querySelectorAll('.fnm-lyricview__word--sung').length).toBeGreaterThan(0)
+    // ⚠️ 逐字高亮是**词**级别的：t=12 时甲行的**第一个词正在唱**。
+    //
+    // ⚠️ T71：卡拉OK 是**默认观感** ⇒ 当前词挂 `--karaoke`（**不再**整词上色），
+    //    **已唱过的词**才挂 `--sung`。
+    //    ⚠️ 本用例里 t=12 恰好落在**第一个词**上 ⇒ 「已唱过的词」为 0 个
+    //    ⇒ 原断言「有 `--sung`」的前提被 T71 **显式推翻** ⇒ 拆成两条更强的事实：
+    const karaoke = active.querySelectorAll('.fnm-lyricview__word--karaoke')
+    expect(karaoke).toHaveLength(1)
+    expect(karaoke[0]!.getAttribute('data-karaoke-progress')).toBe('60.0')
 
     const other = lineAt(container, 1)
     expect(other.className).not.toMatch(/active/)
     expect(other.querySelectorAll('.fnm-lyricview__word--sung')).toHaveLength(0)
+    // ⚠️ **非**当前行**也没有**卡拉OK（只有当前行在推进）。
+    expect(other.querySelectorAll('.fnm-lyricview__word--karaoke')).toHaveLength(0)
   })
 
   it('**翻译只给当前行看**（每行都挂翻译 → 槽位等高的前提就破了）', () => {

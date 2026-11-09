@@ -86,6 +86,11 @@ export function LyricOverlay(props: LyricOverlayProps): ReactElement {
 
       {/* 歌词区：`-webkit-app-region: no-drag`（要点歌词跳转，不能被拖动区吃掉）。 */}
       <div className="fnm-lyricoverlay__lyrics">
+        {/* ⚠️ T71：经典悬浮窗**也是卡拉OK**（当前词按词内连续比例从左到右染色）。
+            ⚠️ **不显式传 `karaoke`** —— `LyricView` 的缺省已是**开**（T71）
+                ⇒ 行为只由**一处**决定，将来新增歌词页面自动一致，不会漏一处。
+            ⚠️ 词级时间戳（真逐字 / 伪逐字）由 `lines` 带进来：
+                本窗**不自己拉歌词**（主窗口推过来，见 `src/player/lyricOverlay.ts`）。 */}
         <LyricView
           lines={safeLines}
           currentTime={position}

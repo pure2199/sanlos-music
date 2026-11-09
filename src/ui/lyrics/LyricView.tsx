@@ -109,10 +109,12 @@ export interface LyricViewProps {
    */
   activeWordClassName?: string
   /**
-   * 「**卡拉OK模式**」：当前词**渐进填色**（T48：灵动歌词）。
+   * 「**卡拉OK模式**」：当前词**渐进填色**（T48 引入；T71 起为**默认观感**）。
    *
-   * ⚠️ **缺省 = `false`** → 既有用法（主界面歌词 / 全屏歌词舞台 / 经典悬浮窗）
-   *    的行为**一字不变**。
+   * ⚠️ **缺省 = `true`**（T71）：卡拉OK 从「**词岛专属**」提升为
+   *    「**歌词视图的默认观感**」⇒ 灵动态词岛 / 经典悬浮窗 / 全屏歌词舞台
+   *    **三处一致**；行为只由**这一处**决定 ⇒ 将来新增歌词页面自动就是卡拉OK
+   *    （不会漏一处）。要回到「整词跳变」的旧观感 ⇒ 显式传 `karaoke={false}`。
    * ⚠️ **为什么需要它**：词级高亮是**整词跳变**——词一到就整词变色 →
    *    每个词的边界都在「闪一下」。卡拉OK 是**颜色边界连续推进**
    *    （已唱部分染色、未唱部分留白），用词内的**连续比例**
@@ -233,7 +235,8 @@ export function LyricView(props: LyricViewProps): ReactElement {
     emptyLabel = '暂无歌词',
     className,
     activeWordClassName,
-    karaoke = false,
+    // ⚠️ T71：缺省 = **开**（卡拉OK 是歌词视图的**默认观感**，不再是词岛专属）。
+    karaoke = true,
   } = props
 
   const safeLines = Array.isArray(lines) ? lines : []
@@ -497,7 +500,9 @@ interface RenderLineOptions {
   /**
    * 卡拉OK 模式（见 `LyricViewProps.karaoke`）。
    *
-   * ⚠️ 缺省 `false` → 当前词照旧走「整词上色」，既有行为**一字不变**。
+   * ⚠️ `LyricView` **总是**把它显式传下来（缺省 `true`，见 `LyricViewProps.karaoke`）
+   *    ⇒ 这里读到的一定是 `true` / `false`，不会是 `undefined`。
+   * ⚠️ 传 `false` ⇒ 当前词照旧走「整词上色」，行为与 T71 之前**一字不变**。
    */
   karaoke?: boolean
   /**
