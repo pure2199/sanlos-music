@@ -130,6 +130,71 @@ export type UpdateInstallResult =
   | { status: 'error'; message: string }
 
 // ---------------------------------------------------------------------------
+// 签名这一关的**唯一判定口径**（T85）
+// ---------------------------------------------------------------------------
+
+/**
+ * 「签名这一关」的判定入参。
+ */
+export interface SignatureGateInput {
+  /** 签名校验结果本身是否通过（`UpdateSignatureResult.ok`）。 */
+  signatureOk: boolean
+  /** 签名校验结果的 `status`（`NotSigned` / `Valid` / `UnknownError` …）。 */
+  signatureStatus: string
+  /** 签名校验结果给出的理由（用于显示；缺省 = 没有）。 */
+  signatureReason?: string | null
+  /**
+   * 用户是否**显式**授权安装未签名包。
+   *
+   * ⚠️ 必须是**已保存**的值（主进程读 `prefs.json`、渲染层读 store），
+   *    **不是**设置页里还没保存的草稿 —— 草稿还没生效，
+   *    用它判定会「界面说可以、主进程拒」。
+   */
+  allowUnsigned: boolean
+}
+
+/** 「签名这一关」的判定结果。 */
+export interface SignatureGateResult {
+  /** 是否放行。 */
+  allowed: boolean
+  /** 不放行的原因（`null` = 放行了）。 */
+  reason: string | null
+}
+
+/**
+ * 「签名这一关」的唯一判定口径（T85）。
+ *
+ * ⚠️ **为什么必须只有一份**：T85 的事故就是「主进程与渲染层各判各的」——
+ *    主进程在「预期签名者为空」时**不探测文件**（给 `NotChecked`），
+ *    渲染层却按「是不是 `NotSigned`」判 ⇒ 「允许安装未签名的更新包」
+ *    **从没有真正生效过**。⇒ 判定逻辑放这里，**两边共用**。
+ *
+ * ⚠️ **口径**：
+ *    - 包**有**签名 ⇒ 必须与「预期的代码签名者」一致（`signatureOk` 为真）；
+ *      没配预期签名者 ⇒ **拒绝**（授权也救不了：那不是「未签名包」）。
+ *    - 包**没有**签名（`NotSigned`）⇒ 用户**显式授权**了才放行；
+ *      没授权 ⇒ **拒绝**（默认行为，一字不变）。
+ *    - 探测失败（`UnknownError` / `Unavailable` …）⇒ **拒绝**（不猜）。
+ *
+ * ⚠️ **它只判「签名这一关」**：**SHA-512 复核**只有主进程能做
+ *    （渲染层碰不到文件系统）⇒ 留在主进程那侧。
+ */
+export function evaluateSignatureGate(input: SignatureGateInput): SignatureGateResult {
+  if (input.signatureOk) return { allowed: true, reason: null }
+  if (input.signatureStatus === 'NotSigned') {
+    if (input.allowUnsigned) return { allowed: true, reason: null }
+    return {
+      allowed: false,
+      reason: '安装包没有代码签名，且未开启「允许安装未签名的更新包」',
+    }
+  }
+  return {
+    allowed: false,
+    reason: input.signatureReason ?? '签名校验未通过，不允许启动安装器',
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 偏好
 // ---------------------------------------------------------------------------
 
@@ -150,17 +215,21 @@ export interface UpdatePrefs {
   /**
    * 预期的代码签名者主体（`CN=…`）。
    *
-   * ⚠️ **不配置就不许启动安装器**——这是「自动更新 = 远程代码执行」的那道闸。
-   *    只允许下载与查看校验结果。
+   * ⚠️ **T85 起**：不配置**不再**等于「一律不许启动」——
+   *    - 包**有**签名但不配置 ⇒ **拒绝启动**（授权也救不了）；
+   *    - 包**没有**签名 ⇒ 走「允许安装未签名的更新包」那条路
+   *      （仍必须 **SHA-512 与清单相符**）。
+   *    详见 `evaluateSignatureGate()`。
    */
   expectedSigner?: string
   /**
-   * 是否**允许安装未签名的更新包**（T82 加）。
+   * 是否**允许安装未签名的更新包**（T82 加；T85 修好它的判定）。
    *
    * ⚠️ **默认关**（缺省 / `false`）：本项目暂未办理代码签名证书 ⇒
-   *    未签名包一律**拒绝启动**（原行为，一字不变）。
+   *    未签名包一律**拒绝启动**（默认行为，一字不变）。
    * ⚠️ **开了也只是放宽「发布者身份」这一条**：安装包仍必须
    *    **SHA-512 与清单相符**（且启动前再验一次）+ **与清单同源**。
+   * ⚠️ 只对「**确实没有**签名」的包有效：包有签名但签名者不符 ⇒ 授权**无效**。
    */
   allowUnsigned?: boolean
 }

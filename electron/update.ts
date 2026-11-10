@@ -47,6 +47,7 @@ import { basename, join, resolve as resolvePath, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
+import { evaluateSignatureGate } from '../shared/update'
 import type {
   UpdateCheckResult,
   UpdateDownloadResult,
@@ -359,7 +360,14 @@ export async function runPowerShellAuthenticode(filePath: string): Promise<{
  * - 签名者主体必须与**用户配置的预期签名者**一致；
  * - 信任链由 Windows 自己判断（`Status` 如实反映），我们不越权替它下结论。
  *
- * ⚠️ **预期签名者没配置 → 一律不通过**（不许启动安装器）。
+ * ⚠️ **T85：不再因为「没配预期签名者」就跳过探测**。
+ *    旧实现在 `expected === ''` 时**提前返回 `NotChecked`、根本不读文件**
+ *    ⇒ 主进程永远不知道这个包有没有签名 ⇒「允许安装未签名的更新包」
+ *    那条路**从没有真正走到过**。
+ *    ⇒ 现在**一律探测**，再按探测结果分流：
+ *    - `NotSigned`（确实没签名）⇒ 交由「未签名放行」那条路判（它要看用户授权 + 哈希）；
+ *    - 有签名但**没配**预期签名者 ⇒ 不通过（授权**也**救不了：那不是「未签名包」）；
+ *    - 有签名且**不符** ⇒ 不通过。
  */
 export async function verifyAuthenticode(
   filePath: string,
@@ -367,14 +375,6 @@ export async function verifyAuthenticode(
   runner: AuthenticodeRunner = runPowerShellAuthenticode,
 ): Promise<UpdateSignatureResult> {
   const expected = (expectedSigner ?? '').trim()
-  if (expected === '') {
-    return {
-      ok: false,
-      status: 'NotChecked',
-      signer: null,
-      reason: '未配置「预期的代码签名者」→ 不允许启动安装器（自动更新等于远程代码执行，这道闸不能省）',
-    }
-  }
   let probed: { status: string; signer: string | null }
   try {
     probed = await runner(filePath)
@@ -386,6 +386,18 @@ export async function verifyAuthenticode(
   }
   if (!probed.signer) {
     return { ok: false, status: probed.status, signer: null, reason: '读不到签名者信息' }
+  }
+  // ⚠️ **有签名、但没配预期签名者** ⇒ 拒绝。
+  //    （T85：这里以前是「不探测就直接拒」，现在改成「探测完再拒」——
+  //    区别在于主进程**现在知道**这个包有没有签名，
+  //    「没签名 + 用户已授权」这条路才走得通。）
+  if (expected === '') {
+    return {
+      ok: false,
+      status: probed.status,
+      signer: probed.signer,
+      reason: '安装包有代码签名，但未配置「预期的代码签名者」',
+    }
   }
   if (probed.signer !== expected) {
     return {
@@ -471,7 +483,7 @@ export interface DownloadUpdateOptions {
   fetchImpl: typeof fetch
   /** Authenticode 校验执行器。 */
   runAuthenticode?: AuthenticodeRunner
-  /** 预期的代码签名者（不配置 → 签名一栏判为不通过）。 */
+  /** 预期的代码签名者（不配置 → **包有签名时**判为不通过；包没签名时走「未签名放行」那条路）。 */
   expectedSigner?: string
 }
 
@@ -564,7 +576,10 @@ export async function downloadUpdate(opts: DownloadUpdateOptions): Promise<Updat
 export interface LaunchInstallerOptions {
   /** 安装包路径。 */
   filePath: string
-  /** 预期的代码签名者（不配置 → 拒绝启动）。 */
+  /**
+   * 预期的代码签名者（不配置 → **包有签名时**拒绝启动；
+   * 包**没签名**时改走「允许安装未签名包」那条路，T85 起**不再**直接拒）。
+   */
   expectedSigner?: string
   /**
    * 是否**允许安装未签名包**（T82；**默认 false** = 原行为，一字不变）。
@@ -623,12 +638,15 @@ export async function launchInstaller(opts: LaunchInstallerOptions): Promise<Upd
 }
 
 /**
- * 「未签名包能否放行」的判定（T82）。
+ * 「未签名包能否放行」的判定（T82；T85 修好它的判定口径）。
  *
  * ⚠️ **三道条件缺一不可**：
  * 1. 用户**显式**开了「允许安装未签名更新」（`allowUnsigned`）；
  * 2. 这个包**确实没有**签名（`NotSigned`）——签名者不符的包**不走这条路**；
  * 3. 启动前重算的 **SHA-512 与清单相符**（哈希是硬闸）。
+ *
+ * ⚠️ **第 1、2 条用共享口径**（`evaluateSignatureGate`，与渲染层**同一份**）——
+ *    T85 的事故就是两边各判各的 ⇒ 这两条**不许**在这里另写一遍。
  *
  * @returns 放行返回 `{ ok: true }`；否则 `{ ok: false, reason }`（reason 可直接显示给用户）。
  */
@@ -636,12 +654,16 @@ async function verifyUnsignedAllowed(
   opts: LaunchInstallerOptions,
   signature: UpdateSignatureResult,
 ): Promise<{ ok: boolean; reason: string }> {
-  // ⚠️ **签名者不符**（包**有**签名但不是预期那个）→ **不走**未签名这条路。
-  if (signature.status !== 'NotSigned') {
-    return { ok: false, reason: signature.reason ?? '未知原因' }
-  }
-  if (opts.allowUnsigned !== true) {
-    return { ok: false, reason: signature.reason ?? '未知原因' }
+  // 签名本来就通过 ⇒ 这条路不用走（调用方只在 `!signature.ok` 时才进来，这里兜个底）。
+  if (signature.ok) return { ok: true, reason: '' }
+  const gate = evaluateSignatureGate({
+    signatureOk: signature.ok,
+    signatureStatus: signature.status,
+    signatureReason: signature.reason,
+    allowUnsigned: opts.allowUnsigned === true,
+  })
+  if (!gate.allowed) {
+    return { ok: false, reason: gate.reason ?? '未知原因' }
   }
   const expected = (opts.expectedSha512 ?? '').trim().toLowerCase()
   if (expected.length !== SHA512_HEX_LENGTH || !/^[0-9a-f]+$/.test(expected)) {

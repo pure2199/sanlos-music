@@ -22,14 +22,15 @@
 // 约定
 // ---------------------------------------------------------------------------
 // - **store 里不放任何凭证**；
-// - 「预期签名者」**没配就不许启动安装器**（主进程会拒）——
-//   界面要**提前说清楚**，不能等用户点了才被拒；
+// - 「能不能启动安装器」用**共享口径**（`evaluateSignatureGate`，与主进程同一份）——
+//   界面要**提前说清楚**，但**不许比主进程严**（那会把功能堵死，T85 的教训）；
 // - 任何一步失败都**如实显示可读文案**，不静默吞掉。
 // ---------------------------------------------------------------------------
 
 import { create } from 'zustand'
 
 import type { PlayerBridge } from '../../shared/playerBridge'
+import { evaluateSignatureGate } from '../../shared/update'
 import type {
   UpdateCheckResult,
   UpdateDownloadResult,
@@ -235,7 +236,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
 
   installUpdate: async (): Promise<void> => {
     const bridge = playerBridge()
-    const { download, expectedSigner } = get()
+    const { download, allowUnsigned } = get()
     if (!bridge) {
       set({ status: 'error', error: '当前环境不支持启动安装器' })
       return
@@ -244,9 +245,18 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       set({ status: 'error', error: '还没有已下载的安装包' })
       return
     }
-    // ⚠️ **没配预期签名者就不许启动**——提前说清楚，别等主进程拒。
-    if (expectedSigner.trim() === '') {
-      set({ status: 'error', error: '未配置「预期的代码签名者」→ 不允许启动安装器' })
+    // ⚠️ **提前说清楚**（这不是闸，闸在主进程那边）。
+    //    ⚠️ T85：判定口径必须用**共享**的 `evaluateSignatureGate`（与主进程**同一份**）——
+    //       旧实现在这里「预期签名者为空就直接拦」，比主进程**严**
+    //       ⇒ 把「允许安装未签名的更新包」整个堵死了（用户勾了也没用）。
+    const gate = evaluateSignatureGate({
+      signatureOk: download.signature.ok,
+      signatureStatus: download.signature.status,
+      signatureReason: download.signature.reason,
+      allowUnsigned,
+    })
+    if (!gate.allowed) {
+      set({ status: 'error', error: gate.reason ?? '签名校验未通过，不允许启动安装器' })
       return
     }
     set({ status: 'installing', error: null })

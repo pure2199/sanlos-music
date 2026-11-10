@@ -17,6 +17,8 @@ import { render, screen, fireEvent, within, waitFor } from '@testing-library/rea
 
 import { SettingsPanel } from '../src/components/SettingsPanel'
 import { useAppPrefsStore, DEFAULT_CLOSE_BEHAVIOR } from '../src/state/appPrefsStore'
+import { useUpdateStore } from '../src/state/updateStore'
+import type { UpdateCheckResult, UpdateDownloadResult } from '../shared/update'
 import { APP_INFO } from '../shared/appInfo'
 
 beforeEach(() => {
@@ -365,5 +367,148 @@ describe('设置页：版本号 / 项目地址 / 更新源（T82）', () => {
         update: expect.objectContaining({ allowUnsigned: true }),
       }),
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T85：更新组的「启动安装」按钮 + 文案
+// ---------------------------------------------------------------------------
+//
+// ⚠️ T85 的事故 = 渲染层那两道拦截（store 提前 return + 按钮 disabled）
+//    把「允许安装未签名的更新包」**彻底堵死**，且**一条报错都没有**。
+//    ⇒ 这里钉住：按钮的启用条件用**已保存**的授权（不是草稿），
+//    判定与主进程**同一口径**；文案**不许**再自相矛盾。
+// ---------------------------------------------------------------------------
+
+describe('设置页：自动更新的签名闸（T85）', () => {
+  /** 一份「检查到了新版本」的结果。 */
+  const AVAILABLE: UpdateCheckResult = {
+    status: 'available',
+    current: '0.2.1',
+    manifest: {
+      version: '0.2.2',
+      releasedAt: '2026-11-04T00:00:00.000Z',
+      notes: '占位说明',
+      files: [
+        {
+          name: 'FN-Music-Setup-0.2.2.exe',
+          url: 'FN-Music-Setup-0.2.2.exe',
+          sha512: 'a'.repeat(128),
+          size: 1024,
+        },
+      ],
+    },
+    file: {
+      name: 'FN-Music-Setup-0.2.2.exe',
+      url: 'FN-Music-Setup-0.2.2.exe',
+      sha512: 'a'.repeat(128),
+      size: 1024,
+    },
+  }
+
+  /** 一份「下载好了、且**没有**签名」的安装包。 */
+  const UNSIGNED: UpdateDownloadResult = {
+    status: 'ok',
+    path: 'C:\\Temp\\FN-Music-Setup-0.2.2.exe',
+    bytes: 1024,
+    sha512Ok: true,
+    signature: { ok: false, status: 'NotSigned', signer: null, reason: '安装包没有 Authenticode 签名' },
+  }
+
+  /** 摆好 store（检查结果 + 已下载的包）。 */
+  function seedUpdateStore(download: UpdateDownloadResult | null): void {
+    useUpdateStore.setState({
+      result: AVAILABLE,
+      download,
+      status: 'checked',
+      error: null,
+      allowUnsigned: false,
+      allowUnsignedDraft: false,
+      expectedSigner: '',
+      signerDraft: '',
+    })
+  }
+
+  /** 假桥（`getPrefs` 按给定偏好返回）。 */
+  function stubPrefs(allowUnsigned: boolean): void {
+    ;(globalThis as unknown as { fnPlayer?: unknown }).fnPlayer = {
+      getAppVersion: vi.fn().mockResolvedValue('0.2.1'),
+      getPrefs: vi.fn().mockResolvedValue({ update: { allowUnsigned } }),
+      setPrefs: vi.fn().mockResolvedValue({}),
+    }
+  }
+
+  beforeEach(() => {
+    useUpdateStore.setState({
+      result: null,
+      download: null,
+      status: 'idle',
+      error: null,
+      allowUnsigned: false,
+      allowUnsignedDraft: false,
+    })
+  })
+
+  afterEach(() => {
+    delete (globalThis as unknown as { fnPlayer?: unknown }).fnPlayer
+  })
+
+  it('未签名包 + **已保存**了授权 → 「启动安装」**可点**（T85 的核心）', async () => {
+    stubPrefs(true)
+    seedUpdateStore(UNSIGNED)
+    render(<SettingsPanel />)
+
+    pickCategory('更新')
+    const button = await screen.findByRole('button', { name: '启动安装' })
+
+    await waitFor(() => {
+      expect((button as HTMLButtonElement).disabled).toBe(false)
+    })
+  })
+
+  it('未签名包 + 只勾了**没保存** → 按钮**仍不可点**（并提示要先保存）', async () => {
+    stubPrefs(false)
+    seedUpdateStore(UNSIGNED)
+    render(<SettingsPanel />)
+
+    pickCategory('更新')
+    const button = await screen.findByRole('button', { name: '启动安装' })
+    // 等 `load()` 把「已保存 = false」灌进来。
+    await waitFor(() => {
+      expect((screen.getByTestId('update-allow-unsigned') as HTMLInputElement).checked).toBe(false)
+    })
+    fireEvent.click(screen.getByTestId('update-allow-unsigned'))
+
+    // ⚠️ 草稿还没生效 ⇒ 主进程读到的还是「没授权」⇒ 按钮必须仍不可点。
+    expect((button as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('update-unsaved-hint')).toBeTruthy()
+  })
+
+  it('未签名包 + **没授权** → 按钮不可点', async () => {
+    stubPrefs(false)
+    seedUpdateStore(UNSIGNED)
+    render(<SettingsPanel />)
+
+    pickCategory('更新')
+    const button = await screen.findByRole('button', { name: '启动安装' })
+
+    await waitFor(() => {
+      expect((button as HTMLButtonElement).disabled).toBe(true)
+    })
+  })
+
+  it('文案**不再**自相矛盾（旧那句「未配置预期签名者时只允许下载」已删）', async () => {
+    stubPrefs(false)
+    render(<SettingsPanel />)
+
+    pickCategory('更新')
+    await waitFor(() => {
+      expect(screen.getByTestId('update-allow-unsigned')).toBeTruthy()
+    })
+
+    const text = document.body.textContent ?? ''
+    expect(text).not.toContain('未配置预期签名者时只允许下载')
+    expect(text).toContain('允许安装未签名的更新包')
+    expect(text).toContain('没填预期签名者就一律拒绝')
   })
 })

@@ -8,7 +8,7 @@
 //   2. 清单形状合法  → 版本号 / 文件 / SHA-512 逐项校验
 //   3. 文件同源      → 安装包不许被清单指到别处
 //   4. 哈希相符      → SHA-512 不符就丢弃
-//   5. 签名相符      → 没配预期签名者就不许启动
+//   5. 签名相符      → 包有签名时必须与预期签名者一致；包没签名时需用户显式授权（T85）
 //   6. 用户点击      → 检查 / 下载 / 启动都是显式调用
 //
 // ⚠️ 测试数据全是占位数据（假 URL、假哈希、假签名者），
@@ -21,6 +21,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { evaluateSignatureGate } from '../shared/update'
 import type { UpdateFile } from '../shared/update'
 import {
   compareVersions,
@@ -379,7 +380,7 @@ describe('下载安装包（T23）', () => {
 // ---------------------------------------------------------------------------
 
 describe('Authenticode 签名校验（T23）', () => {
-  it('没配预期签名者 → 不通过（不许启动安装器）', async () => {
+  it('没配预期签名者 + 包**有签名** → 不通过（不许启动安装器）', async () => {
     const result = await verifyAuthenticode('C:/占位/a.exe', undefined, async () => ({
       status: 'Valid',
       signer: 'CN=占位签名者',
@@ -387,8 +388,25 @@ describe('Authenticode 签名校验（T23）', () => {
     expect(result.ok).toBe(false)
     // ⚠️ **必须钉住这条具体的理由**：只断言 `ok === false` 是不够的——
     //    「签名者与预期不符」也会让 `ok` 为 false（变异自证踩到过）。
-    expect(result.status).toBe('NotChecked')
     expect(result.reason).toContain('未配置')
+    // ⚠️ T85：现在是「**探测过**、发现它有签名，但没配预期」⇒
+    //    status 应该是**探测结果**，不再是那个「压根没探测」的 `NotChecked`。
+    expect(result.status).toBe('Valid')
+  })
+
+  it('没配预期签名者 + 包**没签名** → **照样探测**（不许提前返回）', async () => {
+    let probed = 0
+    const result = await verifyAuthenticode('C:/占位/a.exe', undefined, async () => {
+      probed += 1
+      return { status: 'NotSigned', signer: null }
+    })
+    // ⚠️ T85：**必须真的去探测文件** ——
+    //    旧实现在这里提前返回 `NotChecked`（连文件都没读），
+    //    主进程因此**永远不知道**这个包有没有签名
+    //    ⇒「允许安装未签名的更新包」那条路**从没有真正走到过**。
+    expect(probed).toBe(1)
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe('NotSigned')
   })
 
   it('没有签名 → 不通过', async () => {
@@ -586,5 +604,309 @@ describe('未签名安装包（T82）', () => {
     expect(opened).toBe(0)
     if (result.status !== 'error') throw new Error('不是 error')
     expect(result.message).toContain('不符')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T85：签名闸的**判定矩阵**
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 为什么要单独钉一张矩阵：
+//    T85 的事故 = 「主进程判一套、渲染层判另一套」，
+//    两套叠在一起 ⇒「允许安装未签名的更新包」**从没有真正生效过**
+//    （而且**一条报错都没有**）⇒ 这里把判定表**逐行**钉死。
+//
+//    | 包     | 预期签名者 | allowUnsigned | 哈希 | 期望   |
+//    |--------|------------|---------------|------|--------|
+//    | 未签名 | 空         | 开            | 相符 | ✅ 放行 |
+//    | 未签名 | 空         | 关            | 相符 | ❌ 拒绝 |
+//    | 未签名 | 有         | 开            | 相符 | ✅ 放行 |
+//    | 未签名 | 有         | 关            | 相符 | ❌ 拒绝 |
+//    | 未签名 | 空         | 开            | 不符 | ❌ 拒绝 |
+//    | 未签名 | 空         | 开            | 无   | ❌ 拒绝 |
+//    | 有签名 | 一致       | 任意          | 任意 | ✅ 放行 |
+//    | 有签名 | 空         | 开            | 相符 | ❌ 拒绝 |
+//    | 有签名 | 不符       | 开            | 相符 | ❌ 拒绝 |
+// ---------------------------------------------------------------------------
+
+describe('签名闸判定矩阵（T85）', () => {
+  /** 造一个真的临时安装包（`sha512File` 要读盘）。 */
+  function makeInstaller(content: string): { path: string; sha512: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'fnm-update-matrix-'))
+    tempDirs.push(dir)
+    const path = join(dir, 'FN-Music-Setup-9.9.9.exe')
+    writeFileSync(path, content)
+    return { path, sha512: createHash('sha512').update(content).digest('hex') }
+  }
+
+  /** 假装这个包**没有**签名。 */
+  const notSigned = async (): Promise<{ status: string; signer: string | null }> => ({
+    status: 'NotSigned',
+    signer: null,
+  })
+
+  /** 假装这个包**有**签名，签名者是「预期的人」。 */
+  const signedByExpected = async (): Promise<{ status: string; signer: string | null }> => ({
+    status: 'Valid',
+    signer: 'CN=预期的人',
+  })
+
+  /** 假装这个包**有**签名，签名者是「别的人」。 */
+  const signedByOther = async (): Promise<{ status: string; signer: string | null }> => ({
+    status: 'Valid',
+    signer: 'CN=别的人',
+  })
+
+  it('未签名 + **没配**预期签名者 + 已授权 + 哈希相符 → **放行**（T85 的核心）', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      // ⚠️ **故意不配**预期签名者 —— 这正是 T85 修好的那条组合。
+      expectedSigner: '',
+      allowUnsigned: true,
+      expectedSha512: file.sha512,
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('ok')
+    expect(opened).toBe(1)
+  })
+
+  it('未签名 + **没配**预期签名者 + **没授权** → 拒绝启动（原鉴别力：默认行为不变）', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: '',
+      allowUnsigned: false,
+      expectedSha512: file.sha512,
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+    if (result.status !== 'error') throw new Error('不是 error')
+    // ⚠️ 拒绝理由要说清「差什么」，别让用户以为签名坏了。
+    expect(result.message).toContain('允许安装未签名的更新包')
+  })
+
+  it('未签名 + 配了预期签名者 + 已授权 + 哈希相符 → 放行', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      allowUnsigned: true,
+      expectedSha512: file.sha512,
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('ok')
+    expect(opened).toBe(1)
+  })
+
+  it('未签名 + 配了预期签名者 + **没授权** → 拒绝启动', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      allowUnsigned: false,
+      expectedSha512: file.sha512,
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+  })
+
+  it('未签名 + 没配预期签名者 + 已授权 + **哈希不符** → 拒绝（哈希是硬闸）', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: '',
+      allowUnsigned: true,
+      expectedSha512: `${file.sha512.slice(0, -1)}0`,
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+    if (result.status !== 'error') throw new Error('不是 error')
+    expect(result.message).toContain('SHA-512')
+  })
+
+  it('未签名 + 没配预期签名者 + 已授权 + **没有清单哈希** → 拒绝（无从核对）', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: '',
+      allowUnsigned: true,
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+    if (result.status !== 'error') throw new Error('不是 error')
+    expect(result.message).toContain('SHA-512')
+  })
+
+  it('有签名 + 签名者**一致** → 放行（不论 allowUnsigned）', async () => {
+    const file = makeInstaller('signed-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      allowUnsigned: false,
+      expectedSha512: file.sha512,
+      runAuthenticode: signedByExpected,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('ok')
+    expect(opened).toBe(1)
+  })
+
+  it('有签名 + **没配**预期签名者 + 已授权 → 仍然拒绝（授权只管「未签名」的包）', async () => {
+    const file = makeInstaller('signed-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: '',
+      allowUnsigned: true,
+      expectedSha512: file.sha512,
+      runAuthenticode: signedByOther,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+    if (result.status !== 'error') throw new Error('不是 error')
+    expect(result.message).toContain('未配置')
+  })
+
+  it('有签名 + 签名者**不符** + 已授权 → 仍然拒绝（授权救不了）', async () => {
+    const file = makeInstaller('signed-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      allowUnsigned: true,
+      expectedSha512: file.sha512,
+      runAuthenticode: signedByOther,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+    if (result.status !== 'error') throw new Error('不是 error')
+    expect(result.message).toContain('不符')
+  })
+
+  it('探测失败 → 拒绝（不猜）', async () => {
+    const file = makeInstaller('signed-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      allowUnsigned: true,
+      expectedSha512: file.sha512,
+      runAuthenticode: async () => {
+        throw new Error('探测炸了')
+      },
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T85：共享判定口径 `evaluateSignatureGate`
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 它是**主进程与渲染层共用的唯一一份**口径 ——
+//    凡是「签名这一关」怎么判，都不许在这两处各写一遍。
+// ---------------------------------------------------------------------------
+
+describe('共享签名口径 evaluateSignatureGate（T85）', () => {
+  it('签名通过 → 放行', () => {
+    const result = evaluateSignatureGate({
+      signatureOk: true,
+      signatureStatus: 'Valid',
+      allowUnsigned: false,
+    })
+    expect(result.allowed).toBe(true)
+    expect(result.reason).toBeNull()
+  })
+
+  it('未签名 + 已授权 → 放行', () => {
+    const result = evaluateSignatureGate({
+      signatureOk: false,
+      signatureStatus: 'NotSigned',
+      allowUnsigned: true,
+    })
+    expect(result.allowed).toBe(true)
+  })
+
+  it('未签名 + **没授权** → 拒绝，理由说清差什么', () => {
+    const result = evaluateSignatureGate({
+      signatureOk: false,
+      signatureStatus: 'NotSigned',
+      allowUnsigned: false,
+    })
+    expect(result.allowed).toBe(false)
+    expect(result.reason).toContain('允许安装未签名的更新包')
+  })
+
+  it('有签名但没配预期签名者 → 拒绝（授权**无效**）', () => {
+    const result = evaluateSignatureGate({
+      signatureOk: false,
+      signatureStatus: 'Valid',
+      signatureReason: '安装包有代码签名，但未配置「预期的代码签名者」',
+      allowUnsigned: true,
+    })
+    expect(result.allowed).toBe(false)
+    expect(result.reason).toContain('未配置')
+  })
+
+  it('探测失败（状态不是 NotSigned）→ 拒绝', () => {
+    const result = evaluateSignatureGate({
+      signatureOk: false,
+      signatureStatus: 'UnknownError',
+      allowUnsigned: true,
+    })
+    expect(result.allowed).toBe(false)
+    expect(result.reason).toBeTruthy()
   })
 })

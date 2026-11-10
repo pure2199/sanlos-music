@@ -34,6 +34,7 @@ import type { CloseBehavior, LyricOverlayMode, PlayerBridge } from '../../shared
 import type { FfmpegStatus } from '../../shared/ffmpeg'
 import type { LyricSource } from '../../shared/lyricProvider'
 import type { StreamQuality } from '../../shared/types'
+import { evaluateSignatureGate } from '../../shared/update'
 import { isLocalTrackId } from '../../shared/localMedia'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import { totalDownloadedBytes, useDownloadStore } from '../state/downloadStore'
@@ -206,7 +207,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   // --- 自动更新（Task 23）---------------------------------------------------
   //
   // ⚠️ **渲染层只发请求**：检查 / 下载 / 启动全在主进程。
-  //    「预期的代码签名者」没配 → **不许启动安装器**（界面提前说清楚）。
+  //    「能不能启动安装器」用**共享口径**（`evaluateSignatureGate`）——
+  //    界面提前说清楚，但**不许比主进程严**（T85 的教训）。
   // --- 外部歌词源（Task 32）-------------------------------------------------
   //
   // ⚠️ **渲染层不碰网络**：这里只改偏好；抓取全在主进程。
@@ -354,13 +356,20 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   /**
    * 能不能点「启动安装」。
    *
-   * ⚠️ T82：除了「签名校验通过」，还多一条路 —— **未签名包 + 用户显式授权**
-   *    （`allowUnsigned`）⇒ 可以装（主进程那边**仍会再验一次 SHA-512**）。
+   * ⚠️ T85：判定口径用**共享**的 `evaluateSignatureGate`（与主进程**同一份**），
+   *    并且用的是**已保存**的 `allowUnsigned`（不是还没保存的草稿）
+   *    —— 草稿还没生效，拿它判定会「界面说可以、主进程拒」。
+   *    （旧实现在这里用 `allowUnsignedDraft` + 手写 `status === 'NotSigned'`，
+   *      而主进程那时给的是 `NotChecked` ⇒ 按钮永远 disabled。）
    */
   const signatureOk =
     updateDownload?.status === 'ok' &&
-    (updateDownload.signature.ok === true ||
-      (allowUnsignedDraft && updateDownload.signature.status === 'NotSigned'))
+    evaluateSignatureGate({
+      signatureOk: updateDownload.signature.ok,
+      signatureStatus: updateDownload.signature.status,
+      signatureReason: updateDownload.signature.reason,
+      allowUnsigned,
+    }).allowed
 
   const rootClass = className ? `fnm-settings ${className}` : 'fnm-settings'
 
@@ -783,7 +792,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 {`安装包已下载（${formatBytes(updateDownload.bytes)}）。${
                   updateDownload.signature.ok
                     ? '签名校验通过。'
-                    : updateDownload.signature.status === 'NotSigned' && allowUnsignedDraft
+                    : updateDownload.signature.status === 'NotSigned' && allowUnsigned
                       ? '安装包没有代码签名（已按你的授权放行；主进程仍会核对 SHA-512）。'
                       : `签名校验未通过：${updateDownload.signature.reason ?? '未知原因'}——不允许安装。`
                 }`}
@@ -807,7 +816,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   title={
                     signatureOk
                       ? '启动安装器'
-                      : '需要先下载，且签名校验通过（未配置预期签名者时不允许安装）'
+                      : '需要先下载，且签名校验通过（未签名包要先勾选「允许安装未签名的更新包」并保存）'
                   }
                 >
                   {updateStatus === 'installing' ? '启动中…' : '启动安装'}
@@ -823,13 +832,18 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               默认从**项目自己的 Releases** 拉更新（不用填地址）；填了别的地址就用别的源。
             </p>
             <p className="fnm-settings__hint">
-              安装包必须带代码签名，且签名者与「预期的代码签名者」一致才会被启动；
-              未配置预期签名者时只允许下载，不允许安装。
+              安装包**带**代码签名时，必须与「预期的代码签名者」一致才会被启动；
+              没填预期签名者就一律拒绝（自动更新 = 远程代码执行，这道闸不省）。
             </p>
             <p className="fnm-settings__hint">
-              ⚠️ 本项目暂未办理代码签名证书 ⇒ 安装包**没有签名**。勾选「允许安装未签名的更新包」
-              后才允许安装（**SHA-512 与同源校验照旧**，哈希不符一律拒绝）。
+              ⚠️ 本项目暂未办理代码签名证书 ⇒ 安装包**没有签名**。这时勾选「允许安装未签名的更新包」
+              并**保存**后才允许安装（**SHA-512 与同源校验照旧**，哈希不符一律拒绝）。
             </p>
+            {!updateSaved && (
+              <p className="fnm-settings__hint" data-testid="update-unsaved-hint">
+                有未保存的修改 —— 点「保存」后才会生效。
+              </p>
+            )}
           </fieldset>
         )}
 
