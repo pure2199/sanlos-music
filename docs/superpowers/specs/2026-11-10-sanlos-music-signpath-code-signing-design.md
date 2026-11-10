@@ -483,3 +483,66 @@ job log 原文（CI run 42861355862，第 20 行）：
 | `vitest` | **≥ 2263**（既有 2263 条一条不删；新增若干） |
 | CI | run **success**（含 `Pack (smoke)`） |
 | 发版链路 | `release.yml`（`pack_only=true`）run **success** |
+
+---
+
+## 十一、T87.10 修订：PowerShell 把 Markdown 反引号当转义符 ⇒ Summary 步骤解析失败（2026-11-10）
+
+### 11.1 现象
+
+T87.9 修好之后（head `32a967c`）：
+
+| run | 工作流 | 结果 |
+|---|---|---|
+| **42865021458** | CI（push） | ✅ **success**（8 步全绿，含 `Pack (smoke)`，耗时 4m47s） |
+| **42865707790** | Release（`workflow_dispatch`，`pack_only=true`） | ❌ **失败**（4m31s） |
+
+Release 这一轮有个**关键信号**：run 页面的 **Artifacts 里已经有 `unsigned-artifacts`（268 MB）**
+⇒ **第 8 步 `Pack` 成功了**（两个 exe 都出出来了）⇒ 失败在**之后**的步骤。
+失败步骤 = **第 10 步 `Summary (pack only)`**（check-run annotation 的锚点是 `#step:10:18`）。
+
+job log 原文：
+
+```
+Summary (pack only)
+1s
+Run echo "### 只打包模式" >> $env:GITHUB_STEP_SUMMARY
+
+ParserError: D:\a\_temp\1c8f7698-d0f4-421f-8a7c-4e86787eef31.ps1:4
+
+Line |
+   4 |  echo "产物已上传为 artifact \`unsigned-artifacts\`（**未签名**，符合预期）。" >> $env: …
+     |                         ~~
+     | The Unicode escape sequence is not valid. A valid sequence is `u{ followed by one to six hex digits and a
+     | closing '}'.
+
+Error: Process completed with exit code 1.
+```
+
+### 11.2 根因
+
+**PowerShell 的反引号（`` ` ``）是转义符** ⇒ 双引号字符串里的 Markdown 行内代码
+`` `unsigned-artifacts` `` 被当成「转义序列起始」⇒ `` `u `` 不是合法的转义序列
+⇒ **整个脚本解析失败**（ParserError）⇒ 步骤退出码 1。
+
+⚠️ 这行是 **T87 就写好**的，但此前**每一步都先挂**（非法键 → CRLF → 404）
+⇒ 它一直藏着，**直到 Pack 通了才第一次被执行到**。
+⇒ **教训**：**工作流里「跑不到」的步骤等于「没写」** —— 每一步都得能单独被执行。
+
+### 11.3 修法（两条，缺一不可）
+
+| # | 措施 | 作用 |
+|---|---|---|
+| ① | `release.yml` 的 Summary 步骤改用 **单引号**字符串（PowerShell 单引号里**没有**转义语义 ⇒ 反引号是普通字符） | 修掉**这一次**的失败 |
+| ② | **新守卫测试**：所有工作流的 `run:` 块里**不许出现反引号**（PowerShell 把它当转义符、bash 把它当命令替换 ⇒ 两边都不能有） | 把它从「CI 跑到才发现」变成「**`npm test` 就红**」 |
+
+⚠️ ② 的口径：**只看 `run:` 块里非注释的行**（YAML 注释里的反引号无害 —— 注释不会被 shell 执行）。
+
+### 11.4 验收
+
+| 项 | 口径 |
+|---|---|
+| 守卫有效性 | 把反引号塞回某个 `run:` 块 ⇒ **新测试必红**（变异自证） |
+| `tsc --noEmit` | exit 0 |
+| `vitest` | **≥ 2269**（既有 2269 条一条不删；新增若干） |
+| Release 链路 | `release.yml`（`pack_only=true`）run **success** ⇒ 证明「CI 能出包 + 打包后的步骤也能跑」 |
