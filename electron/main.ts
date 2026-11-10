@@ -366,6 +366,9 @@ if (!isPrimaryInstance) {
           contextIsolation: true,
           sandbox: true,
           nodeIntegration: false,
+          // ⚠️ T82：用户要求「去掉 F12 调出开发者工具」⇒ **打包后彻底不开**
+          //    devtools（任何途径都开不出来）；开发时（`npm start`）仍可调试。
+          devTools: !app.isPackaged,
         },
       })
       mainWindow = win
@@ -639,6 +642,8 @@ if (!isPrimaryInstance) {
             contextIsolation: true,
             sandbox: true,
             nodeIntegration: false,
+            // ⚠️ T82：同主窗口——打包后不开 devtools。
+            devTools: !app.isPackaged,
           },
         })
         // 置顶到最高级（'screen-saver'）：连全屏应用都压得住它。
@@ -716,6 +721,8 @@ if (!isPrimaryInstance) {
             contextIsolation: true,
             sandbox: true,
             nodeIntegration: false,
+            // ⚠️ T82：同主窗口——打包后不开 devtools。
+            devTools: !app.isPackaged,
           },
         })
         // 置顶到最高级（'screen-saver'）：连全屏应用都压得住它（与经典窗同款）。
@@ -878,6 +885,8 @@ if (!isPrimaryInstance) {
         prefs,
         getTarget: () => (win.isDestroyed() ? null : win.webContents),
         getWindow: () => (win.isDestroyed() ? null : win),
+        // ⚠️ T82：版本号**只能**由主进程给（渲染层是 sandbox，读不到 package.json）。
+        appVersion: app.getVersion(),
         onPlayerState: (state) => {
           currentPlayerState = state
           tray.update(state)

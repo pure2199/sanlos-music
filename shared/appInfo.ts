@@ -25,6 +25,21 @@ export const APP_INFO = {
   website: 'https://www.sanlos.cn',
   /** ICP 备案号。 */
   icp: '桂ICP备202507161号-1',
+  /**
+   * **项目地址**（源码仓库；T82 加）。
+   *
+   * ⚠️ 同样**只能通过主进程**用系统浏览器打开（见文件头说明）。
+   */
+  repository: 'https://github.com/pure2199/sanlos-music',
+  /**
+   * **自动更新源**（T82 加）：GitHub Release 的 `latest/download` 目录。
+   *
+   * ⚠️ 用 `releases/latest/download`（**不是**某个具体 tag 的目录）⇒
+   *    **永远指向最新那版** ⇒ 发新版不用改代码。
+   * ⚠️ 清单 `latest.json` 与安装包都在这同一个目录下 ⇒ 满足客户端
+   *    「安装包必须与清单**同源**」的硬要求。
+   */
+  updateBaseUrl: 'https://github.com/pure2199/sanlos-music/releases/latest/download',
 } as const
 
 /**
@@ -33,7 +48,12 @@ export const APP_INFO = {
  * ⚠️ **精确匹配**，**不做后缀匹配** → `sanlos.cn.evil.example` 不放行
  *    （后缀匹配会把 `evil-sanlos.cn` 之类一起放进来）。
  */
-export const EXTERNAL_LINK_ALLOWED_HOSTS: readonly string[] = ['sanlos.cn', 'www.sanlos.cn']
+export const EXTERNAL_LINK_ALLOWED_HOSTS: readonly string[] = [
+  'sanlos.cn',
+  'www.sanlos.cn',
+  // ⚠️ T82：项目地址在 GitHub 上 ⇒ 放行 `github.com`（仍是**精确匹配**）。
+  'github.com',
+]
 
 /**
  * 判断一个 URL 是否允许用系统浏览器打开。

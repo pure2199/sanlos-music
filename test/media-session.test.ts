@@ -146,6 +146,10 @@ function fakeBridge(): {
   let handler: ((command: PlayerCommand) => void) | null = null
   let unsubscribed = false
   const bridge: PlayerBridge = {
+    // ⚠️ T82：桥多了 `getAppVersion`（版本号只能由主进程给）——这里给个假的。
+    getAppVersion() {
+      return Promise.resolve('0.0.0-test')
+    },
     pushState(snapshot) {
       pushed.push(snapshot)
     },

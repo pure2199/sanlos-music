@@ -17,7 +17,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -463,5 +463,128 @@ describe('启动安装器（T23）', () => {
     expect(result.status).toBe('error')
     if (result.status !== 'error') throw new Error('不是 error')
     expect(result.message).toContain('找不到文件')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T82：允许安装**未签名**包（默认关；SHA-512 仍是硬闸）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 本项目暂未办理代码签名证书 ⇒ 安装包**没有签名** ⇒ 默认被签名闸挡住。
+//    T82 加了一条**显式、默认关**的授权：「允许安装未签名的更新包」。
+//    ⇒ 这里钉住它的**边界**：只放宽「发布者身份」这一条，
+//    **SHA-512 不符 / 无从核对 / 签名者不符** 一律拒绝。
+// ---------------------------------------------------------------------------
+
+describe('未签名安装包（T82）', () => {
+  /** 造一个真的临时安装包（`sha512File` 要读盘）。 */
+  function makeInstaller(content: string): { path: string; sha512: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'fnm-update-test-'))
+    tempDirs.push(dir)
+    const path = join(dir, 'FN-Music-Setup-9.9.9.exe')
+    writeFileSync(path, content)
+    return { path, sha512: createHash('sha512').update(content).digest('hex') }
+  }
+
+  /** 假装这个包**没有签名**。 */
+  const notSigned = async (): Promise<{ status: string; signer: string | null }> => ({
+    status: 'NotSigned',
+    signer: null,
+  })
+
+  it('默认（没开授权）→ 未签名包**仍然拒绝启动**（原行为一字不变）', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+    if (result.status !== 'error') throw new Error('不是 error')
+    expect(result.message).toContain('拒绝启动')
+  })
+
+  it('开了授权 + **哈希相符** → 允许启动（未签名）', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      allowUnsigned: true,
+      expectedSha512: file.sha512,
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('ok')
+    expect(opened).toBe(1)
+  })
+
+  it('开了授权但**哈希不符** → 仍然拒绝（哈希是硬闸，放权也救不了）', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      allowUnsigned: true,
+      // ⚠️ 故意给一个**错的**哈希（多写一个字符）。
+      expectedSha512: `${file.sha512.slice(0, -1)}0`,
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+    if (result.status !== 'error') throw new Error('不是 error')
+    expect(result.message).toContain('SHA-512')
+  })
+
+  it('开了授权但**没给清单哈希** → 拒绝（无从核对）', async () => {
+    const file = makeInstaller('unsigned-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      allowUnsigned: true,
+      runAuthenticode: notSigned,
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+    if (result.status !== 'error') throw new Error('不是 error')
+    expect(result.message).toContain('SHA-512')
+  })
+
+  it('包**有签名但签名者不符** → 授权**也救不了**（不走未签名那条路）', async () => {
+    const file = makeInstaller('signed-payload')
+    let opened = 0
+    const result = await launchInstaller({
+      filePath: file.path,
+      expectedSigner: 'CN=预期的人',
+      allowUnsigned: true,
+      expectedSha512: file.sha512,
+      runAuthenticode: async () => ({ status: 'Valid', signer: 'CN=别的人' }),
+      openPath: async () => {
+        opened += 1
+        return ''
+      },
+    })
+    expect(result.status).toBe('error')
+    expect(opened).toBe(0)
+    if (result.status !== 'error') throw new Error('不是 error')
+    expect(result.message).toContain('不符')
   })
 })

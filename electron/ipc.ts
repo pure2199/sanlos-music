@@ -98,6 +98,7 @@ import type {
 } from '../shared/playerBridge'
 import type { ConnectionInfo, ConnectionKind, PlayMode, StreamQuality, ThemeName } from '../shared/types'
 import { sanitizeSpectrumBins } from '../shared/spectrum'
+import { APP_INFO } from '../shared/appInfo'
 import { buildCandidates, fetchConnectionParams, hostOf, normalizeBase } from './connection'
 import { TrustedHosts } from './cert'
 import { openExternalUrl } from './externalLinks'
@@ -1046,6 +1047,9 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
       ) {
         entry.expectedSigner = expectedSigner.trim()
       }
+      // ⚠️ T82：「允许安装未签名更新」只认**布尔**（别的类型整段丢弃，不落盘）。
+      const allowUnsigned = update['allowUnsigned']
+      if (typeof allowUnsigned === 'boolean') entry.allowUnsigned = allowUnsigned
       if (Object.keys(entry).length > 0) out.update = entry
     }
   }
@@ -1158,6 +1162,13 @@ export interface PlayerIpcOptions {
    *    避免在 Vitest 里真的拉起浏览器。
    */
   openExternal?: (url: string) => Promise<void>
+  /**
+   * 当前**版本号**（T82）。
+   *
+   * ⚠️ 由主进程注入（`app.getVersion()`）——渲染层是 sandbox，
+   *    **读不到 `package.json`**，版本号只能这么给。
+   */
+  appVersion?: string
   /**
    * 渲染进程推来**悬浮歌词消息**时的回调（Task 10）。
    *
@@ -1396,6 +1407,12 @@ export function registerPlayerIpc(opts: PlayerIpcOptions): void {
     return openExternalUrl(url, { open })
   })
 
+  // --- 版本号（T82）-------------------------------------------------------
+  //
+  // ⚠️ 渲染层是 sandbox，**读不到 `package.json`** ⇒ 版本号只能由主进程给
+  //    （主进程用 `app.getVersion()`，与安装包 `FileVersion` 同源）。
+  ipcMain.handle('app:version', () => opts.appVersion ?? '')
+
   // 偏好。
   ipcMain.handle('prefs:get', () => prefs.read())
   ipcMain.handle('prefs:set', (_event, arg) => prefs.write(asRecord(arg) ?? {}))
@@ -1448,8 +1465,20 @@ export function registerUpdateIpc(opts: UpdateIpcOptions): void {
   /** 读当前的更新偏好（地址 + 预期签名者）。 */
   const readUpdatePrefs = (): NonNullable<AppPrefs['update']> => prefs.read().update ?? {}
 
+  /**
+   * 实际的更新源地址（T82）。
+   *
+   * ⚠️ **没配地址 ⇒ 回落项目地址**（`APP_INFO.updateBaseUrl`）⇒
+   *    「从项目拉取」**开箱即用**，不用先手填一遍地址。
+   * ⚠️ 回落发生在**主进程**：渲染层既不碰网络，也不能指定地址。
+   */
+  const resolveBaseUrl = (): string => {
+    const configured = (readUpdatePrefs().baseUrl ?? '').trim()
+    return configured === '' ? APP_INFO.updateBaseUrl : configured
+  }
+
   ipcMain.handle('update:check', async () => {
-    return await update.check(readUpdatePrefs().baseUrl ?? '')
+    return await update.check(resolveBaseUrl())
   })
 
   ipcMain.handle('update:download', async (_event, arg) => {
@@ -1461,7 +1490,11 @@ export function registerUpdateIpc(opts: UpdateIpcOptions): void {
   ipcMain.handle('update:install', async (_event, arg) => {
     const name = readString(asRecord(arg)?.['name'])
     if (name === '') return { status: 'error', message: '安装参数不合法' }
-    return await update.install(name, readUpdatePrefs().expectedSigner)
+    return await update.install(
+      name,
+      readUpdatePrefs().expectedSigner,
+      readUpdatePrefs().allowUnsigned === true,
+    )
   })
 }
 

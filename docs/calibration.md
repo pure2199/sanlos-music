@@ -3573,3 +3573,102 @@ T57 轮全面复验后，仓库与工作区里散落着**用户私有的标识**
 - ⚠️ 若日后仍要接**酷狗 KRC**（真逐字 89%~100%），那是**另一个任务**
   （原规格 `docs/superpowers/specs/2026-11-10-sanlos-music-kugou-krc-lyric-source-design.md`
   仍在，已标注「未实施」）；与本任务**不冲突**（本任务只管「有没有真逐字」）。
+
+## 四十四、T82：外壳收尾（F12 / 版本号 / 项目地址 / 自动更新从项目拉取）
+
+### 起因
+
+用户提了四件事（2026-11-10）：
+
+1. 去掉软件的 **F12** 按键调出（开发者工具）；
+2. 给软件加入**版本号**；
+3. 加入**项目地址**；
+4. 加入**自动更新功能，从项目拉取**。
+
+⚠️ 第 4 项**不是**「从零写自动更新」—— T23 已有整条机制
+（`update:check` / `update:download` / `update:install` 全在主进程），
+本任务只是**把它接到项目上** + **补上版本号 / 项目地址**。
+
+### 判定口径
+
+| 项 | 取值 |
+|---|---|
+| F12 | **显式吞掉**（新增 `'swallow'` 动作）：拦下默认行为、**什么都不做**；`openDevTools` 接缝**整个拆掉**（含 `electron/oauthWindow.ts` 里那处残留的**死接缝**） |
+| 打包后 | 四个窗口一律 `devTools: !app.isPackaged` ⇒ 打包后 `false` ⇒ **任何途径都开不出**；开发态仍可调试 |
+| 版本号 | **主进程是唯一真相源**：`app.getVersion()` → 新 IPC `app:version`（渲染层是 sandbox，读不到 `package.json`） |
+| 项目地址 | `APP_INFO.repository` = `https://github.com/pure2199/sanlos-music`（白名单加 `github.com`，仍**精确匹配**） |
+| 更新源 | `APP_INFO.updateBaseUrl` = `.../releases/latest/download`（**不是某个 tag 的目录** ⇒ 永远指向最新那版） |
+| 回落 | **主进程**回落（`update:check` 地址为空 ⇒ 用项目地址）；渲染层仍不碰网络、也不能指定地址 |
+| 签名闸 | **默认一字不变**；新增 `update.allowUnsigned`（**默认关**）+ 设置页开关，只放宽「发布者身份」，**SHA-512 与同源仍是硬闸**（签名者不符的包**不走**这条路） |
+
+### ⚠️ 踩坑一（本次最关键）：**Playwright 的键盘注入不会触发 `before-input-event`**
+
+第一次写 e2e 时用 `page.keyboard.press('F12')` ⇒ 测出来「开发者工具开不出来」⇒ **绿**。
+但**变异自证**立刻打脸：把 F12 **重新绑回** `openDevTools`（恢复 T82 之前的行为），
+**e2e 依然全绿** ⇒ 这条 e2e **没有鉴别力**（**假绿**）。
+
+探针（`release/verify/fnm-keylog2-probe.mjs`，在应用里挂记录器**逐键记录**）查出的真相：
+
+| 输入通道 | 原理 | 有没有触发 `before-input-event` |
+|---|---|---|
+| `page.keyboard.press(...)` | CDP `Input.dispatchKeyEvent`，**直接注入渲染进程** | ❌ **一次都没有** |
+| `webContents.sendInputEvent(...)` | **主进程**模拟真实按键，走**完整输入管线** | ✅ **条条都有**（F12 / Ctrl+Shift+I / Ctrl+V 全记到了） |
+
+⇒ 改用**主进程 `sendInputEvent`** 后，同一个变异**立刻变红** ⇒ e2e 才有鉴别力。
+
+⚠️ **量测方法本身也要自证**（这一条探针先后踩了三个坑）：
+
+1. 主进程里的数组记录器（挂 `globalThis` / `process`）：**读不回来**
+   —— Playwright 的 `app.evaluate` **每次都在独立 realm 里执行**；
+2. 主进程的 stdout：**抓不到**（Windows 上 Electron 主进程的 stdout 不接管道，实测 **0 字节**）；
+3. 文件记录器**路径写死进产物**才对（靠环境变量传路径 ⇒ 万一没传到就静默写到 `NUL`，结论照样是假的）。
+
+⇒ 最终方案：**文件记录器 + 相对路径 + 「已挂载」哨兵**
+（**文件不存在** = 记录器没挂上，本次测量无效；**文件存在但没有事件** = 真没事件）。
+
+### ⚠️ 踩坑二：既有 T36 的「Ctrl+V 粘贴」e2e 也是**假绿**
+
+由踩坑一连带查出：那条用例用 `page.keyboard.press('Control+V')` ⇒ **不会**触发 `before-input-event`
+⇒ 真正让粘贴生效的是 **Blink 自己的编辑命令** ⇒ **那条 e2e 验的不是 T36 接的那条接缝**。
+
+⚠️ **本任务不动它**（既有测试一条不许删、断言一条不许削弱）⇒ 列入待办（见文末）。
+
+### 改动文件
+
+| 文件 | 改什么 |
+|---|---|
+| `electron/appShortcuts.ts` | 新增 `'swallow'` 动作；F12 / Ctrl+Shift+I → 吞掉；**拆掉** `openDevTools` 接缝 |
+| `electron/oauthWindow.ts` | 授权窗 `devTools: false`；**删掉** T36 留下的 `openDevTools?` 死接缝 |
+| `electron/main.ts` | 三个窗口 `devTools: !app.isPackaged`；`registerPlayerIpc` 传 `appVersion: app.getVersion()` |
+| `electron/ipc.ts` | 新增 `app:version` 通道；prefs 清洗 `allowUnsigned`；`update:check` **回落项目地址**；install 透传 `allowUnsigned` |
+| `electron/update.ts` | 新增 `sha512File()`（流式）；`launchInstaller` 支持 `allowUnsigned` + `expectedSha512`，启动前**再验一次** SHA-512 |
+| `electron/preload.ts` / `shared/playerBridge.ts` | 桥加 `getAppVersion()` |
+| `shared/appInfo.ts` | 加 `repository` / `updateBaseUrl`；白名单加 `github.com`（仍精确匹配） |
+| `shared/update.ts` | `UpdatePrefs` 加 `allowUnsigned?` |
+| `src/state/updateStore.ts` | `allowUnsigned` 已存值 / 草稿 / 保存 |
+| `src/components/SettingsPanel.tsx` + `settings-panel.css` | 关于页加「版本」「项目地址」；更新页加「当前版本」「用项目地址」「允许未签名」 |
+| `test/app-version.test.ts`（新） | 版本号 IPC、项目地址回落、allowUnsigned 落盘与透传 |
+| `test/t82-shell-contract.test.ts`（新） | **源码契约**：三处 `devTools: !app.isPackaged`、授权窗 `devTools: false`、**全仓不再有 `openDevTools`** |
+| `e2e/t82-shell.spec.ts`（新） | 真实 Electron：F12 探针（`sendInputEvent` + **对照组**）、关于页版本/项目地址、更新页当前版本/更新源 |
+| `test/app-shortcuts.test.ts` / `app-info.test.ts` / `tray-tooltip.test.ts` / `update.test.ts` / `media-session.test.ts` / `settings-page.test.tsx` | 改写 **4** 条前提被显式推翻的断言 + 新增用例 |
+
+### 验收
+
+| 项 | 结果 |
+|---|---|
+| `tsc --noEmit` | exit 0 |
+| `vitest` | **2111 passed / 100 files**（既有 2080 条**一条不删**；改写 **4** 条前提被显式推翻的断言） |
+| `build` | exit 0 |
+| `playwright` | **32 passed**（含 T82 新增 **3** 条**真实 Electron** 用例） |
+| 变异自证 | **8 条全部被抓住**（F12 重新绑回 `openDevTools` / 主窗口 devTools 恒真 / 授权窗 devTools 恒真 / 生产代码复活 `openDevTools` 接缝 / `app:version` 写死 / 不回落项目地址 / 不校验 SHA-512 / 白名单改子串匹配） |
+
+### 遗留 / 待办
+
+- ⚠️ **T36 的「Ctrl+V 粘贴」e2e 需要重写**（改用 `sendInputEvent`）——
+  否则它**测不到**自己接的那条接缝（本任务不动既有测试）；
+- ⚠️ **打包态的真机复验未做**：本任务验的是**开发构建**；
+  「打包后 `devTools: false`」靠**源码契约测试**钉住
+  （`test/t82-shell-contract.test.ts`），**装包后按一次 F12** 仍值得用户复验一次；
+- ⚠️ **自动更新默认出网**：不填地址也能「检查更新」⇒ 会访问 GitHub；
+- ⚠️ 本项目**仍未办理代码签名证书** ⇒ 默认只允许下载；
+- ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验等老待办**不变**。

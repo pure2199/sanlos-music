@@ -76,12 +76,6 @@ export interface WebContentsLike {
    * ⚠️ **可选**：同上。
    */
   paste?(): void
-  /**
-   * 打开开发者工具（T36：菜单栏去掉后，F12 快捷键要自己接回来）。
-   *
-   * ⚠️ **可选**：同上。
-   */
-  openDevTools?(): void
 }
 
 /** 授权窗口的最小接口。 */
@@ -525,6 +519,8 @@ export async function runOAuthWindowWith(
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // ⚠️ T82：授权窗加载的是**外部页面** ⇒ 永远不开 devtools。
+      devTools: false,
     },
   })
 

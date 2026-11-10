@@ -27,7 +27,7 @@
 //    样式住在同目录的 `settings-panel.css`。
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
+import { useCallback, useEffect, useState, type ChangeEvent as ReactChangeEvent, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 
 import { APP_INFO } from '../../shared/appInfo'
 import type { CloseBehavior, LyricOverlayMode, PlayerBridge } from '../../shared/playerBridge'
@@ -253,6 +253,31 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   const checkUpdate = useUpdateStore((state) => state.check)
   const downloadUpdate = useUpdateStore((state) => state.downloadUpdate)
   const installUpdate = useUpdateStore((state) => state.installUpdate)
+  const allowUnsigned = useUpdateStore((state) => state.allowUnsigned)
+  const allowUnsignedDraft = useUpdateStore((state) => state.allowUnsignedDraft)
+  const setAllowUnsignedDraft = useUpdateStore((state) => state.setAllowUnsignedDraft)
+
+  // --- 版本号（T82）--------------------------------------------------------
+  //
+  // ⚠️ 渲染层是 sandbox，**读不到 `package.json`** ⇒ 版本号只能由主进程给
+  //    （`app.getVersion()`，与安装包的 `FileVersion` 同源）。
+  const [appVersion, setAppVersion] = useState('')
+  useEffect(() => {
+    const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
+    const bridge = scope.fnPlayer
+    // ⚠️ **桥可能没有这个方法**（浏览器预览 / 旧单测替身）→ 不炸、不显示假版本。
+    if (!bridge || typeof bridge.getAppVersion !== 'function') return
+    let alive = true
+    void bridge
+      .getAppVersion()
+      .then((version) => {
+        if (alive) setAppVersion(version)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => {
     void loadUpdate()
@@ -275,6 +300,25 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   }, [installUpdate])
 
   /**
+   * 「用项目地址」：把更新源填成**项目自己的 Release 目录**并保存（T82）。
+   *
+   * ⚠️ 主进程在**没配地址**时本来就会回落项目地址；这个按钮是让用户
+   *    **看得见、也改得动**（填别的源时，一键切回项目）。
+   */
+  const handleUseProjectSource = useCallback(() => {
+    setBaseUrlDraft(APP_INFO.updateBaseUrl)
+    void saveUpdate()
+  }, [setBaseUrlDraft, saveUpdate])
+
+  /** 「允许安装未签名更新」的开关（T82）。 */
+  const handleToggleAllowUnsigned = useCallback(
+    (event: ReactChangeEvent<HTMLInputElement>): void => {
+      setAllowUnsignedDraft(event.target.checked)
+    },
+    [setAllowUnsignedDraft],
+  )
+
+  /**
    * 点官网 → 用**系统默认浏览器**打开（不在应用内跳转）。
    *
    * ⚠️ **必须 `preventDefault()`**：主窗口**没有** `setWindowOpenHandler`
@@ -289,11 +333,34 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
     void scope.fnPlayer?.openExternal(APP_INFO.website)
   }, [])
 
+  /**
+   * 点**项目地址** → 用系统默认浏览器打开源码仓库（T82）。
+   *
+   * ⚠️ 同样**必须 `preventDefault()`**（否则应用窗口被导航走）；
+   *    白名单在主进程那一侧（`github.com` 已在白名单里，仍是**精确匹配**）。
+   */
+  const handleOpenRepository = useCallback((event: ReactMouseEvent<HTMLAnchorElement>): void => {
+    event.preventDefault()
+    const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
+    void scope.fnPlayer?.openExternal(APP_INFO.repository)
+  }, [])
+
   const updateBusy =
     updateStatus === 'checking' || updateStatus === 'downloading' || updateStatus === 'installing'
   const updateSaved =
-    baseUrlDraft.trim() === updateBaseUrl && signerDraft.trim() === updateExpectedSigner
-  const signatureOk = updateDownload?.status === 'ok' && updateDownload.signature.ok === true
+    baseUrlDraft.trim() === updateBaseUrl &&
+    signerDraft.trim() === updateExpectedSigner &&
+    allowUnsignedDraft === allowUnsigned
+  /**
+   * 能不能点「启动安装」。
+   *
+   * ⚠️ T82：除了「签名校验通过」，还多一条路 —— **未签名包 + 用户显式授权**
+   *    （`allowUnsigned`）⇒ 可以装（主进程那边**仍会再验一次 SHA-512**）。
+   */
+  const signatureOk =
+    updateDownload?.status === 'ok' &&
+    (updateDownload.signature.ok === true ||
+      (allowUnsignedDraft && updateDownload.signature.status === 'NotSigned'))
 
   const rootClass = className ? `fnm-settings ${className}` : 'fnm-settings'
 
@@ -629,6 +696,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         {category === 'update' && (
           <fieldset className="fnm-settings__group">
             <legend className="fnm-settings__legend">自动更新</legend>
+            <p className="fnm-settings__hint" data-testid="update-current-version">
+              {`当前版本：${appVersion ? `v${appVersion}` : '（读取中…）'}　更新源：项目 Releases`}
+            </p>
             <label className="fnm-settings__option fnm-settings__option--stack">
               <span>更新服务器地址</span>
               <input
@@ -636,10 +706,20 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 className="fnm-settings__input"
                 name="fnm-update-base-url"
                 value={baseUrlDraft}
-                placeholder="https://updates.example.com/fnmusic"
+                placeholder={APP_INFO.updateBaseUrl}
                 onChange={(event) => setBaseUrlDraft(event.target.value)}
               />
             </label>
+            <div className="fnm-settings__row">
+              <button
+                type="button"
+                className="fnm-settings__button"
+                onClick={handleUseProjectSource}
+                data-testid="update-use-project-source"
+              >
+                用项目地址
+              </button>
+            </div>
             <label className="fnm-settings__option fnm-settings__option--stack">
               <span>预期的代码签名者</span>
               <input
@@ -650,6 +730,18 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 placeholder="CN=你的证书主体名"
                 onChange={(event) => setSignerDraft(event.target.value)}
               />
+            </label>
+            {/* ⚠️ T82：默认**关**——本项目暂未办理代码签名证书，
+                未签名包默认**拒绝安装**（原行为一字不变）。 */}
+            <label className="fnm-settings__checkbox">
+              <input
+                type="checkbox"
+                name="fnm-update-allow-unsigned"
+                checked={allowUnsignedDraft}
+                onChange={handleToggleAllowUnsigned}
+                data-testid="update-allow-unsigned"
+              />
+              <span>允许安装未签名的更新包</span>
             </label>
             <div className="fnm-settings__row">
               <button
@@ -691,7 +783,9 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 {`安装包已下载（${formatBytes(updateDownload.bytes)}）。${
                   updateDownload.signature.ok
                     ? '签名校验通过。'
-                    : `签名校验未通过：${updateDownload.signature.reason ?? '未知原因'}——不允许安装。`
+                    : updateDownload.signature.status === 'NotSigned' && allowUnsignedDraft
+                      ? '安装包没有代码签名（已按你的授权放行；主进程仍会核对 SHA-512）。'
+                      : `签名校验未通过：${updateDownload.signature.reason ?? '未知原因'}——不允许安装。`
                 }`}
               </p>
             )}
@@ -726,8 +820,15 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               </p>
             )}
             <p className="fnm-settings__hint">
+              默认从**项目自己的 Releases** 拉更新（不用填地址）；填了别的地址就用别的源。
+            </p>
+            <p className="fnm-settings__hint">
               安装包必须带代码签名，且签名者与「预期的代码签名者」一致才会被启动；
               未配置预期签名者时只允许下载，不允许安装。
+            </p>
+            <p className="fnm-settings__hint">
+              ⚠️ 本项目暂未办理代码签名证书 ⇒ 安装包**没有签名**。勾选「允许安装未签名的更新包」
+              后才允许安装（**SHA-512 与同源校验照旧**，哈希不符一律拒绝）。
             </p>
           </fieldset>
         )}
@@ -739,6 +840,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               <div className="fnm-settings__about-row">
                 <dt>应用名称</dt>
                 <dd>{APP_INFO.name}</dd>
+              </div>
+              <div className="fnm-settings__about-row">
+                <dt>版本</dt>
+                <dd data-testid="app-about-version">{appVersion ? `v${appVersion}` : '（读取中…）'}</dd>
               </div>
               <div className="fnm-settings__about-row">
                 <dt>开发者</dt>
@@ -766,9 +871,23 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 <dt>备案号</dt>
                 <dd data-testid="app-about-icp">{APP_INFO.icp}</dd>
               </div>
+              <div className="fnm-settings__about-row">
+                <dt>项目地址</dt>
+                <dd>
+                  {/* ⚠️ 同样必须 `preventDefault`（见 `handleOpenRepository`）。 */}
+                  <a
+                    className="fnm-settings__about-link"
+                    href={APP_INFO.repository}
+                    onClick={handleOpenRepository}
+                    data-testid="app-about-repository"
+                  >
+                    {APP_INFO.repository}
+                  </a>
+                </dd>
+              </div>
             </dl>
             <p className="fnm-settings__hint">
-              点官网会用系统默认浏览器打开（不在应用内跳转）。
+              点官网 / 项目地址都会用系统默认浏览器打开（不在应用内跳转）。
             </p>
           </fieldset>
         )}

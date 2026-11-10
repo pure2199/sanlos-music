@@ -13,10 +13,11 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 
 import { SettingsPanel } from '../src/components/SettingsPanel'
 import { useAppPrefsStore, DEFAULT_CLOSE_BEHAVIOR } from '../src/state/appPrefsStore'
+import { APP_INFO } from '../shared/appInfo'
 
 beforeEach(() => {
   useAppPrefsStore.setState({
@@ -250,5 +251,119 @@ describe('设置页：桌面歌词样式二选一（T45）', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: '灵动态词岛' }))
     expect(setLyricOverlayMode).toHaveBeenCalledWith('island')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T82：版本号 / 项目地址 / 自动更新从项目拉取
+// ---------------------------------------------------------------------------
+
+describe('设置页：版本号 / 项目地址 / 更新源（T82）', () => {
+  /** 装一个假的播放器桥（版本号 + 外部链接 + 偏好读写）。 */
+  function stubBridge(): {
+    openExternal: ReturnType<typeof vi.fn>
+    getAppVersion: ReturnType<typeof vi.fn>
+    setPrefs: ReturnType<typeof vi.fn>
+  } {
+    const openExternal = vi.fn().mockResolvedValue(true)
+    const getAppVersion = vi.fn().mockResolvedValue('0.2.1')
+    const setPrefs = vi.fn().mockResolvedValue({})
+    ;(globalThis as unknown as { fnPlayer?: unknown }).fnPlayer = {
+      openExternal,
+      getAppVersion,
+      getPrefs: vi.fn().mockResolvedValue({}),
+      setPrefs,
+    }
+    return { openExternal, getAppVersion, setPrefs }
+  }
+
+  afterEach(() => {
+    delete (globalThis as unknown as { fnPlayer?: unknown }).fnPlayer
+  })
+
+  it('「关于」→ 显示**版本号**（主进程给的）', async () => {
+    stubBridge()
+    render(<SettingsPanel />)
+
+    pickCategory('关于')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('app-about-version').textContent).toBe('v0.2.1')
+    })
+  })
+
+  it('「关于」→ 显示**项目地址**，点它请主进程用系统浏览器打开', async () => {
+    const { openExternal } = stubBridge()
+    render(<SettingsPanel />)
+
+    pickCategory('关于')
+    const link = screen.getByTestId('app-about-repository')
+    expect(link.textContent).toBe(APP_INFO.repository)
+
+    // ⚠️ 关键：链接**不许**把应用窗口导航走 → 必须 `preventDefault`。
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    link.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(openExternal).toHaveBeenCalledWith(APP_INFO.repository)
+  })
+
+  it('「更新」→ 显示**当前版本**与「用项目地址」按钮', async () => {
+    stubBridge()
+    render(<SettingsPanel />)
+
+    pickCategory('更新')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('update-current-version').textContent).toContain('v0.2.1')
+    })
+    expect(screen.getByTestId('update-use-project-source')).toBeTruthy()
+  })
+
+  it('「用项目地址」→ 把**项目地址**填进更新源并保存', async () => {
+    const { setPrefs } = stubBridge()
+    render(<SettingsPanel />)
+
+    pickCategory('更新')
+    fireEvent.click(screen.getByTestId('update-use-project-source'))
+
+    await waitFor(() => {
+      expect(setPrefs).toHaveBeenCalled()
+    })
+    expect(setPrefs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ baseUrl: APP_INFO.updateBaseUrl }),
+      }),
+    )
+  })
+
+  it('「允许安装未签名的更新包」→ **默认不勾**（本项目暂未签名）', async () => {
+    stubBridge()
+    render(<SettingsPanel />)
+
+    pickCategory('更新')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('update-allow-unsigned')).toBeTruthy()
+    })
+    expect((screen.getByTestId('update-allow-unsigned') as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('勾上「允许安装未签名的更新包」→ 写进偏好', async () => {
+    const { setPrefs } = stubBridge()
+    render(<SettingsPanel />)
+
+    pickCategory('更新')
+    fireEvent.click(screen.getByTestId('update-allow-unsigned'))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => {
+      expect(setPrefs).toHaveBeenCalled()
+    })
+    expect(setPrefs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ allowUnsigned: true }),
+      }),
+    )
   })
 })

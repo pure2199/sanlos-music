@@ -5,12 +5,25 @@
 // ⚠️ **为什么需要这个模块**：T36 把 Windows 上的默认菜单栏去掉了
 //    （`Menu.setApplicationMenu(null)`）——但 **Electron 的默认菜单同时绑着
 //    一批快捷键**：编辑（Ctrl+C / Ctrl+V）与**开发者工具**（Ctrl+Shift+I / F12）。
-//    菜单一去掉，它们**全部消失** →
-//    - 登录框、搜索框、设置页的「自定义歌词 API 模板」全都**粘不了**；
-//    - 调试时**打不开开发者工具**。
-//    ⇒ 这里把常用的几个**手工接回来**。
+//    菜单一去掉，它们**全部消失** → 登录框、搜索框、设置页的「自定义歌词 API
+//    模板」全都**粘不了** ⇒ 这里把**复制 / 粘贴**手工接回来。
 //
-// ⚠️ **只接 C / V / 开发者工具，不接 X / A / Z**：
+// ⚠️ **T82：开发者工具那一路已拆掉**（用户要求「去掉 F12 调出功能」）：
+//    - `resolveShortcut()` 对 **F12 / Ctrl+Shift+I** 返回 **`'swallow'`**
+//      ⇒ **显式吞掉**：拦下默认行为、**什么都不做**（不是「不接管」——
+//      万一别处还有绑定，按键不能落到那儿）；
+//    - `ShortcutTarget.openDevTools` **整个拆掉**（没人调了）；
+//    - 另：打包后窗口 `devTools: false`（见 `electron/main.ts`）⇒ **任何途径**
+//      都开不出开发者工具；开发时（`npm start`）仍可调试。
+//
+// ⚠️ **测这条接缝只能用主进程的 `sendInputEvent`**（2026-11-10 实测）：
+//    Playwright 的 `page.keyboard.press()` = CDP `Input.dispatchKeyEvent`
+//    ⇒ **直接注入渲染进程** ⇒ **根本不触发** `before-input-event`
+//    ⇒ 本模块的接缝**一次都不会执行** ⇒ 用它写的 e2e 是**假绿**
+//    （实测：探针逐键记录，CDP 通道 0 条、`sendInputEvent` 通道条条都有）。
+//    `webContents.sendInputEvent()` 走**完整输入管线** ⇒ 真的会触发。
+//
+// ⚠️ **只接 C / V，不接 X / A / Z**：
 //    - Ctrl+X（剪切）、Ctrl+A（全选）、Ctrl+Z（撤销）是 **Blink 自己的编辑命令**
 //      → 不依赖菜单 accelerator → 不拦，交给渲染进程；
 //    - ⚠️ **尤其不能拦 Ctrl+A**：Electron 的 `webContents.selectAll()` 是
@@ -37,8 +50,13 @@ export interface ShortcutInput {
   meta: boolean
 }
 
-/** 能被接管的快捷键动作。 */
-export type ShortcutAction = 'copy' | 'paste' | 'devtools'
+/**
+ * 能被接管的快捷键动作。
+ *
+ * ⚠️ `'swallow'` = **吞掉这个键**：拦下默认行为、**什么都不做**
+ *    （T82 起，F12 / Ctrl+Shift+I 走这条路——开发者工具入口已拆）。
+ */
+export type ShortcutAction = 'copy' | 'paste' | 'swallow'
 
 /** `before-input-event` 的事件形状（最小子集）。 */
 export interface BeforeInputEventLike {
@@ -66,12 +84,6 @@ export interface ShortcutTarget {
    * ⚠️ **可选**：同上。
    */
   paste?(): void
-  /**
-   * 打开开发者工具（菜单去掉前，这是 View 菜单里的 accelerator）。
-   *
-   * ⚠️ **可选**：同上。
-   */
-  openDevTools?(): void
 }
 
 /**
@@ -84,13 +96,15 @@ export function resolveShortcut(input: ShortcutInput): ShortcutAction | null {
   // ⚠️ **只认 `keyDown`**：`keyUp` / `char` 也触发 → 处理两遍 = **粘贴两次**。
   if (input.type !== 'keyDown') return null
 
-  // --- 开发者工具：F12 或 Ctrl+Shift+I -----------------------------------
+  // --- 开发者工具：**吞掉**（T82）----------------------------------------
   //
-  // ⚠️ 这两个**原本就是默认菜单的 accelerator**（View → Toggle Developer Tools）
-  //    → 去掉菜单就得自己接回来，否则调试时连控制台都打不开。
+  // ⚠️ 这两个**原本就是默认菜单的 accelerator**（View → Toggle Developer Tools）。
+  //    T36 把菜单去掉后手工接了回来；**T82 起按用户要求拆掉这条路**：
+  //    返回 `'swallow'` ⇒ 拦下默认行为、**什么都不做**
+  //    ⇒ 按 F12 **什么都不会发生**（不是「调了别的」，是彻底没反应）。
   if (!input.alt && !input.meta) {
-    if (input.key === 'F12' && !input.control && !input.shift) return 'devtools'
-    if (input.control && input.shift && input.key.toLowerCase() === 'i') return 'devtools'
+    if (input.key === 'F12' && !input.control && !input.shift) return 'swallow'
+    if (input.control && input.shift && input.key.toLowerCase() === 'i') return 'swallow'
   }
 
   // --- 复制 / 粘贴 --------------------------------------------------------
@@ -106,7 +120,7 @@ export function resolveShortcut(input: ShortcutInput): ShortcutAction | null {
 }
 
 /**
- * 把「复制 / 粘贴 / 开发者工具」快捷键接到某个 `webContents` 上。
+ * 把「复制 / 粘贴 / 吞键」快捷键接到某个 `webContents` 上。
  *
  * ⚠️ **必须在去掉应用菜单之后调用**：菜单还在时两者会**同时生效** → 粘贴两次。
  *
@@ -120,7 +134,7 @@ export function attachAppShortcuts(target: ShortcutTarget): void {
     event.preventDefault()
     if (action === 'copy') target.copy?.()
     else if (action === 'paste') target.paste?.()
-    else target.openDevTools?.()
+    // ⚠️ `'swallow'`：**故意什么都不做**——F12 / Ctrl+Shift+I 到此为止。
   })
 }
 
@@ -139,7 +153,6 @@ export function adaptLooseWebContents(loose: {
   on(channel: string, listener: (...args: unknown[]) => void): void
   copy?(): void
   paste?(): void
-  openDevTools?(): void
 }): ShortcutTarget {
   return {
     on: (_event, listener) => {
@@ -150,6 +163,5 @@ export function adaptLooseWebContents(loose: {
     },
     copy: () => loose.copy?.(),
     paste: () => loose.paste?.(),
-    openDevTools: () => loose.openDevTools?.(),
   }
 }

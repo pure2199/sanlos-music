@@ -41,7 +41,7 @@
 
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { createWriteStream, existsSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync } from 'node:fs'
 import { mkdir, rename, rm } from 'node:fs/promises'
 import { basename, join, resolve as resolvePath, sep } from 'node:path'
 import { Readable } from 'node:stream'
@@ -270,6 +270,26 @@ export function pickInstaller(manifest: UpdateManifest): UpdateFile | null {
 /** 计算字节的 SHA-512（小写 hex）。 */
 export function sha512Hex(bytes: Uint8Array): string {
   return createHash('sha512').update(bytes).digest('hex')
+}
+
+/**
+ * 计算**文件**的 SHA-512（小写 hex，流式，不把整个文件读进内存）。
+ *
+ * ⚠️ T82：给「允许安装未签名更新」那条路用——启动安装器前**再验一次**哈希
+ *    （下载到启动之间，文件理论上可能被换掉）。
+ *
+ * @param filePath 文件路径。
+ * @returns 小写 hex；读不了抛错（调用方据此拒绝）。
+ */
+export async function sha512File(filePath: string): Promise<string> {
+  const hash = createHash('sha512')
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const stream = createReadStream(filePath)
+    stream.on('data', (chunk: string | Buffer) => hash.update(chunk))
+    stream.on('error', rejectPromise)
+    stream.on('end', () => resolvePromise())
+  })
+  return hash.digest('hex')
 }
 
 /**
@@ -546,6 +566,18 @@ export interface LaunchInstallerOptions {
   filePath: string
   /** 预期的代码签名者（不配置 → 拒绝启动）。 */
   expectedSigner?: string
+  /**
+   * 是否**允许安装未签名包**（T82；**默认 false** = 原行为，一字不变）。
+   *
+   * ⚠️ 只在「包**没有**签名」时才起作用；**哈希不符 → 照样拒绝**。
+   */
+  allowUnsigned?: boolean
+  /**
+   * 清单里的 **SHA-512**（T82）：启动前**再验一次**。
+   *
+   * ⚠️ 必须是**主进程自己缓存的清单**里的那个值（不是渲染进程给的）。
+   */
+  expectedSha512?: string
   /** Authenticode 校验执行器。 */
   runAuthenticode?: AuthenticodeRunner
   /** 启动文件的执行器（默认走 Electron 的 `shell.openPath`）。 */
@@ -557,6 +589,12 @@ export interface LaunchInstallerOptions {
  *
  * ⚠️ **启动前重新验一次签名**：下载到启动之间，文件理论上可能被换掉。
  * ⚠️ 签名不通过 → **绝不启动**（这是最后一道闸）。
+ *
+ * ⚠️ **T82 的例外路径**（唯一一条，且**默认关闭**）：
+ *    - 包**没有**签名（`NotSigned`）**且** 用户显式开了「允许安装未签名更新」
+ *      **且** 启动前重算的 **SHA-512 与清单相符**
+ *      ⇒ 才放行（此时**只**放宽了「发布者身份」，其余闸门一字没松）。
+ *    - 其余任何情况（签名不符 / 签名者不符 / 哈希不符 / 没开授权）→ **一律拒绝**。
  */
 export async function launchInstaller(opts: LaunchInstallerOptions): Promise<UpdateInstallResult> {
   const signature = await verifyAuthenticode(
@@ -565,9 +603,12 @@ export async function launchInstaller(opts: LaunchInstallerOptions): Promise<Upd
     opts.runAuthenticode ?? runPowerShellAuthenticode,
   )
   if (!signature.ok) {
-    return {
-      status: 'error',
-      message: `安装包签名校验未通过，已拒绝启动：${signature.reason ?? '未知原因'}`,
+    const unsignedAllowed = await verifyUnsignedAllowed(opts, signature)
+    if (!unsignedAllowed.ok) {
+      return {
+        status: 'error',
+        message: `安装包签名校验未通过，已拒绝启动：${unsignedAllowed.reason}`,
+      }
     }
   }
   try {
@@ -579,6 +620,43 @@ export async function launchInstaller(opts: LaunchInstallerOptions): Promise<Upd
   } catch (cause) {
     return { status: 'error', message: `启动安装包失败：${readableError(cause)}` }
   }
+}
+
+/**
+ * 「未签名包能否放行」的判定（T82）。
+ *
+ * ⚠️ **三道条件缺一不可**：
+ * 1. 用户**显式**开了「允许安装未签名更新」（`allowUnsigned`）；
+ * 2. 这个包**确实没有**签名（`NotSigned`）——签名者不符的包**不走这条路**；
+ * 3. 启动前重算的 **SHA-512 与清单相符**（哈希是硬闸）。
+ *
+ * @returns 放行返回 `{ ok: true }`；否则 `{ ok: false, reason }`（reason 可直接显示给用户）。
+ */
+async function verifyUnsignedAllowed(
+  opts: LaunchInstallerOptions,
+  signature: UpdateSignatureResult,
+): Promise<{ ok: boolean; reason: string }> {
+  // ⚠️ **签名者不符**（包**有**签名但不是预期那个）→ **不走**未签名这条路。
+  if (signature.status !== 'NotSigned') {
+    return { ok: false, reason: signature.reason ?? '未知原因' }
+  }
+  if (opts.allowUnsigned !== true) {
+    return { ok: false, reason: signature.reason ?? '未知原因' }
+  }
+  const expected = (opts.expectedSha512 ?? '').trim().toLowerCase()
+  if (expected.length !== SHA512_HEX_LENGTH || !/^[0-9a-f]+$/.test(expected)) {
+    return { ok: false, reason: '没有清单里的 SHA-512 可核对 → 不允许安装未签名包' }
+  }
+  let actual: string
+  try {
+    actual = await sha512File(opts.filePath)
+  } catch (cause) {
+    return { ok: false, reason: `读不到安装包内容，无法核对 SHA-512：${readableError(cause)}` }
+  }
+  if (actual !== expected) {
+    return { ok: false, reason: '安装包 SHA-512 与清单不一致 → 不允许安装（哈希不符一律拒绝）' }
+  }
+  return { ok: true, reason: '' }
 }
 
 // ---------------------------------------------------------------------------
@@ -613,8 +691,12 @@ export interface UpdateController {
   check(baseUrl: string): Promise<UpdateCheckResult>
   /** 下载安装包（用缓存里的清单项）。 */
   download(name: string, expectedSigner?: string): Promise<UpdateDownloadResult>
-  /** 启动安装器。 */
-  install(name: string, expectedSigner?: string): Promise<UpdateInstallResult>
+  /**
+   * 启动安装器。
+   *
+   * @param allowUnsigned 是否允许装**未签名**包（T82；默认 false = 原行为）。
+   */
+  install(name: string, expectedSigner?: string, allowUnsigned?: boolean): Promise<UpdateInstallResult>
 }
 
 /**
@@ -667,7 +749,7 @@ export function createUpdateController(opts: UpdateControllerOptions): UpdateCon
         expectedSigner,
       })
     },
-    install: async (name: string, expectedSigner?: string): Promise<UpdateInstallResult> => {
+    install: async (name: string, expectedSigner?: string, allowUnsigned?: boolean): Promise<UpdateInstallResult> => {
       const safe = sanitizeFileName(name)
       if (!safe) {
         return { status: 'error', message: '安装包名不合法' }
@@ -680,9 +762,14 @@ export function createUpdateController(opts: UpdateControllerOptions): UpdateCon
       if (!existsSync(filePath)) {
         return { status: 'error', message: '安装包不存在（请先下载）' }
       }
+      // ⚠️ T82：未签名包要核对哈希 ⇒ 用**主进程自己缓存的清单**里的 SHA-512
+      //    （不是渲染进程给的；缓存里没有就不给 ⇒ 那条路自然关着）。
+      const cachedEntry = findCached(safe)
       return await launchInstaller({
         filePath,
         expectedSigner,
+        allowUnsigned,
+        expectedSha512: cachedEntry?.file.sha512,
         runAuthenticode: runner,
         openPath,
       })

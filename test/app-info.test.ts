@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { APP_INFO, EXTERNAL_LINK_ALLOWED_HOSTS, isAllowedExternalUrl } from '../shared/appInfo'
+import { resolveFileUrl, resolveManifestUrl, validateUpdateBaseUrl } from '../electron/update'
 
 describe('软件信息（T41）', () => {
   it('开发者 / 公司 / 官网 / 备案号**齐全**', () => {
@@ -58,7 +59,54 @@ describe('外部链接白名单（T41）', () => {
     expect(isAllowedExternalUrl('   ')).toBe(false)
   })
 
-  it('白名单就是那两条，且是**精确匹配**（不做后缀匹配）', () => {
-    expect(EXTERNAL_LINK_ALLOWED_HOSTS).toEqual(['sanlos.cn', 'www.sanlos.cn'])
+  it('白名单就是那三条，且是**精确匹配**（不做后缀匹配）', () => {
+    // ⚠️ T82：加了 `github.com`（项目地址）⇒ **两条变三条**。
+    //    「精确匹配、不做后缀匹配」这条鉴别力**一字不变**。
+    expect(EXTERNAL_LINK_ALLOWED_HOSTS).toEqual(['sanlos.cn', 'www.sanlos.cn', 'github.com'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T82：项目地址 + 自动更新源
+// ---------------------------------------------------------------------------
+
+describe('项目地址与更新源（T82）', () => {
+  it('项目地址就是 GitHub 仓库，**自己**在白名单里', () => {
+    expect(APP_INFO.repository).toBe('https://github.com/pure2199/sanlos-music')
+    expect(isAllowedExternalUrl(APP_INFO.repository)).toBe(true)
+  })
+
+  it('更新源指向 **latest/download**（永远指向最新那版，发新版不用改代码）', () => {
+    expect(APP_INFO.updateBaseUrl).toBe(
+      'https://github.com/pure2199/sanlos-music/releases/latest/download',
+    )
+  })
+
+  it('更新源是**合法的 https 目录地址**（客户端的地址校验放行）', () => {
+    expect(validateUpdateBaseUrl(APP_INFO.updateBaseUrl)).not.toBeNull()
+  })
+
+  it('更新源的**清单地址** = `<源>/latest.json`（与发布产物同名）', () => {
+    expect(resolveManifestUrl(APP_INFO.updateBaseUrl)).toBe(
+      'https://github.com/pure2199/sanlos-music/releases/latest/download/latest.json',
+    )
+  })
+
+  it('清单里的安装包**同源**放行（客户端不许被指到别处）', () => {
+    const url = resolveFileUrl(APP_INFO.updateBaseUrl, 'FN-Music-Setup-0.2.1.exe')
+    expect(url).toBe(
+      'https://github.com/pure2199/sanlos-music/releases/latest/download/FN-Music-Setup-0.2.1.exe',
+    )
+  })
+
+  it('GitHub 的**其它主机名不放行**（只放行 github.com 本名）', () => {
+    expect(isAllowedExternalUrl('https://raw.githubusercontent.com/pure2199/sanlos-music')).toBe(false)
+    expect(isAllowedExternalUrl('https://gist.github.com')).toBe(false)
+  })
+
+  it('**后缀伪装**一律拒绝（精确匹配）', () => {
+    expect(isAllowedExternalUrl('https://github.com.evil.example')).toBe(false)
+    expect(isAllowedExternalUrl('https://evil-github.com')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com.co')).toBe(false)
   })
 })

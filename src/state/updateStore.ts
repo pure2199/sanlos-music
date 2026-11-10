@@ -64,10 +64,16 @@ export interface UpdateStore {
   baseUrl: string
   /** 已保存的预期签名者（空 = **不许启动安装器**）。 */
   expectedSigner: string
+  /**
+   * 已保存的「允许安装未签名更新」（T82；**默认关**）。
+   */
+  allowUnsigned: boolean
   /** 更新服务器地址的**输入草稿**。 */
   baseUrlDraft: string
   /** 预期签名者的**输入草稿**。 */
   signerDraft: string
+  /** 「允许安装未签名更新」的**草稿**。 */
+  allowUnsignedDraft: boolean
   /** 当前阶段。 */
   status: UpdateStatus
   /** 最近一次检查的结果。 */
@@ -84,6 +90,8 @@ export interface UpdateStore {
   setBaseUrlDraft: (value: string) => void
   /** 改签名者草稿（不落盘）。 */
   setSignerDraft: (value: string) => void
+  /** 改「允许安装未签名更新」草稿（不落盘）。 */
+  setAllowUnsignedDraft: (value: boolean) => void
   /** 检查更新。 */
   check: () => Promise<void>
   /** 下载安装包。 */
@@ -96,8 +104,10 @@ export interface UpdateStore {
 export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   baseUrl: '',
   expectedSigner: '',
+  allowUnsigned: false,
   baseUrlDraft: '',
   signerDraft: '',
+  allowUnsignedDraft: false,
   status: 'idle',
   result: null,
   download: null,
@@ -106,7 +116,15 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   load: async (): Promise<void> => {
     const bridge = playerBridge()
     if (!bridge) {
-      set({ baseUrl: '', expectedSigner: '', baseUrlDraft: '', signerDraft: '', error: null })
+      set({
+        baseUrl: '',
+        expectedSigner: '',
+        allowUnsigned: false,
+        baseUrlDraft: '',
+        signerDraft: '',
+        allowUnsignedDraft: false,
+        error: null,
+      })
       return
     }
     try {
@@ -114,7 +132,16 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       const update = prefs.update ?? {}
       const baseUrl = update.baseUrl ?? ''
       const expectedSigner = update.expectedSigner ?? ''
-      set({ baseUrl, expectedSigner, baseUrlDraft: baseUrl, signerDraft: expectedSigner, error: null })
+      const allowUnsigned = update.allowUnsigned === true
+      set({
+        baseUrl,
+        expectedSigner,
+        allowUnsigned,
+        baseUrlDraft: baseUrl,
+        signerDraft: expectedSigner,
+        allowUnsignedDraft: allowUnsigned,
+        error: null,
+      })
     } catch {
       set({ error: '读取更新设置失败' })
     }
@@ -122,20 +149,34 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
 
   save: async (): Promise<void> => {
     const bridge = playerBridge()
-    const { baseUrlDraft, signerDraft } = get()
+    const { baseUrlDraft, signerDraft, allowUnsignedDraft } = get()
     if (!bridge) {
       // 没有桥 → 只在本地生效（浏览器预览；不崩、也不静默写盘）。
-      set({ baseUrl: baseUrlDraft, expectedSigner: signerDraft, error: null })
+      set({
+        baseUrl: baseUrlDraft,
+        expectedSigner: signerDraft,
+        allowUnsigned: allowUnsignedDraft,
+        error: null,
+      })
       return
     }
     try {
       const prefs = await bridge.setPrefs({
-        update: { baseUrl: baseUrlDraft, expectedSigner: signerDraft },
+        update: { baseUrl: baseUrlDraft, expectedSigner: signerDraft, allowUnsigned: allowUnsignedDraft },
       })
       const update = prefs.update ?? {}
       const baseUrl = update.baseUrl ?? ''
       const expectedSigner = update.expectedSigner ?? ''
-      set({ baseUrl, expectedSigner, baseUrlDraft: baseUrl, signerDraft: expectedSigner, error: null })
+      const allowUnsigned = update.allowUnsigned === true
+      set({
+        baseUrl,
+        expectedSigner,
+        allowUnsigned,
+        baseUrlDraft: baseUrl,
+        signerDraft: expectedSigner,
+        allowUnsignedDraft: allowUnsigned,
+        error: null,
+      })
     } catch {
       set({ error: '保存更新设置失败' })
     }
@@ -147,6 +188,10 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
 
   setSignerDraft: (value: string): void => {
     set({ signerDraft: value })
+  },
+
+  setAllowUnsignedDraft: (value: boolean): void => {
+    set({ allowUnsignedDraft: value })
   },
 
   check: async (): Promise<void> => {

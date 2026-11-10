@@ -514,6 +514,13 @@ export interface PlayerBridge {
    */
   openExternal(url: string): Promise<boolean>
   /**
+   * 读**当前版本号**（`app:version`；T82 加）。
+   *
+   * ⚠️ 渲染层是 sandbox，**读不到 `package.json`** ⇒ 版本号只能由主进程给
+   *    （主进程用 `app.getVersion()`，与安装包的 `FileVersion` 同源）。
+   */
+  getAppVersion(): Promise<string>
+  /**
    * 推送悬浮歌词消息（`lyric:state`，`ipcRenderer.send`）。
    *
    * ⚠️ **主窗口渲染进程**用它把「曲目 + 歌词」与「播放进度」推给主进程，
@@ -679,8 +686,7 @@ export interface PlayerBridge {
   //
   // ⚠️ 这三个方法**都不返回任何凭证**。
   /** 检查更新（`update:check`）：拉清单、比版本。 */
-  checkUpdate(): Promise<UpdateCheckResult>
-  /**
+  checkUpdate(): Promise<UpdateCheckResult>  /**
    * 下载安装包（`update:download`）。
    *
    * @param name 清单里的**文件名**（主进程会用自己缓存的清单项下载）。

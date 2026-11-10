@@ -649,10 +649,16 @@ describe('registerPlayerIpc', () => {
     // ⚠️ T47（频谱波形）又新增一个：
     //    - `lyric:spectrum`（推送式）：主窗口渲染进程推频谱 → 主进程只转发给词岛窗。
     //    → 前提再次被推翻，这里**继续**改写为新的完整集合（不是放宽断言）。
+    //
+    // ⚠️ T82（外壳收尾）又新增一个：
+    //    - `app:version`（调用式）：把**当前版本号**给渲染层
+    //      （渲染层是 sandbox，读不到 `package.json` ⇒ 版本号只能主进程给）。
+    //    → 前提再次被推翻，这里**继续**改写为新的完整集合（不是放宽断言）。
     const { ipcMain, handlers, listeners } = fakeIpcMain()
     registerPlayerIpc({ ipcMain, prefs: new PrefsStore({ filePath: tempFile() }) })
     expect([...handlers.keys()].sort()).toEqual([
       'app:open-external',
+      'app:version',
       'download:cancel',
       'download:clear',
       'download:list',

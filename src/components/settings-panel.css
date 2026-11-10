@@ -190,6 +190,22 @@
   max-width: 560px;
 }
 
+/* 勾选项（T82：「允许安装未签名的更新包」） */
+.fnm-settings__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.fnm-settings__checkbox:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 /* 输入框 / 下拉框 */
 .fnm-settings__input {
   padding: 7px 10px;
