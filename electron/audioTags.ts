@@ -311,8 +311,18 @@ interface SyltEntry {
  * 帧体：编码(1) + 语言(3) + 时间戳格式(1) + 内容类型(1) + 描述符（按编码终止）
  *      + 重复 { 文本（按编码终止） + 时间戳(4 字节大端) }。
  *
- * ⚠️ **只支持「绝对时间（毫秒）」**（时间戳格式 = 1）；
- *    MPEG 帧号格式（= 2）需要帧率，**猜不得** ⇒ 整帧放弃。
+ * ⚠️ **时间戳格式（字节偏移 4）怎么认**（T84，真实文件实测后定的）：
+ * - `1` = 绝对时间（**毫秒**）—— ID3v2 规范；
+ * - `2` = MPEG 帧号 —— ID3v2 规范；**但现实里几乎没人真按帧号写**：
+ *   mutagen（最流行的 Python 标签库）写 `SYLT` 时**一律声明「格式 = 2」**，
+ *   **存的却是毫秒**（它自己的代码把 `1` 当帧号、其它当毫秒 ⇒ 约定与规范相反）；
+ * - ⇒ 现实中最常见的 `SYLT` 文件**恰好**都落在「格式 2 + 毫秒」这一档
+ *   （真实语料：lollypop 的 `SYLT` 测试集、各类 Python 标签工具写出的文件）。
+ *   ⇒ 用户 2026-11-10 拍板：**格式 1 与 2 都按毫秒读**。
+ * - 其它取值（`0` / `3+`）⇒ 真不知道是啥 ⇒ **整帧放弃**（不猜）。
+ *
+ * ⚠️ **风险（如实标注）**：若某个文件**真按规范**存了 MPEG 帧号，我们会把它当毫秒
+ *   ⇒ 时间戳偏早 ⇒ 卡拉OK 走偏（**不会崩、不会显示错歌词**，只是时间不准）。
  *
  * @param data 帧体（**不含**帧头）。
  * @returns 增强 LRC 文本；没有 / 读不出来 → `undefined`。
@@ -321,7 +331,8 @@ export function parseSylltFrame(data: Buffer): string | undefined {
   if (data.length < 7) return undefined
   const encoding = byteAt(data, 0)
   const timeFormat = byteAt(data, 4)
-  if (timeFormat !== 1) return undefined
+  // ⚠️ **只认 1 与 2**（见上面的实测依据）；其余一律放弃（不猜）。
+  if (timeFormat !== 1 && timeFormat !== 2) return undefined
   const descriptor = readTerminatedString(data, 6, encoding)
   const entries: SyltEntry[] = []
   let offset = descriptor.next

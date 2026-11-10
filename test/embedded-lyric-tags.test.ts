@@ -322,10 +322,28 @@ describe('T83 内嵌歌词 —— ID3v2 SYLT', () => {
     expect(lines[0]?.wordTimed).toBe(false)
   })
 
-  it('MPEG 帧号时间戳（= 2）⇒ 整帧放弃（猜不得帧率）', () => {
-    const frame = sylltFrame([{ text: '示例', timeMs: 1000 }], 2)
+  it('时间戳格式 = 2（mutagen 系的**实际约定**，存的其实是毫秒）⇒ **按毫秒读**', () => {
+    // ⚠️ **T84**：这条断言的前**前提被用户显式推翻**（原口径是「格式 2 ⇒ 整帧放弃」）。
+    //    依据：真实文件实测（mutagen 写出的 `SYLT` 一律声明格式 2，存的却是毫秒）
+    //    ⇒ 现实中最常见的 `SYLT` 文件全在这一档 ⇒ 放弃它们等于「功能没有」。
+    const frame = sylltFrame(
+      [
+        { text: 'ten', timeMs: 0 },
+        { text: ' nine', timeMs: 1000 },
+      ],
+      2,
+    )
     const parsed = parseId3v2(id3Tag([id3RawFrame('SYLT', frame)]))
-    expect(parsed.lyrics).toBeUndefined()
+    // ⚠️ 断言**不弱于**原来那条：原来只钉「拿不到」，现在钉「拿到什么」+ 逐字标签。
+    expect(parsed.lyrics).toBe('[00:00.000]<00:00.000>ten<00:01.000> nine')
+    const lines = parseEnhancedLrc(parsed.lyrics ?? '')
+    expect(lines[0]?.wordTimed).toBe(true)
+  })
+
+  it('时间戳格式 = 0 / 3+ ⇒ 整帧放弃（真不知道是啥 ⇒ **不猜**）', () => {
+    // ⚠️ **保住「不猜」的鉴别力**：只有 **1 与 2** 按毫秒读；其它取值一律放弃。
+    expect(parseSylltFrame(sylltFrame([{ text: '示例', timeMs: 1000 }], 0))).toBeUndefined()
+    expect(parseSylltFrame(sylltFrame([{ text: '示例', timeMs: 1000 }], 3))).toBeUndefined()
   })
 
   it('USLT 与 SYLT 同时存在 ⇒ SYLT 赢（真逐字优先于行级）', () => {

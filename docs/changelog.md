@@ -14,16 +14,18 @@
 | 领域 | 内容 |
 |---|---|
 | **内嵌标签** | 读 **ID3v2 `USLT`（行级）/ `SYLT`（真逐字）/ Vorbis 注释 `LYRICS`·`UNSYNCEDLYRICS` / MP4 `©lyr` / WAV·AIFF 里的 `ID3 ` 块**（**手写解析器，不引新依赖**）；`SYLT` 自动转成增强 LRC ⇒ 渲染层解析器**一行不改** |
+| **`SYLT` 时间戳** | **「时间戳格式 = 2」的文件也按毫秒读**（T84）—— ID3 规范说 `2` = MPEG 帧号，但**现实中几乎所有** `SYLT`（尤其 mutagen 写的）都声明 `2` 而**存的却是毫秒** ⇒ 以前这类文件**整帧被放弃**、真机上「真逐字」等于没有；现在 `1` 与 `2` **都按毫秒读**（其余取值仍整帧放弃，**不猜**） |
 | **来源优先级** | 内嵌算**本地侧**、排在 NAS 前面（用户 2026-11-10 拍板）：「线上优先」= **线上 → 内嵌 → NAS**；「本地优先」= **内嵌 → NAS → 线上**；**不用外部源**时内嵌照用（**不需要外网**） |
 | **三层覆盖** | ① **本地导入**的歌 ② **已下载**的 NAS 曲目（读**原文件**，标签最全）③ **NAS 在线播放**（只读**文件头 64 KB**，读满即断开，**不把整首歌拉下来**） |
 | **界面** | 全屏歌词页**如实显示**「歌词来源：音频内嵌」（不装作是别的源）；设置里的「歌词来源」下拉**不加**内嵌（内嵌不是外部源） |
-| **工程** | 单元测试 **2159** 条（+48）；Playwright E2E **34** 条（+2，真实 Electron）；新增 `electron/embeddedLyric.ts`、`shared/embeddedLyric.ts`、`test/embedded-lyric.test.ts`、`test/embedded-lyric-tags.test.ts`、`test/t83-mock-wav.test.ts`、`e2e/t83-embedded-lyric.spec.ts`；**变异自证 8 条全部被抓住** |
+| **工程** | 单元测试 **2164** 条（+53）；Playwright E2E **34** 条（+2，真实 Electron）；新增 `electron/embeddedLyric.ts`、`shared/embeddedLyric.ts`、`test/embedded-lyric.test.ts`、`test/embedded-lyric-tags.test.ts`、`test/t83-mock-wav.test.ts`、`test/embedded-lyric-real-samples.test.ts`、`e2e/t83-embedded-lyric.spec.ts`、`tools/fn-fetch-embedded-lyric-samples.mjs`；**变异自证 10 条全部被抓住**（T84 新增 2 条：只读格式 1 / 格式 0·3 也照读） |
 
 ### 已知影响
 
 - ⚠️ **只对「文件里本来就带歌词标签」的歌曲生效**：NAS 服务端若统一转码（标准音质 = MP3 320k）⇒ **标签必丢** ⇒ 这一层对 **NAS 在线播放**可能始终读不到（**本地导入 / 已下载的原文件**不受影响）。
 - ⚠️ **流式层只支持「元数据在文件头」的容器**（MP3 / FLAC / Ogg / WAV）：MP4 的 `moov` 常在文件尾 ⇒ 流式层**读不到** `©lyr`（**本地文件层**不受影响）。
 - ⚠️ **全屏歌词页多了一行来源说明**（以前只有线上源 / NAS 源会显示）。
+- ⚠️ **少数真按 ID3 规范存 MPEG 帧号的 `SYLT`** ⇒ 我们会把它当毫秒 ⇒ 时间戳**偏早**、卡拉OK 走偏 —— **不会崩、不会显示错歌词**，只是时间不准。取舍：**「有歌词」优先于「时间绝对准确」**。
 
 ---
 
