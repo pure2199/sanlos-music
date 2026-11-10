@@ -126,7 +126,24 @@ npm run pack       # 2. 打包
 2. asar 内文件清单**不含** `node_modules`；
 3. `release/win-unpacked/Sanlos Music.exe`（或 `electron.exe`）能双击启动，
    打开登录页、连上 NAS、播放一首；
-4. `release/verify/*.log` 记录本次验证的实际输出（**不是空文件**）。
+4. `release/verify/*.log` 记录本次验证的实际输出（**不是空文件**）；
+5. **签名状态**：`node tools/fn-check-signature.mjs release`
+   ⇒ 打印每个产物的 `Status` / 签名者 / 指纹
+   （配了证书却没签上 ⇒ **打包本身就会失败**，这一步是**独立复核**）。
+
+#### 本次产物（v0.2.4，本机实测）
+
+| 资产 | 字节 | sha256 |
+|---|---|---|
+| `FN-Music-Setup-0.2.4.exe` | 86,106,122 | `f49d026e3a80e304375a10dc3b60ebd0679f6fe3d6fa37e7e678ec1ebb8a847c` |
+| `FN-Music-Portable-0.2.4.exe` | 79,009,806 | `6757f39ee34b9a4e7fc96410372a40c2b5a4cb4880d19cfb11cbd3b0f86323e7` |
+| `FN-Music-Setup-0.2.4.exe.blockmap` | 90,275 | `3ffd1ccf4c54a91a08bd369c3e8b81dbbf2f60cbcf9b32182eda3d7b7cd2b2ac` |
+| `latest.yml` | 344 | `df13d89e76e7baaef7d53a3229b1d980b1fab052b77c138adc3232f8167fe9dd` |
+| `latest.json` | 619 | `38f5de922919f818170150dfbb248a0b6626e02631a14d961cfb8b6d8b1eaad3` |
+
+产物自检：两个安装包的 **FileVersion = 0.2.4**；本次构建的 `app.asar` 里
+`package.json` 版本 = **0.2.4**、条目 **20** 条、**不含 `node_modules`**；
+签名状态 = `NotSigned`（**公开产物不签名**，理由见 §7.7）。
 
 #### 验「音频内嵌歌词」要用的真实样本（**不进仓库**）
 
@@ -146,7 +163,7 @@ node node_modules/vitest/vitest.mjs run test/embedded-lyric-real-samples.test.ts
 仓库自带的自动化检查：
 
 ```bash
-npm test          # 单元测试（2164 条）
+npm test          # 单元测试（2195 条）
 npm run e2e       # E2E 冒烟（Playwright 驱动真实 Electron）
 npm run typecheck # 跑 tsc --noEmit（开着 noUnusedLocals / noUnusedParameters 闸门）
 ```
@@ -156,7 +173,8 @@ npm run typecheck # 跑 tsc --noEmit（开着 noUnusedLocals / noUnusedParameter
 ## 六、已知限制
 
 - **无代码签名**：产物未签名 → Windows SmartScreen 会提示「未知发布者」。这是**预期**的；
-  正式发布需要自备代码签名证书（`electron-builder.yml` 里配 `win.signAndEditExecutable` / `certificateFile`）。
+  要签名**不用改配置** —— 设 `WIN_CSC_LINK` + `WIN_CSC_KEY_PASSWORD` 即可（见 §7.5），
+  打包后**自动断言**签没签上。
 - **图标是 Electron 默认图标**：`directories.buildResources: build` 指向的 `build/` 目录当前不存在
   → 用的是默认图标。需要自定义图标时，把 `build/icon.ico`（≥256×256）放进去即可。
 - **仅 Windows x64**：未配置其它平台与架构。
