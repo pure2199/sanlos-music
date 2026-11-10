@@ -226,7 +226,10 @@ jobs:
             $len = (Get-Item $p).Length
             $rows += "| $name | $len | $hash |"
           }
-          $nl = [Environment]::NewLine
+          # ⚠️ **行尾统一成 LF**（`docs/releases/*.md` 是 LF；`[Environment]::NewLine`
+          #    在 Windows 上是 CRLF ⇒ 拼出来的说明会**混行尾**）。
+          #    ⚠️ 用 `[char]10` 而不是反引号转义（工作流 run: 块里反引号是转义符）。
+          $nl = [string][char]10
           $extra = @('', '---', '', '## 下载校验（sha256）', '', '| 文件 | 字节数 | sha256 |', '|---|---|---|', ($rows -join $nl), '', '⚠️ 产物由 CI 构建，NSIS 安装器内嵌构建时间戳 ⇒ 两次构建的字节不同 ⇒ 校验值只对**本 Release**的资产有效。') -join $nl
           $outFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           # ⚠️ 写 UTF-8 **无 BOM**（PS 5.1 的 -Encoding utf8 会带 BOM ⇒ 页面开头多一个字符）。

@@ -388,4 +388,14 @@ describe('T87.11 —— 未签名发布路径', () => {
     expect(block).toContain('-Encoding UTF8')
     expect(block).toContain('UTF8Encoding($false)')
   })
+
+  it('**行尾统一成 LF**（`docs/releases/*.md` 是 LF；Windows 的 `NewLine` 是 CRLF ⇒ 会混行尾）', () => {
+    const block = stepBlock(yml, 'Prepare release notes with checksums')
+    // ⚠️ 只看**可执行行**（注释里可以提到被弃用的写法）。
+    const exec = collectRunBlockLines(block).join('\n')
+    expect(exec).toContain('$nl = [string][char]10')
+    expect(exec).not.toContain('[Environment]::NewLine')
+    // ⚠️ 不许用反引号转义（`` "`n" ``）—— PowerShell 的反引号是转义符。
+    expect(collectRunBlockLines(block).filter((line) => line.includes('`'))).toEqual([])
+  })
 })

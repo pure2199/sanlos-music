@@ -22,6 +22,13 @@ export interface SignatureProbeInfo {
   hasTimestamp: boolean
   /** 时间戳签发者主体；没有时间戳时为 `null`。 */
   timeStamper: string | null
+  /**
+   * **探测本身是否失败**（T87.11-b）。
+   *
+   * ⚠️ `true` = 签名状态**未知**（探不出来），**不等于**「有签名」。
+   *    ⇒ 判定层必须**单独**报「探测失败」，不许拿它判「有签名」。
+   */
+  probeFailed?: boolean
 }
 
 /** 判定条件（`evaluateSignature` 的第二个参数）。 */
@@ -74,6 +81,18 @@ export function getSharedSigning(): {
 
 /** 读一个文件的签名信息（走 `Get-AuthenticodeSignature`）。 */
 export function probeSignature(filePath: string): SignatureProbeInfo
+
+/**
+ * 给 PowerShell 子进程用的环境变量。
+ *
+ * ⚠️ 会把 **Windows PowerShell 5.1 自己的**系统模块目录**前置**到
+ *    `PSModulePath`（CI 上 runner 的 `PSModulePath` 指向 pwsh 7 的模块目录
+ *    ⇒ 5.1 会找到同名但加载不了的模块）。
+ */
+export function powershellEnv(env?: NodeJS.ProcessEnv): NodeJS.ProcessEnv
+
+/** 把 PowerShell 的失败整理成一行可读的失败原因。 */
+export function describePowerShellFailure(cause: unknown): string
 
 /** 读一个 .pfx 的主体名。 */
 export function probePfxSubject(

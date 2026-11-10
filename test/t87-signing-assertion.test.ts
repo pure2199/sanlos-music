@@ -23,10 +23,10 @@
 
 import { describe, expect, it } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { evaluateSignature } from '../tools/fn-check-signature.mjs'
+import { describePowerShellFailure, evaluateSignature, powershellEnv } from '../tools/fn-check-signature.mjs'
 import type { SignatureProbeInfo } from '../tools/fn-check-signature.mjs'
 import { extractCommonNames, matchesExpectedSigner, parseSignerCandidates } from '../shared/update'
 
@@ -272,5 +272,113 @@ describe('T87 签名断言 —— CLI 层', () => {
     )
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('未知的 --expect 值')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T87.11-b：CI 上的 PowerShell 模块加载 + 「探测失败 ≠ 有签名」
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **背景**：Release run `42901166145`（#6）在 `Verify unsigned artifacts` 失败。
+//    CI 上 Windows PowerShell 5.1 加载不了 `Microsoft.PowerShell.Security`
+//    （runner 默认 shell 是 pwsh 7 ⇒ `PSModulePath` 指向 PS7 的模块目录
+//    ⇒ 5.1 找到同名但为 .NET Core 编译的模块 ⇒ `CouldNotAutoloadMatchingModule`）
+//    ⇒ 3 个产物全部「探测失败」⇒ Release 没建出来。
+//
+// ⚠️ **本机复现不出来**（本机只有 5.1、PSModulePath 正常）⇒
+//    ① 行为面钉「`powershellEnv` 的前置顺序」；
+//    ② 结构面钉「源码里必须有 `$PSHOME` 绝对路径导入 + 前置系统模块目录」；
+//    ③ 再加一条**真跑一次**的端到端（CI 上跑 ⇒ 就是这次的回归网）。
+//
+// ⚠️ **纪律**：本节只**追加**；既有断言一条不删、一条不削弱。
+
+describe('T87.11-b —— 签名探测在 CI 上的两个坑', () => {
+  const tool = join(REPO_ROOT, 'tools', 'fn-check-signature.mjs')
+  const toolSrc = readFileSync(tool, 'utf8')
+
+  describe('① PowerShell 5.1 加载不了安全模块', () => {
+    it('**按 `$PSHOME` 绝对路径**显式导入安全模块（绕开 PSModulePath 的搜索顺序）', () => {
+      expect(toolSrc).toContain('$PSHOME')
+      expect(toolSrc).toContain('Microsoft.PowerShell.Security.psd1')
+      expect(toolSrc).toContain('Import-Module')
+    })
+
+    it('子进程的 `PSModulePath` **前置** 5.1 自己的系统模块目录', () => {
+      const sysModules = join(
+        process.env.SystemRoot ?? 'C:\\Windows',
+        'system32',
+        'WindowsPowerShell',
+        'v1.0',
+        'Modules',
+      )
+      const env = powershellEnv({ ...process.env, PSModulePath: 'ZZZ-TAIL' })
+      // ⚠️ **前置**（第一段就是它）⇒ 5.1 先找到自己那份 ⇒ 自动加载成功。
+      expect(env.PSModulePath?.startsWith(sysModules)).toBe(true)
+      // ⚠️ 别的路径**不许被替换掉**（用户模块、PS7 的模块…可能还有用）。
+      expect(env.PSModulePath).toContain('ZZZ-TAIL')
+    })
+
+    it('**没有** `PSModulePath` 时也能补上系统模块目录', () => {
+      const env = powershellEnv({ SystemRoot: process.env.SystemRoot ?? 'C:\\Windows' })
+      expect(env.PSModulePath).toContain('WindowsPowerShell')
+    })
+
+    it('PowerShell 的失败信息**降噪**（不许把整条 base64 命令行塞进报错）', () => {
+      const cause = Object.assign(
+        new Error('Command failed: powershell.exe -NoProfile -EncodedCommand Q0xJW01MLAAAAA'),
+        { status: 1, stderr: 'Get-AuthenticodeSignature : module could not be loaded\n' },
+      )
+      const text = describePowerShellFailure(cause)
+      expect(text).toContain('退出码 1')
+      expect(text).toContain('could not be loaded')
+      // ⚠️ 命令行（那段 base64）**不许**出现在报错里 ⇒ 真原因才看得见。
+      expect(text).not.toContain('Q0xJW01MLAAAAA')
+    })
+  })
+
+  describe('② 探测失败 ≠ 「有签名」', () => {
+    const failed = probe({ status: 'UnknownError', signer: null, hasTimestamp: false, probeFailed: true })
+
+    it('**探测失败** ⇒ 报「探测失败」，**不许**说成「有签名」', () => {
+      for (const options of [
+        { expect: 'none' },
+        { expect: 'valid' },
+        { expect: 'signed' },
+        { expectCn: 'SignPath Foundation' },
+      ]) {
+        const problems = evaluateSignature(failed, options)
+        expect(problems.length).toBeGreaterThan(0)
+        expect(problems.join('|')).toContain('探测失败')
+        // ⚠️ **不许**出现「有签名」—— 那是「探不出来」的**反向**说法。
+        expect(problems.join('|')).not.toContain('有签名')
+      }
+    })
+
+    it('**探测失败** ⇒ 闸门**仍然失败**（fail-closed 一条不许松）', () => {
+      expect(evaluateSignature(failed, { expect: 'none' }).length).toBeGreaterThan(0)
+      expect(evaluateSignature(failed, { expect: 'valid' }).length).toBeGreaterThan(0)
+    })
+
+    it('**没打 `probeFailed` 标记** ⇒ 老语义一字不变', () => {
+      // ⚠️ 既有语义：`UnknownError` 在 `--expect valid` 下仍然算失败（且仍报 Valid）。
+      expect(evaluateSignature(probe({ status: 'UnknownError' }), { expect: 'valid' }).join('|')).toContain(
+        'Valid',
+      )
+      // `--expect none` + 真的没签名 ⇒ 依旧放行。
+      expect(evaluateSignature(probe({ status: 'NotSigned', signer: null }), { expect: 'none' })).toEqual([])
+    })
+  })
+
+  describe('③ 端到端：真跑一次探测', () => {
+    // ⚠️ 夹具用 esbuild 的二进制（**未签名**、只有 ~11 MB，比 electron.exe 小得多）。
+    const fixture = join(REPO_ROOT, 'node_modules', '@esbuild', 'win32-x64', 'esbuild.exe')
+    const hasFixture = process.platform === 'win32' && existsSync(fixture)
+
+    it.skipIf(!hasFixture)('未签名的 exe ⇒ `--expect none` 通过（CI 上这就是回归网）', () => {
+      const result = spawnSync(process.execPath, [tool, '--expect', 'none', fixture], { encoding: 'utf8' })
+      expect(result.stderr).not.toContain('探测失败')
+      expect(result.status).toBe(0)
+      expect(result.stdout).toContain('NotSigned')
+    })
   })
 })
