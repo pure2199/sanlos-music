@@ -23,17 +23,23 @@ jobs:
     timeout-minutes: 30
 
     env:
-      # ⚠️ **T87.8：这两行的实际效力，别被注释骗了**（实测，不是推断）：
-      # - `ELECTRON_MIRROR` 其实**不生效** —— `@electron/get` 的取值优先级里
-      #   `.npmrc` 注入的 `npm_config_electron_mirror` 排在前面 ⇒ 仓库 `.npmrc` 的
-      #   npmmirror 胜出（实测：CI 里 electron 二进制确实是从 npmmirror 下的）。
-      #   真要改成官方源，必须用 **npm 风格的小写名** `npm_config_electron_mirror`，
-      #   且**值不能带尾部 `/v`**（`@electron/get` 会自己拼 `v<version>/` 目录：
-      #   实测 `.../download/v32.3.3/…` ⇒ HTTP 206，`.../download/v/v32.3.3/…` ⇒ 404）。
-      #   这里仍保留这个变量，是为了让「万一它哪天生效了」也是**正确**的形态。
-      # - `ELECTRON_BUILDER_BINARIES_MIRROR` **是生效的**（electron-builder 直接读
-      #   这个环境变量，不走 npm 配置）。
-      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download
+      # ⚠️ **T87.9：这两个镜像变量的「拼接规则」不一样，别混着写**
+      #    （实测根因见 `docs/superpowers/specs/2026-11-10-sanlos-music-signpath-code-signing-design.md` 第十节）：
+      #
+      # - `ELECTRON_MIRROR` 由 **@electron/get** 读，它的下载 URL 是**纯字符串拼接**
+      #   （`${mirror}${version}/${file}`，见 `@electron/get/dist/cjs/artifact-utils.js`）
+      #   ⇒ **值必须自带结尾的 `/`**，否则会拼出
+      #   `…/releases/downloadv32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **HTTP 404**
+      #   ⇒ **整个打包挂掉**（2026-11-10 实测：CI run 42861355862 / Release run 42861484377）。
+      # - `ELECTRON_BUILDER_BINARIES_MIRROR` 由 **electron-builder 自己**读
+      #   （`app-builder-lib/out/util/electronGet.js` 的 `getBinariesMirrorUrl`），
+      #   它**自己会补尾斜杠** ⇒ 这里带不带 `/` 都对。
+      #
+      # ⚠️ **优先级**：`@electron/get` 的 `mirrorVar` 先看 `.npmrc` 注入的
+      #   `npm_config_electron_mirror` ⇒ **在 `npm ci` 里走 npmmirror**（`.npmrc` 的值）；
+      #   而 `node scripts/pack.cjs` **不是 npm 命令** ⇒ 拿不到那些变量
+      #   ⇒ **打包这一步只有 `ELECTRON_MIRROR` 生效** ⇒ 值写错 = CI 打包直接挂。
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
       ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download
 
     steps:

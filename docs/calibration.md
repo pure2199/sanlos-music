@@ -4235,3 +4235,68 @@ A1 非法键（LF）必红 / A2 按 sha256 还原 / A3 还原后必绿 / **B CRL
   （另：每次发布要在 SignPath 平台**人工点一次批准**）；
 - ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验、**轮换 NAS 口令**、
   GitHub 改口令 + 开 2FA 等老待办**不变**。
+
+---
+
+## 五十一、T87.9：CI 打包 404 ⇒ `ELECTRON_MIRROR` 少一个结尾的 `/`（2026-11-10）
+
+### 做了什么
+
+**一句话**：T87.8 修好配置之后，CI 仍然挂在**同一个步骤**（第 8 步 `Pack`）⇒
+根因是 **T87.8 自己把 `ELECTRON_MIRROR` 改成了「无尾斜杠」** ⇒ 拼出畸形 URL ⇒ **404**；
+修好之后补了一条**用 `@electron/get` 自己口径**的守卫，让「镜像变量写错」**在 `npm test` 就红**。
+
+### 现象与根因（**实测**，不是推断）
+
+| 项 | 内容 |
+| --- | --- |
+| 触发的 run | **42861355862**（CI）与 **42861484377**（Release，`pack_only=true`） |
+| 失败位置 | 第 8 步 `Pack`；前 7 步**全绿** ⇒ **T87.8 的 CRLF 修复生效了**（单测这次过了） |
+| 报错原文 | `⨯ Response code 404 (Not Found) for https://github.com/electron/electron/releases/downloadv32.3.3/electron-v32.3.3-win32-x64.zip` |
+| 根因 | `@electron/get` 的下载 URL 是**纯字符串拼接** `${base}${path}/${file}`（`artifact-utils.js:60`）⇒ **镜像必须自带结尾的 `/`**（它的默认值 `BASE_URL` 就带） |
+| 谁读这个变量 | `mirrorVar`（`artifact-utils.js:24-38`）优先级：`npm_config_electron_mirror`（`.npmrc` 注入）→ … → `ELECTRON_MIRROR` → 默认 |
+| **为什么「装依赖没事、打包才炸」** | `npm ci` 是 npm 命令 ⇒ npm 注入 `npm_config_electron_mirror` ⇒ 走 npmmirror；**`node scripts/pack.cjs` 不是 npm 命令** ⇒ 拿不到那些变量 ⇒ **只有 `ELECTRON_MIRROR` 生效** |
+| 为什么本地测不出来 | 本机 electron-builder 的下载缓存里**已有** electron zip ⇒ 打包**根本不下载**；CI 是干净 runner ⇒ 缓存空 ⇒ **必须下载** |
+| 另一条镜像不用改 | `ELECTRON_BUILDER_BINARIES_MIRROR` 由 electron-builder 自己的 `getBinariesMirrorUrl()` 读（`electronGet.js:748`），它**自己补尾斜杠** ⇒ 带不带 `/` 都对（实测 `winCodeSign-2.6.0.7z` / `nsis-3.0.4.1.7z` 均 **206**） |
+
+⚠️ **打脸记录（留档）**：T87.8 的 spec §9.5 判断「`ELECTRON_MIRROR` 是死代码（`.npmrc` 优先）」
+⇒ 于是把值改成「无尾斜杠」⇒ **直接把 CI 打包打挂了**。那条结论**只对 `npm ci` 成立**。
+⇒ **教训**：「某变量在 A 场景下无效」**推不出**「它在 B 场景下也无效」—— 而且**同一个变量在不同上下文里
+的生效与否可能不同**（npm 注入 vs 直接跑 node）。
+
+### 修法（三条）
+
+| # | 措施 |
+| --- | --- |
+| ① | `ci.yml` / `release.yml` 的 `ELECTRON_MIRROR` 补回结尾的 `/`；注释改成**事实**（两个镜像变量的拼接规则不同、优先级不同） |
+| ② | **新** `test/t87-ci-mirror-url.test.ts`（6 条）：用 **`@electron/get` 自己的** `getArtifactRemoteURL` 把工作流里那个值算成**真实下载 URL**；含「少一个 `/` 必红」的变异自证、「npm 上下文里 `.npmrc` 优先」的事实钉子、两个工作流必须一致的钉子 |
+| ③ | spec §9.5 的错误结论**就地更正**（不删历史，标注「已被 T87.9 推翻」并指向第十节）；`docs/packaging.md` §7.9 增补「CI 里的下载镜像变量」小节 |
+
+### 验证（全部实测）
+
+| 项 | 结果 |
+| --- | --- |
+| 真实可达 | 用算出来的 URL 做 Range GET：`…/download/v32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **206**；`…/download/v32.3.3/SHASUMS256.txt` ⇒ **206** |
+| 守卫有效性 | `release/verify/t87c-mutations.mjs` ⇒ ✅ **11/11 场景全过**：ci.yml 少一个 `/` 必红 → 按 sha256 还原 → 还原后必绿 → release.yml 少一个 `/` 必红 → 还原 → **CRLF 行尾仍必绿** → **CRLF + 少一个 `/` 必红** → 还原 → 两个工作流不一致必红 → 还原 → 最终态必绿 |
+| `tsc --noEmit` | ✅ exit 0 |
+| `vitest` | ✅ **2269 passed / 110 files**（既有 2263 条一条不删；新增 **6** 条） |
+| 本地打包 | `node scripts/pack.cjs`（`FNM_PACK_OUTPUT=release-probe`）⇒ ✅ **exit 0** |
+| 字节自检 | ✅ 改动文件 BOM=N / FFFD=0 / NUL=0 / 行尾与原文件一致（`docs/changelog.md`、`docs/calibration.md` 仍是 **CRLF**） |
+
+### 已知限制
+
+- ⚠️ `test/t87-ci-mirror-url.test.ts` 走的是 electron-builder **内置**的 `@electron/get`
+  内部路径（`app-builder-lib/node_modules/@electron/get/dist/cjs/artifact-utils.js`）
+  ⇒ 将来升级 electron-builder 若改了路径，这条测试会**响亮地失败**（而不是静默跳过）；
+- ⚠️ CI 的打包步骤**必须联网**下载 electron zip 与构建器二进制（干净 runner 无缓存）
+  ⇒ 每次约多花 1~3 分钟；**未**加 `actions/cache`（属可选优化，另立任务）；
+- ⚠️ `electronDist` **未**配置 ⇒ electron-builder 仍会下载 electron zip（配了就能完全离线，也更快）
+  —— 属可选优化，另立任务。
+
+### 遗留 / 待办
+
+- ⚠️ **T87.7（发版 v0.2.5）** 仍卡在两件工程侧无法代替的事（**不变**）；
+- ⚠️ 可选优化（**待用户拍板**）：`actions/cache` 缓存 electron-builder 的缓存目录；
+  `electronDist` 指向 `node_modules/electron/dist`（彻底免下载）；
+- ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验、**轮换 NAS 口令**、
+  GitHub 改口令 + 开 2FA 等老待办**不变**。

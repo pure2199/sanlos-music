@@ -49,12 +49,14 @@ jobs:
     timeout-minutes: 120
 
     env:
-      # ⚠️ 与 `ci.yml` 保持一致（**含 T87.8 的更正**）：
-      #    `ELECTRON_MIRROR` 其实**不生效** —— `.npmrc` 注入的
-      #    `npm_config_electron_mirror` 优先级更高 ⇒ 实际走的是 npmmirror；
-      #    且值**不能带尾部 `/v`**（`@electron/get` 会自己拼 `v<version>/`），
-      #    否则一旦生效就是 404。详见 `ci.yml` 里同一段注释。
-      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download
+      # ⚠️ 与 `ci.yml` 保持一致（**T87.9 更正：镜像变量的写法**）：
+      #    `ELECTRON_MIRROR` 的值**必须自带结尾的 `/`** —— `@electron/get` 是**纯字符串拼接**
+      #    （`${mirror}${version}/${file}`）⇒ 少了 `/` 会拼出 `…/downloadv32.3.3/…` ⇒ 404
+      #    ⇒ **整个打包挂掉**（2026-11-10 实测：Release run 42861484377）。
+      #    另：`ELECTRON_BUILDER_BINARIES_MIRROR` 由 electron-builder 自己读，
+      #    它**自己补尾斜杠** ⇒ 带不带 `/` 都对。
+      #    详细推导见 `ci.yml` 里同一段注释与 spec 第十节。
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
       ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download
       # ⚠️ 产物目录（`scripts/pack.cjs` 与 `scripts/publish-manifest.mjs` 共用这个变量）。
       FNM_PACK_OUTPUT: release-ci

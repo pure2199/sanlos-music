@@ -412,6 +412,32 @@ win:
 - `ci.yml` 每次 push / PR 都会 **真出一次包**（`Pack (smoke)` 步骤）
   ⇒ 配置写错不会再等到发版工作流才炸。
 
+#### ⚠️ CI 里的下载镜像变量（**两个变量的写法不一样**，T87.9 实测）
+
+`ci.yml` / `release.yml` 里有两个下载镜像变量，**它们的拼接规则不一样** ⇒ 照抄会挂：
+
+| 变量 | 谁读它 | 拼接规则 | 正确写法 |
+|---|---|---|---|
+| `ELECTRON_MIRROR` | **@electron/get** | **纯字符串拼接** `${mirror}${version}/${file}` ⇒ **它自己不会补 `/`** | **必须自带结尾的 `/`**：`https://github.com/electron/electron/releases/download/` |
+| `ELECTRON_BUILDER_BINARIES_MIRROR` | **electron-builder 自己**（`getBinariesMirrorUrl`） | `${base}${releaseName}/${file}`，但它**先补尾斜杠** | 带不带 `/` 都对 |
+
+⚠️ **少了那个 `/` = 整个打包挂掉**（2026-11-10 实测）：CI run 42861355862 与
+Release run 42861484377 都死在第 8 步 `Pack`：
+
+```
+⨯ Response code 404 (Not Found) for
+  https://github.com/electron/electron/releases/downloadv32.3.3/electron-v32.3.3-win32-x64.zip
+```
+
+⚠️ **为什么「装依赖时没事、打包时才炸」**：`@electron/get` 的取值优先级里，
+`.npmrc` 注入的 `npm_config_electron_mirror` **排在 `ELECTRON_MIRROR` 前面**
+⇒ **`npm ci`**（npm 会注入）走 npmmirror；**`node scripts/pack.cjs` 不是 npm 命令**
+⇒ 拿不到那些变量 ⇒ **只有 `ELECTRON_MIRROR` 生效**。
+
+⇒ **守卫已就位**：`test/t87-ci-mirror-url.test.ts` 用 **@electron/get 自己的**
+`getArtifactRemoteURL` 把工作流里那个值算成**真实下载 URL** ⇒ 镜像写错（少一个 `/`）
+⇒ **`npm test` 就红**（不必等到 CI 打包挂掉才发现）。
+
 #### ⚠️ 打包搬进 CI 带来的三个副作用
 
 1. **产物集合变了**：签名会改 exe 的字节 ⇒ electron-builder 基于**未签名** exe 算出来的
