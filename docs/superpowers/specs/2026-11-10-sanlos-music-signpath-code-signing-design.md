@@ -369,7 +369,7 @@ using a configuration object that does not match the API schema.
 ⚠️ ③ 的代价：CI 每次 push 多花约 3~5 分钟（要下 NSIS / winCodeSign 等构建器
 二进制）。**接受** —— 公开产物的第一道门就是「能出包」。
 
-### 9.5 附带发现：CI 里的 `ELECTRON_MIRROR` 覆盖其实是**死代码**
+### 9.5 附带发现：CI 里的 `ELECTRON_MIRROR` 覆盖其实是**死代码**（**⚠️ 本节结论已被 T87.9 推翻，见第十节**）
 
 `@electron/get` 的取值优先级（`node_modules/@electron/get/dist/cjs/artifact-utils.js:26-32`）：
 **`.npmrc` 注入的 `npm_config_electron_mirror` 排在 `ELECTRON_MIRROR` 前面**
@@ -386,6 +386,13 @@ using a configuration object that does not match the API schema.
 ⇒ 本次**不改行为**（现网 CI 是绿的 ⇒ 不夹带无关变更），只把注释改成**与事实一致**，
 并把「真要改用官方源，必须用 npm 风格的小写变量名、且值不带 `/v`」写进注释。
 
+> ⚠️ **更正（2026-11-10，T87.9）**：本节的「`ELECTRON_MIRROR` 是死代码」**只对 `npm ci` 成立**。
+> `node scripts/pack.cjs` **不是 npm 命令** ⇒ 拿不到 `.npmrc` 注入的
+> `npm_config_electron_mirror` ⇒ **只有 `ELECTRON_MIRROR` 生效**。
+> 而且「值不带 `/v`」这条**不完整**：正确形态是**带结尾的 `/`**（`…/releases/download/`）
+> ⇒ 本节末尾那句「值不带 `/v`」被当成了「不带尾斜杠」⇒ **T87.8 把 CI 打包打挂了**。
+> 详见第十节。
+
 ### 9.6 验收
 
 | 项 | 口径 |
@@ -396,3 +403,83 @@ using a configuration object that does not match the API schema.
 | `vitest` | **≥ 2260**（既有 2260 条一条不删；新增若干） |
 | CI | `ci.yml` run **success**（含新增的 `Pack (smoke)` 步骤） |
 | 发版链路 | `release.yml`（`pack_only=true`）run **success** ⇒ 证明「CI 能出包」 |
+
+---
+
+## 十、T87.9 修订：`ELECTRON_MIRROR` 缺尾斜杠导致 CI 打包 404（2026-11-10）
+
+### 10.1 现象
+
+T87.8 的两个提交（`3db3c8c` 修配置、`370ca6f` 修行尾断言）推上去之后：
+
+- CI run **42861355862** ⇒ **失败**（作业 `typecheck + unit tests + build + pack`）
+- Release run **42861484377**（`pack_only=true`）⇒ **失败**（作业 `build → sign → verify → publish`）
+
+两个作业的**前 7 步全绿**（checkout / setup-node / npm ci / typecheck / **test** / build）
+⇒ **T87.8 的 CRLF 修复生效了**（单测这次过了）⇒ 失败都落在**第 8 步 `Pack`**。
+
+job log 原文（CI run 42861355862，第 20 行）：
+
+```
+  • packaging       platform=win32 arch=x64 electron=32.3.3 appOutDir=.pack-staging\win-unpacked
+  • downloaded      label=electron progress=100%
+⨯ Response code 404 (Not Found) for
+  https://github.com/electron/electron/releases/downloadv32.3.3/electron-v32.3.3-win32-x64.zip
+```
+
+⇒ `download` 后面**少了一个 `/`**。
+
+### 10.2 根因
+
+**`ELECTRON_MIRROR` 的值必须自带结尾的 `/`；T87.8 把它改成了「无尾斜杠」⇒ CI 打包必 404。**
+
+事实（本机读代码 + Range GET 实测，不是推断）：
+
+| 事实 | 证据 |
+|---|---|
+| `@electron/get` 的下载 URL 是**纯字符串拼接** | `app-builder-lib/node_modules/@electron/get/dist/cjs/artifact-utils.js:59`：`return \`${base}${path}/${file}\`` ⇒ `base`（镜像）**自带** `/` 时才是 `…/download/v32.3.3/electron-….zip` |
+| 它的默认值**带**尾斜杠 | 同文件 `BASE_URL = 'https://github.com/electron/electron/releases/download/'` |
+| `ELECTRON_MIRROR` 只在**非 npm 上下文**里生效 | `mirrorVar`（同文件 23-38）优先级：`npm_config_electron_mirror`（**`.npmrc` 注入**）→ `NPM_CONFIG_…` → … → `ELECTRON_MIRROR` → 默认。`npm ci` 时 npm 会注入前者 ⇒ 走 npmmirror；**`node scripts/pack.cjs` 不是 npm 命令 ⇒ 拿不到那些变量 ⇒ 只有 `ELECTRON_MIRROR` 生效** |
+| 正确形态确实可达 | `https://github.com/electron/electron/releases/download/v32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **HTTP 206**；`…/download/v32.3.3/SHASUMS256.txt` ⇒ **HTTP 206** |
+
+⇒ **是本任务自己把上一轮改坏的**：T87.8 §9.5 判断「`ELECTRON_MIRROR` 是死代码（`.npmrc` 优先）」，
+于是把值改成「无尾斜杠」形态 ⇒ 在**非 npm 上下文**里拼出畸形 URL。
+⚠️ 那条结论**只对 `npm ci` 成立**，对 `node scripts/pack.cjs` **不成立**。
+
+⚠️ **另一条镜像不用改**：`ELECTRON_BUILDER_BINARIES_MIRROR` 由 electron-builder 自己的
+`getBinariesMirrorUrl()` 读（`app-builder-lib/out/util/electronGet.js:748`），
+它**自己补尾斜杠**（`url.endsWith("/") ? url : \`${url}/\``）⇒ 带不带 `/` 都对。
+（实测 `…/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z` 与
+`…/download/nsis-3.0.4.1/nsis-3.0.4.1.7z` 均 **206**。）
+
+### 10.3 为什么本地测不出来
+
+| 本机 | CI |
+|---|---|
+| electron-builder 的下载缓存里**已有** electron zip ⇒ **根本不下载** | 干净 runner ⇒ 缓存空 ⇒ **必须下载** |
+| 之前那次打包已经把 zip 拉下来了 | 每次 run 都是新机器 |
+
+⇒ 「本地绿、CI 红」的又一种形态：**不是代码不同，是「本机有缓存、CI 没缓存」**。
+⇒ 凡是「本机靠缓存跑通、CI 必须联网」的步骤，**必须有一条不依赖缓存的守卫**。
+
+### 10.4 修法（三条，缺一不可）
+
+| # | 措施 | 作用 |
+|---|---|---|
+| ① | `ci.yml` / `release.yml` 的 `ELECTRON_MIRROR` 补回结尾的 `/`；注释改成**事实**（两个镜像变量的**拼接规则不同**、**优先级不同**） | 修掉**这一次**的失败 |
+| ② | **新** `test/t87-ci-mirror-url.test.ts`：用 **@electron/get 自己的** `getArtifactRemoteURL` 把工作流里那个值算成**真实下载 URL** | 把「少一个 `/`」从「CI 打包才红」变成「`npm test` 就红」 |
+| ③ | 更正 §9.5 的错误结论 + 在 `docs/packaging.md` 写清「这两个变量的写法不一样」 | 不让**同一个错误结论**留在仓库里骗下一个人 |
+
+⚠️ ② **不自己写 URL 拼接规则**：直接调 `@electron/get` 的 `getArtifactRemoteURL`
+⇒ 判定口径与真正下载时**是同一份**（与 T87.8 的 `validateConfiguration` 同一思路）。
+
+### 10.5 验收
+
+| 项 | 口径 |
+|---|---|
+| 守卫有效性 | 去掉 `ELECTRON_MIRROR` 的尾斜杠 ⇒ **新测试必红**（变异自证） |
+| 真实可达 | 用算出来的 URL 做 Range GET ⇒ **206** |
+| `tsc --noEmit` | exit 0 |
+| `vitest` | **≥ 2263**（既有 2263 条一条不删；新增若干） |
+| CI | run **success**（含 `Pack (smoke)`） |
+| 发版链路 | `release.yml`（`pack_only=true`）run **success** |
