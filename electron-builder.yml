@@ -47,6 +47,11 @@ win:
   #    （之前没有这一行 ⇒ 用的是 Electron 默认图标）。
   # ⚠️ 用 PNG（不手工拼 ICO）—— electron-builder 自己转成 exe 需要的尺寸。
   icon: build/icon.png
+  # ⚠️ **T87：显式钉住时间戳源**（不依赖默认值 —— 默认值会变、会挂）。
+  #    ⚠️ **为什么必须有时间戳**：没有 RFC 3161 时间戳 ⇒ 证书到期那天，
+  #       **历史上所有安装包一起失效**（用户装不上了）⇒ 打包后要**断言**它。
+  #    （SignPath 路线由 SignPath 负责打时间戳；这一行管的是「本机 / 自签」路线。）
+  timeStampServer: http://timestamp.digicert.com
   target:
     - target: nsis
       arch:

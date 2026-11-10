@@ -736,7 +736,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 className="fnm-settings__input"
                 name="fnm-update-signer"
                 value={signerDraft}
-                placeholder="CN=你的证书主体名"
+                placeholder="签发者主体名（如 SignPath Foundation）"
                 onChange={(event) => setSignerDraft(event.target.value)}
               />
             </label>
@@ -836,8 +836,12 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               没填预期签名者就一律拒绝（自动更新 = 远程代码执行，这道闸不省）。
             </p>
             <p className="fnm-settings__hint">
-              ⚠️ 本项目暂未办理代码签名证书 ⇒ 安装包**没有签名**。这时勾选「允许安装未签名的更新包」
+              ⚠️ **没有签名**的安装包（例如更早的版本）需要勾选「允许安装未签名的更新包」
               并**保存**后才允许安装（**SHA-512 与同源校验照旧**，哈希不符一律拒绝）。
+            </p>
+            <p className="fnm-settings__hint">
+              「预期的代码签名者」填**签发者主体名**即可（**不必**抄整串 <code>CN=…, O=…, C=…</code>），
+              也可以填**多个**（用逗号分隔）；公开安装包由 <code>SignPath Foundation</code> 签发时就填它。
             </p>
             {!updateSaved && (
               <p className="fnm-settings__hint" data-testid="update-unsaved-hint">

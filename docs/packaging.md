@@ -352,3 +352,51 @@ node tools/fn-check-signature.mjs release-probe
 唯一彻底免的是 **Microsoft Store**（商店代签，显示商店名）。
 ⚠️ **主体名一次定死**：换证书 = 换显示名 + SmartScreen 信誉清零 ⇒ 别换来换去。
 
+### 7.9 走 **SignPath Foundation**（公开产物签名的当前路线，T87）
+
+⚠️ **为什么不再按 §7.8「采购商业证书」走**：实测（2026-11）之后有三条**事实修正**：
+
+| 原以为 | 实测（2026-11） |
+|---|---|
+| Certum 开源计划（免费）谁都能申请 | **要 GitHub star > 1k** ⇒ 本项目 star=0 ⇒ **够不着** |
+| EV 证书能立刻拿到 SmartScreen 信誉 | 微软 **2024 起取消** EV 的即时信誉 ⇒ OV 与 EV **无差别**（个别 2026 选型文章仍在宣传「EV 秒获信誉」⇒ **过期信息**） |
+| 签名证书要插 U 盾 | **Certum Standard 云签名 €209/年**，**SimplySign 云签名无需 UKey**；有效期上限已被压到 **459 天** |
+
+⇒ **SignPath Foundation**（给符合资格的开源项目的**免费** OV 证书）是当前最优解：
+
+| 事实 | 内容 |
+|---|---|
+| 成本 | **免费** |
+| 密钥 | 私钥在 **SignPath 的 HSM**，CI 只持一个 **Submitter** 权限的 API token |
+| 签发者 | **「SignPath Foundation」**（**不是**公司名）⇒ 用户看到的发布者就是它 |
+| 前提 | **可信构建** —— 只签 **CI 从本仓库构建出的**产物 ⇒ **打包必须搬进 CI** |
+| 流程 | **每次发布人工审批**（在 SignPath 平台点一次） |
+| 团队 | 单维护者可兼任 author / reviewer / approver 三角色（有先例） |
+| 前置 | GitHub 与 SignPath **两个账号都要开 MFA**；仓库要有 **OSI 认可的许可证**（本项目 = MIT） |
+
+#### 落地形态（代码在仓库里）
+
+| 文件 | 作用 |
+|---|---|
+| `.github/workflows/release.yml` | 打包 → 送签 → 等审批 → 取回 → **校验** → 发 Release |
+| `.signpath/artifact-configurations/default.xml` | 告诉 SignPath **签哪个文件**（两个 exe） |
+| `scripts/check-signpath-config.mjs` | 配置**快速失败**（缺一项就停，绝不「跳过签名照样发布」） |
+| `tools/fn-check-signature.mjs` | 签名断言：`--expect valid` + `--require-timestamp` + `--expect-cn` |
+| `CODE_SIGNING_POLICY.md` | 交给 SignPath 审核的**代码签名政策** |
+| `docs/signing.md` | 面向维护者/用户的完整说明（申请、配置、发版、故障排查） |
+
+#### ⚠️ 打包搬进 CI 带来的三个副作用
+
+1. **产物集合变了**：签名会改 exe 的字节 ⇒ electron-builder 基于**未签名** exe 算出来的
+   `latest.yml` 与 `*.blockmap` **失效** ⇒ **不再发布**它们
+   （本项目的自动更新走自己的 `latest.json` + SHA-512，本来就不用它们）⇒
+   公开 Release 的资产从 5 个变成 **3 个**（安装包 / 便携版 / `latest.json`）。
+2. **`latest.json` 必须在签名之后生成**（否则 SHA-512 对不上，客户端一更新就失败）。
+3. **本机手工打包的包签不了**（SignPath 不签非 CI 产物）⇒ 这是**特性**，不是缺陷。
+
+#### 退路
+
+若 Foundation 拒审、或单人三角色不被接受 ⇒ 换 **Certum Standard Code Signing in the Cloud
+（€209/年）**。本项目的签名代码**不绑定 SignPath** ⇒ 只需要改「期望的 CN 候选值」
+（客户端设置页 + CI 的 `SIGNPATH_EXPECTED_CN`）即可，**不用改任何逻辑**。
+

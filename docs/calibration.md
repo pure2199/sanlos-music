@@ -4038,3 +4038,90 @@ v0.2.3 发布后用户问「为什么签名没通过」⇒ 实测发现**真缺�
 - ⚠️ **发版**：T85 + T86 都在「未发布」小节里 ⇒ 要不要切 **v0.2.4** 由用户定；
 - ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验、**轮换 NAS 口令**、
   GitHub 改口令 + 开 2FA 等老待办**不变**。
+
+---
+
+## 四十九、T87：公开产物的代码签名（SignPath Foundation 免费路线）
+
+### 做了什么
+
+**一句话**：把「公开产物**没有**签名」变成「公开产物**带公开 OV 签名**」，
+并把整条链路（**CI 打包 → 送签 → 人工审批 → 校验 → 发布**）搬进 CI。
+
+### 关键决策（用户拍板）
+
+| 项 | 决定 |
+|---|---|
+| 路线 | **SignPath Foundation 免费 OV**（证书 publisher = 「SignPath Foundation」） |
+| 渠道 | **两条并存**：Release（NSIS + 应用内自更新）走 SignPath；**Microsoft Store** 另立 **T88** |
+| 打包 | **搬进 CI**（SignPath 以「可信构建」为前提 ⇒ 本机手工包**签不了**） |
+| 退路 | 换 Certum Standard 云签名（€209/年）⇒ **只改 CN 候选值**，不改逻辑 |
+
+### 代码落点
+
+| 文件 | 作用 |
+|---|---|
+| `shared/update.ts` | **唯一**的签名者匹配口径（`extractCommonNames` / `parseSignerCandidates` / `matchesExpectedSigner`）—— 客户端与构建期工具**共用** |
+| `electron/update.ts` | 主进程按新口径核对签名者 |
+| `src/components/SettingsPanel.tsx` | 「预期的代码签名者」支持**多候选**；文案写清 `SignPath Foundation` |
+| `tools/fn-check-signature.mjs` | 断言加严：`--expect valid` / `--require-timestamp` / `--expect-cn`；判定抽成**纯函数** `evaluateSignature()` |
+| `tools/fn-check-signature.d.mts` | 给 TS 侧 import 这个 `.mjs` 的手写声明（本仓库 tsconfig **无 `allowJs`**） |
+| `scripts/pack.cjs` | 关掉「证书自动发现」；`FNM_EXPECT_SIGNER_CN` 加严开关；CI 适配说明 |
+| `scripts/publish-manifest.mjs` | 认 `FNM_PACK_OUTPUT`（清单与安装包**必须同目录**） |
+| `scripts/check-signpath-config.mjs` | 配置**快速失败**（缺一项就停） |
+| `.github/workflows/release.yml` | 发版工作流（build → pack → 送签 → 审批 → 校验 → 发布） |
+| `.signpath/artifact-configurations/default.xml` | 告诉 SignPath **签哪个文件** |
+| `CODE_SIGNING_POLICY.md` / `docs/signing.md` | 申请材料 + 维护者说明 |
+
+### 匹配口径（**一字不差**，客户端与工具同一份）
+
+```
+① 整串相等优先：规范化（trim + 折叠内部空白 + 转小写）后 subject 整串 == 候选
+② 否则 extractCommonNames(subject) 的任一 CN == 候选（相等，大小写不敏感）
+③ 绝不做「包含」匹配
+候选分隔：',' ';' 换行；自动去掉 'CN=' 前缀；只认 CN，不认 O/C
+```
+
+### 实测（**真证书**，不是 mock）
+
+用**微软真签名的** `C:\Windows\System32\notepad.exe`
+（Subject = `CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US`）：
+
+| 命令 | 结果 |
+|---|---|
+| `--expect valid --require-timestamp --expect-cn "Microsoft Windows"` | ✅ **通过**（exit 0）—— `Status=Valid`、**时间戳检出「有」**、CN 精确命中 |
+| `--expect-cn "Microsoft Windows Evil"` | ❌ **失败**（exit 1）——「包含」式伪造被挡住 |
+| 对**未签名**的 `electron.exe` 跑同一条 | ❌ 失败 3 条（状态不是 `Valid` / 没有签名无法核对 CN / 没有 RFC 3161 时间戳） |
+| `--expect none`（对未签名文件） | ✅ 通过（exit 0）—— 旧语义**一字不变** |
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `tsc --noEmit` | exit 0 |
+| `vitest` | **2260 passed / 108 files**（既有 2195 条**一条不删**；新增 **65** 条） |
+| `build` | exit 0 |
+| `playwright` | **34 passed** |
+
+### 已知限制（如实标注）
+
+- ⚠️ **发布者会显示「SignPath Foundation」**（不是公司名）—— 免费路线的固有代价；
+- ⚠️ **签名 ≠ 不弹窗**：SmartScreen 判的是**文件哈希的信誉** ⇒ 第一版照样弹
+  （通常数周、数百次真实下载才积累起来）；签名真正解决的是「**不再是未知发布者**」
+  与「**Smart App Control 的 Win11 不再直接拦截**」；
+- ⚠️ **公开 Release 资产 5 → 3 个**：`latest.yml` / `*.blockmap` 基于**未签名** exe 算
+  ⇒ 签名后失效 ⇒ 不再发布（客户端走 `latest.json` + SHA-512，本来就不用它们）；
+- ⚠️ **本机手工打包不会被签**（SignPath 只签 CI 产物）；
+- ⚠️ **每次发布要人工点一次批准**；不批 ⇒ 工作流超时失败（artifact 保留，可重跑）；
+- ⚠️ **CI 只跑 typecheck / test / build**（`ci.yml` 现状，不跑 e2e）；
+- ⚠️ **「同一套匹配逻辑」靠 esbuild 运行时复用**（`shared/update.ts` ⇒ CJS ⇒ 内存里 `new Function` 求值）
+  —— 不是 Node 原生 TS 加载（CI 用 **Node 22**，原生类型剥离在该版本上不保证）；
+  ⚠️ 该文件必须在 **node 环境**下测（jsdom 的 `TextEncoder` 跨 realm ⇒ esbuild 启动自检必炸）。
+
+### 遗留 / 待办
+
+- ⚠️ **【工程侧无法代替】** ① 用户提交 SignPath Foundation 申请（`signpath.org/apply`）；
+  ② 批下来后填 5 个 secrets / variables；③ 每次发布人工批准一次；
+- ⚠️ **T87.7（发版 v0.2.5）** 待上面三件事齐了才能跑；
+- ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验、**轮换 NAS 口令**、
+  GitHub 改口令 + 开 2FA 等老待办**不变**。

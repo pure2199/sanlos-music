@@ -1,0 +1,198 @@
+# ---------------------------------------------------------------------------
+# T87：发版工作流（CI 打包 → SignPath 送签 → 人工审批 → 校验 → 发 Release）
+# ---------------------------------------------------------------------------
+#
+# ⚠️ **为什么必须搬进 CI**：SignPath 免费计划（Foundation）以「**可信构建**」为前提
+#    —— 只签 **CI 从本仓库构建出的**产物 ⇒ 本机手工打包的包**签不了**。
+#    ⇒ 发版流程从「本机手工」改为「CI 自动」。
+#
+# ⚠️ **失败即失败（安全失败设计）**：下列任一情况 ⇒ 工作流**失败**，
+#    **绝不产出「声称已签名」的产物**：
+#    - SignPath 的 secrets / variables 没配 ⇒ **快速失败**并说明缺哪几个；
+#    - 签名状态不是 `Valid` ⇒ 失败；
+#    - **没有 RFC 3161 时间戳** ⇒ 失败（证书到期后历史包会集体失效）；
+#    - 签名者 CN 与预期不符 ⇒ 失败；
+#    - 审批超时 ⇒ 失败（artifact 保留着供排查）。
+#
+# ⚠️ **每个版本都要人工批一次**：Foundation 计划要求**逐次人工审批**
+#    （在 SignPath 平台上点一次）⇒ 工作流会**一直等**（`wait-for-completion`）。
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的标签（如 v0.2.5）'
+        required: true
+        type: string
+      pack_only:
+        description: '只打包（验证 CI 能出包）；关掉才会送签 + 发版'
+        required: false
+        default: true
+        type: boolean
+
+# ⚠️ **同一个标签只允许一个发版跑**（两个人同时点 ⇒ 互相覆盖资产）。
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  # ⚠️ 发 Release 需要写权限（上传资产 / 建 Release）。
+  contents: write
+
+jobs:
+  release:
+    name: build → sign → verify → publish
+    runs-on: windows-latest
+    # ⚠️ **人工审批可能很久**（SignPath 平台上要手动点一次）⇒ 超时给足。
+    timeout-minutes: 120
+
+    env:
+      # ⚠️ 与 `ci.yml` 保持一致：仓库的 `.npmrc` 把 Electron 下载镜像指向 npmmirror
+      #    （面向国内网络），GitHub Runner 在境外 ⇒ 这里显式指回官方源。
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/v
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download
+      # ⚠️ 产物目录（`scripts/pack.cjs` 与 `scripts/publish-manifest.mjs` 共用这个变量）。
+      FNM_PACK_OUTPUT: release-ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # ⚠️ **只签这个标签的源码** —— 可信构建的前提就是「产物来自这个仓库的这个提交」。
+          ref: ${{ inputs.tag }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # ⚠️ 不用 Node 26：electron@32 的 install.js 依赖的 extract-zip@2 在 Node 26 上
+          #    解压会挂起（详见 scripts/ensure-electron.cjs 的注释）。
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Pack
+        # ⚠️ **直接调 pack.cjs**（不跑 `npm run pack`）—— 后者会**再 build 一次**。
+        #    pack.cjs 自带前置检查（缺 `dist/` 会早失败并说清楚缺什么）。
+        # ⚠️ 这一步产出的 exe **必然没签名**（SignPath 是**打包之后**才签的）
+        #    ⇒ 签名断言放在「取回签名件之后」。
+        run: node scripts/pack.cjs
+
+      - name: Upload unsigned artifacts
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-artifacts
+          # ⚠️ 这个 artifact 会被**交给 SignPath**（按 artifact-id 拉取）⇒
+          #    里面的 exe 就是待签的那两个。
+          path: release-ci/*
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Summary (pack only)
+        if: ${{ inputs.pack_only }}
+        run: |
+          echo "### 只打包模式" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "产物已上传为 artifact \`unsigned-artifacts\`（**未签名**，符合预期）。" >> $env:GITHUB_STEP_SUMMARY
+          echo "要真正发版，把 \`pack_only\` 关掉再跑一次。" >> $env:GITHUB_STEP_SUMMARY
+
+      # -----------------------------------------------------------------------
+      # 下面这些步骤只在「真发版」时跑
+      # -----------------------------------------------------------------------
+
+      - name: Check SignPath configuration
+        if: ${{ !inputs.pack_only }}
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORG_ID: ${{ vars.SIGNPATH_ORG_ID || secrets.SIGNPATH_ORG_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG || secrets.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_POLICY_SLUG: ${{ vars.SIGNPATH_POLICY_SLUG || secrets.SIGNPATH_POLICY_SLUG }}
+          SIGNPATH_ARTIFACT_SLUG: ${{ vars.SIGNPATH_ARTIFACT_SLUG || secrets.SIGNPATH_ARTIFACT_SLUG }}
+        run: node scripts/check-signpath-config.mjs
+
+      - name: SignPath — submit signing request and fetch signed artifact
+        if: ${{ !inputs.pack_only }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORG_ID || secrets.SIGNPATH_ORG_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || secrets.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_SLUG || secrets.SIGNPATH_ARTIFACT_SLUG }}
+          # ⚠️ 待签产物 = 上面那个 artifact（SignPath 按 id 去 GitHub 上拉）。
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          # ⚠️ **人工审批**：SignPath 那边不点「批准」，这里就一直等（最多 90 分钟）。
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: '5400'
+          output-artifact-directory: signed
+
+      - name: Verify signed artifact
+        if: ${{ !inputs.pack_only }}
+        # ⚠️ **发布闸门**：状态必须是 Valid、必须带 RFC 3161 时间戳、CN 必须相等。
+        #    ⚠️ CN 口径与**客户端**同一份（`shared/update.ts`）⇒ 客户端认的，
+        #       这里也认；客户端不认的，这里也不认。
+        run: >
+          node tools/fn-check-signature.mjs
+          --expect valid
+          --require-timestamp
+          --expect-cn "${{ vars.SIGNPATH_EXPECTED_CN || 'SignPath Foundation' }}"
+          signed
+
+      - name: Replace artifacts with signed ones and write update manifest
+        if: ${{ !inputs.pack_only }}
+        env:
+          UPDATE_NOTES: 安装包已由 SignPath Foundation 签名（Authenticode，含 RFC 3161 时间戳）。
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # ⚠️ **签名件的文件清单必须与未签名件一致**（SignPath 只该换掉 exe 的字节）。
+          $unsigned = Get-ChildItem -Path release-ci -File | ForEach-Object { $_.Name } | Sort-Object
+          $signed = Get-ChildItem -Path signed -File | ForEach-Object { $_.Name } | Sort-Object
+          if (Compare-Object $unsigned $signed) {
+            throw "签名件与原产物的文件清单不一致：原 = $($unsigned -join ', ')，签名后 = $($signed -join ', ')"
+          }
+          Copy-Item -Path signed/*.exe -Destination release-ci/ -Force
+          # ⚠️ 清单必须基于**签名后**的安装包算 SHA-512（客户端会拿它核对下载到的文件）。
+          node scripts/publish-manifest.mjs
+
+      - name: Publish GitHub Release
+        if: ${{ !inputs.pack_only }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $notesFile = "docs/releases/$env:TAG.md"
+          if (-not (Test-Path $notesFile)) { throw "找不到发布说明：$notesFile" }
+          $assets = @(
+            "release-ci/FN-Music-Setup-$version.exe",
+            "release-ci/FN-Music-Portable-$version.exe",
+            "release-ci/latest.json"
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path $asset)) { throw "缺少资产：$asset" }
+          }
+          # ⚠️ **只发这 3 个资产**：
+          #    `latest.yml` / `*.blockmap` 是 electron-builder 基于**未签名**的 exe 算的
+          #    ⇒ 签名改了字节 ⇒ 它们**已经失效** ⇒ 发出去就是**错的数据**。
+          #    （本项目的自动更新走自己的 `latest.json` + SHA-512，本来就不用它们。）
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG @assets --clobber
+          } else {
+            gh release create $env:TAG @assets --title "Sanlos Music $env:TAG" --notes-file $notesFile
+          }

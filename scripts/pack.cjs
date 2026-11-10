@@ -42,6 +42,34 @@
  *      不依赖全局 PATH 上装了什么版本（也**不经过 shell**，避免 Node 22+
  *      的 `shell: true` 弃用告警与路径含空格的引号问题）。
  *
+ * ---------------------------------------------------------------------------
+ * 三、CI 适配（T87）
+ * ---------------------------------------------------------------------------
+ * SignPath 免费签名以「**可信构建**」为前提 ⇒ 产物**必须**由 CI 从本仓库构建
+ * ⇒ 打包搬进 CI（`.github/workflows/release.yml`）。为此本脚本固定了三件事：
+ *
+ * 1. **关掉证书自动发现**（`CSC_IDENTITY_AUTO_DISCOVERY=false`）
+ *    - electron-builder 默认会去 Windows 证书库里翻代码签名证书
+ *      ⇒ 干净 runner 上找不到（无害），但**本机**若装了证书就会**自动签**
+ *      ⇒「本机产物有签名、CI 产物没签名」⇒ 不可预期。
+ *    - 要签就**显式**给 `WIN_CSC_LINK`（口径唯一）；临时打开用
+ *      `FNM_CSC_AUTO_DISCOVERY=1`。
+ *
+ * 2. **CI 里直接跑 `node scripts/pack.cjs`**（不要 `npm run pack`）
+ *    - `npm run pack` 会**再跑一次 build**（`npm run build && node scripts/pack.cjs`）
+ *      ⇒ CI 里浪费一轮；工作流已经在上一步 build 过 ⇒ 直接调本脚本。
+ *    - 本脚本**自带前置检查**（缺 `dist/index.html` / `dist-electron/main.js`
+ *      会**早失败**并说清楚缺什么）。
+ *
+ * 3. **输出目录用 `FNM_PACK_OUTPUT=release-ci`**
+ *    - CI 上传到 artifact、交给 SignPath 送签的，就是这个目录。
+ *    - ⚠️ 目录名以 `release-` 开头 ⇒ 已在 `.gitignore` 里（本地试跑也不脏仓库）。
+ *
+ * ⚠️ **加严签名断言是可选的**（`FNM_EXPECT_SIGNER_CN`）：设了就额外要求
+ *    「状态 Valid + 带 RFC 3161 时间戳 + CN 相等」。
+ *    ⚠️ **SignPath 路线用不着它** —— SignPath 是在**打包之后**签的
+ *    ⇒ 打包阶段产物必然没签名 ⇒ 断言要放在「取回签名件之后」（release.yml 里做）。
+ *
  * 用法：
  *   npm run pack            # 正式产物 → release/
  *   npm run pack:probe      # 验证用产物 → release-probe/（不动 release/）
@@ -139,6 +167,14 @@ const result = spawnSync(process.execPath, [builderBin, ...args], {
     ...process.env,
     // 关键：不联网下载 electron，直接用项目里那份。
     ELECTRON_OVERRIDE_DIST_PATH: electronDist,
+    // ⚠️ **T87 / CI 必需：关掉「证书自动发现」**。
+    //    electron-builder 默认会去 Windows 证书库里翻代码签名证书：
+    //    - 干净 runner 上找不到（无害）；
+    //    - 但**本机**若装了证书就会**自动签** ⇒「本机产物有签名、CI 产物没签名」
+    //      ⇒ 同一份代码、两种结果 ⇒ 不可预期。
+    //    ⇒ 默认关掉；要签就**显式**给 `WIN_CSC_LINK`（口径唯一）。
+    //    临时需要打开时：`FNM_CSC_AUTO_DISCOVERY=1`。
+    CSC_IDENTITY_AUTO_DISCOVERY: process.env.FNM_CSC_AUTO_DISCOVERY === '1' ? 'true' : 'false',
   },
 })
 
@@ -165,15 +201,31 @@ if (result.status !== 0) {
 const cscLink = (process.env.WIN_CSC_LINK || process.env.CSC_LINK || '').trim()
 const checkScript = path.join(repoRoot, 'tools', 'fn-check-signature.mjs')
 
+// ⚠️ **T87：加严断言的开关**（默认**关** ⇒ 行为与 T86 一字不变）。
+// 设了 `FNM_EXPECT_SIGNER_CN` ⇒ 除了「有签名」，还要求：
+//   ① 签名状态是 **Valid**（不是 HashMismatch / Expired / NotTrusted）；
+//   ② 带 **RFC 3161 时间戳**（证书到期后历史安装包不会集体失效）；
+//   ③ 签名者 **CN** 与它**相等**（口径与客户端**同一份**：`shared/update.ts`）。
+// ⚠️ **SignPath 路线用不着这个开关**：SignPath 是在**打包之后**签的
+//    ⇒ 打包阶段产物必然没签名 ⇒ 断言要放在「取回签名件之后」（见 release.yml）。
+const expectCn = (process.env.FNM_EXPECT_SIGNER_CN || '').trim()
+
 if (cscLink === '') {
   console.log('[pack] ℹ️ 未配置签名证书（WIN_CSC_LINK / CSC_LINK）⇒ 产物**未签名**（预期行为）')
 } else {
-  const checkArgs = [checkScript, '--expect', 'signed', stagingDir]
+  const checkArgs = [checkScript]
+  if (expectCn) {
+    console.log(`[pack] 加严签名断言：Valid + RFC 3161 时间戳 + CN = ${expectCn}`)
+    checkArgs.push('--expect', 'valid', '--require-timestamp', '--expect-cn', expectCn)
+  } else {
+    checkArgs.push('--expect', 'signed')
+  }
   // ⚠️ `CSC_LINK` 可以是 **base64 内容**；只有它是**文件路径**时才能核对
   //    「签的是不是我们指定的那张证书」。
   if (cscLink.toLowerCase().endsWith('.pfx') && fs.existsSync(cscLink)) {
     checkArgs.push('--pfx', cscLink)
   }
+  checkArgs.push(stagingDir)
   console.log('[pack] 校验产物签名…')
   const check = spawnSync(process.execPath, checkArgs, { cwd: repoRoot, stdio: 'inherit' })
   if (check.error) {

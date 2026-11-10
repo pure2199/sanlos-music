@@ -121,8 +121,15 @@ Windows 10 1809+ / x64. MIT licensed.
 | `FN-Music-Setup-0.2.4.exe` | `f49d026e3a80e304375a10dc3b60ebd0679f6fe3d6fa37e7e678ec1ebb8a847c` |
 | `FN-Music-Portable-0.2.4.exe` | `6757f39ee34b9a4e7fc96410372a40c2b5a4cb4880d19cfb11cbd3b0f86323e7` |
 
-> ⚠️ **产物未做代码签名**：Windows SmartScreen 会拦（蓝色「Windows 已保护你的电脑」）→
+> ⚠️ **v0.2.4 及更早的产物未做代码签名**：Windows SmartScreen 会拦（蓝色「Windows 已保护你的电脑」）→
 > 点「更多信息」→「仍要运行」。需要静默安装可用 `FN-Music-Setup-0.2.4.exe /S`。
+>
+> ✅ **更新版本起**改由 **[SignPath Foundation](https://signpath.org)** 签发**公开 OV 签名**
+> （Windows 上显示的发布者是「SignPath Foundation」）⇒ 不再是「未知发布者」，
+> 且在**开启了 Smart App Control 的 Windows 11** 上不再被直接拦截。
+> ⚠️ **但 SmartScreen 的蓝框第一版仍可能出现** —— 微软判的是**文件哈希的信誉**，
+> 新证书的信誉要从零开始积累（通常需要数周、数百次真实下载）。
+> 怎么自己验？见 [`docs/signing.md`](./docs/signing.md)（含 `Get-AuthenticodeSignature` 复核命令）。
 
 - **首次使用**：装完打开 → 顶栏「连接」→ 用 **FN ID 探测**（推荐）或 **地址 + 账号口令**
   登录，详见「[二、两种登录方式](#二两种登录方式)」；
@@ -260,6 +267,8 @@ A：见下面「九、开发与贡献」；动手前请先读 [`docs/superpowers
 
 | 文档 | 内容 |
 |---|---|
+| [`docs/signing.md`](./docs/signing.md) | 代码签名（SignPath Foundation）：怎么验证、怎么申请、怎么发版 |
+| [`CODE_SIGNING_POLICY.md`](./CODE_SIGNING_POLICY.md) | 代码签名政策（提交给 SignPath 审核的那份） |
 | [`docs/packaging.md`](./docs/packaging.md) | 打包口径、可复现的确切定义、离线打包、验证步骤 |
 | [`docs/build-verification.md`](./docs/build-verification.md) | 实际跑过的构建/打包验证记录与证据 |
 | [`docs/calibration.md`](./docs/calibration.md) | 真机联调校准清单（哪些已验证、哪些待真机确认） |

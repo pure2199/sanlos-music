@@ -2,8 +2,10 @@
 // 自动更新（Task 23）—— 跨进程类型
 // ---------------------------------------------------------------------------
 //
-// ⚠️ 本文件**只能是纯类型**（`interface` / `type`）：
-// - 不得出现任何运行时代码（导出的值、常量、函数）；
+// ⚠️ 本文件**只能是纯类型**（`interface` / `type`）或**纯函数**：
+// - 纯函数必须**不依赖任何运行时环境**（不 import Electron / Node 内置模块、
+//   不碰 DOM / 不读文件 / 不发网络）——
+//   判定逻辑放这里，是为了让主进程与渲染层**共用同一份**（T85 的教训）；
 // - 不得 import Electron / Node 内置模块 / DOM 类型。
 //
 // 理由与 `shared/playerBridge.ts` 完全相同：主进程（`electron/update.ts`、
@@ -192,6 +194,125 @@ export function evaluateSignatureGate(input: SignatureGateInput): SignatureGateR
     allowed: false,
     reason: input.signatureReason ?? '签名校验未通过，不允许启动安装器',
   }
+}
+
+// ---------------------------------------------------------------------------
+// 签名者的**文本口径**（T87）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么需要它（T87）**：T85 之前，「预期的代码签名者」是拿
+//    **整串精确相等**去比 PowerShell 的 `SignerCertificate.Subject`
+//    —— 那是一串 RFC4514 文本（`CN=…, O=…, C=…`）。
+//    ⇒ 用户必须**逐字符**粘贴这串才能匹配（手打必错；证书续期 / 换 CA 后还会失效）。
+//    ⇒ 真实证书（公开 OV）的 Subject 必然带 O / C ⇒ 这个口径**没法用**。
+//
+// ⚠️ **口径（安全关键）**：只做 **CN（Common Name）的相等比较**，
+//    **绝不做「包含」匹配** ——
+//    包含匹配的话，一张 `CN=SignPath Foundation Evil` 的证书就能骗过闸门。
+// ---------------------------------------------------------------------------
+
+/**
+ * 规范化签名者相关的文本：去首尾空白 + **折叠内部连续空白** + 转小写。
+ *
+ * ⚠️ 只动**空白**与**大小写**：其余字符一个都不改
+ *    （证书里的主体名是什么字符，就按什么字符比）。
+ */
+function normalizeSignerText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+/**
+ * 按分隔符切分，**尊重反斜杠转义**（`\,` 不会被切开）。
+ *
+ * ⚠️ RFC4514 的 DN 里，值内部的逗号要写成 `\,` ⇒ 不处理转义就会把
+ *    `CN=A\, B` 切成两半。
+ */
+function splitRespectingEscapes(value: string, separators: string[]): string[] {
+  const out: string[] = []
+  let current = ''
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i] ?? ''
+    if (ch === '\\' && i + 1 < value.length) {
+      current += ch + (value[i + 1] ?? '')
+      i += 1
+      continue
+    }
+    if (separators.includes(ch)) {
+      out.push(current)
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  out.push(current)
+  return out
+}
+
+/** 去掉 RFC4514 里的转义反斜杠（`\,` → `,`、`\\` → `\`）。 */
+function unescapeDnValue(value: string): string {
+  return value.replace(/\\([,;\\"])/g, '$1')
+}
+
+/**
+ * 从 RFC4514 风格的 Subject 串里取出**全部** `CN` 分量（保持原始大小写）。
+ *
+ * ⚠️ **只取 CN**：Windows 上用户看到的「发布者」= 证书的 CN
+ *    ⇒ 拿 O（组织）或 C（国家）当判定依据没有意义，也不该放行。
+ *
+ * 例：`CN=SignPath Foundation, O=SignPath Foundation GmbH, C=AT`
+ *   ⇒ `['SignPath Foundation']`
+ */
+export function extractCommonNames(subject: string): string[] {
+  const names: string[] = []
+  for (const part of splitRespectingEscapes(subject, [','])) {
+    const eq = part.indexOf('=')
+    if (eq <= 0) continue
+    const attr = part.slice(0, eq).trim().toUpperCase()
+    if (attr !== 'CN') continue
+    const value = unescapeDnValue(part.slice(eq + 1)).trim()
+    if (value !== '' && !names.includes(value)) names.push(value)
+  }
+  return names
+}
+
+/**
+ * 把用户填的「预期的代码签名者」解析成**候选集**。
+ *
+ * ⚠️ **多个候选用 `,` `;` 或换行分隔** —— 这样「换一张证书」只改配置、不改代码。
+ * ⚠️ 允许直接写 `CN=xxx` 的形式 ⇒ **自动去掉 `CN=` 前缀**，
+ *    只留主体名（否则用户填 `CN=SignPath Foundation` 永远匹配不上 CN 值）。
+ */
+export function parseSignerCandidates(expected: string): string[] {
+  const out: string[] = []
+  for (const raw of splitRespectingEscapes(expected, [',', ';', '\r', '\n'])) {
+    const trimmed = raw.trim()
+    if (trimmed === '') continue
+    const stripped = unescapeDnValue(trimmed.replace(/^CN\s*=\s*/i, '')).trim()
+    if (stripped === '') continue
+    if (!out.includes(stripped)) out.push(stripped)
+  }
+  return out
+}
+
+/**
+ * 判定签名者主体是否命中用户配置的候选。
+ *
+ * ⚠️ **匹配顺序**：
+ * 1. **整串相等优先** —— 兼容「用户粘了整个 Subject 串」的既有配置
+ *    （也兼容含逗号的值：整串相等在**切分之前**判定）；
+ * 2. 否则取 Subject 的**全部 CN**，与候选逐个**相等**比较。
+ *
+ * ⚠️ **绝不做「包含」匹配**（`SignPath Foundation Evil` ≠ `SignPath Foundation`）。
+ */
+export function matchesExpectedSigner(subject: string, expected: string): boolean {
+  const normalizedSubject = normalizeSignerText(subject)
+  const normalizedExpected = normalizeSignerText(expected)
+  if (normalizedSubject === '' || normalizedExpected === '') return false
+  if (normalizedSubject === normalizedExpected) return true
+  const cns = extractCommonNames(subject).map(normalizeSignerText)
+  if (cns.length === 0) return false
+  const candidates = parseSignerCandidates(expected).map(normalizeSignerText)
+  return candidates.some((candidate) => candidate !== '' && cns.includes(candidate))
 }
 
 // ---------------------------------------------------------------------------

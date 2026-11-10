@@ -47,7 +47,7 @@ import { basename, join, resolve as resolvePath, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
-import { evaluateSignatureGate } from '../shared/update'
+import { evaluateSignatureGate, matchesExpectedSigner, parseSignerCandidates } from '../shared/update'
 import type {
   UpdateCheckResult,
   UpdateDownloadResult,
@@ -418,12 +418,20 @@ export async function verifyAuthenticode(
       reason: '安装包有代码签名，但未配置「预期的代码签名者」',
     }
   }
-  if (probed.signer !== expected) {
+  // ⚠️ **T87：不再用「整串精确相等」**。
+  //    旧口径拿整个 RFC4514 Subject 串（`CN=…, O=…, C=…`）跟用户填的值比
+  //    ⇒ 用户必须**逐字符**粘贴才能匹配（手打必错；证书续期后还会失效）。
+  //    ⇒ 现在按**共享口径**（`shared/update.ts` 的 `matchesExpectedSigner`）：
+  //      ① 整串相等（兼容「粘了整个 Subject」的既有配置）；
+  //      ② 否则取 Subject 的**全部 CN** 与候选**相等**比较。
+  //    ⇒ **绝不做「包含」匹配**：`CN=SignPath Foundation Evil` 骗不过去。
+  if (!matchesExpectedSigner(probed.signer, expected)) {
+    const candidates = parseSignerCandidates(expected).join(' / ')
     return {
       ok: false,
       status: probed.status,
       signer: probed.signer,
-      reason: `签名者与预期不符（预期 ${expected}，实际 ${probed.signer}）`,
+      reason: `签名者与预期不符（预期 ${candidates || expected}，实际 ${probed.signer}）`,
     }
   }
   return { ok: true, status: probed.status, signer: probed.signer, reason: null }

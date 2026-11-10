@@ -4,6 +4,41 @@
 
 ---
 
+## 未发布 —— T87（公开产物带签名）
+
+相对 **v0.2.4** 的一次更新：**公开产物的代码签名** —— 产物改由
+[SignPath Foundation](https://signpath.org) 签发**公开 OV 签名** ⇒ 不再显示「未知发布者」，
+且在**开启了 Smart App Control 的 Windows 11** 上不再被直接拦截。
+完整说明见 [`docs/signing.md`](./signing.md)。
+
+**签名链路整体搬进 CI** —— SignPath 免费计划以「**可信构建**」为前提 ⇒
+**本机手工打包的包签不了** ⇒ 发版流程改为「CI 打包 → 送签 → 人工审批 → 校验 → 发版」。
+
+### 变更
+
+| 领域 | 内容 |
+|---|---|
+| **签名者匹配** | 「预期的代码签名者」从**整串精确相等**改成 **CN 相等 + 多候选**（逗号 / 分号 / 换行分隔，自动去掉 `CN=` 前缀，大小写与空白不敏感）—— 真实证书的 Subject 必然带 O / C ⇒ 老口径根本没法用；**绝不做「包含」匹配**（`CN=SignPath Foundation Evil` 骗不过去） |
+| **一份口径** | 判定逻辑收在 `shared/update.ts`（`matchesExpectedSigner`）—— **客户端（主进程）与构建期断言工具共用同一份**；工具用 esbuild **运行时复用**它，**不复制逻辑** |
+| **断言加严** | `tools/fn-check-signature.mjs` 新增 `--expect valid`（状态必须是 `Valid`）、`--require-timestamp`（必须有 RFC 3161 时间戳）、`--expect-cn`（按 CN 匹配）；**既有选项（`--expect signed|none` / `--expect-signer` / `--pfx`）语义一字不变** |
+| **fail-closed** | `--expect` 的值拼错、`--expect-cn` / `--expect-signer` 给空值 ⇒ **直接失败**（不许「什么都不检查就通过」） |
+| **打包适配 CI** | `scripts/pack.cjs` 默认**关掉证书自动发现**（本机装了证书也会自动签 ⇒ 结果不可预期）+ 新增 `FNM_EXPECT_SIGNER_CN` 加严开关；`scripts/publish-manifest.mjs` 认 `FNM_PACK_OUTPUT`（CI 的产物在 `release-ci/`） |
+| **发版工作流** | 新增 `.github/workflows/release.yml`（手动触发，参数 `tag` + `pack_only`）：构建 → 打包 → 送签 → **人工审批** → 取回 → **校验**（`Valid` + 时间戳 + CN）→ 生成清单 → 发 Release；**任一环节不过 ⇒ 工作流失败，绝不发布** |
+| **申请材料** | 新增 `CODE_SIGNING_POLICY.md`（提交给 SignPath 审核的那份）与 `docs/signing.md`（申请 / 配置 / 发版 / 故障排查） |
+| **工程** | 单元测试 **+65** 条（新增 `test/t87-signing-assertion.test.ts`、`test/t87-ci-release-workflow.test.ts`）；Playwright E2E **34** 条（不变） |
+
+### 已知影响
+
+- ⚠️ **发布者会显示「SignPath Foundation」**（不是公司名）—— 这是免费路线的**固有代价**。
+- ⚠️ **SmartScreen 的蓝框第一版仍可能出现**：微软判的是**文件哈希的信誉** ⇒ 新证书的信誉要从零积累（通常数周、数百次真实下载）。签名真正解决的是「**不再是未知发布者**」与「**Smart App Control 的 Win11 不再直接拦截**」。
+- ⚠️ **公开 Release 的资产从 5 个变成 3 个**（安装包 / 便携版 / `latest.json`）：`latest.yml` 与 `*.blockmap` 是 electron-builder 基于**未签名** exe 算出来的 ⇒ 签名改了字节 ⇒ 它们**已失效** ⇒ 不再发布（本项目的自动更新走自己的 `latest.json` + SHA-512，本来就不用它们）。
+- ⚠️ **本机手工打包的包不会被签名**（SignPath 只签 CI 产物）—— 这是「可信构建」的要求，不是缺陷。
+- ⚠️ **每次发布要在 SignPath 平台人工点一次批准**；不批 ⇒ 工作流超时失败（artifact 保留，可重跑）。
+- ⚠️ **客户端要填「预期的代码签名者」= `SignPath Foundation`**（或含它的候选列表），否则「有签名的包」一律被拒。
+- ⚠️ **T87.7（发版 v0.2.5）仍卡在两件工程侧无法代替的事**：① 用户提交 SignPath Foundation 申请；② 批下来后填 5 个 secrets / variables。
+
+---
+
 ## 0.2.4 —— 2026-11-10
 
 相对 **v0.2.3** 的一次更新：**自动更新的签名链路** —— 「允许安装未签名的更新包」

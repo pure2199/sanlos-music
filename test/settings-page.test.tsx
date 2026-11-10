@@ -511,4 +511,23 @@ describe('设置页：自动更新的签名闸（T85）', () => {
     expect(text).toContain('允许安装未签名的更新包')
     expect(text).toContain('没填预期签名者就一律拒绝')
   })
+
+  it('T87：「预期的代码签名者」支持**多个候选**，并写明本项目的签发者', async () => {
+    stubPrefs(false)
+    render(<SettingsPanel />)
+
+    pickCategory('更新')
+    await waitFor(() => {
+      expect(screen.getByTestId('update-allow-unsigned')).toBeTruthy()
+    })
+
+    const text = document.body.textContent ?? ''
+    // ① 可填多个（换证书只改配置、不改客户端）
+    expect(text).toContain('多个')
+    expect(text).toContain('逗号')
+    // ② 写明本项目公开产物的签发者（SignPath Foundation）
+    expect(text).toContain('SignPath Foundation')
+    // ⚠️ 旧文案「本项目暂未办理代码签名证书」在拿到公开证书后就是**错的** ⇒ 必须删掉
+    expect(text).not.toContain('本项目暂未办理代码签名证书')
+  })
 })

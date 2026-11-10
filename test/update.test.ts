@@ -21,7 +21,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { evaluateSignatureGate } from '../shared/update'
+import { evaluateSignatureGate, extractCommonNames, matchesExpectedSigner, parseSignerCandidates } from '../shared/update'
 import type { UpdateFile } from '../shared/update'
 import {
   compareVersions,
@@ -430,6 +430,98 @@ describe('Authenticode 签名校验（T23）', () => {
     const result = await verifyAuthenticode('C:/占位/a.exe', 'CN=预期的人', async () => ({
       status: 'Valid',
       signer: 'CN=别的人',
+    }))
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('不符')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 签名者的**文本口径**（T87）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么要有这一组**：T85 之前，「预期的代码签名者」是拿**整串精确相等**
+//    去比 PowerShell 的完整 Subject（`CN=…, O=…, C=…`）
+//    ⇒ 用户必须**逐字符**粘贴才能匹配（手打必错；证书续期后还会失效）。
+//    ⇒ 真实公开 OV 证书的 Subject 必然带 O / C ⇒ 那个口径**没法用**。
+//
+// ⚠️ **安全边界**：匹配只认 **CN 的相等** ——
+//    **包含匹配会被 `CN=SignPath Foundation Evil` 骗过**（已钉成用例）。
+// ---------------------------------------------------------------------------
+
+describe('签名者匹配口径（T87）', () => {
+  const SUBJECT = 'CN=SignPath Foundation, O=SignPath Foundation GmbH, C=AT'
+
+  it('从 Subject 里取出全部 CN', () => {
+    expect(extractCommonNames(SUBJECT)).toEqual(['SignPath Foundation'])
+  })
+
+  it('只认 CN：O / C 不算数', () => {
+    expect(extractCommonNames('O=某公司, C=CN')).toEqual([])
+  })
+
+  it('CN 值里的转义逗号不被切开', () => {
+    expect(extractCommonNames('CN=A\\, B, O=某公司')).toEqual(['A, B'])
+  })
+
+  it('填主体名即可命中（不必抄整串）', () => {
+    expect(matchesExpectedSigner(SUBJECT, 'SignPath Foundation')).toBe(true)
+  })
+
+  it('大小写与空白不敏感', () => {
+    expect(matchesExpectedSigner(SUBJECT, '  signpath   FOUNDATION ')).toBe(true)
+  })
+
+  it('带 `CN=` 前缀也能命中', () => {
+    expect(matchesExpectedSigner(SUBJECT, 'CN=SignPath Foundation')).toBe(true)
+  })
+
+  it('粘了整个 Subject 串也能命中（兼容既有配置）', () => {
+    expect(matchesExpectedSigner(SUBJECT, SUBJECT)).toBe(true)
+  })
+
+  it('多个候选：任一命中即可（逗号 / 分号 / 换行分隔）', () => {
+    expect(matchesExpectedSigner(SUBJECT, '别的人, SignPath Foundation')).toBe(true)
+    expect(matchesExpectedSigner(SUBJECT, '别的人;SignPath Foundation')).toBe(true)
+    expect(matchesExpectedSigner(SUBJECT, '别的人\nSignPath Foundation')).toBe(true)
+  })
+
+  it('⚠️ 包含式伪造**不放行**', () => {
+    expect(matchesExpectedSigner(SUBJECT, 'SignPath Foundation Evil')).toBe(false)
+    expect(matchesExpectedSigner('CN=SignPath Foundation Evil, O=X, C=AT', 'SignPath Foundation')).toBe(false)
+  })
+
+  it('候选留空 ⇒ 不命中（有签名的包仍被拒）', () => {
+    expect(matchesExpectedSigner(SUBJECT, '')).toBe(false)
+    expect(matchesExpectedSigner(SUBJECT, '   ')).toBe(false)
+  })
+
+  it('候选集解析：去空白、去空项、去 `CN=` 前缀', () => {
+    expect(parseSignerCandidates(' A , , CN=B ;C ')).toEqual(['A', 'B', 'C'])
+  })
+
+  it('主进程：真实 Subject + 只填主体名 → 放行', async () => {
+    const result = await verifyAuthenticode('C:/占位/a.exe', 'SignPath Foundation', async () => ({
+      status: 'Valid',
+      signer: 'CN=SignPath Foundation, O=SignPath Foundation GmbH, C=AT',
+    }))
+    expect(result.ok).toBe(true)
+  })
+
+  it('主进程：填错主体 → 拒绝（理由里要说清差在哪）', async () => {
+    const result = await verifyAuthenticode('C:/占位/a.exe', '别的公司', async () => ({
+      status: 'Valid',
+      signer: 'CN=SignPath Foundation, O=SignPath Foundation GmbH, C=AT',
+    }))
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('不符')
+    expect(result.reason).toContain('别的公司')
+  })
+
+  it('主进程：伪造主体（多一个 Evil）→ 拒绝', async () => {
+    const result = await verifyAuthenticode('C:/占位/a.exe', 'SignPath Foundation', async () => ({
+      status: 'Valid',
+      signer: 'CN=SignPath Foundation Evil, O=X, C=AT',
     }))
     expect(result.ok).toBe(false)
     expect(result.reason).toContain('不符')
