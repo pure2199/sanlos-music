@@ -30,8 +30,10 @@ import type { LyricOverlayMessage, PlayerBridge, AppPrefs } from '../../shared/p
 import { parseLyricEntries, type LyricLine } from '../ui/lyrics/parse'
 import { applyAudibleLatency } from '../ui/lyrics/timing'
 import {
+  defaultEmbeddedLyricFetcher,
   defaultExternalLyricFetcher,
   loadLyricEntries,
+  type EmbeddedLyricFetcher,
   type ExternalLyricFetcher,
 } from './lyricSource'
 import { useAppPrefsStore } from '../state/appPrefsStore'
@@ -110,6 +112,13 @@ export interface LyricOverlayOptions {
    */
   external?: ExternalLyricFetcher | null
   /**
+   * **音频内嵌歌词**取法（T83）。
+   *
+   * ⚠️ **可缺省** → 不查内嵌（既有单测的行为完全不变）。
+   * ⚠️ 不传时走**默认取法**（IPC 到主进程）；桌面壳里桥存在 → 默认会查。
+   */
+  embedded?: EmbeddedLyricFetcher | null
+  /**
    * 歌词来源的**优先级**（T70）：`online-first`（线上优先）/ `local-first`（本地优先）。
    *
    * ⚠️ 缺省 = 读 `useAppPrefsStore` 的当前值（**每次取词时读一次**——
@@ -147,6 +156,14 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
    */
   const external: ExternalLyricFetcher | null =
     options.external === undefined ? defaultExternalLyricFetcher() : options.external
+  /**
+   * **音频内嵌歌词**取法（T83）。
+   *
+   * ⚠️ `options.embedded` 显式给 `null` = **明确不查内嵌**；
+   *    没给这个键 → 用**默认取法**（IPC 到主进程；单测里没有桥 → `null` → 不查）。
+   */
+  const embedded: EmbeddedLyricFetcher | null =
+    options.embedded === undefined ? defaultEmbeddedLyricFetcher() : options.embedded
   /**
    * 歌词来源优先级（T70）。
    *
@@ -232,7 +249,7 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
           album: song.album,
           duration: song.duration,
         },
-        { api, external: external, priority: priority() },
+        { api, external: external, embedded: embedded, priority: priority() },
       )
       // 期间又切了歌 → 这份歌词已经过时，丢弃。
       if (token !== fetchToken) return

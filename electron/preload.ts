@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { FnBridge } from '../shared/bridge'
+import { toEmbeddedLyricText } from '../shared/embeddedLyric'
 import { sanitizeSpectrumBins } from '../shared/spectrum'
 import type {
   DownloadTask,
@@ -233,6 +234,17 @@ const fnPlayer: PlayerBridge = {
   // ⚠️ 渲染进程**只发请求**：外部歌词的抓取**全在主进程**——
   //    渲染进程**不碰网络**，也**不能指定要抓哪个地址**（只报歌名 / 歌手 / 时长）。
   fetchExternalLyric: (query) => ipcRenderer.invoke('lyric:fetch', query),
+  // -------------------------------------------------------------------------
+  // 音频内嵌歌词（T83）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 渲染进程**只报曲目 id**：读文件 / 取流**全在主进程**——
+  //    渲染进程**不碰文件系统**，也**不能指定路径**。
+  // ⚠️ **必须在这里适配形状**：主进程回的是 `{ content, layer }`（对象），
+  //    而桥的契约是 `Promise<string>` ⇒ 不适配的话渲染层会拿到对象、
+  //    被判成「没有内嵌歌词」⇒ **静默失效**（实测踩过，见 `shared/embeddedLyric.ts`）。
+  readEmbeddedLyric: async (id) =>
+    toEmbeddedLyricText(await ipcRenderer.invoke('lyric:embedded', { id })),
 }
 
 contextBridge.exposeInMainWorld('fnPlayer', fnPlayer)

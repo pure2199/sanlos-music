@@ -150,6 +150,10 @@ function fakeBridge(): {
     getAppVersion() {
       return Promise.resolve('0.0.0-test')
     },
+    // ⚠️ T83：桥多了 `readEmbeddedLyric`（读内嵌歌词只能由主进程做）——这里给个空的。
+    readEmbeddedLyric() {
+      return Promise.resolve('')
+    },
     pushState(snapshot) {
       pushed.push(snapshot)
     },

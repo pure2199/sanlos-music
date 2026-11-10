@@ -53,8 +53,10 @@ import type { LyricSource } from '../../shared/lyricProvider'
 import { usePlayerStore } from '../state/playerStore'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import {
+  defaultEmbeddedLyricFetcher,
   defaultExternalLyricFetcher,
   loadLyricEntries,
+  type EmbeddedLyricFetcher,
   type ExternalLyricFetcher,
 } from '../player/lyricSource'
 import { LyricView } from '../ui/lyrics/LyricView'
@@ -84,6 +86,12 @@ export interface FullPlayerPageProps {
    * ⚠️ **可缺省** → 没有桥时**不查外部**（既有单测的行为完全不变）。
    */
   externalLyric?: ExternalLyricFetcher | null
+  /**
+   * **音频内嵌歌词**取法（T83；可注入，缺省走 IPC 到主进程）。
+   *
+   * ⚠️ **可缺省** → 没有桥时**不查内嵌**（既有单测的行为完全不变）。
+   */
+  embeddedLyric?: EmbeddedLyricFetcher | null
   /** 关闭回调。 */
   onClose?: () => void
   /** 附加类名。 */
@@ -247,6 +255,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     store = usePlayerStore,
     lyricApi: api = lyricApi,
     externalLyric,
+    embeddedLyric,
     onClose,
     className,
   } = props
@@ -266,6 +275,10 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
    * **实际命中的那个线上源**（T73）—— 如实显示，不装作是首选源。
    */
   const [lyricSourceUsed, setLyricSourceUsed] = useState<LyricSource | null>(null)
+  /**
+   * **实际命中的来源是不是「音频内嵌」**（T83）—— 如实显示，不装作是别的源。
+   */
+  const [lyricEmbedded, setLyricEmbedded] = useState(false)
   const [tint, setTint] = useState<string | null>(null)
   /** 取色重试次数（失败后延迟重试；见 `MAX_TINT_ATTEMPTS`）。 */
   const [tintAttempt, setTintAttempt] = useState(0)
@@ -334,6 +347,14 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   const [externalFetcher] = useState<ExternalLyricFetcher | null>(() =>
     externalLyric === undefined ? defaultExternalLyricFetcher() : externalLyric,
   )
+  /**
+   * **音频内嵌歌词**取法（T83）。
+   *
+   * ⚠️ 同上：用**惰性初始化**拿稳定引用（每次渲染新建函数会让效果重跑）。
+   */
+  const [embeddedFetcher] = useState<EmbeddedLyricFetcher | null>(() =>
+    embeddedLyric === undefined ? defaultEmbeddedLyricFetcher() : embeddedLyric,
+  )
 
   // --- 歌词：拉取 + 用 Task 12 的入口解析合并 --------------------------------
   useEffect(() => {
@@ -342,6 +363,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
       setLyricStatus('idle')
       setLyricReason(null)
       setLyricSourceUsed(null)
+      setLyricEmbedded(false)
       return
     }
     let cancelled = false
@@ -349,13 +371,14 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     setRawLines([])
     setLyricReason(null)
     setLyricSourceUsed(null)
+    setLyricEmbedded(false)
     // ⚠️ **优先级由 `lyricPriority` 决定**（T70：缺省「线上优先」，
     //    线上匹配不上 / 报错 / 超时就回落本地）；线上源只回 LRC 文本，
     //    这里包成条目后仍交给**现有**的 `parseLyricEntries`（解析逻辑一行不改）。
     loadLyricEntries(
       songId,
       { title: songTitle, artist: songArtist, album: songAlbum, duration: songDuration },
-      { api, external: externalFetcher, priority: lyricPriority },
+      { api, external: externalFetcher, embedded: embeddedFetcher, priority: lyricPriority },
     )
       .then((result) => {
         if (cancelled) return
@@ -363,6 +386,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
         setLyricReason(result.reason)
         // ⚠️ T73：源链是「依次试」的 ⇒ 命中的**未必**是用户选的那个 ⇒ 如实显示。
         setLyricSourceUsed(result.externalSource ?? null)
+        // ⚠️ T83：**内嵌**也是一个来源 ⇒ 界面要**如实显示**（不装作是线上源）。
+        setLyricEmbedded(result.origin === 'embedded')
         // ⚠️ 有歌词 → `ready`；没歌词**且有原因** → `error`（如实显示原因）；
         //    没歌词**也没原因** → `ready` + 空行 → 界面显示「暂无歌词」。
         setLyricStatus(result.entries.length > 0 || !result.reason ? 'ready' : 'error')
@@ -380,6 +405,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     api,
     songId,
     externalFetcher,
+    embeddedFetcher,
     lyricPriority,
     // ⚠️ T73：源 / 模板变了 ⇒ **重新取词**（页面开着也要变）。
     lyricSource,
@@ -516,7 +542,10 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
             <>
               {lyricBody}
               {/* ⚠️ T73：如实显示**实际命中的那个源**（源链依次试，未必是首选）。 */}
-              {lyricSourceUsed ? (
+              {/* ⚠️ T83：**内嵌**也是一个来源 ⇒ 单独一行如实显示。 */}
+              {lyricEmbedded ? (
+                <p className="fnm-fullplayer__status">歌词来源：音频内嵌</p>
+              ) : lyricSourceUsed ? (
                 <p className="fnm-fullplayer__status">歌词来源：{SOURCE_LABEL[lyricSourceUsed]}</p>
               ) : null}
             </>

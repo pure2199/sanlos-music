@@ -712,4 +712,17 @@ export interface PlayerBridge {
    * @param query 歌名 / 歌手 / 专辑 / 时长（**只当匹配线索**，不是地址）。
    */
   fetchExternalLyric(query: ExternalLyricQuery): Promise<ExternalLyricResult>
+  // -------------------------------------------------------------------------
+  // 音频内嵌歌词（T83）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **渲染层只发请求、只收结果**：读文件 / 取流**全在主进程**——
+  //    渲染层**不碰文件系统**，也**不能指定路径**（只报曲目 id）。
+  /**
+   * 读这个曲目的**内嵌歌词**（`lyric:embedded`）。
+   *
+   * @param id 曲目 id（`local:…` 或 NAS 的 guid）。
+   * @returns LRC 文本；**没有内嵌歌词 ⇒ 空串**（**永不抛**）。
+   */
+  readEmbeddedLyric(id: string): Promise<string>
 }

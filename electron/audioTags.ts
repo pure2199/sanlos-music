@@ -44,6 +44,13 @@ export interface AudioTags {
   album?: string
   /** 时长（**秒**）。 */
   duration?: number
+  /**
+   * **内嵌歌词**（标准 LRC 文本）。
+   *
+   * ⚠️ **可选字段、缺省 = 没有歌词** ⇒ 既有对象与既有测试**一字不改**。
+   * ⚠️ 内容**可能含逐字标签**（`<mm:ss.xxx>`）⇒ 交给现有解析器即可自动进卡拉OK。
+   */
+  lyrics?: string
 }
 
 /**
@@ -214,6 +221,222 @@ function decodeTextFrame(data: Buffer): string {
 }
 
 // ---------------------------------------------------------------------------
+// 内嵌歌词（USLT / SYLT / Vorbis 注释 / MP4 ©lyr）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **一律转成「标准 LRC 文本」再交出去**：
+//    渲染层的解析器（`src/ui/lyrics/parse.ts`）早就会吃 `<mm:ss.xxx>` 逐字标签
+//    ⇒ 这里只要把二进制形态翻译成 LRC，**渲染层一行都不用改**。
+//
+// ⚠️ **不引新依赖**（硬约束）⇒ 全部手写。
+
+/**
+ * `SYLT` 判「行模式」的阈值：片段去空白后的长度**中位数 ≥ 它** ⇒ 每个片段是一整行。
+ *
+ * ⚠️ **启发式**（真实标签没有「这是行还是词」的标志位）：
+ *    真实标签里「一整行」通常 ≥ 10 字，「一个词」通常 ≤ 6 字 ⇒ 取 12。
+ */
+export const SYLT_LINE_MODE_MEDIAN = 12
+
+/** 毫秒 → `mm:ss.mmm`（LRC 时间标签的内容部分；**毫秒精度**不丢）。 */
+function formatLrcClock(ms: number): string {
+  const total = Math.max(0, Math.round(ms))
+  const minutes = Math.floor(total / 60000)
+  const seconds = Math.floor((total % 60000) / 1000)
+  const millis = total % 1000
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`
+}
+
+/** 去掉 NUL（**不 trim**）—— 词条之间的空格要原样留着。 */
+function stripNul(value: string): string {
+  return value.replace(/\u0000/g, '')
+}
+
+/**
+ * 按 ID3 编码读一个「以终止符结尾的字符串」。
+ *
+ * ⚠️ UTF-16（编码 1 / 2）的终止符是**两个** 0x00。
+ * ⚠️ 没找到终止符 → 剩下的**全算文本**（宁可多读，不要丢）。
+ */
+function readTerminatedString(
+  buffer: Buffer,
+  offset: number,
+  encoding: number,
+): { text: string; next: number } {
+  const wide = encoding === 1 || encoding === 2
+  const width = wide ? 2 : 1
+  let end = offset
+  for (;;) {
+    if (end + width > buffer.length) {
+      return { text: decodeText(buffer.subarray(offset), encoding), next: buffer.length }
+    }
+    const terminator = wide
+      ? byteAt(buffer, end) === 0 && byteAt(buffer, end + 1) === 0
+      : byteAt(buffer, end) === 0
+    if (terminator) break
+    end += width
+  }
+  return { text: decodeText(buffer.subarray(offset, end), encoding), next: end + width }
+}
+
+/**
+ * 解析 ID3v2 的 `USLT` 帧（unsynchronised lyrics = **无同步**的歌词文本）。
+ *
+ * 帧体：编码(1) + 语言(3) + 内容描述符（按编码终止）+ 歌词文本（按编码终止）。
+ *
+ * @param data 帧体（**不含**帧头）。
+ * @returns LRC 文本；没有 / 读不出来 → `undefined`。
+ */
+export function parseUsltFrame(data: Buffer): string | undefined {
+  if (data.length < 6) return undefined
+  const encoding = byteAt(data, 0)
+  // 语言 3 字节（`offset 1..3`）跳过。
+  const descriptor = readTerminatedString(data, 4, encoding)
+  const lyrics = readTerminatedString(data, descriptor.next, encoding)
+  const text = stripNul(lyrics.text).trim()
+  return text.length > 0 ? text : undefined
+}
+
+/** `SYLT` 的一条条目。 */
+interface SyltEntry {
+  /** 文本（**保留空格**：词之间的空白要原样留在逐字标签之间）。 */
+  text: string
+  /** 时间戳（**毫秒**）。 */
+  timeMs: number
+}
+
+/**
+ * 解析 ID3v2 的 `SYLT` 帧（synchronised lyrics = **逐字同步**歌词）⇒ 转成增强 LRC。
+ *
+ * 帧体：编码(1) + 语言(3) + 时间戳格式(1) + 内容类型(1) + 描述符（按编码终止）
+ *      + 重复 { 文本（按编码终止） + 时间戳(4 字节大端) }。
+ *
+ * ⚠️ **只支持「绝对时间（毫秒）」**（时间戳格式 = 1）；
+ *    MPEG 帧号格式（= 2）需要帧率，**猜不得** ⇒ 整帧放弃。
+ *
+ * @param data 帧体（**不含**帧头）。
+ * @returns 增强 LRC 文本；没有 / 读不出来 → `undefined`。
+ */
+export function parseSylltFrame(data: Buffer): string | undefined {
+  if (data.length < 7) return undefined
+  const encoding = byteAt(data, 0)
+  const timeFormat = byteAt(data, 4)
+  if (timeFormat !== 1) return undefined
+  const descriptor = readTerminatedString(data, 6, encoding)
+  const entries: SyltEntry[] = []
+  let offset = descriptor.next
+  while (offset < data.length) {
+    const text = readTerminatedString(data, offset, encoding)
+    offset = text.next
+    if (offset + 4 > data.length) break
+    entries.push({ text: stripNul(text.text), timeMs: readUint32BE(data, offset) })
+    offset += 4
+  }
+  if (!entries.length) return undefined
+  return syltEntriesToLrc(entries)
+}
+
+/** 词模式下的一行。 */
+interface SyltLine {
+  /** 行时间（毫秒）= 行内第一个词的时间。 */
+  timeMs: number
+  /** 行内的词。 */
+  parts: SyltEntry[]
+}
+
+/**
+ * 把词模式的 `SYLT` 条目聚成行。
+ *
+ * ⚠️ **断行规则（写死）**：
+ * - 条目文本里**含 `\n`** ⇒ 那里断行（写标签的工具用它标行尾）；
+ * - 条目文本**以 `\n` 结尾** ⇒ 该条目结束一行；
+ * - **全程没有 `\n`** ⇒ 启发式：片段以 CJK 句读结尾且累计 ≥ 12 字 ⇒ 断行；
+ *   累计 ≥ 32 字 ⇒ 兜底断行。
+ */
+function splitSyltWordsIntoLines(entries: SyltEntry[]): SyltLine[] {
+  const hasNewline = entries.some((entry) => entry.text.includes('\n'))
+  const lines: SyltLine[] = []
+  let current: SyltLine | null = null
+  let length = 0
+
+  const flush = (): void => {
+    current = null
+    length = 0
+  }
+
+  for (const entry of entries) {
+    const pieces = entry.text.split('\n')
+    for (let i = 0; i < pieces.length; i++) {
+      const piece = pieces[i]!
+      const isLast = i === pieces.length - 1
+      if (piece.length > 0) {
+        if (!current) {
+          current = { timeMs: entry.timeMs, parts: [] }
+          lines.push(current)
+        }
+        current.parts.push({ text: piece, timeMs: entry.timeMs })
+        length += piece.replace(/\s+/g, '').length
+      }
+      const explicitBreak = !isLast
+      const entryEndsLine = isLast && entry.text.endsWith('\n')
+      const heuristicBreak =
+        !hasNewline &&
+        isLast &&
+        ((length >= 12 && /[，。！？；、]$/.test(piece.trim())) || length >= 32)
+      if (explicitBreak || entryEndsLine || heuristicBreak) flush()
+    }
+  }
+  return lines
+}
+
+/**
+ * `SYLT` 条目 → **增强 LRC** 文本（`<mm:ss.xxx>` 逐字标签）。
+ *
+ * ⚠️ **行 / 词形态判定是启发式**（见 {@link SYLT_LINE_MODE_MEDIAN}）：
+ *    行模式 ⇒ 每个条目一行（行级时间戳）；
+ *    词模式 ⇒ 逐字标签（**真逐字**）⇒ 交给现有解析器即可自动进卡拉OK。
+ */
+function syltEntriesToLrc(entries: SyltEntry[]): string {
+  if (!entries.length) return ''
+  const sorted = [...entries].sort((a, b) => a.timeMs - b.timeMs)
+  const lengths = sorted
+    .map((entry) => entry.text.replace(/\s+/g, '').length)
+    .sort((a, b) => a - b)
+  const median = lengths[Math.floor(lengths.length / 2)] ?? 0
+  if (median >= SYLT_LINE_MODE_MEDIAN) {
+    // 行模式：条目内的换行用空格接上（**不编造时间戳**、内容不丢）。
+    return sorted
+      .map((entry) => `[${formatLrcClock(entry.timeMs)}]${entry.text.replace(/\r?\n/g, ' ')}`)
+      .join('\n')
+  }
+  return splitSyltWordsIntoLines(sorted)
+    .map((line) => {
+      if (line.parts.length === 1) {
+        const only = line.parts[0]!
+        return `[${formatLrcClock(only.timeMs)}]${only.text}`
+      }
+      const content = line.parts
+        .map((part) => `<${formatLrcClock(part.timeMs)}>${part.text}`)
+        .join('')
+      return `[${formatLrcClock(line.timeMs)}]${content}`
+    })
+    .join('\n')
+}
+
+/**
+ * 从 Vorbis 注释里取内嵌歌词。
+ *
+ * ⚠️ `LYRICS` 优先（它可能带同步信息），空则取 `UNSYNCEDLYRICS`。
+ */
+function pickVorbisLyrics(comments: Map<string, string>): string | undefined {
+  const lyrics = comments.get('LYRICS')
+  if (lyrics && lyrics.trim().length > 0) return lyrics
+  const unsynced = comments.get('UNSYNCEDLYRICS')
+  if (unsynced && unsynced.trim().length > 0) return unsynced
+  return undefined
+}
+
+// ---------------------------------------------------------------------------
 // ID3v2
 // ---------------------------------------------------------------------------
 
@@ -330,12 +553,22 @@ export function parseId3v2(buffer: Buffer): Id3v2Result {
       if (!tags.artist) tags.artist = decodeTextFrame(data)
     } else if (id === 'TALB' || id === 'TAL') {
       if (!tags.album) tags.album = decodeTextFrame(data)
+    } else if (id === 'USLT' || id === 'ULT') {
+      // ⚠️ `USLT` 是**行级**歌词 ⇒ 只在没有更好的（`SYLT`）时用。
+      if (!tags.lyrics) {
+        const lyrics = parseUsltFrame(data)
+        if (lyrics) tags.lyrics = lyrics
+      }
+    } else if (id === 'SYLT' || id === 'SLT') {
+      // ⚠️ `SYLT` 是**真逐字** ⇒ 无条件覆盖 `USLT`（行级）。
+      const lyrics = parseSylltFrame(data)
+      if (lyrics) tags.lyrics = lyrics
     }
 
     offset = dataStart + size
   }
 
-  return { title: tags.title, artist: tags.artist, album: tags.album, tagSize }
+  return { title: tags.title, artist: tags.artist, album: tags.album, lyrics: tags.lyrics, tagSize }
 }
 
 // ---------------------------------------------------------------------------
@@ -584,6 +817,9 @@ export async function parseFlacTags(reader: TagReader, head: Buffer): Promise<Au
     if (title) tags.title = title
     if (artist) tags.artist = artist
     if (album) tags.album = album
+    // ⚠️ **内嵌歌词**（`LYRICS` / `UNSYNCEDLYRICS`）。
+    const lyrics = pickVorbisLyrics(comments)
+    if (lyrics) tags.lyrics = lyrics
   }
   if (sampleRate > 0 && totalSamples > 0) {
     tags.duration = totalSamples / sampleRate
@@ -774,6 +1010,9 @@ export async function parseOggTags(reader: TagReader, head: Buffer): Promise<Aud
   if (title) tags.title = title
   if (artist) tags.artist = artist
   if (album) tags.album = album
+  // ⚠️ **内嵌歌词**（`LYRICS` / `UNSYNCEDLYRICS`）。
+  const lyrics = pickVorbisLyrics(comments)
+  if (lyrics) tags.lyrics = lyrics
 
   // 时长：末页 granule。
   const tailStart = Math.max(0, reader.size - TAG_TAIL_BYTES)
@@ -949,6 +1188,8 @@ async function findMp4Atom(
 const MP4_TAG_TITLE = '\u00a9nam'
 const MP4_TAG_ARTIST = '\u00a9ART'
 const MP4_TAG_ALBUM = '\u00a9alb'
+/** ⚠️ **内嵌歌词**（iTunes 写的是 `©lyr`）。 */
+const MP4_TAG_LYRICS = '\u00a9lyr'
 
 /** 解析 `ilst` 里的条目 → 标签码 → 文本值。 */
 function parseMp4Ilst(buffer: Buffer, ilst: Mp4Atom): Map<string, string> {
@@ -1021,6 +1262,9 @@ export async function parseMp4Tags(reader: TagReader, head: Buffer): Promise<Aud
         if (title) tags.title = title
         if (artist) tags.artist = artist
         if (album) tags.album = album
+        // ⚠️ **内嵌歌词**（`©lyr`）。
+        const lyrics = items.get(MP4_TAG_LYRICS)
+        if (lyrics) tags.lyrics = lyrics
       }
     }
   }
@@ -1153,6 +1397,21 @@ export async function parseWavTags(reader: TagReader, head: Buffer): Promise<Aud
     }
   }
 
+  // ⚠️ **T83：WAV 的 `ID3 ` 块**（有些工具会往 WAV 里塞 ID3v2）⇒ 复用 ID3v2 解析器。
+  //    跟 AIFF 一样：`ID3 ` 块**就是** ID3v2 ⇒ 内嵌歌词（`USLT` / `SYLT`）白捡。
+  const wavId3 = await findRiffChunk(reader, 12, reader.size, 'ID3 ', true)
+  if (wavId3 && wavId3.dataSize > 10) {
+    const body = await reader.read(
+      wavId3.dataOffset,
+      Math.min(wavId3.dataSize, TAG_METADATA_MAX_BYTES),
+    )
+    const parsed = parseId3v2(body)
+    if (parsed.title && !tags.title) tags.title = parsed.title
+    if (parsed.artist && !tags.artist) tags.artist = parsed.artist
+    if (parsed.album && !tags.album) tags.album = parsed.album
+    if (parsed.lyrics) tags.lyrics = parsed.lyrics
+  }
+
   return tags
 }
 
@@ -1207,6 +1466,8 @@ export async function parseAiffTags(reader: TagReader, head: Buffer): Promise<Au
     if (parsed.title) tags.title = parsed.title
     if (parsed.artist) tags.artist = parsed.artist
     if (parsed.album) tags.album = parsed.album
+    // ⚠️ **内嵌歌词**（AIFF 的 `ID3 ` 块就是 ID3v2 ⇒ 白捡）。
+    if (parsed.lyrics) tags.lyrics = parsed.lyrics
   }
 
   return tags
@@ -1240,6 +1501,8 @@ export async function readTagsFromReader(reader: TagReader): Promise<AudioTags |
     if (parsed.title) tags.title = parsed.title
     if (parsed.artist) tags.artist = parsed.artist
     if (parsed.album) tags.album = parsed.album
+    // ⚠️ **内嵌歌词**（`USLT` 行级 / `SYLT` 真逐字）。
+    if (parsed.lyrics) tags.lyrics = parsed.lyrics
     const duration = await readMpegDuration(reader, parsed.tagSize, reader.size)
     if (duration !== undefined && duration > 0) tags.duration = duration
     return tags

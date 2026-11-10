@@ -73,6 +73,7 @@ import { dirname, join } from 'node:path'
 import { API_PREFIX, CODE_OK, RELAY_DOMAIN_SUFFIX } from '../shared/constants'
 import type { AuthSessionInfo, CandidateInfo, ServerInfo } from '../shared/bridge'
 import { sanitizeEqPrefsPayload } from '../shared/eqPrefs'
+import type { EmbeddedLyricPayload } from '../shared/embeddedLyric'
 import type { FfmpegFallbackResult, FfmpegStatus } from '../shared/ffmpeg'
 import {
   LYRIC_PRIORITIES,
@@ -101,6 +102,7 @@ import { sanitizeSpectrumBins } from '../shared/spectrum'
 import { APP_INFO } from '../shared/appInfo'
 import { buildCandidates, fetchConnectionParams, hostOf, normalizeBase } from './connection'
 import { TrustedHosts } from './cert'
+import { readEmbeddedLyric, type EmbeddedLyricDeps } from './embeddedLyric'
 import { openExternalUrl } from './externalLinks'
 import { probeCandidates } from './probe'
 import { authx } from './sign'
@@ -1510,6 +1512,12 @@ export interface LyricIpcOptions {
   prefs: PrefsStore
   /** 歌词源提供器（真正的逻辑在 `electron/lyricProvider.ts`）。 */
   provider: LyricProvider
+  /**
+   * **音频内嵌歌词**的依赖（T83）。
+   *
+   * ⚠️ **可缺省** ⇒ 没接就返回空串（内嵌这一层当没有）。
+   */
+  embedded?: EmbeddedLyricDeps
 }
 
 /**
@@ -1553,6 +1561,26 @@ export function registerLyricIpc(opts: LyricIpcOptions): void {
 
     const query: ExternalLyricQuery = { title, artist, album, duration }
     return await provider.fetchExternalLyric(source, lyric.template ?? '', query)
+  })
+
+  // -------------------------------------------------------------------------
+  // 音频内嵌歌词（T83）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **渲染进程是不可信输入**：它只能报**曲目 id**，
+  //    **不能报路径** ⇒ 路径一律由主进程自己解析（下载索引 → 本地登记表）。
+  // ⚠️ **永不抛**：读不到 / 没有 ⇒ `{ content: '', layer: 'none' }`。
+  ipcMain.handle('lyric:embedded', async (_event, arg): Promise<EmbeddedLyricPayload> => {
+    const record = asRecord(arg)
+    const id = readString(record?.['id']) ?? ''
+    if (id === '') return { content: '', layer: 'none' }
+    const embedded = opts.embedded
+    if (!embedded) return { content: '', layer: 'none' }
+    try {
+      return await readEmbeddedLyric(id, embedded)
+    } catch {
+      return { content: '', layer: 'none' }
+    }
   })
 }
 

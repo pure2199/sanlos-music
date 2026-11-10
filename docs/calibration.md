@@ -3672,3 +3672,110 @@ T57 轮全面复验后，仓库与工作区里散落着**用户私有的标识**
 - ⚠️ **自动更新默认出网**：不填地址也能「检查更新」⇒ 会访问 GitHub；
 - ⚠️ 本项目**仍未办理代码签名证书** ⇒ 默认只允许下载；
 - ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验等老待办**不变**。
+
+## 四十五、T83：音频内嵌歌词（读音频文件里自带的标签）
+
+**一句话**：歌曲文件里**自带**的歌词也能用了 —— 主进程直接读音频文件的**内嵌标签**，
+`SYLT` 的**真逐字**自动进卡拉OK，只有行级的按整行显示（**不假装逐字**）。
+
+### 结论
+
+| 项 | 内容 |
+|---|---|
+| 读哪些标签 | **ID3v2 `USLT`（行级）/ `SYLT`（真逐字）/ Vorbis 注释 `LYRICS`·`UNSYNCEDLYRICS` / MP4 `©lyr` / WAV·AIFF 里的 `ID3 ` 块**（**手写解析器，不引新依赖**） |
+| 怎么用 | 一律转成**标准 LRC 文本**再交出去 ⇒ 渲染层解析器（`src/ui/lyrics/parse.ts`）**一行不改**；`SYLT` 转成增强 LRC（`<mm:ss.xxx>` 逐字标签）⇒ 真逐字自动进卡拉OK |
+| 覆盖哪三层 | ① **本地导入**的歌 ② **已下载**的 NAS 曲目（读**原文件**，标签最全）③ **NAS 在线播放**（`Range: bytes=0-65535`，**读满即断开**） |
+| 优先级 | 内嵌算**本地侧**、排在 NAS 前面（用户 2026-11-10 拍板）：「线上优先」= **线上 → 内嵌 → NAS**；「本地优先」= **内嵌 → NAS → 线上**；**不用外部源**时内嵌照用（**不需要外网**） |
+| 界面 | 全屏歌词页**如实显示**「歌词来源：音频内嵌」；设置里的「歌词来源」下拉**不加**内嵌（内嵌不是外部源） |
+
+### ⚠️ 踩坑一（本次最隐蔽）：**跨进程形状不一致 ⇒ 静默失效**
+
+第一次写完 E2E 是**红的**：歌词区一直显示「暂无歌词」，而页面底部还挂着
+「该音频无法播放：当前内核不支持该格式」。**两个症状，两个独立的根因**。
+
+查「内嵌歌词没取到」时，主进程探针显示 `readEmbeddedLyric` **明明返回了歌词**，
+渲染进程直接调桥也**拿得到** ⇒ 断点落在**主进程与渲染层之间**。
+
+真因：**IPC 回的是对象**（`{ content, layer }`），而桥的契约是
+`Promise<string>` ⇒ preload **原样透传** ⇒ 渲染层拿到的是对象，
+被 `typeof content === 'string'` 判成「**没有**内嵌歌词」⇒
+**静默失效：没有任何报错，界面只是「暂无歌词」**。
+
+修法（两处，缺一不可）：
+
+1. `shared/embeddedLyric.ts`（新）：**跨进程契约**——`toEmbeddedLyricText()`
+   把载荷适配成字符串；preload **必须**用它（`electron/preload.ts`）；
+2. `test/embedded-lyric.test.ts`：**把整条链串起来断言**
+   （真 IPC 处理器 → 真适配器 → 真渲染层取法）⇒ 任何一环的形状漂移都必红。
+
+⚠️ **教训**：`typeof x === 'string'` 这种**兜底**会把形状漂移变成**静默降级**。
+跨进程边界上**要么形状对得上，要么让测试红**——不能靠兜底糊过去。
+
+### ⚠️ 踩坑二：mock 的 WAV **不合法** ⇒ Chromium 根本播不了
+
+第二个根因在**夹具**：给 mock 的 WAV 塞 `ID3 ` 块时，**没按 RIFF 规范**处理
+**奇数长度**的块（规范要求后面跟**一个补齐字节**，且**不计入**块大小）。
+
+后果：按规范走块结构的解析器会**错位一字节** ⇒ 读到的下一个块 id 变成
+`ata.`（而不是 `data`）⇒ Chromium 找不到 `data` 块 ⇒
+`NotSupportedError` ⇒「该音频无法播放：当前内核不支持该格式」。
+
+⚠️ **我们自己的解析器没事**（`ID3 ` 块在 `data` **之前**，找到它就不用再走块链）
+⇒ **单测全绿、E2E 却红**：这正是「**mock 必须自己也是合法的**」的又一个例子。
+
+修法：mock 按规范补齐字节；并新增 `test/t83-mock-wav.test.ts`
+（**走真实 HTTP 路径**取流 ⇒ 按规范走一遍块结构 ⇒ 断言 `fmt ` / `ID3 ` / `data` **按序可见**）
+⇒ 夹具再坏，**单测就会红**，不用等 E2E。
+
+### 未实测（**如实标注，不写死成契约**）
+
+| # | 待校准 | 现状 | 兜底 |
+|---|---|---|---|
+| ① | NAS `GET track/stream?guid=` 是否**透传原始字节** | **未实测**（标准音质明确是服务端转 MP3 320k ⇒ **标签必丢**） | 若服务端永远转码 ⇒ ③ 层天然读不到歌词 ⇒ 功能实际生效在 **①② 两层**（本地文件 + 已下载的原文件） |
+| ② | 用户曲库里到底多少歌带内嵌歌词 | **未抽样** | 无（不影响实现，只影响收益） |
+| ③ | `SYLT` 的行 / 词形态分布 | **未抽样**（形态判定是**启发式**：片段去空白长度中位数 ≥ 12 ⇒ 行模式） | 规则写死 + 单测钉住；判错时**退化成行级**（不崩、不假精细） |
+| ④ | `SYLT` 的时间戳格式字段（`1` = 绝对毫秒 / `2` = MPEG 帧号） | **未实测** | 只支持 `1`；`2` ⇒ 该帧**放弃**（不猜帧率） |
+
+### 改动文件
+
+| 文件 | 改什么 |
+|---|---|
+| `electron/audioTags.ts` | `AudioTags` 加 `lyrics?`；ID3v2 帧循环接入 `USLT`/`ULT` + `SYLT`/`SLT`（`SYLT` 无条件覆盖 `USLT`）；Vorbis 取 `LYRICS`→`UNSYNCEDLYRICS`；MP4 取 `©lyr`；**WAV 的 `ID3 ` 块**（复用 ID3v2 解析器）；各容器分支透传 `lyrics` |
+| `electron/embeddedLyric.ts`（新） | 主进程模块：曲目 id → LRC 文本；三条来源分支；**永不抛**；`readAtMostBytes()`（读满即断开） |
+| `electron/ipc.ts` | 新增 `ipcMain.handle('lyric:embedded')`（**只收 id**，回 `{ content, layer }`，永不抛） |
+| `electron/main.ts` | `fetchStreamHead()`（`Range: bytes=0-N`）+ 把「下载索引 → 本地登记表」的路径查询接进内嵌层 |
+| `electron/preload.ts` | 暴露 `readEmbeddedLyric(id)`；**用 `toEmbeddedLyricText()` 适配载荷形状** |
+| `shared/embeddedLyric.ts`（新） | **跨进程契约**：载荷类型 + `toEmbeddedLyricText()` |
+| `shared/playerBridge.ts` | `LyricBridge` 加 `readEmbeddedLyric(id): Promise<string>` |
+| `src/player/lyricSource.ts` | `origin` 加 `'embedded'`；`toEmbeddedEntries()`；`loadLocalFirst` / `loadOnlineFirst` 插入内嵌层；`deps.embedded?` 可注入 |
+| `src/player/lyricOverlay.ts` | 悬浮窗 / 词岛也接上内嵌层 |
+| `src/pages/FullPlayerPage.tsx` | 「歌词来源：音频内嵌」如实显示 |
+| `mock-server/fixtures.ts` / `mock-server/server.ts` | 新增那首「带内嵌歌词」的歌（`t2`）+ **按 RIFF 规范**构造带 `ID3 ` 块的 WAV |
+| `test/embedded-lyric-tags.test.ts`（新） | 6 类容器的标签解析（22 条） |
+| `test/embedded-lyric.test.ts`（新） | 主进程取词 / 渲染层优先级矩阵 / **跨进程契约** / 流式层读满即断 / 渲染层不碰文件系统（23 条） |
+| `test/t83-mock-wav.test.ts`（新） | 夹具的 **RIFF 合法性**（走真实 HTTP 路径）（3 条） |
+| `test/helpers/audio-fixtures.ts`（新） | 共用夹具（登录 / 取流 / RIFF 块走查） |
+| `e2e/t83-embedded-lyric.spec.ts`（新） | 真实 Electron：内嵌歌词两行 + 来源标签 + **能播**；对照组不显示内嵌标签 |
+| `test/media-session.test.ts` | mock 桥补 `readEmbeddedLyric()`（**加桩，不删断言**） |
+
+### 验收
+
+| 项 | 结果 |
+|---|---|
+| `tsc --noEmit` | exit 0 |
+| `vitest` | **2159 passed / 103 files**（既有 2133 条**一条不删**） |
+| `build` | exit 0 |
+| `playwright` | **34 passed**（含 T83 新增 **2** 条**真实 Electron** 用例） |
+| 变异自证 | **8 条全部被抓住**（去掉 `USLT` 分支 / `SYLT` 不转逐字 / `SYLT` 丢词间空格 / 内嵌层优先级插错 / 渲染层自己读文件 / 内嵌层失败抛异常 / `LYRICS` 键取错 / 流式层无限读不 abort） |
+
+### 遗留 / 待办
+
+- ⚠️ **真机复验未做**（需要用户放三个文件）：
+  一个带 `SYLT` 的 mp3 ⇒ 必须**进卡拉OK**；
+  一个带 `LYRICS`（行级）的 flac ⇒ 必须走**整行显示**（不假装逐字）；
+  一个**没有**任何歌词标签的文件 ⇒ 行为必须**与今天一致**（仍显示「暂无歌词」）；
+- ⚠️ **NAS 服务端是否透传原始字节未实测** ⇒ 若始终转码，③ 层（在线播放）**天然读不到**歌词（①② 两层不受影响）；
+- ⚠️ **MP4 的 `moov` 常在文件尾** ⇒ 流式层读不到 `©lyr`（**如实放弃，不猜**；本地文件层不受影响）；
+- ⚠️ **全屏歌词页多了一行来源说明**（以前只有线上源 / NAS 源会显示）；
+- ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验等老待办**不变**。
+

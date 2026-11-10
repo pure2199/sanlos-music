@@ -41,6 +41,8 @@ import {
 import {
   ALBUMS,
   ARTISTS,
+  EMBEDDED_LYRIC_LRC,
+  EMBEDDED_LYRIC_SONG_GUID,
   GENRES,
   INITIAL_PLAYLIST_TRACKS,
   LYRICS,
@@ -481,6 +483,70 @@ function buildWav(): Buffer {
 let cachedWav: Buffer | null = null
 
 /**
+ * 造一个带 `ID3 ` 块的 ID3v2.3 标签（**只有 `USLT` 帧**）。
+ *
+ * ⚠️ `USLT` 帧体：编码(1) + 语言(3) + 描述符(空) + 歌词文本 + 终止符。
+ */
+function buildId3Uslt(lrc: string): Buffer {
+  const text = Buffer.from(lrc, 'utf8')
+  const payload = Buffer.concat([
+    Buffer.from([3]), // 编码 = UTF-8
+    Buffer.from('chi', 'ascii'),
+    Buffer.from([0x00]), // 内容描述符（空）
+    text,
+    Buffer.from([0x00]),
+  ])
+  const frameSize = Buffer.alloc(4)
+  frameSize.writeUInt32BE(payload.length, 0)
+  const frame = Buffer.concat([
+    Buffer.from('USLT', 'ascii'),
+    frameSize,
+    Buffer.from([0, 0]),
+    payload,
+  ])
+  const tagSize = Buffer.alloc(4)
+  const value = frame.length
+  tagSize[0] = (value >>> 21) & 0x7f
+  tagSize[1] = (value >>> 14) & 0x7f
+  tagSize[2] = (value >>> 7) & 0x7f
+  tagSize[3] = value & 0x7f
+  return Buffer.concat([
+    Buffer.from('ID3', 'ascii'),
+    Buffer.from([3, 0, 0]),
+    tagSize,
+    frame,
+  ])
+}
+
+/**
+ * 在 WAV 的 `fmt ` 之后插一个 `ID3 ` 块（T83：验「音频内嵌歌词」）。
+ *
+ * ⚠️ **必须放在 `data` 之前** —— 客户端读内嵌歌词时**只取文件头 64 KB**。
+ * ⚠️ **必须按 RIFF 规范补齐**：块数据长度为**奇数**时，后面要跟**一个补齐字节**
+ *    （**不计入**块大小）。
+ *    ⚠️ 不补 ⇒ 解析器按规范跳过这个块时会**错位一字节** ⇒ 读到的下一个块 id
+ *    变成 `ata.`（而不是 `data`）⇒ Chromium 直接报「当前内核不支持该格式」。
+ *    （实测：不补齐 ⇒ 播放失败；补齐 ⇒ 播放正常。）
+ */
+function buildWavWithId3(lrc: string): Buffer {
+  const base = buildWav()
+  const id3 = buildId3Uslt(lrc)
+  const chunkSize = Buffer.alloc(4)
+  chunkSize.writeUInt32LE(id3.length, 0)
+  const chunk = Buffer.concat([Buffer.from('ID3 ', 'ascii'), chunkSize, id3])
+  // ⚠️ RIFF：块数据为**奇数**字节 ⇒ 后面补**一个** 0x00。
+  const padded = id3.length % 2 === 1 ? Buffer.concat([chunk, Buffer.from([0x00])]) : chunk
+  // ⚠️ `base` 的布局：RIFF(4) + size(4) + WAVE(4) + fmt 块(24) + data 块 + 数据。
+  const body = Buffer.concat([base.subarray(8, 36), padded, base.subarray(36)])
+  const riffSize = Buffer.alloc(4)
+  riffSize.writeUInt32LE(body.length, 0)
+  return Buffer.concat([Buffer.from('RIFF', 'ascii'), riffSize, body])
+}
+
+/** 带 `ID3 ` 块的 WAV（**懒加载一次**）。 */
+let cachedWavWithId3: Buffer | null = null
+
+/**
  * 解析 `Range: bytes=…` 请求头。
  *
  * ⚠️ **只支持单区间**（`bytes=N-M` / `bytes=N-` / `bytes=-N`）：
@@ -697,7 +763,12 @@ export function createMockServer(): MockServer {
       sendJson(res, err(1, '歌曲不存在'))
       return
     }
-    const wav = buildWav()
+    // ⚠️ **T83**：那首「内嵌歌词」的歌 ⇒ 返回一个**带 `ID3 ` 块**的 WAV
+    //    （客户端读内嵌歌词时只取文件头 ⇒ 块必须在 `data` 之前）。
+    const wav =
+      guid === EMBEDDED_LYRIC_SONG_GUID
+        ? (cachedWavWithId3 ??= buildWavWithId3(EMBEDDED_LYRIC_LRC))
+        : buildWav()
 
     // ⚠️ **Range / 206**（T20）：拖动进度条定位靠分段请求。
     //    没有 Range 头 → 整段 200（但**必须**带 `accept-ranges: bytes`，

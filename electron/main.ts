@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, nativeImage, screen, session as electronSession } from 'electron'
 import path from 'node:path'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { stat } from 'node:fs/promises'
 
 import type {
   LyricOverlayMessage,
@@ -23,6 +24,7 @@ import {
 import { createHttpStack } from './http'
 import { attachAppShortcuts } from './appShortcuts'
 import { createLyricProvider } from './lyricProvider'
+import { readAtMostBytes } from './embeddedLyric'
 import { registerLocalMedia } from './localMedia'
 import { LOCAL_LIBRARY_FILE_NAME, LocalLibrary, readFileBytes, registerLocalLibraryIpc } from './localLibrary'
 import { registerAppSchemes } from './schemes'
@@ -521,6 +523,44 @@ if (!isPrimaryInstance) {
         return await http.fetch(request)
       }
 
+      /**
+       * 取音频流的**头一段字节**（T83：用来读内嵌歌词标签）。
+       *
+       * ⚠️ **只取头部**：容器标签都在文件开头（MP3 的 ID3 / FLAC 的注释块 / Ogg 的注释头），
+       *    64 KB 足够 ⇒ **读满立刻断开**，绝不把整首歌拉下来。
+       * ⚠️ **服务端可能无视 Range** ⇒ 那就只读我们拿到的那一段（后面的不要）。
+       *
+       * @param songId 歌曲 guid。
+       * @param byteLength 要取多少字节。
+       * @returns 头部的字节；取不到 ⇒ `null`（**永不抛**）。
+       */
+      const fetchStreamHead = async (
+        songId: string,
+        byteLength: number,
+      ): Promise<Buffer | null> => {
+        const base = session.state.base
+        const token = session.state.token
+        if (!base || !token) return null
+        try {
+          const url = `${base}${API_PREFIX}/track/stream?guid=${encodeURIComponent(songId)}`
+          const headers = new Headers()
+          headers.set('range', `bytes=0-${Math.max(0, byteLength - 1)}`)
+          const request = buildUpstreamRequest(
+            { method: 'GET', url, headers },
+            token,
+            session.state.isRelay,
+          )
+          const response = await http.fetch(request)
+          if (!response.ok) return null
+          const body = response.body
+          if (!body) return null
+          // ⚠️ **读满就断开**（逻辑在 `embeddedLyric.ts` 里 ⇒ 可单测）。
+          return await readAtMostBytes(body, byteLength)
+        } catch {
+          return null
+        }
+      }
+
       const downloads = new DownloadManager({
         fetchStream: fetchDownloadStream,
         getDownloadDir: resolveDownloadDir,
@@ -962,6 +1002,22 @@ if (!isPrimaryInstance) {
       registerLyricIpc({
         prefs,
         provider: createLyricProvider({ fetchImpl: http.fetch }),
+        // ⚠️ **T83：音频内嵌歌词**。
+        //    查找链与 `fnml://` 一致（下载索引 → 本地登记表）——
+        //    下载过的曲目拿到的是**原文件**（标签最完整）。
+        embedded: {
+          resolveTrackPath: (id) => downloads.localPath(id) ?? localLibrary.localPath(id),
+          readFileBytes,
+          statSize: async (file) => {
+            try {
+              const info = await stat(file)
+              return info.isFile() ? info.size : null
+            } catch {
+              return null
+            }
+          },
+          fetchStreamHead,
+        },
       })
 
       // 13b. 启动时按偏好恢复桌面歌词窗（上次是开着的就接着开）。

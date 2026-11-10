@@ -74,7 +74,7 @@ export interface LyricLoadResult {
   /** 歌词条目（交给 `parseLyricEntries`）。 */
   entries: LyricEntry[]
   /** 实际用到的来源。 */
-  origin: 'nas' | 'external' | 'none'
+  origin: 'nas' | 'external' | 'embedded' | 'none'
   /**
    * **实际命中的那个线上源**（T73）。
    *
@@ -104,6 +104,13 @@ export interface LyricLoadDeps {
    */
   external?: ExternalLyricFetcher | null
   /**
+   * **音频内嵌歌词**的取法（T83）。
+   *
+   * ⚠️ **可缺省**（`undefined` / `null`）⇒ 不查内嵌。
+   *    这样既有的单元测试（只注入 `api`）**行为完全不变**。
+   */
+  embedded?: EmbeddedLyricFetcher | null
+  /**
    * 歌词来源的**优先级**（T70）。
    *
    * ⚠️ **缺省 = `'online-first'`**（线上优先）—— 用户显式要求。
@@ -122,6 +129,42 @@ export interface LyricLoadDeps {
 
 /** 外部歌词包成 `LyricEntry` 用的前缀（保证 guid 不与 NAS 的撞）。 */
 const EXTERNAL_GUID_PREFIX = 'external'
+
+/** 内嵌歌词包成 `LyricEntry` 用的前缀（保证 guid 不与 NAS 的撞）。 */
+const EMBEDDED_GUID_PREFIX = 'embedded'
+
+/**
+ * **音频内嵌歌词**的取法（T83；可注入，便于单测）。
+ *
+ * ⚠️ 返回**空串** = 这个曲目没有内嵌歌词。
+ * ⚠️ **主进程做**：读文件 / 取流都在主进程（渲染层不碰文件系统）。
+ */
+export type EmbeddedLyricFetcher = (songId: string) => Promise<string>
+
+/**
+ * 把内嵌歌词文本包成 `LyricEntry[]`。
+ *
+ * ⚠️ **只有一条**（内嵌歌词没有「原文 / 翻译」之分）。
+ *
+ * @param songId 歌曲 guid（只用来拼一个不冲突的 guid）。
+ * @param content LRC 文本。
+ */
+export function toEmbeddedEntries(songId: string, content: string): LyricEntry[] {
+  const text = typeof content === 'string' ? content.trim() : ''
+  if (!text) return []
+  return [
+    {
+      guid: `${EMBEDDED_GUID_PREFIX}:${songId}`,
+      source: EMBEDDED_GUID_PREFIX,
+      content: text,
+      createdAt: null,
+      updatedAt: null,
+      // ⚠️ 内嵌歌词就是**带时间戳的 LRC**（`SYLT` 已被主进程转成增强 LRC）。
+      isLRC: true,
+      offset: 0,
+    },
+  ]
+}
 
 /**
  * 把外部源返回的原文 / 翻译包成 `LyricEntry[]`。
@@ -202,6 +245,23 @@ async function readNas(
 }
 
 /**
+ * 读**音频内嵌歌词**（T83；**永不抛**）。
+ *
+ * ⚠️ 读不到 ⇒ 当「没有」（**不该**让整个取词流程炸掉）。
+ */
+async function readEmbedded(
+  embedded: EmbeddedLyricFetcher | null | undefined,
+  songId: string,
+): Promise<LyricEntry[]> {
+  if (!embedded) return []
+  try {
+    return toEmbeddedEntries(songId, await embedded(songId))
+  } catch {
+    return []
+  }
+}
+
+/**
  * 查线上歌词，**带超时**。
  *
  * ⚠️ **抛异常也当成一种结果**（`status: 'error'`）—— 不能让 IPC 断了
@@ -238,12 +298,19 @@ async function fetchOnline(
  * 「本地优先」（Task 32 的老口径）—— **代码路径一字不改**。
  *
  * ⚠️ NAS 有歌词 → 直接用（**完全不发外部请求**）；NAS 没有 → 才查外部。
+ * ⚠️ **T83**：**内嵌歌词算「本地侧」，排在 NAS 前面**（用户 2026-11-10 拍板的方案 A）——
+ *    内嵌是**作者自己放的**，比服务端刮来的更准。
  */
 async function loadLocalFirst(
   songId: string,
   target: LyricMatchTarget,
   deps: LyricLoadDeps,
 ): Promise<LyricLoadResult> {
+  const embedded = await readEmbedded(deps.embedded, songId)
+  if (embedded.length > 0) {
+    return { entries: embedded, origin: 'embedded', reason: null }
+  }
+
   const nas = await readNas(deps.api, songId)
   if (nas.entries.length > 0) {
     return { entries: nas.entries, origin: 'nas', reason: null }
@@ -289,8 +356,12 @@ async function loadOnlineFirst(
   deps: LyricLoadDeps,
 ): Promise<LyricLoadResult> {
   const external = deps.external
-  // ⚠️ **没有外部取法** ⇒ **零外部请求**，直接用本地。
+  // ⚠️ **没有外部取法** ⇒ **零外部请求**，直接用本地（**内嵌 → NAS**，T83）。
   if (!external) {
+    const embedded = await readEmbedded(deps.embedded, songId)
+    if (embedded.length > 0) {
+      return { entries: embedded, origin: 'embedded', reason: null }
+    }
     const nas = await readNas(deps.api, songId)
     if (nas.entries.length > 0) {
       return { entries: nas.entries, origin: 'nas', reason: null }
@@ -311,7 +382,11 @@ async function loadOnlineFirst(
     // ⚠️ `ok` 但原文与翻译**都为空** ⇒ 视同**匹配不上** ⇒ 回落本地。
   }
 
-  // --- 线上匹配不上（not-found / error / 超时 / ok 但内容空）⇒ 回落本地 -----
+  // --- 线上匹配不上（not-found / error / 超时 / ok 但内容空）⇒ 回落本地（**内嵌 → NAS**，T83）----
+  const embedded = await readEmbedded(deps.embedded, songId)
+  if (embedded.length > 0) {
+    return { entries: embedded, origin: 'embedded', reason: null }
+  }
   const nas = await readNas(deps.api, songId)
   if (nas.entries.length > 0) {
     // ⚠️ 线上坏**不该**让用户看不到本地已有的歌词 ⇒ `reason = null`。
@@ -362,9 +437,15 @@ export async function loadLyricEntries(
 /**
  * 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。
  */
-function playerBridge(): { fetchExternalLyric?: ExternalLyricFetcher } | null {
+function playerBridge(): {
+  fetchExternalLyric?: ExternalLyricFetcher
+  readEmbeddedLyric?: (id: string) => Promise<string>
+} | null {
   const scope = globalThis as unknown as {
-    fnPlayer?: { fetchExternalLyric?: ExternalLyricFetcher }
+    fnPlayer?: {
+      fetchExternalLyric?: ExternalLyricFetcher
+      readEmbeddedLyric?: (id: string) => Promise<string>
+    }
   }
   return scope.fnPlayer ?? null
 }
@@ -380,4 +461,20 @@ export function defaultExternalLyricFetcher(): ExternalLyricFetcher | null {
   const fn = bridge?.fetchExternalLyric
   if (!fn) return null
   return async (target: LyricMatchTarget): Promise<ExternalLyricResult> => await fn(target)
+}
+
+/**
+ * 默认的**内嵌歌词**取法：**经 IPC 到主进程**（T83）。
+ *
+ * ⚠️ 渲染层**不碰文件系统** —— 这里只发 IPC 请求（只报曲目 id）。
+ * ⚠️ 没有桥（浏览器预览 / 单测）→ 返回 `null`（**不查内嵌**）。
+ */
+export function defaultEmbeddedLyricFetcher(): EmbeddedLyricFetcher | null {
+  const bridge = playerBridge()
+  const fn = bridge?.readEmbeddedLyric
+  if (!fn) return null
+  return async (songId: string): Promise<string> => {
+    const content = await fn(songId)
+    return typeof content === 'string' ? content : ''
+  }
 }
