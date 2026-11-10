@@ -109,11 +109,17 @@ jobs:
 
       - name: Summary (pack only)
         if: ${{ inputs.pack_only }}
+        # ⚠️ **T87.10：脚本正文里一律不许有反引号**（也不许有双引号字符串）：
+        #    PowerShell 的反引号是**转义符** ⇒ 双引号里的 Markdown 行内代码
+        #    被当成「转义序列起始」⇒ 报 `The Unicode escape sequence is not valid`
+        #    ⇒ **整个脚本 ParserError** ⇒ 步骤退出码 1
+        #    （2026-11-10 实测：Release run 42865707790 死在这一步）。
+        #    ⇒ 字符串一律用**单引号**，Markdown 的行内代码改用「」。
         run: |
-          echo "### 只打包模式" >> $env:GITHUB_STEP_SUMMARY
-          echo "" >> $env:GITHUB_STEP_SUMMARY
-          echo "产物已上传为 artifact \`unsigned-artifacts\`（**未签名**，符合预期）。" >> $env:GITHUB_STEP_SUMMARY
-          echo "要真正发版，把 \`pack_only\` 关掉再跑一次。" >> $env:GITHUB_STEP_SUMMARY
+          echo '### 只打包模式' >> $env:GITHUB_STEP_SUMMARY
+          echo '' >> $env:GITHUB_STEP_SUMMARY
+          echo '产物已上传为 artifact「unsigned-artifacts」（**未签名**，符合预期）。' >> $env:GITHUB_STEP_SUMMARY
+          echo '要真正发版，把「pack_only」关掉再跑一次。' >> $env:GITHUB_STEP_SUMMARY
 
       # -----------------------------------------------------------------------
       # 下面这些步骤只在「真发版」时跑

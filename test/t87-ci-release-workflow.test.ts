@@ -182,3 +182,96 @@ describe('T87 更新清单与产物目录', () => {
     expect(src).toContain('RELEASE_DIR')
   })
 })
+
+// ---------------------------------------------------------------------------
+// T87.10：工作流脚本里的**反引号**（2026-11-10 实测踩到）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **现象**：Release run 42865707790 挂在第 10 步 `Summary (pack only)`：
+//      ParserError: … The Unicode escape sequence is not valid.
+//    ⇒ **PowerShell 的反引号是转义符** ⇒ 双引号字符串里的 Markdown 行内代码
+//    （`unsigned-artifacts`）被当成「转义序列起始」⇒ **整个脚本解析失败**。
+//
+// ⚠️ **为什么这类坑会藏着**：那一步在 T87 就写好了，但此前**每一步都先挂**
+//    （非法键 → CRLF → 404）⇒ 一直**没被执行到**。
+//    ⇒ **跑不到的步骤等于没写** ⇒ 必须有守卫。
+//
+// ⚠️ **口径**：
+//    - **PowerShell** 把 `` ` `` 当**转义符**；
+//    - **bash** 把 `` ` `` 当**命令替换**；
+//    ⇒ 两边都不许出现。**YAML 注释里可以有**（注释不会被 shell 执行）。
+
+/**
+ * 收集工作流里所有 `run:` 块里**非注释**的行。
+ *
+ * @param yml 工作流文件的原文
+ * @returns 每个 `run:` 块里需要交给 shell 执行的行（已去注释、去空行）
+ */
+function collectRunBlockLines(yml: string): string[] {
+  const out: string[] = []
+  let inBlock = false
+  let blockIndent = 0
+  for (const raw of yml.split('\n')) {
+    const indent = raw.length - raw.trimStart().length
+    const trimmed = raw.trim()
+    if (!inBlock) {
+      const m = /^run:\s*(.*)$/.exec(trimmed)
+      if (m) {
+        const value = (m[1] ?? '').trim()
+        if (value === '|' || value === '>') {
+          // 块状（literal / folded）⇒ 收集到「缩进不大于 `run:` 的非空行」为止。
+          inBlock = true
+          blockIndent = indent
+        } else {
+          // 单行 `run: xxx` ⇒ 整行就是脚本。
+          out.push(value)
+        }
+      }
+      continue
+    }
+    // 块结束：下一个同级 key / 下一个 step（缩进不大于 `run:` 且非空）。
+    if (trimmed && indent <= blockIndent) {
+      inBlock = false
+      continue
+    }
+    if (!trimmed || trimmed.startsWith('#')) continue
+    out.push(trimmed)
+  }
+  return out
+}
+
+describe('T87.10 —— 工作流脚本里的反引号', () => {
+  const workflows = ['ci.yml', 'release.yml']
+
+  it('所有工作流的 `run:` 块里**不许出现反引号**', () => {
+    for (const name of workflows) {
+      const yml = readRepoFile('.github', 'workflows', name)
+      const bad = collectRunBlockLines(yml).filter((line) => line.includes('`'))
+      expect(bad, `${name} 的 run 块里有反引号`).toEqual([])
+    }
+  })
+
+  it('**变异自证**：把反引号塞回 `run:` 块 ⇒ 必被抓出来', () => {
+    const yml = readRepoFile('.github', 'workflows', 'release.yml')
+    const mutated = yml.replace(
+      /^(\s*)echo '产物已上传为 artifact.*$/m,
+      "$1echo '产物已上传为 artifact `unsigned-artifacts`（未签名）。' >> $env:GITHUB_STEP_SUMMARY",
+    )
+    // 变异必须真的改到了东西（否则下面的断言就是在验一个没变过的文件）。
+    expect(mutated).not.toBe(yml)
+    const bad = collectRunBlockLines(mutated).filter((line) => line.includes('`'))
+    expect(bad.length).toBeGreaterThan(0)
+  })
+
+  it('Summary 步骤的字符串**用单引号**（PowerShell 单引号里没有转义语义）', () => {
+    const yml = readRepoFile('.github', 'workflows', 'release.yml')
+    const lines = collectRunBlockLines(yml)
+    const summaryLines = lines.filter((line) => line.includes('GITHUB_STEP_SUMMARY'))
+    expect(summaryLines.length).toBeGreaterThan(0)
+    for (const line of summaryLines) {
+      // ⚠️ 一律单引号：双引号里 PowerShell 会展开 `$` 与反引号 ⇒ 容易出「看着像 Markdown
+      //    其实被 shell 解释」的坑。
+      expect(line).not.toMatch(/echo\s+"/)
+    }
+  })
+})

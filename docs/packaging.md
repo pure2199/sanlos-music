@@ -438,6 +438,32 @@ Release run 42861484377 都死在第 8 步 `Pack`：
 `getArtifactRemoteURL` 把工作流里那个值算成**真实下载 URL** ⇒ 镜像写错（少一个 `/`）
 ⇒ **`npm test` 就红**（不必等到 CI 打包挂掉才发现）。
 
+#### ⚠️ 工作流脚本里**不许有反引号**（T87.10 实测）
+
+`release.yml` 的 `Summary (pack only)` 步骤曾挂在**第 10 步**：
+
+```
+ParserError: … The Unicode escape sequence is not valid.
+```
+
+⇒ **PowerShell 的反引号（`` ` ``）是转义符** ⇒ 双引号字符串里的 Markdown 行内代码
+（`` `unsigned-artifacts` ``）被当成「转义序列起始」⇒ **整个脚本解析失败**（退出码 1）。
+
+| shell | 反引号的含义 | 后果 |
+|---|---|---|
+| PowerShell | **转义符** | `` `u `` 不是合法转义 ⇒ ParserError |
+| bash | **命令替换** | 试图执行 `unsigned-artifacts` ⇒ 找不到命令 |
+
+⇒ 纪律：
+
+1. 工作流的 `run:` 块里**一律不用反引号**（Markdown 的行内代码改用「」）；
+2. 字符串一律用**单引号**（PowerShell 单引号里没有转义语义，也不会展开 `$`）；
+3. **守卫已就位**：`test/t87-ci-release-workflow.test.ts` 会扫所有工作流的 `run:` 块
+   ⇒ 出现反引号 ⇒ **`npm test` 就红**。
+
+⚠️ **「跑不到的步骤等于没写」**：这一步从 T87 就写好了，但此前**每一步都先挂**
+⇒ 它**从未被执行过** ⇒ 直到 Pack 通了才第一次跑到。
+
 #### ⚠️ 打包搬进 CI 带来的三个副作用
 
 1. **产物集合变了**：签名会改 exe 的字节 ⇒ electron-builder 基于**未签名** exe 算出来的

@@ -4302,7 +4302,61 @@ A1 非法键（LF）必红 / A2 按 sha256 还原 / A3 还原后必绿 / **B CRL
 ### 遗留 / 待办
 
 - ⚠️ **T87.7（发版 v0.2.5）** 仍卡在两件工程侧无法代替的事（**不变**）；
-- ⚠️ 可选优化（**待用户拍板**）：`actions/cache` 缓存 electron-builder 的缓存目录；
+- ⚠️ 可选优化（**待用户拍板**）：`actions/cache` 缓存 electron-builder 的缓存目录;
   `electronDist` 指向 `node_modules/electron/dist`（彻底免下载）；
+- ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验、**轮换 NAS 口令**、
+  GitHub 改口令 + 开 2FA 等老待办**不变**。
+
+---
+
+## 五十二、T87.10：PowerShell 把 Markdown 反引号当转义符 ⇒ 发版工作流第 10 步 ParserError（2026-11-10）
+
+### 做了什么
+
+**一句话**：T87.9 修好之后 **CI 全绿**（含 `Pack (smoke)`），但 **Release 工作流仍失败** ——
+好在这次失败**在打包之后**（产物 artifact 都上传出来了）⇒ 揪出最后一个坑：
+**PowerShell 的反引号是转义符** ⇒ 摘要那一步的 Markdown 行内代码让**整个脚本解析失败**。
+
+### 现象与根因（**实测**，不是推断）
+
+| 项 | 内容 |
+| --- | --- |
+| 触发的 run | CI **42865021458**（head `32a967c`）⇒ ✅ **success**（8 步全绿，含 `Pack (smoke)`，4m47s）；Release **42865707790**（`pack_only=true`）⇒ ❌ 失败（4m31s） |
+| **关键信号** | run 页面 Artifacts 里**已经有 `unsigned-artifacts`（268 MB）** ⇒ **第 8 步 `Pack` 成功了** ⇒ 失败在**之后** |
+| 失败步骤 | **第 10 步 `Summary (pack only)`**（check-run annotation 锚点 `#step:10:18`） |
+| 报错原文 | `ParserError: …ps1:4` → `The Unicode escape sequence is not valid. A valid sequence is `u{ followed by one to six hex digits and a closing '}'.` |
+| 根因 | **PowerShell 的反引号（`` ` ``）是转义符** ⇒ 双引号字符串里的 Markdown 行内代码 `` `unsigned-artifacts` `` 被当成「转义序列起始」⇒ `` `u `` 非法 ⇒ **整个脚本 ParserError** ⇒ 退出码 1 |
+| 为什么一直藏着 | 这行是 **T87 就写好**的，但此前**每一步都先挂**（非法键 → CRLF → 404）⇒ **它从未被执行过** |
+
+⇒ **教训**：**工作流里「跑不到」的步骤等于「没写」** —— 每一步都得能单独被执行；
+⇒ 而且**单测只能验结构、验不了 shell 语义** ⇒ 必须有「结构守卫 + 本地真跑一次」两道。
+
+### 修法（两条）
+
+| # | 措施 |
+| --- | --- |
+| ① | `release.yml` 的 Summary 步骤改用**单引号**字符串；Markdown 的行内代码改用「」 |
+| ② | **新守卫**（`test/t87-ci-release-workflow.test.ts`，+3 条）：所有工作流的 `run:` 块里**不许出现反引号**（PowerShell 当转义符、bash 当命令替换）；含「变异自证」；另钉「Summary 的字符串用单引号」 |
+
+### 验证（全部实测）
+
+| 项 | 结果 |
+| --- | --- |
+| 本地真跑那段 PowerShell | ✅ `release/verify/t87d-powershell-summary-probe.mjs`：`powershell.exe -EncodedCommand`（base64 UTF-16LE）⇒ **exit 0**（无 ParserError）、摘要文件生成、中文**没乱码**（写出的字节是 UTF-16LE + BOM，GitHub 读取端按 BOM 解） |
+| `tsc --noEmit` | ✅ exit 0 |
+| `vitest` | ✅ **2272 passed / 110 files**（既有 2269 条一条不删；新增 **3** 条） |
+| CI | run **42865021458** ⇒ ✅ **success**（含 `Pack (smoke)`） |
+| 发版链路 | run **42865707790**（`pack_only=true`）⇒ ❌ 失败于第 10 步（**Pack 本身已成功**）⇒ 修完后重跑 ⇒ **__RELEASE_RUN_ID__** / **__RELEASE_CONCLUSION__** |
+
+### 已知限制
+
+- ⚠️ `release.yml` 里**送签之后**的步骤（SignPath Action / 校验 / 替换资产 / 发 Release）
+  在 `pack_only=true` 下**全部被跳过** ⇒ **至今没有一次真发版跑过** ⇒ 只能等 T87.7（用户申请到 SignPath）才验证；
+- ⚠️ 摘要文件由 PowerShell 的 `>>` 写出 ⇒ 本机实测是 **UTF-16LE（含 BOM）**；
+  GitHub 的读取端按 BOM 解码 ⇒ 正常（**下次跑完要去 run 页面目视确认一次**）。
+
+### 遗留 / 待办
+
+- ⚠️ **T87.7（发版 v0.2.5）** 仍卡在两件工程侧无法代替的事（**不变**）；
 - ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验、**轮换 NAS 口令**、
   GitHub 改口令 + 开 2FA 等老待办**不变**。
