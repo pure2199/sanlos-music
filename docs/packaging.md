@@ -212,6 +212,10 @@ npm run publish:manifest  # 2. 生成 release/latest.json（自动算 SHA-512）
 客户端的更新服务器地址**不在构建期**——在应用「设置 → 自动更新 → 更新服务器地址」里填，
 存进 `prefs.json` 的 `update.baseUrl`（换服务器不用重新打包）。
 
+⚠️ **v0.2.2 起有缺省值**：地址**留空**时，主进程自动回落到**项目自己的 Releases**
+（`shared/appInfo.ts` 的 `APP_INFO.updateBaseUrl` = `releases/latest/download`
+⇒ **永远指向最新那版**）；设置页也有「用项目地址」一键填入。
+
 ### 7.4 安全边界（**每一条都缺一不可**）
 
 | 闸 | 规则 | 挡住什么 |
