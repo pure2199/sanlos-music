@@ -74,9 +74,12 @@ Because one person holds all three roles, the separation-of-duties control is pr
 **explicit, per-release human approval step**: no release is signed without a deliberate
 approval action in SignPath, and the approval is recorded in SignPath's audit log.
 
-**Multi-factor authentication** is enabled on both the GitHub account and the SignPath account,
-as required by the SignPath Foundation programme. The CI token is a separate, non-personal
-identity with the `Submitter` role only; it can neither approve nor sign.
+**Multi-factor authentication** is a hard requirement of the SignPath Foundation programme:
+every team member must enable MFA both on their SignPath account and on the source repository
+host. Enabling MFA on the GitHub account of the maintainer is a **prerequisite for the first
+signing request** and is being completed before that request is submitted; the SignPath account
+is registered with MFA at the same time. The CI token is a separate, non-personal identity with
+the `Submitter` role only; it can neither approve nor sign.
 
 ## 4. Keys, credentials and secrets
 

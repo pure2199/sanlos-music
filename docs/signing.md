@@ -4,10 +4,15 @@
 > 本地开发用的**自签**证书是另一回事（见 [packaging.md](./packaging.md) 第七节）——
 > **自签产物绝不发到公开 Release**。
 
-**一句话**：从 v0.2.5 起，本项目的公开安装包由 **[SignPath Foundation](https://signpath.org)**
-签发**公开 OV（Organization Validation）代码签名证书** ⇒ Windows 上显示的发布者是
+**一句话**：本项目已向 **[SignPath Foundation](https://signpath.org)** 提交**免费**的
+公开 OV（Organization Validation）代码签名证书申请（**2026-11-11 已提交，审核中**）
+⇒ **批下来后从 v0.2.6 起**，公开安装包会带上签名，Windows 上显示的发布者是
 **「SignPath Foundation」**（**不是**公司名），并且在**开启了 Smart App Control 的 Windows 11**
 上不再被直接拦截。
+
+⚠️ **v0.2.5 本身仍然没有签名**（申请在途）⇒ 那批用户按
+[README「三、快速开始」的绕法](../README.md#三快速开始)处理（解除锁定 / `Unblock-File`），
+**Smart App Control 的机器则要等 v0.2.6**。
 
 ---
 
@@ -74,15 +79,21 @@ Get-AuthenticodeSignature .\FN-Music-Setup-0.2.5.exe |
 
 ## 三、维护者：怎么申请 + 怎么配（**目前卡在这一步**）
 
-### 3.1 提交申请
+### 3.1 提交申请（**已于 2026-11-11 提交，审核中**）
 
 1. 打开 <https://signpath.org/apply>；
 2. 需要准备：仓库地址（https://github.com/pure2199/sanlos-music ）、许可证（MIT）、
    项目描述、维护者身份信息；
-3. ⚠️ **两个账号都要开 MFA**：GitHub 账号与 SignPath 账号（Foundation 硬性要求）；
+3. ⚠️ **两个账号都要开 MFA**：GitHub 账号与 SignPath 账号（Foundation 硬性要求）——
+   ⇒ **GitHub 账号的 MFA 必须开**（这是审核的**阻塞项**，不是可选项）；
 4. ⚠️ 本项目是**单维护者**，author / reviewer / approver 三个角色由同一人担任
    （政策见仓库根目录的 [`CODE_SIGNING_POLICY.md`](../CODE_SIGNING_POLICY.md)）——
    Foundation 接受这种安排（有先例）。
+
+**当前状态**：申请表 13 个字段已填 + 2 项必选法律同意，**2026-11-11 由维护者本人提交**
+（页面回执 `Form submitted`）⇒ **等审核**。
+⚠️ **最弱的一项是「可验证声誉」**（0 star / 0 fork / ~73 下载 / 仓库 2026-11-05 才建）
+⇒ **存在被拒风险**；被拒则走 §六 的退路。
 
 ### 3.2 SignPath 后台的配置
 
@@ -113,19 +124,35 @@ Get-AuthenticodeSignature .\FN-Music-Setup-0.2.5.exe |
 ⚠️ **没配全 ⇒ 工作流会「快速失败」并逐项列出缺哪个**
 （`scripts/check-signpath-config.mjs`）⇒ **绝不会**「跳过签名照样发布」。
 
-### 3.4 发版
+### 3.4 发版（**签名版**）
 
-1. 打标签：`git tag v0.2.5 && git push origin v0.2.5`；
+1. 打标签：`git tag v0.2.6 && git push origin v0.2.6`；
 2. GitHub Actions → **Release** → **Run workflow**：
-   - `tag` = `v0.2.5`
+   - `tag` = `v0.2.6`
    - `pack_only` = **false**（关掉才会送签 + 发版）
+   - `sign` = **true**（默认；签名路径）
 3. ⏸ **去 SignPath 平台点一次「批准」**（最多等 90 分钟）；
 4. 工作流自动：校验签名 → 生成 `latest.json` → 建/更新 GitHub Release（3 个资产：
    安装包、便携版、`latest.json`）；
-5. ⚠️ **发布说明**取自 `docs/releases/v<版本>.md` ⇒ 发版前要先把那个文件写好。
+5. ⚠️ **发布说明**取自 `docs/releases/v<版本>.md` ⇒ 发版前要先把那个文件写好；
+   工作流会**自动给它附上**该版本的字节数与 sha256。
 
 > 💡 `pack_only` = **true** 时只跑「构建 + 打包 + 上传 artifact」，
 > **不送签、不发版** ⇒ 用来验证「CI 能出包」而**不需要** SignPath 账号。
+
+### 3.5 发**未签名**版（`sign` = false）—— v0.2.5 用的就是这条
+
+签名申请在途（审核中）时，发版**不必等**：
+
+1. `tag` = 目标版本、`pack_only` = **false**、**`sign` = false**；
+2. 工作流会先**断言产物确实没有签名**（`--expect none`）
+   ⇒ 「这一版没签名」是**构建期事实**，不是口头承诺；
+   （产物若因为任何原因带上了签名 ⇒ **工作流失败，绝不发布**）；
+3. 生成 `latest.json` → 发 Release（同样 3 个资产），说明末尾自动附字节数与 sha256。
+
+⚠️ **两条路径互不干扰**：`sign` 默认 **true** ⇒ 签名路径的闸门一条都没松。
+⚠️ **未签名版的固有代价**：SmartScreen 照旧会拦（可绕）、**Smart App Control 硬拦**（绕不过）、
+企业 AppLocker / WDAC 可能直接拒 ⇒ 详见 README「三、快速开始」。
 
 ---
 
@@ -159,7 +186,11 @@ Get-AuthenticodeSignature .\FN-Music-Setup-0.2.5.exe |
 | 方案 | 成本 | 签发者（CN） |
 |---|---|---|
 | **SignPath Foundation**（当前路线） | 免费 | `SignPath Foundation` |
+| **Certum 开源线**（Open Source Code Signing in the Cloud） | **€49**（商品页 schema.org 标价；社区另有 €69 起 / 中国区 €329/年 / **GitHub ≥1k star 可免**的说法，**需向 Certum 官方核实**） | **公司法定主体名**（待向官方确认） |
 | Certum Standard Code Signing in the Cloud | €209/年 | **公司法定主体名**（如「广西闪链时空网络科技有限公司」） |
+
+⚠️ **Certum 开源线相对 SignPath 的差别**：证书签给我们**自己**的主体 ⇒ Windows 上显示的是
+**公司名**（不是「SignPath Foundation」）、**没有逐版人工审批**；代价是**要付费**。
 
 采购清单见 [packaging.md](./packaging.md) 第 7.8 节。
 

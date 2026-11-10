@@ -31,6 +31,13 @@ on:
         required: false
         default: true
         type: boolean
+      sign:
+        # ⚠️ **默认 true** —— 签名是默认路径；未签名必须**显式**关掉（fail-closed 方向）。
+        #    关掉后走「未签名发布」：断言产物**确实没有签名** → 生成清单 → 发 Release。
+        description: '发布时是否走 SignPath 签名（关掉 = 发布未签名产物；未签名路径会断言产物确实没签名）'
+        required: false
+        default: true
+        type: boolean
 
 # ⚠️ **同一个标签只允许一个发版跑**（两个人同时点 ⇒ 互相覆盖资产）。
 concurrency:
@@ -126,7 +133,7 @@ jobs:
       # -----------------------------------------------------------------------
 
       - name: Check SignPath configuration
-        if: ${{ !inputs.pack_only }}
+        if: ${{ !inputs.pack_only && inputs.sign }}
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
           SIGNPATH_ORG_ID: ${{ vars.SIGNPATH_ORG_ID || secrets.SIGNPATH_ORG_ID }}
@@ -136,7 +143,7 @@ jobs:
         run: node scripts/check-signpath-config.mjs
 
       - name: SignPath — submit signing request and fetch signed artifact
-        if: ${{ !inputs.pack_only }}
+        if: ${{ !inputs.pack_only && inputs.sign }}
         uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -152,7 +159,7 @@ jobs:
           output-artifact-directory: signed
 
       - name: Verify signed artifact
-        if: ${{ !inputs.pack_only }}
+        if: ${{ !inputs.pack_only && inputs.sign }}
         # ⚠️ **发布闸门**：状态必须是 Valid、必须带 RFC 3161 时间戳、CN 必须相等。
         #    ⚠️ CN 口径与**客户端**同一份（`shared/update.ts`）⇒ 客户端认的，
         #       这里也认；客户端不认的，这里也不认。
@@ -163,10 +170,8 @@ jobs:
           --expect-cn "${{ vars.SIGNPATH_EXPECTED_CN || 'SignPath Foundation' }}"
           signed
 
-      - name: Replace artifacts with signed ones and write update manifest
-        if: ${{ !inputs.pack_only }}
-        env:
-          UPDATE_NOTES: 安装包已由 SignPath Foundation 签名（Authenticode，含 RFC 3161 时间戳）。
+      - name: Replace artifacts with signed ones
+        if: ${{ !inputs.pack_only && inputs.sign }}
         run: |
           $ErrorActionPreference = 'Stop'
           # ⚠️ **签名件的文件清单必须与未签名件一致**（SignPath 只该换掉 exe 的字节）。
@@ -176,8 +181,58 @@ jobs:
             throw "签名件与原产物的文件清单不一致：原 = $($unsigned -join ', ')，签名后 = $($signed -join ', ')"
           }
           Copy-Item -Path signed/*.exe -Destination release-ci/ -Force
-          # ⚠️ 清单必须基于**签名后**的安装包算 SHA-512（客户端会拿它核对下载到的文件）。
-          node scripts/publish-manifest.mjs
+
+      - name: Write update manifest (signed)
+        if: ${{ !inputs.pack_only && inputs.sign }}
+        # ⚠️ 清单必须基于**签名后**的安装包算 SHA-512（客户端会拿它核对下载到的文件）。
+        #    ⇒ 这一步**必须排在**「Replace artifacts with signed ones」**之后**。
+        env:
+          UPDATE_NOTES: '安装包已由 SignPath Foundation 签名（Authenticode，含 RFC 3161 时间戳）。'
+        run: node scripts/publish-manifest.mjs
+
+      - name: Verify unsigned artifacts
+        if: ${{ !inputs.pack_only && !inputs.sign }}
+        # ⚠️ **未签名发布的闸门**：「这一版没有签名」必须是**构建期事实**，不是口头承诺。
+        #    产物若因为任何原因带上了签名（本地装了证书 / 环境里有 WIN_CSC_LINK……）
+        #    ⇒ **工作流失败，绝不发布**。
+        #    （`--expect none` 是既有选项，语义 = 每个产物都必须**没有**签名，一字未改。）
+        run: node tools/fn-check-signature.mjs --expect none release-ci
+
+      - name: Write update manifest (unsigned)
+        if: ${{ !inputs.pack_only && !inputs.sign }}
+        # ⚠️ notes 里**不许**出现「已签名 / SignPath」这类措辞 —— 这一版确实没签。
+        env:
+          UPDATE_NOTES: '本版未做代码签名（Windows 可能提示「未知发布者」）；详见 Release 说明。'
+        run: node scripts/publish-manifest.mjs
+
+      - name: Prepare release notes with checksums
+        if: ${{ !inputs.pack_only }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $notesFile = "docs/releases/$env:TAG.md"
+          if (-not (Test-Path $notesFile)) { throw "找不到发布说明：$notesFile" }
+          # ⚠️ **必须显式指定编码**：PowerShell 5.1 的默认编码是**控制台代码页**
+          #    （简体中文机器 = 936 / GBK）⇒ 不指定就会把 UTF-8 的中文读成乱码。
+          $base = Get-Content -Path $notesFile -Raw -Encoding UTF8
+          $rows = @()
+          foreach ($name in @("FN-Music-Setup-$version.exe", "FN-Music-Portable-$version.exe")) {
+            $p = Join-Path 'release-ci' $name
+            if (-not (Test-Path $p)) { throw "缺少资产：$p" }
+            $hash = (Get-FileHash -Path $p -Algorithm SHA256).Hash.ToLower()
+            $len = (Get-Item $p).Length
+            $rows += "| $name | $len | $hash |"
+          }
+          $nl = [Environment]::NewLine
+          $extra = @('', '---', '', '## 下载校验（sha256）', '', '| 文件 | 字节数 | sha256 |', '|---|---|---|', ($rows -join $nl), '', '⚠️ 产物由 CI 构建，NSIS 安装器内嵌构建时间戳 ⇒ 两次构建的字节不同 ⇒ 校验值只对**本 Release**的资产有效。') -join $nl
+          $outFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          # ⚠️ 写 UTF-8 **无 BOM**（PS 5.1 的 -Encoding utf8 会带 BOM ⇒ 页面开头多一个字符）。
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText($outFile, ($base.TrimEnd() + $nl + $extra), $utf8NoBom)
+          Write-Output "已生成带校验值的发布说明：$outFile"
 
       - name: Publish GitHub Release
         if: ${{ !inputs.pack_only }}
@@ -187,8 +242,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $notesFile = "docs/releases/$env:TAG.md"
-          if (-not (Test-Path $notesFile)) { throw "找不到发布说明：$notesFile" }
+          # ⚠️ 说明文件来自上一步（**带 sha256 与字节数**的副本）。
+          $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          if (-not (Test-Path $notesFile)) { throw "找不到带校验值的发布说明：$notesFile" }
           $assets = @(
             "release-ci/FN-Music-Setup-$version.exe",
             "release-ci/FN-Music-Portable-$version.exe",
@@ -204,6 +260,7 @@ jobs:
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:TAG @assets --clobber
+            gh release edit $env:TAG --notes-file $notesFile
           } else {
             gh release create $env:TAG @assets --title "Sanlos Music $env:TAG" --notes-file $notesFile
           }

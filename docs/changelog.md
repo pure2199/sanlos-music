@@ -1,20 +1,34 @@
 # 版本变更说明
 
-本项目当前版本：**0.2.4**
+本项目当前版本：**0.2.5**
 
 ---
 
-## 未发布 —— T87（公开产物带签名）
+## 0.2.5 —— 2026-11-11
 
-相对 **v0.2.4** 的一次更新：**公开产物的代码签名** —— 产物改由
-[SignPath Foundation](https://signpath.org) 签发**公开 OV 签名** ⇒ 不再显示「未知发布者」，
-且在**开启了 Smart App Control 的 Windows 11** 上不再被直接拦截。
-完整说明见 [`docs/signing.md`](./signing.md)。
+相对 **v0.2.4** 的一次更新：**把「公开产物的代码签名」这条链路整体做完并搬进 CI**，
+但**这一版的产物仍然没有签名** —— SignPath Foundation 的免费签名申请
+**已于 2026-11-11 提交、审核中** ⇒ **下一个版本（v0.2.6）起**才会真正带上签名。
+
+**为什么不等签名再发版**：签名申请**批不批、何时批不由我们决定**，而审核口径里我们最弱的一项
+是「可验证声誉」（0 star / 0 fork / ~73 下载）⇒ 发版被外部审核无限期卡住并不划算；
+何况**产物至今本就未签名**（v0.2.4 就是未签名发的），自动更新链路也**早已内置**
+「允许安装未签名的更新包」开关 ⇒ **签名从来没有卡住过功能**。
 
 **签名链路整体搬进 CI** —— SignPath 免费计划以「**可信构建**」为前提 ⇒
-**本机手工打包的包签不了** ⇒ 发版流程改为「CI 打包 → 送签 → 人工审批 → 校验 → 发版」。
+**本机手工打包的包签不了** ⇒ 发版流程改为「CI 打包 →（可选）送签 → 人工审批 → 校验 → 发版」。
 
-### 变更
+### 用户看得见的变化
+
+| 领域 | 内容 |
+|---|---|
+| **SmartScreen 蓝框有更省事的解法** | 产物仍未签名 ⇒ 蓝框照旧；但文档给了**三种绕法**：点「更多信息」→「仍要运行」/ 右键属性勾「**解除锁定**」（**蓝框直接消失**）/ PowerShell `Unblock-File` |
+| **签名在途** | 已向 [SignPath Foundation](https://signpath.org) 提交免费签名申请（**审核中**）⇒ 批下来后从 **v0.2.6** 起生效 |
+| **产物改由 CI 构建** | 发版流程整体搬进 CI ⇒ 本机手工包不再对外分发 |
+| **校验值逐版本给** | NSIS 安装器内嵌构建时间戳 ⇒ **两次构建的字节必然不同** ⇒ sha256 只能**逐版本**列（每个 Release 页面 + `docs/releases/v0.2.5.md` 都有）；客户端自动更新仍按 `latest.json` 的 **SHA-512** 校验 |
+| **公开资产固定 3 个** | 安装包 / 便携版 / `latest.json`（`latest.yml` 与 `*.blockmap` 是基于未签名 exe 算出来的，已失效 ⇒ 不发） |
+
+### 签名链路（T87）的技术变更：**已就绪，但这一版未启用**
 
 | 领域 | 内容 |
 |---|---|
@@ -23,22 +37,33 @@
 | **断言加严** | `tools/fn-check-signature.mjs` 新增 `--expect valid`（状态必须是 `Valid`）、`--require-timestamp`（必须有 RFC 3161 时间戳）、`--expect-cn`（按 CN 匹配）；**既有选项（`--expect signed|none` / `--expect-signer` / `--pfx`）语义一字不变** |
 | **fail-closed** | `--expect` 的值拼错、`--expect-cn` / `--expect-signer` 给空值 ⇒ **直接失败**（不许「什么都不检查就通过」） |
 | **打包适配 CI** | `scripts/pack.cjs` 默认**关掉证书自动发现**（本机装了证书也会自动签 ⇒ 结果不可预期）+ 新增 `FNM_EXPECT_SIGNER_CN` 加严开关；`scripts/publish-manifest.mjs` 认 `FNM_PACK_OUTPUT`（CI 的产物在 `release-ci/`） |
-| **发版工作流** | 新增 `.github/workflows/release.yml`（手动触发，参数 `tag` + `pack_only`）：构建 → 打包 → 送签 → **人工审批** → 取回 → **校验**（`Valid` + 时间戳 + CN）→ 生成清单 → 发 Release；**任一环节不过 ⇒ 工作流失败，绝不发布** |
+| **发版工作流** | 新增 `.github/workflows/release.yml`（手动触发，参数 `tag` + `pack_only` + `sign`）：构建 → 打包 →（`sign=true` 时）送签 → **人工审批** → 取回 → **校验**（`Valid` + 时间戳 + CN）→ 生成清单 → 发 Release；**任一环节不过 ⇒ 工作流失败，绝不发布**。⚠️ **`sign=false` 走「未签名发布」**：断言产物**确实没有签名**（`--expect none`）→ 生成清单 → 发 Release ⇒ 「这一版没签名」是**构建期事实**，不是口头承诺 |
 | **申请材料** | 新增 `CODE_SIGNING_POLICY.md`（提交给 SignPath 审核的那份）与 `docs/signing.md`（申请 / 配置 / 发版 / 故障排查） |
 | **工程** | 单元测试 **+77** 条（新增 `test/t87-signing-assertion.test.ts`、`test/t87-ci-release-workflow.test.ts`、`test/t87-builder-config-schema.test.ts`、`test/t87-ci-mirror-url.test.ts`）；Playwright E2E **34** 条（不变） |
 | **T87.8 修打包配置** | `electron-builder.yml` 的时间戳源挪到**合法位置** `win.signtoolOptions.{timeStampServer, rfc3161TimeStampServer}` —— 原先写在 `win` 顶层是**非法键** ⇒ electron-builder 的配置校验**直接失败** ⇒ **整个打包挂掉**（CI run 42857375893 就死在这一行）；**新增** `test/t87-builder-config-schema.test.ts`（用 **electron-builder 自己的** schema 校验配置，含「非法键必被拒」的变异自证）+ `ci.yml` 加 `Pack (smoke)`（每次 push / PR **真出一次包**）⇒ 配置写错不会再等到发版才炸 |
 | **T87.9 修 CI 下载镜像** | `ELECTRON_MIRROR` 的值**必须自带结尾的 `/`** —— `@electron/get` 的下载 URL 是**纯字符串拼接**（`${mirror}${version}/${file}`）⇒ 少了 `/` 会拼出 `…/releases/downloadv32.3.3/…` ⇒ **HTTP 404** ⇒ **整个打包挂掉**（CI run 42861355862 / Release run 42861484377 就死在这一行）；**新增** `test/t87-ci-mirror-url.test.ts`（用 **@electron/get 自己的**拼接函数把工作流里那个值算成**真实下载 URL**）⇒ 镜像写错**在 `npm test` 就红**，不必等 CI 打包挂掉才发现 |
 | **T87.10 修发版工作流脚本** | `release.yml` 的 `Summary (pack only)` 步骤挂在了**第 10 步** —— **PowerShell 把 Markdown 的反引号当成转义符** ⇒ 双引号字符串里的 `` `unsigned-artifacts` `` 被当成「转义序列起始」⇒ `The Unicode escape sequence is not valid` ⇒ **整个脚本 ParserError** ⇒ 步骤退出码 1（Release run 42865707790；此前每步都先挂 ⇒ 这一步**从未被执行过**）；改用**单引号** + Markdown 行内代码改用「」，并**新增守卫**：所有工作流的 `run:` 块里**不许出现反引号**（PowerShell 当转义符、bash 当命令替换）⇒ 写错**在 `npm test` 就红** |
 
-### 已知影响
+### 已知影响（如实标注）
 
-- ⚠️ **发布者会显示「SignPath Foundation」**（不是公司名）—— 这是免费路线的**固有代价**。
-- ⚠️ **SmartScreen 的蓝框第一版仍可能出现**：微软判的是**文件哈希的信誉** ⇒ 新证书的信誉要从零积累（通常数周、数百次真实下载）。签名真正解决的是「**不再是未知发布者**」与「**Smart App Control 的 Win11 不再直接拦截**」。
-- ⚠️ **公开 Release 的资产从 5 个变成 3 个**（安装包 / 便携版 / `latest.json`）：`latest.yml` 与 `*.blockmap` 是 electron-builder 基于**未签名** exe 算出来的 ⇒ 签名改了字节 ⇒ 它们**已失效** ⇒ 不再发布（本项目的自动更新走自己的 `latest.json` + SHA-512，本来就不用它们）。
+- ⚠️ **这一版的公开产物仍然没有代码签名** ⇒ Windows 仍会提示「未知发布者」。
+  ⇒ 绕法见 README「三、快速开始 → 下载安装」（解除锁定 / `Unblock-File`）。
+- ⚠️ **Smart App Control 的 Windows 11 是硬拦**（**没有**「仍要运行」按钮）⇒
+  那类机器**装不上**这一版，**要等签名上线**（v0.2.6）。
+- ⚠️ **企业 AppLocker / WDAC 策略**下未签名 exe 可能被直接拒 ⇒ 同上。
+- ⚠️ **公开 Release 的资产是 3 个**（安装包 / 便携版 / `latest.json`）：`latest.yml` 与 `*.blockmap`
+  是 electron-builder 基于**未签名** exe 算出来的 ⇒ 签名改了字节 ⇒ 它们**已失效** ⇒ 不再发布
+  （本项目的自动更新走自己的 `latest.json` + SHA-512，本来就不用它们）。
 - ⚠️ **本机手工打包的包不会被签名**（SignPath 只签 CI 产物）—— 这是「可信构建」的要求，不是缺陷。
-- ⚠️ **每次发布要在 SignPath 平台人工点一次批准**；不批 ⇒ 工作流超时失败（artifact 保留，可重跑）。
-- ⚠️ **客户端要填「预期的代码签名者」= `SignPath Foundation`**（或含它的候选列表），否则「有签名的包」一律被拒。
-- ⚠️ **T87.7（发版 v0.2.5）仍卡在两件工程侧无法代替的事**：① 用户提交 SignPath Foundation 申请；② 批下来后填 5 个 secrets / variables。
+- ⚠️ **校验值逐版本给**：NSIS 安装器内嵌构建时间戳 ⇒ **两次构建字节不同** ⇒ sha256 只对**该版本**有效。
+- ⚠️ **从 v0.2.6 起**：发布者会显示「**SignPath Foundation**」（不是公司名）—— 这是免费路线的**固有代价**；
+  且每次发布要在 SignPath 平台**人工点一次批准**；客户端要填「预期的代码签名者」= `SignPath Foundation`
+  （或含它的候选列表），否则「有签名的包」一律被拒。
+- ⚠️ **SmartScreen 的蓝框第一版仍可能出现**（即便签了名）：微软判的是**文件哈希的信誉** ⇒
+  新证书的信誉要从零积累（通常数周、数百次真实下载）。签名真正解决的是「**不再是未知发布者**」
+  与「**Smart App Control 的 Win11 不再直接拦截**」。
+- ⚠️ **T87.7（启用签名）仍卡在三件工程侧无法代替的事**：① 审核通过（申请已于 2026-11-11 提交）；
+  ② 批下来后填 5 个 secrets / variables；③ 每次发布人工批准一次。
 
 ---
 

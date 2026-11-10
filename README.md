@@ -14,7 +14,7 @@
 > 技术栈：Electron 32 + React 18 + TypeScript 5（`strict`）+ Vite 5 + Zustand 4 + Vitest 2 + Playwright。
 > 目标平台：Windows 10 1809 及以上 / x64。
 
-> **⬇️ 不想自己编译？直接下载现成的安装包** —— 当前版本 **v0.2.4**（安装版 / 便携版）在
+> **⬇️ 不想自己编译？直接下载现成的安装包** —— 当前版本 **v0.2.5**（安装版 / 便携版）在
 > [Releases · 最新版](https://github.com/pure2199/sanlos-music/releases/latest)，
 > **免登录直接下载**，装完连上你自己的 NAS 就能用（不连 NAS 也能当本地播放器用）。
 
@@ -107,35 +107,49 @@ Windows 10 1809+ / x64. MIT licensed.
 ### 下载安装
 
 **普通用户看这一节就够了**（要自己编译的往下翻「开发」）。Windows 10 1809+ / x64，
-到 [Releases · v0.2.4](https://github.com/pure2199/sanlos-music/releases/tag/v0.2.4) 下载：
+到 [Releases · v0.2.5](https://github.com/pure2199/sanlos-music/releases/tag/v0.2.5) 下载：
 
-| 文件 | 大小 | 说明 |
-|---|---|---|
-| `FN-Music-Setup-0.2.4.exe` | 86,106,122 字节 | **安装版**（NSIS，可改安装目录） |
-| `FN-Music-Portable-0.2.4.exe` | 79,009,806 字节 | **便携版**（免安装，双击即用） |
-
-下完可用 sha256 自行核对（与本仓库发布产物**逐字节一致**）：
-
-| 文件 | sha256 |
+| 文件 | 说明 |
 |---|---|
-| `FN-Music-Setup-0.2.4.exe` | `f49d026e3a80e304375a10dc3b60ebd0679f6fe3d6fa37e7e678ec1ebb8a847c` |
-| `FN-Music-Portable-0.2.4.exe` | `6757f39ee34b9a4e7fc96410372a40c2b5a4cb4880d19cfb11cbd3b0f86323e7` |
+| `FN-Music-Setup-0.2.5.exe` | **安装版**（NSIS，可改安装目录） |
+| `FN-Music-Portable-0.2.5.exe` | **便携版**（免安装，双击即用） |
 
-> ⚠️ **v0.2.4 及更早的产物未做代码签名**：Windows SmartScreen 会拦（蓝色「Windows 已保护你的电脑」）→
-> 点「更多信息」→「仍要运行」。需要静默安装可用 `FN-Music-Setup-0.2.4.exe /S`。
+> ℹ️ **字节数与 sha256 在哪看**：**每个版本自己的 Release 页面**（说明末尾有「下载校验（sha256）」一节）
+> 与 [`docs/releases/v0.2.5.md`](./docs/releases/v0.2.5.md) 都列了**该版本产物**的字节数与 sha256
+> ⇒ **对不上就别装**。
+> ⚠️ **为什么不给「一份通用」的哈希表**：产物由 **CI 构建**，而 NSIS 安装器**内嵌构建时间戳**
+> ⇒ **两次构建的字节必然不同** ⇒ 哈希只能**逐版本**给。
+> （老版本的哈希仍能在**它自己的** Release 页面查到。）
+
+> ⚠️ **v0.2.5 及更早的产物未做代码签名**：Windows SmartScreen 会拦（蓝色「Windows 已保护你的电脑」）。
+> ⇒ **三种绕法，任选其一**：
+> - 点「更多信息」→「仍要运行」；
+> - **更省事（推荐）**：右键安装包 → **属性** → 底部勾「**解除锁定**」→ 应用 ⇒ **蓝框直接消失**；
+> - **命令行一次搞定**（PowerShell）：
+>   ```powershell
+>   Unblock-File .\FN-Music-Setup-0.2.5.exe
+>   # 批量：Get-ChildItem . -Filter *.exe | Unblock-File
+>   ```
 >
-> ✅ **更新版本起**改由 **[SignPath Foundation](https://signpath.org)** 签发**公开 OV 签名**
-> （Windows 上显示的发布者是「SignPath Foundation」）⇒ 不再是「未知发布者」，
-> 且在**开启了 Smart App Control 的 Windows 11** 上不再被直接拦截。
-> ⚠️ **但 SmartScreen 的蓝框第一版仍可能出现** —— 微软判的是**文件哈希的信誉**，
-> 新证书的信誉要从零开始积累（通常需要数周、数百次真实下载）。
-> 怎么自己验？见 [`docs/signing.md`](./docs/signing.md)（含 `Get-AuthenticodeSignature` 复核命令）。
+> ℹ️ **为什么勾「解除锁定」就行**：Windows 的 SmartScreen 下载拦截是**因为文件带「来自互联网」标记**
+> （Mark of the Web）才触发的 ⇒ 去掉这个标记，它就不再拦。
+> ⚠️ **这不代表文件安全** —— 仍要核对上面的 sha256。
+> 需要静默安装可用 `FN-Music-Setup-0.2.5.exe /S`。
+>
+> ✅ **签名正在办理**：本项目已向 **[SignPath Foundation](https://signpath.org)** 提交免费签名申请
+> （**审核中**）⇒ 批下来后**从下一个版本起**产物才会带上公开 OV 签名
+> （Windows 上显示的发布者是「SignPath Foundation」），且在**开启了 Smart App Control 的 Windows 11**
+> 上不再被直接拦截。**这一版没有**，别等它。
+> 进度与影响见 [`docs/signing.md`](./docs/signing.md)。
+>
+> ⚠️ **Smart App Control 的 Windows 11 是例外**：那是**硬拦**（**没有**「仍要运行」按钮）
+> ⇒ 那类机器**要等签名上线**才能装。
 
 - **首次使用**：装完打开 → 顶栏「连接」→ 用 **FN ID 探测**（推荐）或 **地址 + 账号口令**
   登录，详见「[二、两种登录方式](#二两种登录方式)」；
 - **没 NAS 也能用**：未登录时主区默认就是「本地音乐」页，可「添加文件 / 添加文件夹」
   直接播本机音乐；
-- `latest.yml`、`latest.json` 与 `FN-Music-Setup-0.2.4.exe.blockmap` 是**自动更新用的清单**，**不用手动下载**。
+- `latest.json` 是**自动更新用的清单**（本次发布的 3 个资产就是：安装包 / 便携版 / `latest.json`），**不用手动下载**。
 - ⚠️ **v0.2.4 起**：勾选「**允许安装未签名的更新包**」并**保存**后，未签名的更新包也能安装
   （SHA-512 与同源校验照旧）；**不填**「预期的代码签名者」也能用这条路。
 - ⚠️ **v0.2.2 起**：「设置 → 更新」里的**更新服务器地址留空即可** —— 主进程会自动用
@@ -231,8 +245,11 @@ A：Chromium 解不了某些无损格式（APE / ALAC / DSF 等）。客户端�
 **Q：提示「该操作需要下载到本地」？**
 A：兜底解码需要本地文件副本。请先点下载，等它完成再播放。
 
-**Q：Windows 提示「未知发布者」？**
-A：产物**未做代码签名**，这是预期状态。正式分发需要自备代码签名证书。
+**Q：Windows 提示「未知发布者」/ 蓝色「Windows 已保护你的电脑」？**
+A：产物**未做代码签名**（签名申请**已提交、审核中**，批下来后从下一版起生效），这是预期状态。
+**最省事的处理**：右键安装包 → **属性** → 底部勾「**解除锁定**」→ 应用（**蓝框直接消失**）；
+或命令行（PowerShell）：`Unblock-File .\FN-Music-Setup-0.2.5.exe`。
+⚠️ 开了 **Smart App Control** 的 Windows 11 是**硬拦**（没有「仍要运行」按钮）⇒ 那类机器要等签名上线。
 
 **Q：连不上 / 地址无效？**
 A：① **IP 地址**只填 host 时会自动补端口（`5666` / `5667`），**域名地址走标准端口**（`80` / `443`）——若你的域名是局域网直连，请显式写成 `host:5666`；② 若前面写了 `https` 而 NAS 只开了 `http`，请显式改成 `http`；③ 中继链路必须能带上 `mode=relay`；④ 自签证书场景下，客户端**只对 TrustedHosts 放行**，不会全局忽略证书错误。

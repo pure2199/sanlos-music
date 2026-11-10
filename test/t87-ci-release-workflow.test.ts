@@ -275,3 +275,117 @@ describe('T87.10 —— 工作流脚本里的反引号', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// T87.11：未签名发布路径（2026-11-11）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么要有这条路径**：SignPath Foundation 的申请 2026-11-11 已提交，
+//    批不批、何时批**不由我们决定** ⇒ 发版不能被外部审核无限期卡住。
+//    ⇒ v0.2.5 以**未签名**形式发布。
+//
+// ⚠️ **纪律**：既有断言一条不删、一条不削弱；本节只**追加**。
+//    且「未签名」必须是**构建期事实**（机械断言），不是文档里的口头承诺。
+
+/**
+ * 从工作流原文里取出某个 step 的文本块（从 `- name: X` 到下一个 `- name:`）。
+ *
+ * @param yml 工作流原文
+ * @param name step 的名字
+ * @returns 该 step 的完整文本
+ */
+function stepBlock(yml: string, name: string): string {
+  const marker = `- name: ${name}`
+  const start = yml.indexOf(marker)
+  if (start < 0) throw new Error(`找不到步骤：${name}`)
+  const next = yml.indexOf('\n      - name:', start)
+  return next < 0 ? yml.slice(start) : yml.slice(start, next)
+}
+
+/** 取出某个 step 里的 `UPDATE_NOTES` 值（单引号包裹的那一段）。 */
+function updateNotesOf(block: string): string {
+  const matched = block.match(/UPDATE_NOTES: '([^']*)'/)
+  return matched?.[1] ?? ''
+}
+
+describe('T87.11 —— 未签名发布路径', () => {
+  const yml = readRepoFile('.github', 'workflows', 'release.yml')
+
+  it('有 `sign` 输入，且**默认 true**（签名是默认路径，未签名必须显式关掉）', () => {
+    const inputs = yml.slice(yml.indexOf('workflow_dispatch:'), yml.indexOf('concurrency:'))
+    expect(inputs).toMatch(/^\s+sign:\s*$/m)
+    const signBlock = inputs.slice(inputs.indexOf('\n      sign:'))
+    expect(signBlock).toContain('default: true')
+    expect(signBlock).toContain('type: boolean')
+  })
+
+  it('**未签名路径必须断言产物确实没有签名**（不是口头承诺）', () => {
+    const block = stepBlock(yml, 'Verify unsigned artifacts')
+    expect(block).toContain('if: ${{ !inputs.pack_only && !inputs.sign }}')
+    expect(block).toContain('--expect none')
+    expect(block).toContain('release-ci')
+  })
+
+  it('**签名路径仍然加严**（Valid + 时间戳 + CN 一条不少）', () => {
+    const block = stepBlock(yml, 'Verify signed artifact')
+    expect(block).toContain('if: ${{ !inputs.pack_only && inputs.sign }}')
+    expect(block).toContain('--expect valid')
+    expect(block).toContain('--require-timestamp')
+    expect(block).toContain('--expect-cn')
+  })
+
+  it('清单生成**排在替换签名件之后**（否则清单算的是未签名 exe 的哈希）', () => {
+    // ⚠️ 比的是**步骤位置**，不是 `publish-manifest.mjs` 这个字符串的位置
+    //    —— 文件头的注释里也出现过它。
+    const replaceAt = yml.indexOf('- name: Replace artifacts with signed ones')
+    const manifestAt = yml.indexOf('- name: Write update manifest (signed)')
+    expect(replaceAt).toBeGreaterThan(-1)
+    expect(manifestAt).toBeGreaterThan(-1)
+    expect(manifestAt).toBeGreaterThan(replaceAt)
+  })
+
+  it('两种模式**各有各的清单步骤**（未签名路径不许复用签名路径那步）', () => {
+    expect(stepBlock(yml, 'Write update manifest (signed)')).toContain(
+      'if: ${{ !inputs.pack_only && inputs.sign }}',
+    )
+    expect(stepBlock(yml, 'Write update manifest (unsigned)')).toContain(
+      'if: ${{ !inputs.pack_only && !inputs.sign }}',
+    )
+  })
+
+  it('**未签名的 notes 里不许出现「已签名 / SignPath」**（这一版确实没签）', () => {
+    const notes = updateNotesOf(stepBlock(yml, 'Write update manifest (unsigned)'))
+    expect(notes).toContain('未做代码签名')
+    expect(notes).not.toContain('SignPath')
+    expect(notes).not.toContain('已由')
+  })
+
+  it('**变异自证**：把未签名的 notes 改成声称已签名 ⇒ 必被抓出来', () => {
+    const mutated = yml.replace(
+      /UPDATE_NOTES: '本版未做代码签名[^']*'/,
+      "UPDATE_NOTES: '安装包已由 SignPath Foundation 签名（Authenticode，含 RFC 3161 时间戳）。'",
+    )
+    // 变异必须真的改到了东西（否则下面的断言就是在验一个没变过的文件）。
+    expect(mutated).not.toBe(yml)
+    const notes = updateNotesOf(stepBlock(mutated, 'Write update manifest (unsigned)'))
+    expect(notes).toContain('SignPath')
+    expect(notes).not.toContain('未做代码签名')
+  })
+
+  it('Release 说明**由工作流附上 sha256 与字节数**（本机没有 gh，只能这样）', () => {
+    const block = stepBlock(yml, 'Prepare release notes with checksums')
+    expect(block).toContain('Get-FileHash')
+    expect(block).toContain('SHA256')
+    expect(block).toContain('RUNNER_TEMP')
+    // 发布那一步**必须**用这份带校验值的说明。
+    const publish = stepBlock(yml, 'Publish GitHub Release')
+    expect(publish).toContain("Join-Path $env:RUNNER_TEMP 'release-notes.md'")
+    expect(publish).toContain('--notes-file $notesFile')
+  })
+
+  it('**编码必须显式指定**（PS 5.1 默认按控制台代码页读 ⇒ 中文会乱码）', () => {
+    const block = stepBlock(yml, 'Prepare release notes with checksums')
+    expect(block).toContain('-Encoding UTF8')
+    expect(block).toContain('UTF8Encoding($false)')
+  })
+})
