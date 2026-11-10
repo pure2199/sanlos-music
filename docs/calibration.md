@@ -4174,6 +4174,40 @@ v0.2.3 发布后用户问「为什么签名没通过」⇒ 实测发现**真缺�
   `.../download/v/v32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **HTTP 404**）；
 - ⇒ 本次**把注释改成与事实一致** + 把值改成**正确形态**（行为不变：`.npmrc` 仍然优先）。
 
+### 第二次翻车：**CRLF 行尾**（同一天，CI 又挂一次）
+
+修完上面的非法键、推送后，两条 workflow（CI `42859918221` + Release `42860165012`）
+**又挂在同一处：第 6 步 `Unit tests`**（这次**不是**打包步骤）。
+
+从 GitHub 的 check-run annotations 读到的真实报错：
+
+```
+test/t87-builder-config-schema.test.ts
+  AssertionError: expected '…' to match /^ {2}signtoolOptions:\n(?: {4}\S.*\n…/m
+  AssertionError: expected '…' not to be '…'   // 变异那一步：mutated === original
+```
+
+| 根因 | 内容 |
+|---|---|
+| 机制 | GitHub 的 **Windows runner 上 `core.autocrlf=true`** ⇒ **检出后的文本文件是 CRLF**；而本机工作区是 LF（且仓库里 `docs/changelog.md` / `docs/calibration.md` 本来就是 CRLF）⇒ **同一份代码在两边的字节不同** |
+| 表现 1 | 正则 `/^ {2}signtoolOptions:\n/` 要求 `:` 紧跟 `\n`，而 CRLF 下是 `:\r\n` ⇒ **匹配不上** |
+| 表现 2 | 变异那一步的 `replace(/^win:\n/)` 同样匹配不上 ⇒ **变异没生效** ⇒ `expect(mutated).not.toBe(original)` 失败 |
+| 结论 | **行尾不该是判定的变量** ⇒ 断言与变异前一律先 `replace(/\r\n/g, '\n')` 归一化 |
+
+⚠️ **通用教训（比这一次的 bug 更值钱）**：**「本地绿、CI 红」的第一嫌疑是「两边看到的文件字节不同」**
+（行尾 / BOM / 编码），而不是「CI 环境有问题」。⇒ 断言文件内容前**先归一化**，
+或**按字节断言**（明确期望 CRLF 还是 LF）。
+
+⇒ 修完补了 5 个场景的变异自证（`release/verify/t87b-mutations.mjs`）：
+A1 非法键（LF）必红 / A2 按 sha256 还原 / A3 还原后必绿 / **B CRLF 行尾仍必绿** /
+**C CRLF + 非法键必红** / D 还原 / E 最终态必绿 —— **7/7 全过**。
+
+⚠️ **仍留着的隐患（本次**不改**，交由用户拍板）**：仓库**没有 `.gitattributes`**
+⇒ 行尾完全由各人各机器的 `core.autocrlf` 决定 ⇒ **本地与 CI 的文件字节永远可能不同**。
+彻底解法是加一个 `.gitattributes`（`* text=auto eol=lf` + 二进制文件标记）
+—— 但那会**改变所有人工作区的行尾**（本仓库的 `docs/changelog.md` / `docs/calibration.md`
+现在就是 CRLF）⇒ 属于**仓库级口径变更**，不夹带在本次修复里。
+
 ### 验证（全部实测）
 
 | 项 | 结果 |
@@ -4181,7 +4215,7 @@ v0.2.3 发布后用户问「为什么签名没通过」⇒ 实测发现**真缺�
 | 本地打包 `node scripts/pack.cjs` | ✅ **exit 0** —— 配置校验通过；产出 `FN-Music-Setup-0.2.4.exe` + `FN-Music-Portable-0.2.4.exe`；日志 `no code signing certificate configured, signing is skipped` ⇒ **`signtoolOptions` 不会误触发签名** |
 | `tsc --noEmit` | ✅ exit 0 |
 | `vitest` | ✅ **2263 passed / 109 files**（既有 2260 条**一条不删**；新增 **3** 条） |
-| 变异自证 | ✅ 把 `win.timeStampServer` 塞回 yml ⇒ 守卫测试**变红**（exit 1）；按 sha256 还原 ⇒ **变绿** |
+| 变异自证 | ✅ **7/7 场景全过**：非法键（LF）必红 → 按 sha256 还原 → 还原后必绿 → **CRLF 行尾仍必绿** → **CRLF + 非法键必红** → 还原 → 最终态必绿 |
 | 字节自检 | ✅ 改动文件 BOM=N / FFFD=0 / NUL=0 / 行尾与原文件一致 |
 
 ### 已知限制

@@ -220,7 +220,10 @@ describe('T87 打包脚本适配 CI', () => {
   })
 
   it('`electron-builder.yml` **显式**钉了时间戳源（不靠默认值），且**写在合法位置**', () => {
-    const yml = readFileSync(join(REPO_ROOT, 'electron-builder.yml'), 'utf8')
+    // ⚠️ **行尾归一化到 LF**：Windows runner 检出后是 **CRLF**（`core.autocrlf=true`），
+    //    而本机可能是 LF ⇒ 直接对原文做「按行」的正则会**在 CI 上莫名其妙地不匹配**
+    //    （2026-11-10 实测：两条 workflow 都因此挂在「Unit tests」）。
+    const yml = readFileSync(join(REPO_ROOT, 'electron-builder.yml'), 'utf8').replace(/\r\n/g, '\n')
     // ① 两种时间戳源都要显式写出来（传统 `/t` + RFC 3161 `/tr`）。
     expect(yml).toContain('timeStampServer: http://timestamp.digicert.com')
     expect(yml).toContain('rfc3161TimeStampServer: http://timestamp.digicert.com')

@@ -50,6 +50,20 @@ const builderConfig = require('app-builder-lib/out/util/config/config.js') as Bu
 /** electron-builder 的 `debugLogger` 只需要这两个成员。 */
 const NOOP_LOGGER = { isEnabled: false, add: () => {} }
 
+/**
+ * 读一份文本文件，并把行尾**统一成 LF**。
+ *
+ * ⚠️ **为什么必须归一化**（2026-11-10 CI 实测踩到）：
+ *    GitHub 的 Windows runner 上 `core.autocrlf=true` ⇒ **检出后的文本文件是 CRLF**，
+ *    而本机工作区可能是 LF ⇒ 直接对原文做「按行」的正则
+ *    （`/^ {2}timeStampServer:/m`、`replace(/^win:\n/)`）**在 CI 上会莫名其妙地不匹配**
+ *    ⇒ 2026-11-10 两条 workflow 都因此挂在「Unit tests」这一步。
+ *    ⇒ **断言与变异前一律先归一化**：让「行尾」不再是判定的变量。
+ */
+function readNormalized(file: string): string {
+  return readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
+}
+
 /** 用 electron-builder **自己**的加载器 + **它自己的** schema 校验一份配置文件。 */
 async function validateConfigFile(configPath: string): Promise<void> {
   const config = await builderConfig.getConfig(REPO_ROOT, configPath, null)
@@ -65,7 +79,7 @@ describe('T87.8 —— 打包配置的守卫', () => {
   })
 
   it('**非法键必被拒**（变异自证：把 `win.timeStampServer` 塞回去 ⇒ 必须失败）', async () => {
-    const original = readFileSync(join(REPO_ROOT, 'electron-builder.yml'), 'utf8')
+    const original = readNormalized(join(REPO_ROOT, 'electron-builder.yml'))
     // ⚠️ 复刻 2026-11-10 那次失败：`win` **顶层**多一行 `timeStampServer`。
     const mutated = original.replace(
       /^win:\n/m,
@@ -83,7 +97,7 @@ describe('T87.8 —— 打包配置的守卫', () => {
   })
 
   it('**时间戳源写在 `win.signtoolOptions` 下**（合法位置）', () => {
-    const yml = readFileSync(join(REPO_ROOT, 'electron-builder.yml'), 'utf8')
+    const yml = readNormalized(join(REPO_ROOT, 'electron-builder.yml'))
     expect(yml).toMatch(/^ {2}signtoolOptions:\n(?: {4}\S.*\n)+/m)
     expect(yml).toContain('timeStampServer: http://timestamp.digicert.com')
     expect(yml).toContain('rfc3161TimeStampServer: http://timestamp.digicert.com')
