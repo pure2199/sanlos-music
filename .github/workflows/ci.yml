@@ -17,14 +17,23 @@ concurrency:
 jobs:
   verify:
     # 应用是 Windows 专属（托盘 / DPAPI / safeStorage / `fnm://` 自定义协议）。
-    name: typecheck + unit tests + build
+    # ⚠️ **T87.8：加上了「打包」** —— 配置级的错误只有真打包才会暴露。
+    name: typecheck + unit tests + build + pack
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     env:
-      # 仓库的 `.npmrc` 把 Electron 的下载镜像指向 npmmirror（面向国内网络）。
-      # GitHub Runner 在境外 → 这里显式指回官方 release 源，避免拉不动。
-      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/v
+      # ⚠️ **T87.8：这两行的实际效力，别被注释骗了**（实测，不是推断）：
+      # - `ELECTRON_MIRROR` 其实**不生效** —— `@electron/get` 的取值优先级里
+      #   `.npmrc` 注入的 `npm_config_electron_mirror` 排在前面 ⇒ 仓库 `.npmrc` 的
+      #   npmmirror 胜出（实测：CI 里 electron 二进制确实是从 npmmirror 下的）。
+      #   真要改成官方源，必须用 **npm 风格的小写名** `npm_config_electron_mirror`，
+      #   且**值不能带尾部 `/v`**（`@electron/get` 会自己拼 `v<version>/` 目录：
+      #   实测 `.../download/v32.3.3/…` ⇒ HTTP 206，`.../download/v/v32.3.3/…` ⇒ 404）。
+      #   这里仍保留这个变量，是为了让「万一它哪天生效了」也是**正确**的形态。
+      # - `ELECTRON_BUILDER_BINARIES_MIRROR` **是生效的**（electron-builder 直接读
+      #   这个环境变量，不走 npm 配置）。
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download
       ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download
 
     steps:
@@ -51,3 +60,17 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # ⚠️ **T87.8：打包冒烟**（每次 push / PR 都**真出一次包**）。
+      #    起因：`electron-builder.yml` 里多了一行**非法键**（`win.timeStampServer`）
+      #    ⇒ electron-builder 的配置校验直接失败 ⇒ **整个打包挂掉**；
+      #    而「本机没重跑打包」+「CI 不打包」⇒ 两道关卡都没拦住
+      #    ⇒ 直到发版工作流才炸（run 42857375893，失败在第 8 步 `Pack`）。
+      #    ⇒ **谁改了打包配置，就必须有能验证打包配置的关卡。**
+      # ⚠️ 直接调 `scripts/pack.cjs`（**不跑 `npm run pack`**）—— 后者会**再 build 一次**。
+      # ⚠️ 产物目录用 `FNM_PACK_OUTPUT=release-ci`（与 release.yml 同一个变量名）
+      #    ⇒ `release-ci/` 已在 `.gitignore` 里 ⇒ 不脏仓库。
+      - name: Pack (smoke)
+        run: node scripts/pack.cjs
+        env:
+          FNM_PACK_OUTPUT: release-ci

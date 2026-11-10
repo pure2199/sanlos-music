@@ -50,8 +50,22 @@ win:
   # ⚠️ **T87：显式钉住时间戳源**（不依赖默认值 —— 默认值会变、会挂）。
   #    ⚠️ **为什么必须有时间戳**：没有 RFC 3161 时间戳 ⇒ 证书到期那天，
   #       **历史上所有安装包一起失效**（用户装不上了）⇒ 打包后要**断言**它。
-  #    （SignPath 路线由 SignPath 负责打时间戳；这一行管的是「本机 / 自签」路线。）
-  timeStampServer: http://timestamp.digicert.com
+  #    （SignPath 路线由 SignPath 负责打时间戳；这里管的是「本机 / 自签」路线。）
+  #
+  # ⚠️⚠️ **必须写在 `win.signtoolOptions` 下面**（**不能**写在 `win` 顶层）：
+  #    - `win.timeStampServer` / `win.sign.timeStampServer` **都不是合法键**
+  #      ⇒ electron-builder 的配置校验会**直接失败** ⇒ **整个打包挂掉**
+  #      （2026-11-10 实测：CI run 42857375893 就死在这一行）。
+  #    - 合法位置只有 `win.signtoolOptions.timeStampServer`（传统时间戳 `/t`）
+  #      与 `win.signtoolOptions.rfc3161TimeStampServer`（RFC 3161 时间戳 `/tr`，
+  #      sha256 签名走这条）—— 代码读的就是这两个
+  #      （`app-builder-lib/out/codeSign/windowsSignToolManager.js`）。
+  #    - 两者缺省都是 `http://timestamp.digicert.com`；显式写出来是为了
+  #      「不依赖默认值」。
+  #    - ⚠️ 这一段只影响**真去签名时**的命令行参数；没有证书时**不会**触发签名。
+  signtoolOptions:
+    timeStampServer: http://timestamp.digicert.com
+    rfc3161TimeStampServer: http://timestamp.digicert.com
   target:
     - target: nsis
       arch:

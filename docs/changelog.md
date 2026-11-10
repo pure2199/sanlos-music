@@ -25,7 +25,8 @@
 | **打包适配 CI** | `scripts/pack.cjs` 默认**关掉证书自动发现**（本机装了证书也会自动签 ⇒ 结果不可预期）+ 新增 `FNM_EXPECT_SIGNER_CN` 加严开关；`scripts/publish-manifest.mjs` 认 `FNM_PACK_OUTPUT`（CI 的产物在 `release-ci/`） |
 | **发版工作流** | 新增 `.github/workflows/release.yml`（手动触发，参数 `tag` + `pack_only`）：构建 → 打包 → 送签 → **人工审批** → 取回 → **校验**（`Valid` + 时间戳 + CN）→ 生成清单 → 发 Release；**任一环节不过 ⇒ 工作流失败，绝不发布** |
 | **申请材料** | 新增 `CODE_SIGNING_POLICY.md`（提交给 SignPath 审核的那份）与 `docs/signing.md`（申请 / 配置 / 发版 / 故障排查） |
-| **工程** | 单元测试 **+65** 条（新增 `test/t87-signing-assertion.test.ts`、`test/t87-ci-release-workflow.test.ts`）；Playwright E2E **34** 条（不变） |
+| **工程** | 单元测试 **+68** 条（新增 `test/t87-signing-assertion.test.ts`、`test/t87-ci-release-workflow.test.ts`、`test/t87-builder-config-schema.test.ts`）；Playwright E2E **34** 条（不变） |
+| **T87.8 修打包配置** | `electron-builder.yml` 的时间戳源挪到**合法位置** `win.signtoolOptions.{timeStampServer, rfc3161TimeStampServer}` —— 原先写在 `win` 顶层是**非法键** ⇒ electron-builder 的配置校验**直接失败** ⇒ **整个打包挂掉**（CI run 42857375893 就死在这一行）；**新增** `test/t87-builder-config-schema.test.ts`（用 **electron-builder 自己的** schema 校验配置，含「非法键必被拒」的变异自证）+ `ci.yml` 加 `Pack (smoke)`（每次 push / PR **真出一次包**）⇒ 配置写错不会再等到发版才炸 |
 
 ### 已知影响
 

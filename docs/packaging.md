@@ -385,6 +385,33 @@ node tools/fn-check-signature.mjs release-probe
 | `CODE_SIGNING_POLICY.md` | 交给 SignPath 审核的**代码签名政策** |
 | `docs/signing.md` | 面向维护者/用户的完整说明（申请、配置、发版、故障排查） |
 
+#### ⚠️ 时间戳源写在哪（**写错位置 = 整个打包挂掉**，T87.8 实测）
+
+`electron-builder.yml` 里显式钉时间戳源，**必须**写在 `win.signtoolOptions` 下面：
+
+```yaml
+win:
+  signtoolOptions:
+    timeStampServer: http://timestamp.digicert.com       # 传统时间戳 /t
+    rfc3161TimeStampServer: http://timestamp.digicert.com # RFC 3161 时间戳 /tr
+```
+
+⚠️ **写在 `win` 顶层（`win.timeStampServer`）是「非法键」** ⇒ electron-builder 的配置校验
+**直接失败** ⇒ **整个打包挂掉**（2026-11-10 实测：CI run 42857375893 就死在这一行，
+报错是 `Invalid configuration object … configuration.win should be one of these: null`）。
+
+| 键 | 合法归属 | 代码读它的地方 |
+|---|---|---|
+| `timeStampServer` | `WindowsSigntoolConfiguration` ⇒ `win.signtoolOptions.timeStampServer` | `app-builder-lib/out/codeSign/windowsSignToolManager.js:200` |
+| `rfc3161TimeStampServer` | 同上 ⇒ `win.signtoolOptions.rfc3161TimeStampServer` | 同上 `:199`（sha256 签名走这条 `/tr`） |
+
+⇒ **守卫已就位**（别再靠「记得手测一遍」）：
+
+- `test/t87-builder-config-schema.test.ts` 用 **electron-builder 自己的**配置加载器 +
+  **它自己的 schema** 校验 `electron-builder.yml`（含「非法键必被拒」的变异自证）；
+- `ci.yml` 每次 push / PR 都会 **真出一次包**（`Pack (smoke)` 步骤）
+  ⇒ 配置写错不会再等到发版工作流才炸。
+
 #### ⚠️ 打包搬进 CI 带来的三个副作用
 
 1. **产物集合变了**：签名会改 exe 的字节 ⇒ electron-builder 基于**未签名** exe 算出来的

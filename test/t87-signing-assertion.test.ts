@@ -219,9 +219,18 @@ describe('T87 打包脚本适配 CI', () => {
     expect(gitignore).toMatch(/^release-ci\/$/m)
   })
 
-  it('`electron-builder.yml` **显式**钉了时间戳源（不靠默认值）', () => {
+  it('`electron-builder.yml` **显式**钉了时间戳源（不靠默认值），且**写在合法位置**', () => {
     const yml = readFileSync(join(REPO_ROOT, 'electron-builder.yml'), 'utf8')
-    expect(yml).toContain('timeStampServer:')
+    // ① 两种时间戳源都要显式写出来（传统 `/t` + RFC 3161 `/tr`）。
+    expect(yml).toContain('timeStampServer: http://timestamp.digicert.com')
+    expect(yml).toContain('rfc3161TimeStampServer: http://timestamp.digicert.com')
+    // ② ⚠️ **必须在 `win.signtoolOptions` 下面**（T87.8 修订）。
+    //    写在 `win` 顶层是**非法键** ⇒ electron-builder 的配置校验**直接失败**
+    //    ⇒ **整个打包挂掉**（2026-11-10 实测：CI run 42857375893 死在这一行）。
+    expect(yml).toMatch(/^ {2}signtoolOptions:\n(?: {4}\S.*\n)+/m)
+    // ③ `win` 顶层**不许**再出现时间戳源（那正是上面的非法键）。
+    expect(yml).not.toMatch(/^ {2}timeStampServer:/m)
+    expect(yml).not.toMatch(/^ {2}rfc3161TimeStampServer:/m)
   })
 })
 

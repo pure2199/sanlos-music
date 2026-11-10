@@ -49,9 +49,12 @@ jobs:
     timeout-minutes: 120
 
     env:
-      # ⚠️ 与 `ci.yml` 保持一致：仓库的 `.npmrc` 把 Electron 下载镜像指向 npmmirror
-      #    （面向国内网络），GitHub Runner 在境外 ⇒ 这里显式指回官方源。
-      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/v
+      # ⚠️ 与 `ci.yml` 保持一致（**含 T87.8 的更正**）：
+      #    `ELECTRON_MIRROR` 其实**不生效** —— `.npmrc` 注入的
+      #    `npm_config_electron_mirror` 优先级更高 ⇒ 实际走的是 npmmirror；
+      #    且值**不能带尾部 `/v`**（`@electron/get` 会自己拼 `v<version>/`），
+      #    否则一旦生效就是 404。详见 `ci.yml` 里同一段注释。
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download
       ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download
       # ⚠️ 产物目录（`scripts/pack.cjs` 与 `scripts/publish-manifest.mjs` 共用这个变量）。
       FNM_PACK_OUTPUT: release-ci

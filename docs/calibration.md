@@ -4125,3 +4125,79 @@ v0.2.3 发布后用户问「为什么签名没通过」⇒ 实测发现**真缺�
 - ⚠️ **T87.7（发版 v0.2.5）** 待上面三件事齐了才能跑；
 - ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验、**轮换 NAS 口令**、
   GitHub 改口令 + 开 2FA 等老待办**不变**。
+
+---
+
+## 五十、T87.8：CI 出包链路实测失败 ⇒ 打包配置里的**非法键**（2026-11-10）
+
+### 做了什么
+
+**一句话**：T87 落地后第一次跑发版工作流就**失败在打包** ⇒ 根因是
+`electron-builder.yml` 里一行**非法键** ⇒ **整个打包挂掉**；修好之后又补了两道
+守卫，让「打包配置写错」**从此不必等到发版才炸**。
+
+### 现象与根因（**实测**，不是推断）
+
+| 项 | 内容 |
+| --- | --- |
+| 触发的 run | **42857375893**（`workflow_dispatch`，`pack_only=true` ⇒ **只打包、不送签、不发版**） |
+| 失败位置 | 第 8 步 `Pack`；前 7 步（checkout / setup-node / npm ci / typecheck / test / build）**全绿** |
+| 报错原文 | `Invalid configuration object. electron-builder 26.18.0 has been initialized using a configuration object that does not match the API schema. - configuration.win should be one of these: null` |
+| 根因 | `electron-builder.yml` 里的 `win.timeStampServer` **不是 electron-builder 26.18.0 的合法键** ⇒ 配置校验直接失败 ⇒ **整个打包挂掉** |
+| 本地复现 | `node node_modules/electron-builder/cli.js --config electron-builder.yml` ⇒ **报错与 CI 一字不差** |
+| 合法位置 | `win.signtoolOptions.timeStampServer`（传统 `/t`）+ `win.signtoolOptions.rfc3161TimeStampServer`（RFC 3161 `/tr`）—— 代码读的就是这两个（`windowsSignToolManager.js:199-200`） |
+
+### 为什么「没人发现」（**流程缺口**，不是偶发）
+
+1. **本机没重跑打包**：T87 的验证清单有 tsc / vitest / build / e2e / 变异自证 / 真证书实测，
+   **唯独没有 `npm run pack`** ⇒ 改了打包配置却没打包验证过；
+2. **CI 不打包**：`ci.yml` 只跑 typecheck / test / build ⇒ **配置级的错误只有发版工作流才会碰到**。
+
+⇒ 结论：**谁改了打包配置，就必须有能验证打包配置的关卡。**
+
+### 修法（三条，缺一不可）
+
+1. `electron-builder.yml`：挪到 `win.signtoolOptions.{timeStampServer, rfc3161TimeStampServer}`；
+2. **新** `test/t87-builder-config-schema.test.ts`：用 **electron-builder 自己的**配置加载器
+   （`getConfig`）+ **它自己的 schema**（`validateConfiguration`）校验 `electron-builder.yml`
+   ⇒ **不自己写校验器**（自己写的会漏判）；含「非法键必被拒」的变异自证；
+3. `ci.yml` 加 `Pack (smoke)`（`node scripts/pack.cjs`，输出到 `release-ci/`）
+   ⇒ 每次 push / PR **真出一次包**。
+
+### 附带发现：CI 里的 `ELECTRON_MIRROR` 是**死代码**
+
+- `@electron/get` 的优先级：`.npmrc` 注入的 `npm_config_electron_mirror`
+  **排在 `ELECTRON_MIRROR` 前面** ⇒ 实际走的是仓库 `.npmrc` 的 npmmirror
+  （实测佐证：CI 里 electron 二进制**确实**下载成功了 ⇒ 走的就是 npmmirror）；
+- 而且那个值**多带尾部 `/v`** ⇒ 一旦生效就是 404（实测：
+  `.../download/v32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **HTTP 206**；
+  `.../download/v/v32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **HTTP 404**）；
+- ⇒ 本次**把注释改成与事实一致** + 把值改成**正确形态**（行为不变：`.npmrc` 仍然优先）。
+
+### 验证（全部实测）
+
+| 项 | 结果 |
+| --- | --- |
+| 本地打包 `node scripts/pack.cjs` | ✅ **exit 0** —— 配置校验通过；产出 `FN-Music-Setup-0.2.4.exe` + `FN-Music-Portable-0.2.4.exe`；日志 `no code signing certificate configured, signing is skipped` ⇒ **`signtoolOptions` 不会误触发签名** |
+| `tsc --noEmit` | ✅ exit 0 |
+| `vitest` | ✅ **2263 passed / 109 files**（既有 2260 条**一条不删**；新增 **3** 条） |
+| 变异自证 | ✅ 把 `win.timeStampServer` 塞回 yml ⇒ 守卫测试**变红**（exit 1）；按 sha256 还原 ⇒ **变绿** |
+| 字节自检 | ✅ 改动文件 BOM=N / FFFD=0 / NUL=0 / 行尾与原文件一致 |
+
+### 已知限制
+
+- ⚠️ `ci.yml` 每次 push / PR 会**多花约 3~5 分钟**（真出一次包）—— **有意接受的代价**：
+  公开产物的第一道门就是「能出包」；
+- ⚠️ 本地打包时 `win-unpacked` 目录**发布不出去**（老问题 T62：被别的进程持有）
+  ⇒ 产物 exe 本身正常（用的是新文件名）⇒ 与本次改动无关；
+- ⚠️ `test/t87-builder-config-schema.test.ts` 走的是 electron-builder 的**内部路径**
+  （`app-builder-lib/out/util/config/config.js`）⇒ 将来升级 electron-builder 若改了路径，
+  这条测试会**响亮地失败**（而不是静默跳过 ⇒ 守卫失效）。
+
+### 遗留 / 待办
+
+- ⚠️ **T87.7（发版 v0.2.5）** 仍卡在两件工程侧无法代替的事：
+  ① 用户提交 SignPath Foundation 申请；② 批下来后填 5 个 secrets / variables；
+  （另：每次发布要在 SignPath 平台**人工点一次批准**）；
+- ⚠️ T72 手动偏移滑块、T31~T58 肉眼复验、**轮换 NAS 口令**、
+  GitHub 改口令 + 开 2FA 等老待办**不变**。
