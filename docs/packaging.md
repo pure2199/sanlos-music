@@ -128,12 +128,25 @@ npm run pack       # 2. 打包
    打开登录页、连上 NAS、播放一首；
 4. `release/verify/*.log` 记录本次验证的实际输出（**不是空文件**）。
 
+#### 验「音频内嵌歌词」要用的真实样本（**不进仓库**）
+
+这一版多了「读音频文件内嵌标签」的功能 ⇒ 验收它需要**真的带标签的音频文件**：
+
+```bash
+node tools/fn-fetch-embedded-lyric-samples.mjs   # 落到 release/samples/embedded-lyric/（gitignored）
+node node_modules/vitest/vitest.mjs run test/embedded-lyric-real-samples.test.ts
+```
+
+⚠️ **样本不进仓库**：真实语料是 **CC BY-SA 4.0**（许可传染）⇒ 仓库里只留
+**下载脚本 + URL**。样本缺失时 `test/embedded-lyric-real-samples.test.ts` **整组 skip**
+⇒ **CI 钉不住真文件的字节级行为**，只钉**自造夹具**的行为（CI 不依赖网络）。
+
 ### 自动化验证
 
 仓库自带的自动化检查：
 
 ```bash
-npm test          # 单元测试（1216 条）
+npm test          # 单元测试（2164 条）
 npm run e2e       # E2E 冒烟（Playwright 驱动真实 Electron）
 npm run typecheck # 跑 tsc --noEmit（开着 noUnusedLocals / noUnusedParameters 闸门）
 ```
