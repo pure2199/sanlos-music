@@ -4164,7 +4164,7 @@ v0.2.3 发布后用户问「为什么签名没通过」⇒ 实测发现**真缺�
 3. `ci.yml` 加 `Pack (smoke)`（`node scripts/pack.cjs`，输出到 `release-ci/`）
    ⇒ 每次 push / PR **真出一次包**。
 
-### 附带发现：CI 里的 `ELECTRON_MIRROR` 是**死代码**
+### 附带发现：CI 里的 `ELECTRON_MIRROR` 是**死代码**（**⚠️ 本节结论已被 T87.9 推翻，见「五十一」**）
 
 - `@electron/get` 的优先级：`.npmrc` 注入的 `npm_config_electron_mirror`
   **排在 `ELECTRON_MIRROR` 前面** ⇒ 实际走的是仓库 `.npmrc` 的 npmmirror
@@ -4173,6 +4173,12 @@ v0.2.3 发布后用户问「为什么签名没通过」⇒ 实测发现**真缺�
   `.../download/v32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **HTTP 206**；
   `.../download/v/v32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **HTTP 404**）；
 - ⇒ 本次**把注释改成与事实一致** + 把值改成**正确形态**（行为不变：`.npmrc` 仍然优先）。
+
+> ⚠️ **更正（2026-11-10，T87.9）**：本节「`ELECTRON_MIRROR` 是死代码」**只对 `npm ci` 成立**。
+> `node scripts/pack.cjs` **不是 npm 命令** ⇒ 拿不到 `.npmrc` 注入的 `npm_config_electron_mirror`
+> ⇒ **只有 `ELECTRON_MIRROR` 生效**；而且正确形态是**带结尾的 `/`**（`…/releases/download/`），
+> 不是「不带 `/v`」⇒ 本节据此把值改成「无尾斜杠」，**直接把 CI 打包打挂了**（run 42861355862 / 42861484377）。
+> 详见「五十一、T87.9」。
 
 ### 第二次翻车：**CRLF 行尾**（同一天，CI 又挂一次）
 
