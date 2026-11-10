@@ -4345,8 +4345,8 @@ A1 非法键（LF）必红 / A2 按 sha256 还原 / A3 还原后必绿 / **B CRL
 | 本地真跑那段 PowerShell | ✅ `release/verify/t87d-powershell-summary-probe.mjs`：`powershell.exe -EncodedCommand`（base64 UTF-16LE）⇒ **exit 0**（无 ParserError）、摘要文件生成、中文**没乱码**（写出的字节是 UTF-16LE + BOM，GitHub 读取端按 BOM 解） |
 | `tsc --noEmit` | ✅ exit 0 |
 | `vitest` | ✅ **2272 passed / 110 files**（既有 2269 条一条不删；新增 **3** 条） |
-| CI | run **42865021458** ⇒ ✅ **success**（含 `Pack (smoke)`） |
-| 发版链路 | run **42865707790**（`pack_only=true`）⇒ ❌ 失败于第 10 步（**Pack 本身已成功**）⇒ 修完后重跑 ⇒ **__RELEASE_RUN_ID__** / **__RELEASE_CONCLUSION__** |
+| CI | run **42867719484**（head `7e060c1`）⇒ ✅ **success**（8 步全绿，含 `Pack (smoke)`，5m48s） |
+| 发版链路 | run **42865707790**（`pack_only=true`）⇒ ❌ 失败于第 10 步（**Pack 本身已成功**）⇒ 修完后重跑 run **42867840001** ⇒ ✅ **success**（10 步全绿，5m51s；**摘要的中文渲染正常** ⇒ UTF-16LE 的 BOM 被 GitHub 正确解码） |
 
 ### 已知限制
 
