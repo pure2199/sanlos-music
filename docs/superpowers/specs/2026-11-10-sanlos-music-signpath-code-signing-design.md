@@ -297,3 +297,102 @@ git tag v0.2.5  ──►  GitHub Actions（release.yml，workflow_dispatch，re
 2. 批下来后把 5 个 secrets 填进仓库；
 3. 每次发布时在 SignPath 平台**点一次审批**；
 4. 真机复验 §5.3 的客户端三态。
+
+---
+
+## 九、T87.8 修订：`electron-builder.yml` 非法键导致 CI 出包失败（2026-11-10）
+
+### 9.1 现象
+
+T87 实现提交（`78ff477`）之后，手动 dispatch 了一次 `Release` 工作流
+（`workflow_dispatch`，`pack_only=true`，**只打包、不送签、不发版**）：
+
+- run **42857375893** ⇒ **失败**（作业 `build → sign → verify → publish`）
+- 失败步骤：**第 8 步 `Pack`**；前 7 步（checkout / setup-node / npm ci /
+  typecheck / test / build）**全绿** ⇒ **不是环境问题，是配置问题**。
+
+job log 原文：
+
+```
+Error: Invalid configuration object. electron-builder 26.18.0 has been initialized
+using a configuration object that does not match the API schema.
+ - configuration.win should be one of these:
+   null
+    at validateSchema (…/app-builder-lib/src/util/config/schemaValidator.ts:45:9)
+    at validateConfiguration (…/app-builder-lib/src/util/config/config.ts:238:17)
+    at Packager.validateConfig (…/app-builder-lib/src/packager.ts:399:5)
+```
+
+### 9.2 根因
+
+**`electron-builder.yml` 里的 `win.timeStampServer` 不是 electron-builder 26.18.0
+的合法键 ⇒ 配置校验直接失败 ⇒ 整个打包挂掉。**
+
+证据（本机实测，不是推断）：
+
+| 事实 | 证据 |
+|---|---|
+| 该键只存在于 **`WindowsSigntoolConfiguration`** | `node_modules/app-builder-lib/out/options/winOptions.d.ts`：`timeStampServer`（第 114 行）与 `rfc3161TimeStampServer`（第 109 行）同属该接口 |
+| `WindowsSigntoolConfiguration` 挂在 **`win.signtoolOptions`** 下 | 同文件 `WindowsConfiguration.signtoolOptions?: WindowsSigntoolConfiguration \| null` |
+| 代码真正读的就是 `signtoolOptions` | `out/codeSign/windowsSignToolManager.js:199-200`：`options.options.signtoolOptions?.rfc3161TimeStampServer` / `?.timeStampServer`，缺省都是 `http://timestamp.digicert.com` |
+| 写到 `win` 顶层 ⇒ **整个打包直接失败** | 本地复现：`node node_modules/electron-builder/cli.js --config electron-builder.yml` ⇒ **报错与 CI 一字不差** |
+
+⇒ 正确写法是 `win.signtoolOptions.timeStampServer`（RFC 3161 用
+`rfc3161TimeStampServer`）；**不是** `win.timeStampServer`，**也不是**
+`win.sign.timeStampServer`。
+
+### 9.3 为什么会「没人发现」
+
+两道本该拦住它的关卡都没拦住：
+
+1. **本机没重跑打包** —— T87 的验证清单里有 `tsc / vitest / build / e2e /
+   变异自证 / 真证书实测`，**唯独没有 `npm run pack`** ⇒ 改了
+   `electron-builder.yml` 却没打包验证过；
+2. **CI 不打包** —— `ci.yml` 只跑 `typecheck / test / build`
+   ⇒ **配置级的错误只有发版工作流才会碰到**。
+
+⇒ 这不是「偶发环境问题」，是**流程缺口**：
+**谁改了打包配置，就必须有能验证打包配置的关卡。**
+
+### 9.4 修法（三条，缺一不可）
+
+| # | 措施 | 作用 |
+|---|---|---|
+| ① | `win.timeStampServer` → `win.signtoolOptions.{timeStampServer, rfc3161TimeStampServer}` | 修掉**这一次**的失败 |
+| ② | **新** `test/t87-builder-config-schema.test.ts`：用 **electron-builder 自己的**配置加载器（`getConfig`）+ **它自己的 schema**（`validateConfiguration`）校验 `electron-builder.yml` | 把「配置非法键」从「发版时才发现」变成「`npm test` 就红」 |
+| ③ | `ci.yml` 加一步 `Pack (smoke)`（`node scripts/pack.cjs`，输出到 `release-ci/`） | 每次 push **真出一次包** ⇒ 打包链路（而不只是源码）始终被验证 |
+
+⚠️ ② **不自己写 schema 校验器**：直接调 electron-builder 自己的
+`validateConfiguration` ⇒ 判定口径与真正打包时**是同一份**，
+不会出现「自己写的校验器漏判、于是照样放行」。
+
+⚠️ ③ 的代价：CI 每次 push 多花约 3~5 分钟（要下 NSIS / winCodeSign 等构建器
+二进制）。**接受** —— 公开产物的第一道门就是「能出包」。
+
+### 9.5 附带发现：CI 里的 `ELECTRON_MIRROR` 覆盖其实是**死代码**
+
+`@electron/get` 的取值优先级（`node_modules/@electron/get/dist/cjs/artifact-utils.js:26-32`）：
+**`.npmrc` 注入的 `npm_config_electron_mirror` 排在 `ELECTRON_MIRROR` 前面**
+⇒ 仓库 `.npmrc` 的 `electron_mirror=https://npmmirror.com/mirrors/electron/`
+**优先于**工作流里写的 `ELECTRON_MIRROR` ⇒ 那句「这里显式指回官方源」与
+**实际行为不符**。
+
+而且那个值本身也是坏的：`https://github.com/electron/electron/releases/download/v`
+多了尾部 `/v`，而 `@electron/get` 会自己拼 `v<version>/` 目录。实测（Range GET）：
+
+- `…/releases/download/v32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **HTTP 206**（正确形态）
+- `…/releases/download/v/v32.3.3/electron-v32.3.3-win32-x64.zip` ⇒ **HTTP 404**（多一个 `/v`）
+
+⇒ 本次**不改行为**（现网 CI 是绿的 ⇒ 不夹带无关变更），只把注释改成**与事实一致**，
+并把「真要改用官方源，必须用 npm 风格的小写变量名、且值不带 `/v`」写进注释。
+
+### 9.6 验收
+
+| 项 | 口径 |
+|---|---|
+| 本地打包 | `node scripts/pack.cjs` **exit 0**，且产出 `FN-Music-Setup-*.exe` / `FN-Music-Portable-*.exe` |
+| 守卫有效性 | 把非法键塞回 `electron-builder.yml` ⇒ **新测试必红**（变异自证） |
+| `tsc --noEmit` | exit 0 |
+| `vitest` | **≥ 2260**（既有 2260 条一条不删；新增若干） |
+| CI | `ci.yml` run **success**（含新增的 `Pack (smoke)` 步骤） |
+| 发版链路 | `release.yml`（`pack_only=true`）run **success** ⇒ 证明「CI 能出包」 |
