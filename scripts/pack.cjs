@@ -151,6 +151,40 @@ if (result.status !== 0) {
 }
 
 // ---------------------------------------------------------------------------
+// 签名断言（T86）：**签了就要确证签上了**
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么不能信「打包成功」**：electron-builder 在签名环节失败时
+//    **可能只警告、不失败** ⇒「打包成功」**不等于**「签名成功」。
+//    ⇒ 这里主动读一次产物的签名状态（Status / 签名者主体），摆到构建输出里；
+//    配了证书却没签上 ⇒ **让打包失败**（别让「没签名」悄悄溜过去）。
+//
+// ⚠️ **检查的是暂存目录**（= **本次构建**的产物）——
+//    输出目录里可能还躺着**历史上**的旧产物（老版本号的安装包），
+//    拿整个输出目录去查会把旧包一起算进来 ⇒ 误报。
+const cscLink = (process.env.WIN_CSC_LINK || process.env.CSC_LINK || '').trim()
+const checkScript = path.join(repoRoot, 'tools', 'fn-check-signature.mjs')
+
+if (cscLink === '') {
+  console.log('[pack] ℹ️ 未配置签名证书（WIN_CSC_LINK / CSC_LINK）⇒ 产物**未签名**（预期行为）')
+} else {
+  const checkArgs = [checkScript, '--expect', 'signed', stagingDir]
+  // ⚠️ `CSC_LINK` 可以是 **base64 内容**；只有它是**文件路径**时才能核对
+  //    「签的是不是我们指定的那张证书」。
+  if (cscLink.toLowerCase().endsWith('.pfx') && fs.existsSync(cscLink)) {
+    checkArgs.push('--pfx', cscLink)
+  }
+  console.log('[pack] 校验产物签名…')
+  const check = spawnSync(process.execPath, checkArgs, { cwd: repoRoot, stdio: 'inherit' })
+  if (check.error) {
+    fail(`跑签名断言失败：${check.error.message}`)
+  }
+  if (check.status !== 0) {
+    fail('签名断言失败（产物没签上 / 签错了证书）—— 详见上面的输出')
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 发布：把成品从暂存目录搬到真正的输出目录
 // ---------------------------------------------------------------------------
 

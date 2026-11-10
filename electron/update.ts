@@ -316,6 +316,14 @@ export type AuthenticodeRunner = (filePath: string) => Promise<{ status: string;
  *
  * ⚠️ 只读签名信息，**不执行**被检查的文件。
  * ⚠️ Windows 之外没有 PowerShell → 返回 `Unavailable`（调用方据此判为不通过）。
+ *
+ * ⚠️ **T86：签名者主体用 base64 传回**（不是直接吐原文）。
+ *    原因：PowerShell 往**管道**写 stdout 时用的是**控制台代码页**
+ *    （简体中文机器 = OEM 936 / GBK），不是 UTF-8 ⇒ 主体名里带中文时
+ *    （本项目的证书主体名就是**公司法定主体名**，是中文），
+ *    Node 按 UTF-8 解出来是**乱码** ⇒ 与用户填的「预期的代码签名者」
+ *    **永远对不上** ⇒ 安装包会被**莫名其妙**地拒掉。
+ *    ⇒ 让 PowerShell 输出 **base64(UTF-8)**，Node 侧再解 ⇒ 与代码页无关。
  */
 export async function runPowerShellAuthenticode(filePath: string): Promise<{
   status: string
@@ -327,7 +335,8 @@ export async function runPowerShellAuthenticode(filePath: string): Promise<{
     "$s = Get-AuthenticodeSignature -LiteralPath '" + literal + "'",
     "$signer = ''",
     'if ($s.SignerCertificate) { $signer = [string]$s.SignerCertificate.Subject }',
-    "[ordered]@{ status = [string]$s.Status; signer = $signer } | ConvertTo-Json -Compress",
+    '$signerB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($signer))',
+    "[ordered]@{ status = [string]$s.Status; signerB64 = $signerB64 } | ConvertTo-Json -Compress",
   ].join('\n')
   return await new Promise((resolve) => {
     execFile(
@@ -340,16 +349,26 @@ export async function runPowerShellAuthenticode(filePath: string): Promise<{
           return
         }
         try {
-          const parsed = JSON.parse(String(stdout).trim()) as { status?: unknown; signer?: unknown }
+          const parsed = JSON.parse(String(stdout).trim()) as { status?: unknown; signerB64?: unknown }
           const status = typeof parsed.status === 'string' ? parsed.status : 'UnknownError'
-          const signer = typeof parsed.signer === 'string' && parsed.signer !== '' ? parsed.signer : null
-          resolve({ status, signer })
+          resolve({ status, signer: decodeBase64Utf8(parsed.signerB64) })
         } catch {
           resolve({ status: 'UnknownError', signer: null })
         }
       },
     )
   })
+}
+
+/** 把 base64(UTF-8) 解成字符串；不是合法 base64 / 空 ⇒ `null`。 */
+function decodeBase64Utf8(value: unknown): string | null {
+  if (typeof value !== 'string' || value === '') return null
+  try {
+    const text = Buffer.from(value, 'base64').toString('utf8')
+    return text === '' ? null : text
+  } catch {
+    return null
+  }
 }
 
 /**

@@ -262,19 +262,26 @@ npm run publish:manifest  # 2. 生成 release/latest.json（自动算 SHA-512）
 
 ### 7.5 代码签名怎么配（需自备证书）
 
-产物当前**未签名**（`electron-builder.yml` 里 `win.sign` 留空）。自备证书的做法：
+产物**默认不签**（`electron-builder.yml` 里 `win.sign` 留空）。
+**要签不用改配置**——electron-builder 原生读这两个环境变量：
 
-```yaml
-win:
-  signAndEditExecutable: true
-  certificateFile: <你的 .pfx 路径>
-  # 口令走环境变量，不要写进配置文件：
-  # CSC_KEY_PASSWORD
+```powershell
+$env:WIN_CSC_LINK='<证书路径（.pfx）或 base64 内容>'
+$env:WIN_CSC_KEY_PASSWORD='<证书口令>'
+npm run pack
 ```
+
+- 没设这两个变量 ⇒ **自动跳过签名**（不报错）⇒ 产物就是未签名的；
+- ⚠️ **打包后有断言**（`scripts/pack.cjs` → `tools/fn-check-signature.mjs`）：
+  配了证书却没签上 ⇒ **打包直接失败**（electron-builder 本身可能只警告 ⇒ 不能信「打包成功」）。
+  没配证书 ⇒ 只打印一行「产物未签名（预期行为）」，**不**失败；
+- ⚠️ **口令绝不入库**：走环境变量 / CI Secret，**不要**写进 `electron-builder.yml`。
 
 ⚠️ 证书**由你自备**（本项目不附带任何证书）。
 ⚠️ 配好签名后，把证书的**主体名**（形如 `CN=你的公司`）填进应用的「预期的代码签名者」——
    两边对不上，客户端会拒绝启动安装器（这是**故意的**）。
+⚠️ **主体名必须是公司法定主体名**（与营业执照一致）—— Windows 上显示的「发布者」= 证书 CN，
+   **不是**软件名；软件名只能住在 exe 元数据里。
 
 ### 7.6 没证书怎么装更新（T85 起）
 
@@ -289,4 +296,41 @@ win:
 这些**一条都没放宽**。
 ⚠️ 「允许安装未签名的更新包」**默认是关的**，且**只对「确实没有签名」的包生效**：
 万一哪天产物带上了签名而签名者与预期不符，**授权救不了**（那是另一个、更糟的情况）。
+
+### 7.7 本地自签证书（**只为把链路跑通**，T86）
+
+```powershell
+# 生成一张自签「代码签名」证书（.pfx / .cer / 口令 ⇒ 都在 release/certs/，gitignored）
+node tools/fn-make-selfsigned-cert.mjs --trust
+
+# 用它打一个带签名的包（验证用产物 ⇒ 不碰 release/）
+$env:WIN_CSC_LINK=(Resolve-Path 'release\certs\sanlos-code-signing.pfx').Path
+$env:WIN_CSC_KEY_PASSWORD=(Get-Content -Raw 'release\certs\pfx-password.txt').Trim()
+npm run pack:probe
+
+# 随时单独查一次产物的签名状态
+node tools/fn-check-signature.mjs release-probe
+```
+
+⚠️ **自签证书不可信** ⇒ 对外发布时 Windows 仍提示「未知发布者 / 不受信任的证书」
+⇒ **自签产物只用于本地/内部把链路跑通**，**不要**发到公开 Release
+（它会让 Windows 显示「发布者：公司名」却**查不到信任链** ⇒ 比不签名更容易误导人）。
+⚠️ `--trust` 只导入**当前用户**的「受信任的根证书颁发机构」（**不影响别人**），撤销：
+`certutil.exe -user -delstore Root <指纹>`。
+⚠️ 主体名用**公司法定主体名** ⇒ 日后换成真实证书时**不用改任何配置**、
+用户填的「预期的代码签名者」也不用改。
+
+### 7.8 换成**真实** OV 证书（采购清单）
+
+| 路线 | 可行性 | 要点 |
+|---|---|---|
+| **商业 OV**（DigiCert / Sectigo / GlobalSign 等） | ✅ 要走流程 | 私钥**必须**在硬件 token / HSM / 云签名（软件 `.pfx` 已被行业规则禁掉）；有效期上限已被压到 **459 天**；价格约 **$96.75（5 年）~$700（1 年）** |
+| **Azure Artifact Signing** | ❌ 对中国大陆主体**不可用** | 公开信任资格限美国 / 加拿大 / 欧盟 / 英国的组织 + 美加个人；组织还需 3 年以上可验证税务历史 |
+| **自签** | ⚠️ 只在本机不弹警告 | 对外照样「未知发布者」⇒ 公开发布**零意义** |
+
+⚠️ **签名 ≠ 不弹窗**：SmartScreen 判的是**文件哈希的信誉** ⇒ 第一版照样弹；
+要靠真实下载量 + 干净安装积累（通常数周、数百次）；**每次重新打包哈希就变 ⇒ 信誉清零**；
+**必须加时间戳**（否则证书到期后历史安装包全部验证失败）。
+唯一彻底免的是 **Microsoft Store**（商店代签，显示商店名）。
+⚠️ **主体名一次定死**：换证书 = 换显示名 + SmartScreen 信誉清零 ⇒ 别换来换去。
 

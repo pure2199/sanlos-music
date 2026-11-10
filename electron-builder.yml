@@ -81,7 +81,17 @@ publish:
   - provider: generic
     url: https://updates.example.com/fnmusic
 
-# ⚠️ **代码签名**：本项目**未配置**签名证书（`win.sign` 留空）→
+# ⚠️ **代码签名**：本项目**默认不签**（`win.sign` 留空）⇒
 #    产物未签名 → Windows SmartScreen 会提示「未知发布者」。
-#    自备证书的做法见 `docs/packaging.md` 的「自动更新」一节。
+#
+# ⚠️ **要签不用改这个文件**：electron-builder 原生读这两个环境变量 ——
+#      $env:WIN_CSC_LINK='<证书路径（.pfx）或 base64 内容>'
+#      $env:WIN_CSC_KEY_PASSWORD='<证书口令>'
+#    没设就**自动跳过签名**（不报错）⇒ 证书到手时**不必改任何代码**。
+#
+# ⚠️ **打包后有断言**（T86，`scripts/pack.cjs` → `tools/fn-check-signature.mjs`）：
+#    配了证书却没签上 ⇒ **打包直接失败**（electron-builder 本身可能只警告）。
+#    没配证书 ⇒ 打印一行「产物未签名（预期行为）」，**不**失败。
+#
+# ⚠️ 证书怎么准备（本地自签测试 / 真实 OV 证书）见 `docs/packaging.md` 第七节。
 
