@@ -27,6 +27,7 @@ import {
   compareVersions,
   downloadUpdate,
   checkForUpdate,
+  createUpdateController,
   launchInstaller,
   parseUpdateManifest,
   pickInstaller,
@@ -1000,5 +1001,85 @@ describe('共享签名口径 evaluateSignatureGate（T85）', () => {
     })
     expect(result.allowed).toBe(false)
     expect(result.reason).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T87.12：控制器级契约（download → install）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **真机事故**：v0.2.4 / v0.2.5 点「启动安装」⇒ 红框「安装包名不合法」——
+//    渲染层回传了**绝对路径**，而这条 IPC 的参数**从头到尾都是「裸文件名」**
+//    （`electron/update.ts` 的注释原文：「启动时**不许**用渲染进程传来的路径」）。
+//
+// ⚠️ 这里把**主进程自己**的契约钉死：文件名能用；路径**仍然被拒**（防线不放宽）。
+describe('更新控制器的启动契约（T87.12）', () => {
+  const base = 'https://updates.example.com/d'
+  const signer = 'CN=占位签名者'
+  const fileName = 'FN-Music-Setup-1.2.3.exe'
+  const payload = Buffer.from('占位安装包内容')
+
+  /** 造一个「清单 + 文件」都齐全的控制器（真目录、真文件、真 SHA-512）。 */
+  function makeController(): {
+    controller: ReturnType<typeof createUpdateController>
+    opened: string[]
+  } {
+    const destDir = makeTempDir()
+    const file = {
+      name: fileName,
+      url: fileName,
+      sha512: createHash('sha512').update(payload).digest('hex'),
+      size: payload.byteLength,
+    }
+    const manifest = JSON.stringify({ version: '1.2.3', files: [file] })
+    const fetchImpl = (async (input: unknown) => {
+      const url = String(input)
+      if (url.endsWith('/latest.json')) return new Response(manifest)
+      return new Response(payload)
+    }) as unknown as typeof fetch
+    const opened: string[] = []
+    const controller = createUpdateController({
+      fetchImpl,
+      currentVersion: '1.0.0',
+      destDir,
+      runAuthenticode: async () => ({ status: 'Valid', signer }),
+      openPath: async (path: string) => {
+        opened.push(path)
+        return ''
+      },
+    })
+    return { controller, opened }
+  }
+
+  /** 走完「检查 → 下载」，返回下载结果。 */
+  async function downloadAll(controller: ReturnType<typeof createUpdateController>) {
+    const checked = await controller.check(base)
+    expect(checked.status).toBe('available')
+    const downloaded = await controller.download(fileName, signer)
+    expect(downloaded.status).toBe('ok')
+    if (downloaded.status !== 'ok') throw new Error('不是 ok')
+    return downloaded
+  }
+
+  it('用下载结果里的**文件名**启动 ⇒ 真的启动（主进程自己认这个 token）', async () => {
+    const { controller, opened } = makeController()
+    const downloaded = await downloadAll(controller)
+
+    const installed = await controller.install(downloaded.name, signer, false)
+    expect(installed.status).toBe('ok')
+    expect(opened).toHaveLength(1)
+    expect(opened[0]).toContain(fileName)
+  })
+
+  it('回传**绝对路径**仍然被拒（安全边界**不放宽**：含分隔符一律判非法）', async () => {
+    const { controller, opened } = makeController()
+    const downloaded = await downloadAll(controller)
+
+    const installed = await controller.install(downloaded.path, signer, false)
+    expect(installed.status).toBe('error')
+    if (installed.status !== 'error') throw new Error('不是 error')
+    expect(installed.message).toContain('安装包名不合法')
+    // ⚠️ **一次都不许真的启动**。
+    expect(opened).toHaveLength(0)
   })
 })

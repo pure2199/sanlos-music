@@ -261,7 +261,10 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     }
     set({ status: 'installing', error: null })
     try {
-      const result = await bridge.installUpdate(download.path)
+      // ⚠️ **T87.12**：回传**文件名**，**不是** `download.path` ——
+      //    `update:install` 的参数是**裸文件名**（主进程净化后拼到下载目录下面），
+      //    传绝对路径会被判「安装包名不合法」（真机事故：v0.2.4 / v0.2.5 都中招）。
+      const result = await bridge.installUpdate(download.name)
       set({
         status: result.status === 'ok' ? 'idle' : 'error',
         error: result.status === 'ok' ? null : result.message,

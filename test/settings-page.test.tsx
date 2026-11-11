@@ -410,6 +410,8 @@ describe('设置页：自动更新的签名闸（T85）', () => {
   const UNSIGNED: UpdateDownloadResult = {
     status: 'ok',
     path: 'C:\\Temp\\FN-Music-Setup-0.2.2.exe',
+    // ⚠️ **T87.12**：主进程连同落盘用的**文件名**一起给渲染层。
+    name: 'FN-Music-Setup-0.2.2.exe',
     bytes: 1024,
     sha512Ok: true,
     signature: { ok: false, status: 'NotSigned', signer: null, reason: '安装包没有 Authenticode 签名' },

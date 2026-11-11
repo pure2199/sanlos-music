@@ -589,6 +589,9 @@ export async function downloadUpdate(opts: DownloadUpdateOptions): Promise<Updat
   return {
     status: 'ok',
     path: targetPath,
+    // ⚠️ **T87.12**：把落盘用的**文件名**一起给渲染层 ——
+    //    启动安装时它要回传的就是这个名字（`update:install` 的参数是**裸文件名**）。
+    name: safeName,
     bytes: opts.file.size,
     sha512Ok: true,
     signature,
