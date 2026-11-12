@@ -328,3 +328,85 @@ export function toReadableAccent(
   // ⚠️ 压到纯黑仍没达标 ⇒ **原样返回**（深色取色背景 ⇒ 数学上无解，见上面的说明）。
   return accentHex
 }
+
+// ---------------------------------------------------------------------------
+// 全屏页背景的亮度下限（T89-⑮）
+// ---------------------------------------------------------------------------
+
+/**
+ * 全屏页**取色背景**的相对亮度下限。
+ *
+ * ⚠️ **为什么需要它**（T89-⑬ 真机逐封面复验的结论）：
+ *    全屏页的背景是封面的**平均色**，当前歌词行用**强调色当文字色**，
+ *    而强调色与背景**来自同一张图** ⇒ 深色封面上那行字**基本读不出来**
+ *    （43 张去重封面里 **24 张低于 AA**，最差 **1.01**）。
+ *
+ * ⚠️ **数学门槛**：校正只能**压暗**（见 {@link toReadableAccent}），压到**纯黑**时对比度是
+ *    `(L_bg + 0.05) / 0.05` ⇒ 要达到 4.5 必须有 **`L_bg ≥ 0.175`**。
+ *    而深色封面的取色背景实测只有 **0.009–0.164**
+ *    ⇒ **连纯黑都不够** ⇒ 校正函数**放弃校正、原样返回** ⇒ 那行字又变回「几乎看不见」。
+ *
+ * ⚠️ **为什么取 0.60 而不是 0.175**：0.175 只够「纯黑达标」
+ *    ⇒ 强调色会被压成**接近纯黑**（丢掉「这是封面主色」的观感）；
+ *    0.60 时强调色可到 L≈0.36–0.38（与浅色封面那一例 `#0049c2` **同档**）
+ *    ⇒ 两类封面的歌词行观感一致。
+ *
+ * ⚠️ **只作用于全屏页的背景**：全局强调色、按钮底色、其它页面**一律不动**。
+ */
+export const FULLPLAYER_BG_MIN_LUMINANCE = 0.6
+
+/**
+ * 把颜色**保色相、保饱和度**地提亮到「相对亮度 ≥ 下限」。
+ *
+ * ⚠️ **为什么是「提亮」而不是「遮罩」**：遮罩是把暗部**洗向一个固定色**
+ *    （丢饱和度、还要新增 token、且「洗向什么色」需要额外决策）；
+ *    提亮则是**把封面自己的颜色提亮** ⇒ 同样把背景抬到可读区间，
+ *    但**色相与饱和度完整保留** ⇒ 更保色、更可测、**CSS 零改动**。
+ *
+ * ⚠️ **为什么用 HSL 的亮度来提亮**：要改的只是**明度**，
+ *    色相（h）与饱和度（s）**一字不动** ⇒ 提亮后**仍是那张封面的颜色**。
+ *
+ * @param hexColor 要提亮的颜色（`#rrggbb`）。
+ * @param minLuminance 目标相对亮度（缺省 {@link FULLPLAYER_BG_MIN_LUMINANCE}）。
+ * @returns 提亮后的颜色；**输入不合法时原样返回**，**已经达标时不动**（幂等）。
+ */
+export function liftToMinLuminance(
+  hexColor: string,
+  minLuminance: number = FULLPLAYER_BG_MIN_LUMINANCE,
+): string {
+  const rgb = parseHexColor(hexColor)
+  // ⚠️ 输入不合法 ⇒ **原样返回**（不抛、不吞）。
+  if (!rgb) return hexColor
+  // ⚠️ 已经达标 ⇒ **不动**（⇒ 幂等：再调用一次结果不变）。
+  if (relativeLuminance(rgb) >= minLuminance) return hexColor
+
+  const { h, s, l: l0 } = rgbToHsl(rgb)
+  // ⚠️ 步长 0.005、最多 240 步 ⇒ 最远能走到 L=1（纯白 ⇒ 亮度 1 ⇒ 必然达标）。
+  for (let i = 0; i < 240; i += 1) {
+    const l = Math.min(1, l0 + (i + 1) * 0.005)
+    const lifted = hslToRgb({ h, s, l })
+    if (relativeLuminance(lifted) >= minLuminance) return hslToHex({ h, s, l })
+  }
+  return '#ffffff'
+}
+
+/**
+ * CSS `linear-gradient(180deg, a, b)` 在比例 `ratio` 处的颜色（**sRGB 插值**，与浏览器一致）。
+ *
+ * ⚠️ **为什么要它**：全屏页背景是**渐变**（取色背景 → 主题浅底），
+ *    文字压在哪一点上取决于那一行落在页面多高 ⇒ 要算「那一行真正压着的背景色」
+ *    就得按**渐变插值**算，而不是拿渐变的两端去猜。
+ *
+ * @param fromHex 渐变起点（上端，`#rrggbb`）。
+ * @param toHex 渐变终点（下端，`#rrggbb`）。
+ * @param ratio 位置比例（0 = 起点，1 = 终点；**会被夹紧到 [0, 1]**）。
+ */
+export function lerpGradientColor(fromHex: string, toHex: string, ratio: number): string {
+  const a = parseHexColor(fromHex)
+  const b = parseHexColor(toHex)
+  if (!a || !b) return fromHex
+  const t = Math.min(1, Math.max(0, ratio))
+  const part = (v: number): string =>
+    Math.min(255, Math.max(0, Math.round(v))).toString(16).padStart(2, '0')
+  return `#${part(a.r + (b.r - a.r) * t)}${part(a.g + (b.g - a.g) * t)}${part(a.b + (b.b - a.b) * t)}`
+}

@@ -32,8 +32,10 @@ import {
 } from '../src/components/coverColor'
 import {
   ACCENT_TEXT_MIN_CONTRAST,
+  FULLPLAYER_BG_MIN_LUMINANCE,
   contrastRatio,
   parseHexColor,
+  relativeLuminance,
   rgbToHsl,
   toReadableAccent,
 } from '../src/ui/accentColor'
@@ -325,5 +327,116 @@ describe('T89-⑪：样式表里「当文字色用」与「当底色用」必须
     expect(css.indexOf('.fnm-lyricview__line--active')).toBeLessThan(
       css.indexOf('.fnm-lyricview__line--whole'),
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T89-⑮：全屏页的取色背景会被**提亮到亮度下限**
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么**：深色封面的平均色亮度只有 0.009–0.164 ⇒ 压到纯黑也够不到 4.5
+//    ⇒ 强调色「放弃校正、原样返回」⇒ 当前歌词行**基本读不出来**（真机 1.04–2.30）。
+//    ⇒ 修法：写进页面的取色背景**先保色相地提亮到亮度下限（0.60）**。
+//
+// ⚠️ **既有测试一条没改**：上面两个 describe 的断言一字未动。
+// ---------------------------------------------------------------------------
+
+describe('T89-⑮：全屏页的取色背景会被提亮到亮度下限', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    clearCoverColorCache()
+    document.documentElement.removeAttribute('style')
+  })
+
+  /** 桩掉 Image 与 canvas ⇒ 取色拿到**指定的**那一个像素。 */
+  function stubCoverPixel(r: number, g: number, b: number): void {
+    class StubImage {
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      crossOrigin: string | null = null
+      set src(_value: string) {
+        setTimeout(() => this.onload?.(), 0)
+      }
+      get src(): string {
+        return ''
+      }
+    }
+    window.Image = StubImage as unknown as typeof Image
+    HTMLCanvasElement.prototype.getContext = (() => ({
+      drawImage: () => undefined,
+      getImageData: () => ({ data: new Uint8ClampedArray([r, g, b, 255]) }),
+    })) as unknown as HTMLCanvasElement['getContext']
+  }
+
+  /** 替掉「读自定义属性」这一件事（jsdom 的 CSS 引擎不解析样式表里的自定义属性）。 */
+  function stubAccentTokens(): void {
+    const realGetComputedStyle = window.getComputedStyle.bind(window)
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el: Element, pseudo?: string | null) => {
+      const style = realGetComputedStyle(el, pseudo ?? undefined)
+      const original = style.getPropertyValue.bind(style)
+      style.getPropertyValue = (name: string): string => {
+        if (name === '--accent') return APPLE_ACCENT
+        if (name === '--accent-hover') return APPLE_ACCENT_HOVER
+        if (name === '--surface-sunken') return APPLE_SUNKEN
+        return original(name)
+      }
+      return style
+    })
+  }
+
+  /** 渲染全屏页，等它把取色背景与校正后的强调色都写进内联 style。 */
+  async function renderAndWaitForColors(): Promise<{ tint: string; accentText: string }> {
+    const store = createPlayerStore(new FakeEngine())
+    store.getState().playTrack(makeSong(1, { coverId: 'track_dark' }))
+    const api = { list: vi.fn(async () => [] as never[]) }
+
+    const { container } = render(<FullPlayerPage store={store} lyricApi={api as never} />)
+    await waitFor(() => {
+      const root = container.querySelector('[data-testid="full-player"]')
+      expect(root?.getAttribute('style') ?? '').toContain('--fnm-fullplayer__tint')
+    })
+    await waitFor(() => {
+      const root = container.querySelector('[data-testid="full-player"]')
+      expect(root?.getAttribute('style') ?? '').toContain('--fnm-fullplayer__accent-text')
+    })
+
+    const style = container.querySelector('[data-testid="full-player"]')?.getAttribute('style') ?? ''
+    const tint = /--fnm-fullplayer__tint:\s*([^;]+)/.exec(style)?.[1]?.trim() ?? ''
+    const accentText = /--fnm-fullplayer__accent-text:\s*([^;]+)/.exec(style)?.[1]?.trim() ?? ''
+    return { tint, accentText }
+  }
+
+  it('深色封面 ⇒ 写进页面的取色背景**被提亮到亮度下限**', async () => {
+    // ⚠️ `#0e191e` = T89-⑬ 真机扫描里**最暗**的一例（相对亮度 0.0088）。
+    stubCoverPixel(14, 25, 30)
+    stubAccentTokens()
+    const { tint } = await renderAndWaitForColors()
+    expect(tint).not.toBe('')
+    expect(tint).not.toBe('#0e191e')
+    expect(relativeLuminance(parseHexColor(tint)!)).toBeGreaterThanOrEqual(
+      FULLPLAYER_BG_MIN_LUMINANCE,
+    )
+  })
+
+  it('深色封面 ⇒ 当前歌词行的强调色与（提亮后的）渐变最暗端**对比度 ≥ 4.5**', async () => {
+    stubCoverPixel(14, 25, 30)
+    stubAccentTokens()
+    const { tint, accentText } = await renderAndWaitForColors()
+    expect(accentText).not.toBe('')
+    expect(contrastRatio(accentText, tint)).toBeGreaterThanOrEqual(ACCENT_TEXT_MIN_CONTRAST)
+  })
+
+  it('**缓存里存的仍是原始取色结果**（不含亮度下限 ⇒ 缓存语义不变）', async () => {
+    stubCoverPixel(14, 25, 30)
+    stubAccentTokens()
+    await renderAndWaitForColors()
+    expect(getCachedCoverColor('track_dark')).toBe('#0e191e')
+  })
+
+  it('浅色封面（`#d0cbc7`）⇒ 取色背景**一字不变**（观感零变化）', async () => {
+    stubCoverPixel(208, 203, 199)
+    stubAccentTokens()
+    const { tint } = await renderAndWaitForColors()
+    expect(tint).toBe(REAL_TINT)
   })
 })

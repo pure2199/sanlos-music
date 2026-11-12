@@ -61,7 +61,7 @@ import { QUEUE_ONLY_ONE_HINT, removeSongFromQueue } from '../components/PlayerBa
 import type { LyricSource } from '../../shared/lyricProvider'
 import { usePlayerStore } from '../state/playerStore'
 import { useAppPrefsStore } from '../state/appPrefsStore'
-import { toReadableAccent } from '../ui/accentColor'
+import { liftToMinLuminance, toReadableAccent } from '../ui/accentColor'
 import {
   defaultEmbeddedLyricFetcher,
   defaultExternalLyricFetcher,
@@ -347,7 +347,10 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     }
     const cached = getCachedCoverColor(coverId)
     if (cached) {
-      setTint(cached)
+      // ⚠️ **T89-⑮**：写进页面的取色背景要**先提亮到亮度下限**
+      //    （深色封面的平均色亮度只有 0.009–0.164 ⇒ 压到纯黑也够不到 4.5
+      //    ⇒ 当前歌词行的强调色会「放弃校正、原样返回」⇒ 那行字基本读不出来）。
+      setTint(liftToMinLuminance(cached))
       return
     }
     let cancelled = false
@@ -360,8 +363,12 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
       if (cancelled) return
       if (color) {
         // ⚠️ **只缓存成功的结果**。
+        // ⚠️ 缓存里存的是**原始取色结果**（**不含**亮度下限）
+        //    ⇒ 缓存语义不变（别处要「封面真实平均色」时仍拿得到）。
         setCachedCoverColor(coverId, color)
-        setTint(color)
+        // ⚠️ **T89-⑮**：写进页面的背景**先提亮到亮度下限**
+        //    ⇒ 深色封面上当前歌词行的强调色才可能达到 WCAG AA。
+        setTint(liftToMinLuminance(color))
         return
       }
       // ⚠️ **失败不缓存** → 否则一次失败 = 这首歌**到重启为止都不取色**
