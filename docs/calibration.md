@@ -11,9 +11,10 @@
 
 | 阶段 | 状态 |
 |---|---|
-| 单元测试 | ✅ 1228 条 / 44 个文件全绿 |
-| E2E（真实 Electron + 内嵌 mock NAS） | ✅ 4 条全绿 |
+| 单元测试 | ✅ **2304 条 / 110 个文件**全绿（2026-11-12 实测） |
+| E2E（真实 Electron + 内嵌 mock NAS） | ✅ **34 条**全绿（2026-11-12 实测） |
 | 打包 + 打包产物启动冒烟 | ✅ 通过（证据见 [`build-verification.md`](./build-verification.md)） |
+| **公开发布** | ✅ **v0.2.5 已发布**（GitHub Release，3 个资产；**未签名** + 构建来源证明，见 [`packaging.md` 第 7.10 节](./packaging.md)） |
 | **真机联调（真实 fnOS）** | ✅ **已完成一轮** —— 真实 Electron 客户端 × 真实 NAS，**13/13 步全通**；过程中发现 3 个真实缺陷，已修复并复验（见第七节） |
 
 ---
@@ -56,7 +57,7 @@
 |---|---|---|
 | **A** | FN ID 探测 —— 候选构造与并行探测命中预期链路 | **[已实测]** 中继命中；内网/公网在当前网络不可达 |
 | **B** | 中继链路 —— `mode=relay` Cookie 生效、播放可用、界面显示限速提示 | **[已实测]** Cookie 是硬性关卡；**播放与限速提示已在真机复核**（真机播放「占位曲目一」成功，界面显示「中继带宽受限（约 0.5–4 Mbps）」） |
-| **C** | token 续期 —— 触发 token 失效，确认静默续期路径生效 | **[已实测]** ① 显式 `relogin()` 返回 `true`，续期后曲库立刻可用（`tools/fn-session-renew-probe.mjs`）；② **服务端「token 失效」的真实形状已测出来**（`tools/fn-token-expiry-probe.mjs`）：无效 token → **HTTP 401** + `{ code: 99999, msg: "INVALID TOKEN" }` —— 业务码与 `CODE_TOKEN_EXPIRED` 一致 ⇒ **静默续期的触发条件成立**（客户端只读 body 里的业务码，不按状态码判定，401 照样能续期）。③ 二进制流路径（`track/stream`）按 401/403 静默续期一次并重发（`electron/proxy.ts`）。⚠️ 服务端**不提供**「作废当前 token」的接口，**99999 自动续期**那条路径仍无法在真机上自然触发 → 单测覆盖（已补「HTTP 401 + 99999」的真实形状）。⚠️ 规格 §5.4 的「续期失败 → 派发 `auth-lost` 回登录页」**尚未实现**（见第八节） |
+| **C** | token 续期 —— 触发 token 失效，确认静默续期路径生效 | **[已实测]** ① 显式 `relogin()` 返回 `true`，续期后曲库立刻可用（`tools/fn-session-renew-probe.mjs`）；② **服务端「token 失效」的真实形状已测出来**（`tools/fn-token-expiry-probe.mjs`）：无效 token → **HTTP 401** + `{ code: 99999, msg: "INVALID TOKEN" }` —— 业务码与 `CODE_TOKEN_EXPIRED` 一致 ⇒ **静默续期的触发条件成立**（客户端只读 body 里的业务码，不按状态码判定，401 照样能续期）。③ 二进制流路径（`track/stream`）按 401/403 静默续期一次并重发（`electron/proxy.ts`）。⚠️ 服务端**不提供**「作废当前 token」的接口，**99999 自动续期**那条路径仍无法在真机上自然触发 → 单测覆盖（已补「HTTP 401 + 99999」的真实形状）。✅ 规格 §5.4 的「续期失败 → 派发 `auth-lost` 回登录页」**已实现**（`src/api/client.ts` 的 `onAuthLost` → `src/App.tsx` → `src/pages/LoginPage.tsx` 的 `notice` + `sessionLost`；回归测试 `test/auth-lost.test.tsx` 6 条，见第八节 T19-3） |
 | **D** | 转码兜底 —— 用一首 APE/ALAC 确认客户端 FFmpeg 兜底链路可用；确认系统无 ffmpeg 时的提示 | **[已实测]** 客户端 FFmpeg 兜底**全链路在真机跑通**：ALAC 曲（24.2 MB）下载 → 本地 → 播放时自动转成 **Opus**（3.43 MB）→ 经 `fnml://` 起播，**进度真的推进**（实测 `0:06`）、**0 条媒体错误**、提示显示「兜底播放使用 Opus 转码（音质有损…）」。⚠️ 过程中暴露并修掉了 **T18-6**（CSP 漏放 `fnml:` → 本地播放被 URL 安全检查拦死）。✅「系统无 ffmpeg 时的提示」也已实测（见第八节 T19-2）：「该格式（ALAC）当前无法播放：未检测到 FFmpeg。安装 FFmpeg 后即可通过转码播放。」 |
 | **E** | 端口核对 | **[已实测]** 5666 / 5667；**中继只听 443** |
 | **F** | 播放历史端点 —— 条目形状与规格 §15.7 一致；确认「最近播放」的排序依据（`updatedAt`？） | **[已实测]** 形状一致；**排序依据服务端不暴露**（`updatedAt`≡`createdAt` 且非单调）→ 客户端按返回顺序展示；**服务端无写接口** → NAS 历史只读 |
@@ -241,6 +242,14 @@ T19 就是把它们逐条换成实测事实。
   全仓库只有规格文档里出现过 `auth-lost` 这个名字，
   `src/` 与 `electron/` 里**没有任何**地方检查 `99999`、也没有任何地方派发类似事件。
   `sessionStore.reset()`（登出）虽然存在，但**没有任何调用点**。
+
+> ⚠️ **时态提醒（2026-11-12 补）**：上面这两条是 T19-3 **动手之前**的原始结论，
+> 记录的是「**当初缺什么**」，**不是仓库现状**。
+> **当前状态**：`auth-lost` 链路**已实现并有回归测试钉住** ——
+> `src/api/client.ts` 的 `onAuthLost()` → `src/App.tsx`（`sessionLost` 状态）
+> → `src/pages/LoginPage.tsx` 的 `notice`（`role="status"`）+ `sessionLost`（跳过 `restore()`）；
+> 回归测试见 `test/auth-lost.test.tsx`（6 条）与 `test/login-page.test.tsx`（3 条）。
+> 完整落地说明见下方「已实施的修法」。
 
 **后果（修复前）**：token 真的过期、且**续期也失败**时（例如用户改了 NAS 口令、
 或续期那一刻中继不通），用户只会看到当前页面冒出一句 `INVALID TOKEN`，
