@@ -1,0 +1,256 @@
+// ---------------------------------------------------------------------------
+// T89-④：把封面主色转成「能当强调色」的颜色（纯函数，无 DOM ⇒ 可完整单测）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么需要「转换」这一步**：封面主色是**任意的** —— 可能是纯黄
+//    （白字压上去完全看不清）、可能是近黑（当按钮底色太闷）。
+//    而强调色会被当成**按钮底色**，上面的文字是 `--accent-text: #ffffff`
+//    ⇒ **白字压在强调色上** ⇒ 必须满足 **WCAG AA 对比度 ≥ 4.5**。
+//
+// ⚠️ **优先级：对比度 > 保留原色** —— 强调色看不清，比「颜色不够准」严重得多。
+//    ⇒ 对比度不够就**继续压暗**，而不是牺牲对比度去保住原色。
+//
+// ⚠️ **灰白封面没有色相** ⇒ 硬凑一个颜色只会得到一个「脏色」⇒ 返回 `null`
+//    ⇒ 调用方保持主题默认色（比一个难看的灰强）。
+//
+// ⚠️ 本文件**不碰 DOM**、**不读环境** ⇒ 所有判定都能用纯函数测。
+// ---------------------------------------------------------------------------
+
+/** 一个 RGB 颜色（分量 0–255）。 */
+export interface Rgb {
+  r: number
+  g: number
+  b: number
+}
+
+/** 一个 HSL 颜色（`h` 度 0–360，`s` / `l` 0–1）。 */
+export interface Hsl {
+  h: number
+  s: number
+  l: number
+}
+
+/** 一套「Fluent 强调色」三个值。 */
+export interface FluentAccent {
+  /** 强调色本身（按钮底色）。 */
+  accent: string
+  /** 悬停态（同色相、更暗）。 */
+  hover: string
+  /** 焦点环（强调色 + 透明度）。 */
+  focusRing: string
+}
+
+// ---------------------------------------------------------------------------
+// 判定阈值（**都是「观感」阈值，不是数学常量** ⇒ 集中在这里便于调）
+// ---------------------------------------------------------------------------
+
+/** 强调色亮度的下限（太暗 ⇒ 当按钮底色太闷）。 */
+export const FLUENT_ACCENT_MIN_LIGHTNESS = 0.22
+
+/** 强调色亮度的上限（太亮 ⇒ 白字看不清）。 */
+export const FLUENT_ACCENT_MAX_LIGHTNESS = 0.55
+
+/** 强调色饱和度的下限（太灰 ⇒ 不像强调色）。 */
+export const FLUENT_ACCENT_MIN_SATURATION = 0.45
+
+/** 强调色饱和度的上限（太艳 ⇒ 刺眼）。 */
+export const FLUENT_ACCENT_MAX_SATURATION = 0.85
+
+/** 白字压在强调色上要满足的对比度（WCAG AA = 4.5）。 */
+export const FLUENT_ACCENT_MIN_CONTRAST = 4.5
+
+/** 悬停态比常态暗多少（HSL 亮度）。 */
+export const FLUENT_ACCENT_HOVER_LIGHTNESS_DELTA = 0.12
+
+/** 焦点环的透明度（与 `tokens.css` 的 `#0067c059` 同一形态）。 */
+export const FLUENT_ACCENT_FOCUS_ALPHA = 0.35
+
+/**
+ * **低于这个饱和度就认为「没有色相」**（灰白封面）⇒ 不硬凑颜色。
+ *
+ * ⚠️ 与 {@link FLUENT_ACCENT_MIN_SATURATION}（0.45）**不是一回事**：
+ *    0.45 是「当强调色要有多艳」；这里是「到底有没有颜色可谈」。
+ */
+export const FLUENT_ACCENT_MIN_SATURATION_FOR_HUE = 0.15
+
+// ---------------------------------------------------------------------------
+// 解析与转换
+// ---------------------------------------------------------------------------
+
+/**
+ * 解析 `#rgb` / `#rrggbb`（可带 `#` 前缀，可大写）。
+ *
+ * @returns 解析失败（空串 / 长度不对 / 非十六进制）⇒ `null`。
+ */
+export function parseHexColor(hex: string): Rgb | null {
+  if (typeof hex !== 'string') return null
+  const text = hex.trim().replace(/^#/, '')
+  if (!/^[0-9a-fA-F]+$/.test(text)) return null
+  if (text.length === 3) {
+    // ⚠️ 用 `charAt`（不是 `text[0]`）⇒ 不会踩 `noUncheckedIndexedAccess`。
+    const r = text.charAt(0)
+    const g = text.charAt(1)
+    const b = text.charAt(2)
+    return {
+      r: parseInt(r + r, 16),
+      g: parseInt(g + g, 16),
+      b: parseInt(b + b, 16),
+    }
+  }
+  if (text.length !== 6) return null
+  return {
+    r: parseInt(text.slice(0, 2), 16),
+    g: parseInt(text.slice(2, 4), 16),
+    b: parseInt(text.slice(4, 6), 16),
+  }
+}
+
+/** RGB → HSL。 */
+export function rgbToHsl(rgb: Rgb): Hsl {
+  const r = rgb.r / 255
+  const g = rgb.g / 255
+  const b = rgb.b / 255
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const delta = max - min
+  const l = (max + min) / 2
+
+  if (delta === 0) return { h: 0, s: 0, l }
+
+  const s = l > 0.5 ? delta / (2 - max - min) : delta / (max + min)
+  let h: number
+  if (max === r) h = ((g - b) / delta) % 6
+  else if (max === g) h = (b - r) / delta + 2
+  else h = (r - g) / delta + 4
+  h *= 60
+  if (h < 0) h += 360
+  return { h, s, l }
+}
+
+/** HSL → RGB（分量取整 0–255）。 */
+export function hslToRgb(hsl: Hsl): Rgb {
+  const h = ((hsl.h % 360) + 360) % 360
+  const s = Math.min(1, Math.max(0, hsl.s))
+  const l = Math.min(1, Math.max(0, hsl.l))
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = l - c / 2
+  let rp = 0
+  let gp = 0
+  let bp = 0
+  if (h < 60) {
+    rp = c
+    gp = x
+  } else if (h < 120) {
+    rp = x
+    gp = c
+  } else if (h < 180) {
+    gp = c
+    bp = x
+  } else if (h < 240) {
+    gp = x
+    bp = c
+  } else if (h < 300) {
+    rp = x
+    bp = c
+  } else {
+    rp = c
+    bp = x
+  }
+  return {
+    r: Math.round((rp + m) * 255),
+    g: Math.round((gp + m) * 255),
+    b: Math.round((bp + m) * 255),
+  }
+}
+
+/** HSL → `#rrggbb`。 */
+export function hslToHex(hsl: Hsl): string {
+  const { r, g, b } = hslToRgb(hsl)
+  const part = (v: number): string => Math.min(255, Math.max(0, v)).toString(16).padStart(2, '0')
+  return `#${part(r)}${part(g)}${part(b)}`
+}
+
+// ---------------------------------------------------------------------------
+// 对比度（WCAG 2.1）
+// ---------------------------------------------------------------------------
+
+/** sRGB 相对亮度（WCAG 2.1 定义）。 */
+export function relativeLuminance(rgb: Rgb): number {
+  const channel = (raw: number): number => {
+    const c = raw / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b)
+}
+
+/**
+ * 两个颜色之间的对比度（WCAG 2.1）。
+ *
+ * ⚠️ 范围 1–21（黑↔白 = 21）。
+ */
+export function contrastRatio(hexA: string, hexB: string): number {
+  const a = parseHexColor(hexA)
+  const b = parseHexColor(hexB)
+  if (!a || !b) return 1
+  const la = relativeLuminance(a)
+  const lb = relativeLuminance(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+
+/** 给 hex 颜色加透明度（`#rrggbbaa`，与 `tokens.css` 的 `--focus-ring` 同一形态）。 */
+export function hexWithAlpha(hex: string, alpha: number): string {
+  const rgb = parseHexColor(hex)
+  if (!rgb) return hex
+  const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
+  const part = (v: number): string => Math.min(255, Math.max(0, v)).toString(16).padStart(2, '0')
+  return `#${part(rgb.r)}${part(rgb.g)}${part(rgb.b)}${part(a).padStart(2, '0')}`
+}
+
+// ---------------------------------------------------------------------------
+// 主色 → Fluent 强调色
+// ---------------------------------------------------------------------------
+
+/**
+ * 把封面主色转成一套「能当强调色」的颜色。
+ *
+ * ⚠️ 返回 `null` 的两种情况：
+ * 1. 输入不是合法 hex；
+ * 2. **灰白封面（没有色相）** ⇒ 硬凑只会得到「脏色」⇒ 不如保持主题默认色。
+ *
+ * @param hex 封面主色（`#rrggbb`）。
+ */
+export function toFluentAccent(hex: string): FluentAccent | null {
+  const rgb = parseHexColor(hex)
+  if (!rgb) return null
+
+  const hsl = rgbToHsl(rgb)
+  // ⚠️ 没有色相 ⇒ 放弃（调用方保持主题默认色）。
+  if (hsl.s < FLUENT_ACCENT_MIN_SATURATION_FOR_HUE) return null
+
+  const h = hsl.h
+  // 饱和度夹紧：太灰不像强调色；太艳刺眼。
+  const s = Math.min(FLUENT_ACCENT_MAX_SATURATION, Math.max(FLUENT_ACCENT_MIN_SATURATION, hsl.s))
+  // 亮度夹紧：落在 Fluent 强调色的观感区间。
+  let l = Math.min(FLUENT_ACCENT_MAX_LIGHTNESS, Math.max(FLUENT_ACCENT_MIN_LIGHTNESS, hsl.l))
+
+  // ⚠️ **对比度不够就继续压暗**（白字压在上面）。
+  //    ⚠️ 步长 0.02、最多 100 步 ⇒ 最多压到 L=0.02；那时对比度必然已达标
+  //    （纯黑的对比度是 21），所以这个循环一定会结束。
+  for (let i = 0; i < 100 && l > 0.02; i += 1) {
+    if (contrastRatio(hslToHex({ h, s, l }), '#ffffff') >= FLUENT_ACCENT_MIN_CONTRAST) break
+    l -= 0.02
+  }
+
+  const accent = hslToHex({ h, s, l })
+  const hover = hslToHex({
+    h,
+    s,
+    l: Math.max(0.02, l - FLUENT_ACCENT_HOVER_LIGHTNESS_DELTA),
+  })
+  return {
+    accent,
+    hover,
+    focusRing: hexWithAlpha(accent, FLUENT_ACCENT_FOCUS_ALPHA),
+  }
+}

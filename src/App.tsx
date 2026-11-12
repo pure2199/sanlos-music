@@ -25,6 +25,7 @@ import type { DetailKind } from './state/libraryStore'
 import { useAppPrefsStore } from './state/appPrefsStore'
 import { usePlayerStore } from './state/playerStore'
 import { useSessionStore } from './state/sessionStore'
+import { useCoverAccent } from './ui/useCoverAccent'
 import './styles/global.css'
 import './styles/app-shell.css'
 import './styles/tokens.css'
@@ -207,6 +208,16 @@ export default function App() {
   useEffect(() => {
     void useAppPrefsStore.getState().load()
   }, [])
+
+  // -------------------------------------------------------------------------
+  // Fluent 主题的强调色取自封面主色（T89-④）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **规格 §7.1**：「Windows 11 Fluent 风：强调色 = 取自封面取色的 Fluent 强调色」
+  //    —— 双主题表里**唯一**还没落地的一条。
+  // ⚠️ **只有 Fluent 主题会跟着当前歌曲的封面变**（Apple 风按规格是「单色高饱和点缀」= 固定色）。
+  // ⚠️ 取不到色（无封面 / 加载失败 / 灰白封面）⇒ **保持主题默认色**。
+  useCoverAccent()
 
   // -------------------------------------------------------------------------
   // 会话失效 → 回登录页（规格 §5.4）
