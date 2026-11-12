@@ -136,6 +136,16 @@ Windows 10 1809+ / x64. MIT licensed.
 > ⚠️ **这不代表文件安全** —— 仍要核对上面的 sha256。
 > 需要静默安装可用 `FN-Music-Setup-0.2.5.exe /S`。
 >
+> ℹ️ **怎么确认下载到的是官方产物**（没有签名时的替代办法）：
+> ① **构建来源证明** —— 本仓库用 GitHub 官方的 attestation（SLSA build provenance，
+> 由 Sigstore 签发）给每个产物签了「来源证明」：它证明这个文件确实是**本仓库的 CI**
+> 从对应标签构建出来的，**换一字节就验不过**。装好 [GitHub CLI](https://cli.github.com/) 后：
+> ```bash
+> gh attestation verify FN-Music-Setup-0.2.5.exe --repo pure2199/sanlos-music
+> ```
+> ② 或者直接与上面的 **sha256** 逐字比对。
+> ⚠️ 应用内「一键更新」下载的包还会再核对更新清单里的 **SHA-512**（不符一律拒绝安装）。
+>
 > ✅ **签名正在办理**：本项目已向 **[SignPath Foundation](https://signpath.org)** 提交免费签名申请
 > （**审核中**）⇒ 批下来后**从下一个版本起**产物才会带上公开 OV 签名
 > （Windows 上显示的发布者是「SignPath Foundation」），且在**开启了 Smart App Control 的 Windows 11**
@@ -246,10 +256,11 @@ A：Chromium 解不了某些无损格式（APE / ALAC / DSF 等）。客户端�
 A：兜底解码需要本地文件副本。请先点下载，等它完成再播放。
 
 **Q：Windows 提示「未知发布者」/ 蓝色「Windows 已保护你的电脑」？**
-A：产物**未做代码签名**（签名申请**已提交、审核中**，批下来后从下一版起生效），这是预期状态。
+A：产物**未做代码签名**（本项目暂未取得公开可信的代码签名证书，签名申请已被拒），这是预期状态；
+可以按上面「怎么确认下载到的是官方产物」验证（构建来源证明 / sha256）。
 **最省事的处理**：右键安装包 → **属性** → 底部勾「**解除锁定**」→ 应用（**蓝框直接消失**）；
 或命令行（PowerShell）：`Unblock-File .\FN-Music-Setup-0.2.5.exe`。
-⚠️ 开了 **Smart App Control** 的 Windows 11 是**硬拦**（没有「仍要运行」按钮）⇒ 那类机器要等签名上线。
+⚠️ 开了 **Smart App Control** 的 Windows 11 是**硬拦**（没有「仍要运行」按钮）⇒ 那类机器装不了未签名的版本。
 
 **Q：连不上 / 地址无效？**
 A：① **IP 地址**只填 host 时会自动补端口（`5666` / `5667`），**域名地址走标准端口**（`80` / `443`）——若你的域名是局域网直连，请显式写成 `host:5666`；② 若前面写了 `https` 而 NAS 只开了 `http`，请显式改成 `http`；③ 中继链路必须能带上 `mode=relay`；④ 自签证书场景下，客户端**只对 TrustedHosts 放行**，不会全局忽略证书错误。

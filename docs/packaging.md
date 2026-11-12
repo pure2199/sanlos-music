@@ -358,11 +358,11 @@ node tools/fn-check-signature.mjs release-probe
 
 | 原以为 | 实测（2026-11） |
 |---|---|
-| Certum 开源计划（免费）谁都能申请 | **要 GitHub star > 1k** ⇒ 本项目 star=0 ⇒ **够不着** |
+| Certum 开源计划（免费）谁都能申请 | **是付费产品**：Certum「Open Source Code Signing in the Cloud」**€49/年**（`shop.certum.eu` 的 `price: 49.00 EUR` / sku `bd_005`）⇒ **不要求 star**，但要**付款 + 法律主体身份核验**（⚠️ 2026-11 实测，**本条推翻了**原先「要 star > 1k」的说法） |
 | EV 证书能立刻拿到 SmartScreen 信誉 | 微软 **2024 起取消** EV 的即时信誉 ⇒ OV 与 EV **无差别**（个别 2026 选型文章仍在宣传「EV 秒获信誉」⇒ **过期信息**） |
 | 签名证书要插 U 盾 | **Certum Standard 云签名 €209/年**，**SimplySign 云签名无需 UKey**；有效期上限已被压到 **459 天** |
 
-⇒ **SignPath Foundation**（给符合资格的开源项目的**免费** OV 证书）是当前最优解：
+⇒ 当时判断 **SignPath Foundation**（给符合资格的开源项目的**免费** OV 证书）是当前最优解：
 
 | 事实 | 内容 |
 |---|---|
@@ -373,6 +373,10 @@ node tools/fn-check-signature.mjs release-probe
 | 流程 | **每次发布人工审批**（在 SignPath 平台点一次） |
 | 团队 | 单维护者可兼任 author / reviewer / approver 三角色（有先例） |
 | 前置 | GitHub 与 SignPath **两个账号都要开 MFA**；仓库要有 **OSI 认可的许可证**（本项目 = MIT） |
+
+> ⚠️ **2026-11-12 实测：申请已被拒**。拒审原因是**可见度不足**（0 star / 0 fork /
+> 仓库 2026-11-05 才建），**不是**代码质量 ⇒ 上表的前提**没达成** ⇒ 这条路线当前走不通。
+> ⇒ 现状与替代方案见本文 **§7.10 无证书期怎么发版**。
 
 #### 落地形态（代码在仓库里）
 
@@ -478,4 +482,46 @@ ParserError: … The Unicode escape sequence is not valid.
 若 Foundation 拒审、或单人三角色不被接受 ⇒ 换 **Certum Standard Code Signing in the Cloud
 （€209/年）**。本项目的签名代码**不绑定 SignPath** ⇒ 只需要改「期望的 CN 候选值」
 （客户端设置页 + CI 的 `SIGNPATH_EXPECTED_CN`）即可，**不用改任何逻辑**。
+
+### 7.10 无证书期怎么发版（**attestation 路线**，T87.17）
+
+⚠️ **更正**：上面 §7.9 的「退路」**已经触发** —— Foundation 于 **2026-11-12 拒审**。
+
+⚠️ **背景**：公开产物**继续以未签名形式发布**。**没有公开可信证书时，「发布者身份」
+改由 GitHub 官方的 artifact attestation 承担。**
+
+| 项 | 内容 |
+|---|---|
+| 是什么 | **artifact attestation**（SLSA build provenance，Sigstore 公共实例签发） |
+| 证明了什么 | 「这个文件确实是**本仓库的 CI** 从**这个 tag** 构建出来的」⇒ 换一字节就验不过 |
+| 成本 | **公开仓库全部计划免费**（旧 Bronze / Silver / Gold 计划除外） |
+| Action | `actions/attest@v4`（`actions/attest-build-provenance` v4 起已只是它的包装器） |
+| 需要的权限 | `id-token: write`（换 OIDC 拿 Sigstore 证书）+ `attestations: write`（落库） |
+| 用户怎么验 | `gh attestation verify FN-Music-Setup-0.2.6.exe --repo pure2199/sanlos-music` |
+
+#### 发版操作（当前）
+
+1. GitHub 上打开 **Actions → Release → Run workflow**；
+2. `tag` 填要发的标签（如 `v0.2.6`）；
+3. **取消勾选 `pack_only`**（否则只打包、不发版）；
+4. ⚠️ **取消勾选 `sign`** —— SignPath 申请已被拒，签名路径**必然失败**在缺 5 个
+   secret / variable（`scripts/check-signpath-config.mjs` 快速失败）；
+5. 等流水线跑完：未签名路径会**断言产物确实没有签名** → 生成清单 → **出 attestation** → 发 Release。
+
+#### ⚠️ 顺序（错一步就等于签了个没用的东西）
+
+attestation 必须排在**产物定版之后**：签名路径排在「替换签名件」之后，未签名路径排在
+「校验未签名」之后，且必须排在「生成 `latest.json`」**之后**（清单也是公开资产，也该可验证）。
+
+#### 两条路线的信任模型对比
+
+| | 代码签名（Authenticode） | 构建来源证明（attestation） |
+|---|---|---|
+| 谁签 | CA 签发的证书（SignPath / Certum） | GitHub（Sigstore） |
+| 用户怎么验 | Windows 自己验（发布者显示在 UAC 窗口里） | `gh attestation verify`（要装 GitHub CLI） |
+| 挡住的是 | **冒充别家**的发布者 | **非本仓库构建**的产物 |
+| 能不能让 SmartScreen 不弹蓝框 | 能（但新证书的信誉要从零积累） | **不能** ⇒ 仍需「解除锁定」 |
+
+⚠️ **两者互补，不是替代**：attestation 补的是「发布者身份」这一层；
+SmartScreen 的蓝框只能靠「解除锁定」或真正的代码签名解决。
 

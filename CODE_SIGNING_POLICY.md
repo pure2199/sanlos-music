@@ -8,6 +8,16 @@
 
 > 中文版（面向维护者）：[docs/signing.md](./docs/signing.md)
 
+> ⚠️ **Current status (2026-11-12)**: the SignPath Foundation application was **declined**
+> (insufficient public visibility signals — not a judgement of software quality), so **the
+> artefacts published so far are unsigned**. The "publisher identity" they would otherwise
+> lack is instead covered by GitHub **artifact attestations** (SLSA build provenance, issued by
+> Sigstore), which prove that the binaries were built by this repository's CI from the
+> corresponding tag. See `docs/signing.md` (Chinese) and `docs/packaging.md` §7.10.
+>
+> This policy is kept **as is** for a future re-application — the wording of the signing
+> provider line above is the one SignPath requires verbatim.
+
 ---
 
 ## 1. What is signed

@@ -4,15 +4,19 @@
 > 本地开发用的**自签**证书是另一回事（见 [packaging.md](./packaging.md) 第七节）——
 > **自签产物绝不发到公开 Release**。
 
-**一句话**：本项目已向 **[SignPath Foundation](https://signpath.org)** 提交**免费**的
-公开 OV（Organization Validation）代码签名证书申请（**2026-11-11 已提交，审核中**）
-⇒ **批下来后从 v0.2.6 起**，公开安装包会带上签名，Windows 上显示的发布者是
-**「SignPath Foundation」**（**不是**公司名），并且在**开启了 Smart App Control 的 Windows 11**
-上不再被直接拦截。
+**一句话**：本项目曾向 **[SignPath Foundation](https://signpath.org)** 申请**免费**的
+公开 OV（Organization Validation）代码签名证书，**2026-11-12 申请被拒**
+（原因是**可见度不足**，不是代码质量）⇒ **公开安装包当前仍然没有签名**。
 
-⚠️ **v0.2.5 本身仍然没有签名**（申请在途）⇒ 那批用户按
-[README「三、快速开始」的绕法](../README.md#三快速开始)处理（解除锁定 / `Unblock-File`），
-**Smart App Control 的机器则要等 v0.2.6**。
+⚠️ **「发布者身份」改由构建来源证明承担**：GitHub 官方的 **artifact attestation**
+（SLSA build provenance，由 Sigstore 签发）证明每个产物确实是**本仓库的 CI** 从对应标签
+构建出来的 ⇒ 用户可用 `gh attestation verify` 独立验证。
+详见 [packaging.md](./packaging.md) 第 7.10 节。
+
+⚠️ **未签名对用户意味着什么**：Windows 会提示「未知发布者」/ SmartScreen 蓝框
+⇒ 按 [README「三、快速开始」的绕法](../README.md#三快速开始)处理（解除锁定 / `Unblock-File`）；
+**开启了 Smart App Control 的 Windows 11 是硬拦**（没有「仍要运行」按钮）
+⇒ 那类机器装不了未签名版本。
 
 ---
 
@@ -77,9 +81,9 @@ Get-AuthenticodeSignature .\FN-Music-Setup-0.2.5.exe |
 
 ---
 
-## 三、维护者：怎么申请 + 怎么配（**目前卡在这一步**）
+## 三、维护者：怎么申请 + 怎么配（**申请已被拒；下面是复议或换路线时要做的事**）
 
-### 3.1 提交申请（**已于 2026-11-11 提交，审核中**）
+### 3.1 提交申请（**2026-11-11 提交，2026-11-12 被拒**：可见度不足）
 
 1. 打开 <https://signpath.org/apply>；
 2. 需要准备：仓库地址（https://github.com/pure2199/sanlos-music ）、许可证（MIT）、
@@ -140,9 +144,9 @@ Get-AuthenticodeSignature .\FN-Music-Setup-0.2.5.exe |
 > 💡 `pack_only` = **true** 时只跑「构建 + 打包 + 上传 artifact」，
 > **不送签、不发版** ⇒ 用来验证「CI 能出包」而**不需要** SignPath 账号。
 
-### 3.5 发**未签名**版（`sign` = false）—— v0.2.5 用的就是这条
+### 3.5 发**未签名**版（`sign` = false）—— **当前发版走的就是这条**
 
-签名申请在途（审核中）时，发版**不必等**：
+**签名申请已被拒**（2026-11-12）⇒ 当前发版**一律走这条**（不依赖任何证书）：
 
 1. `tag` = 目标版本、`pack_only` = **false**、**`sign` = false**；
 2. 工作流会先**断言产物确实没有签名**（`--expect none`）

@@ -368,6 +368,61 @@ describe('设置页：版本号 / 项目地址 / 更新源（T82）', () => {
       }),
     )
   })
+
+  // -------------------------------------------------------------------------
+  // T87.17：未签名产物的「怎么验证」说明
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **背景**：公开产物长期没有 Authenticode 签名（SignPath 申请已被拒）
+  //    ⇒ 「发布者身份」改由 GitHub attestation（SLSA build provenance）承担
+  //    ⇒ 客户端必须把「怎么验」讲清楚，而不是让用户面对一句「未知发布者」干瞪眼。
+  //
+  // ⚠️ **纪律**：既有断言一条不删、一条不削弱；本节只**追加**。
+
+  describe('T87.17 —— 未签名产物的验证说明', () => {
+    it('更新组说明「当前发布的安装包没有代码签名」', async () => {
+      stubBridge()
+      render(<SettingsPanel />)
+
+      pickCategory('更新')
+
+      await waitFor(() => {
+        expect(screen.getByTestId('update-verify-hint')).toBeTruthy()
+      })
+      const hint = screen.getByTestId('update-verify-hint').textContent ?? ''
+      expect(hint).toContain('没有代码签名')
+      expect(hint).toContain('未知发布者')
+    })
+
+    it('给出**两种验证办法**（构建来源证明 + sha256）', async () => {
+      stubBridge()
+      render(<SettingsPanel />)
+
+      pickCategory('更新')
+
+      await waitFor(() => {
+        expect(screen.getByTestId('update-verify-howto')).toBeTruthy()
+      })
+      const howto = screen.getByTestId('update-verify-howto').textContent ?? ''
+      expect(howto).toContain('怎么验证这个安装包')
+      expect(howto).toContain('gh attestation verify')
+      expect(howto).toContain('sha256')
+    })
+
+    it('⚠️ **不写**「本项目暂未办理代码签名证书」这种**会过期**的项目状态', async () => {
+      // ⚠️ 拿到公开证书后那句话就是假的 ⇒ 只描述**产物**的状态，不描述项目状态。
+      stubBridge()
+      render(<SettingsPanel />)
+
+      pickCategory('更新')
+
+      await waitFor(() => {
+        expect(screen.getByTestId('update-verify-hint')).toBeTruthy()
+      })
+      const text = document.body.textContent ?? ''
+      expect(text).not.toContain('本项目暂未办理代码签名证书')
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------

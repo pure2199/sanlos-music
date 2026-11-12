@@ -793,7 +793,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   updateDownload.signature.ok
                     ? '签名校验通过。'
                     : updateDownload.signature.status === 'NotSigned' && allowUnsigned
-                      ? '安装包没有代码签名（已按你的授权放行；主进程仍会核对 SHA-512）。'
+                      ? '安装包没有代码签名（已按你的授权放行；主进程仍会核对 SHA-512）。想确认它是官方产物，见下方「怎么验证这个安装包」。'
                       : `签名校验未通过：${updateDownload.signature.reason ?? '未知原因'}——不允许安装。`
                 }`}
               </p>
@@ -842,6 +842,21 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             <p className="fnm-settings__hint">
               「预期的代码签名者」填**签发者主体名**即可（**不必**抄整串 <code>CN=…, O=…, C=…</code>），
               也可以填**多个**（用逗号分隔）；公开安装包由 <code>SignPath Foundation</code> 签发时就填它。
+            </p>
+            {/* ⚠️ **T87.17**：公开产物**长期没有签名** ⇒ 必须把「怎么确认是官方产物」讲清楚，
+                而不是让用户面对一句「未知发布者」干瞪眼。
+                ⚠️ 措辞只描述**产物**的状态（「当前发布的安装包没有签名」），
+                **不写**「本项目暂未办理证书」这种项目状态 —— 那是**会过期**的说法
+                （拿到证书后就是假的；既有测试也盯着这类文案）。 */}
+            <p className="fnm-settings__hint" data-testid="update-verify-hint">
+              ⚠️ 当前公开发布的安装包**没有代码签名**（Windows 会提示「未知发布者」）。
+            </p>
+            <p className="fnm-settings__hint" data-testid="update-verify-howto">
+              <strong>怎么验证这个安装包</strong>：① 用 GitHub CLI 验证**构建来源**——
+              <code>gh attestation verify FN-Music-Setup-版本号.exe --repo pure2199/sanlos-music</code>
+              （证明它确实是本仓库的 CI 从对应标签构建出来的，换一字节就验不过）；
+              ② 或与 Release 页面末尾的 <strong>sha256</strong> 表逐字比对。
+              应用内更新还会再核对清单里的 <strong>SHA-512</strong>（不符一律拒绝安装）。
             </p>
             {!updateSaved && (
               <p className="fnm-settings__hint" data-testid="update-unsaved-hint">

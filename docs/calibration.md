@@ -4530,3 +4530,69 @@ SignPath 线**保留**，批下来后从 **v0.2.6** 起启用签名。
 - ⬜ **真机复验**需要**新构建**：勾「允许安装未签名的更新包」→ 保存 → 检查 → 下载 → 启动安装 ⇒ 安装器真的起来；
 - ⚠️ `downloadUpdate()` 里 `sanitizeFileName(file.name) ?? 'update.exe'` 的兜底：清单文件名带分隔符时落盘名与清单名对不上 ⇒ `findCached()` 查不到 ⇒ 未签名包会因「没有清单里的 SHA-512 可核对」被拒（**fail-closed，安全**）⇒ **不在本轮范围**；
 - ⬜ T87.7-b、SignPath 审核、开 2FA 等老待办**不变**。
+## 五十六、T87.17：无证书可信发布 —— 用 GitHub attestation 替代代码签名证书（2026-11-12）
+
+### 背景：SignPath Foundation 的申请**已被拒**
+
+| 项 | 事实（2026-11-12 实测） |
+| --- | --- |
+| 拒审原因 | **可见度不足**，不是代码质量（同生态另有 3 个项目同因被拒：WinSight / Rivulet / SteamWrapper） |
+| 本仓库的短板 | star = 0 / fork = 0 / 仓库 2026-11-05 才建 / ~73 下载 |
+| 结论 | 重报大概率再拒 ⇒ 用户明确「不再申请」 |
+
+### ⚠️ 合法边界（本任务的红线）
+
+| 允许 | 禁止 |
+| --- | --- |
+| 诚实未签名发布（显式声明 + 可验证的信任锚） | 伪造签名 / 伪造证书 |
+| 自签证书仅用于**本机 / 内部**把链路跑通 | 冒用他人证书或主体名 |
+| 「产物到底签没签」在 CI / 文档 / 客户端里**一致** | 文档或 Release 页面声称「已签名」而实际未签 |
+
+### 现状盘点（实测，不是推测）
+
+| 能力 | 状态 |
+| --- | --- |
+| CI 未签名发布路径 | ✅ 已就绪（`sign = false` ⇒ `--expect none` ⇒ 清单 ⇒ 发 Release；v0.2.5 就是这么发的） |
+| 客户端「允许安装未签名的更新包」 | ✅ 已就绪（T82 加开关 / T85 修判定 / T87 修签名者匹配） |
+| 更新源可达 | ✅ `curl -sIL` 打到 `releases/latest/download/latest.json` ⇒ 302 ⇒ 302 ⇒ **200 / 466 B** |
+| SHA-512 / 同源 / 路径穿越硬闸 | ✅ 已就绪（`electron/update.ts`） |
+| **发布者身份的可验证性** | ❌ **没有**（只有 sha256，而 sha256 与 exe 在**同一个 Release 页面** ⇒ 改得了页面就改得了两者） |
+
+### 关键机制：attestation = 没有公开证书时的「发布者身份」信任锚
+
+| 项 | 内容 |
+| --- | --- |
+| 是什么 | GitHub 官方的 **artifact attestation**（SLSA build provenance，Sigstore 公共实例签发） |
+| 证明了什么 | 「这个文件确实是**本仓库的 CI** 从**这个 tag** 构建出来的」，且换一字节就验不过 |
+| 成本 | **公开仓库全部计划免费**（本仓库 `visibility: public`，2026-11-12 查 GitHub API 确认） |
+| Action | `actions/attest@v4`（`actions/attest-build-provenance` v4 起已只是它的包装器） |
+| 需要的权限 | `id-token: write`（换 OIDC）+ `attestations: write`（落库） |
+| 用户怎么验 | `gh attestation verify FN-Music-Setup-0.2.6.exe --repo pure2199/sanlos-music` |
+
+### 改动
+
+| 文件 | 内容 |
+| --- | --- |
+| `.github/workflows/release.yml` | 加 `id-token: write` + `attestations: write`；新增 `Attest build provenance` 步骤（`subject-path` 覆盖两个 exe + `latest.json`）；Step Summary 与 Release 说明给出验证入口；Release 说明按 `SIGNED` **分两种形态**写（不许写死） |
+| `src/components/SettingsPanel.tsx` | 未签名提示补「怎么验证」；新增「怎么验证这个安装包」说明块（`update-verify-hint` / `update-verify-howto`） |
+| `test/t87-ci-release-workflow.test.ts` | **追加** T87.17 契约测试 **8** 条（含**变异自证**） |
+| `test/settings-page.test.tsx` | **追加** T87.17 界面契约 **3** 条 |
+| `docs/changelog.md` | 顶部「当前状态」提示块 + 0.2.5 条目内「后续」块（**不改写历史行**） |
+| `docs/packaging.md` | §7.9 更正 Certum 结论（**不要求 star**，是 €49 付费产品）+ 新增 §7.10 |
+| `docs/signing.md` / `CODE_SIGNING_POLICY.md` / `README.md` | 当前状态注记 + 「未签名 + 怎么验」 |
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `tsc --noEmit` | ✅ exit 0 |
+| `vitest` | ✅ **2304 passed / 110 files / 0 failed**（既有 2293 条**一条不删**；新增 **11** 条） |
+| 字节自检 | ✅ bad=0 |
+| Playwright E2E | 未跑（本任务没动运行时行为；T87.18 与发版一起跑） |
+
+### 遗留 / 待办
+
+- ⬜ **发 v0.2.6** 并端到端验证（attestation 真跑出来 + 一键更新真装上 + 真实 Electron 实证「应用内下载的包不带 Zone.Identifier」）⇒ 单独任务（T87.18，涉及发版 ⇒ 需先确认）。
+- ⬜ README 的 `### Code signing policy` 展示位 + `.github/CODEOWNERS`（SignPath 复议时必备）。
+- ⚠️ `sign` 输入默认仍是 **true**（既有契约不许削弱）⇒ 当前发版必须**手动取消勾选**（签名路径必然失败在缺 5 个 secret / variable）。
+- ⚠️ 剩下 2.52 GB 缓存清理、GitHub 2FA / 改口令、NAS 口令轮换等老待办**不变**。

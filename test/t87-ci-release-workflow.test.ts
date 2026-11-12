@@ -399,3 +399,89 @@ describe('T87.11 —— 未签名发布路径', () => {
     expect(collectRunBlockLines(block).filter((line) => line.includes('`'))).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// T87.17：构建来源证明（attestation）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **背景**：SignPath Foundation 的申请已被拒（可见度不足）⇒ 公开产物**长期没有**
+//    Authenticode 签名 ⇒ 「发布者身份」这一层由 **GitHub attestation**
+//    （SLSA build provenance，Sigstore 签发）承担。
+//
+// ⚠️ **为什么这些必须是契约**：这一步被改坏（顺序错 / subject 漏了 / 权限没了）
+//    **不会**让工作流失败 ⇒ 发出去的是「验不了来源」的产物，而页面上看不出差别
+//    ⇒ 必须把结构钉死。
+//
+// ⚠️ **纪律**：既有断言一条不删、一条不削弱；本节只**追加**。
+
+describe('T87.17 —— 构建来源证明（attestation）', () => {
+  const yml = readRepoFile('.github', 'workflows', 'release.yml')
+
+  /** 取出 attestation 步骤的 `subject-path` 值。 */
+  const subjectOf = (text: string): string =>
+    stepBlock(text, 'Attest build provenance').match(/subject-path: '([^']*)'/)?.[1] ?? ''
+
+  /** subject 是否覆盖了两个 exe（`release-ci/*.exe`）。 */
+  const coversExe = (text: string): boolean => subjectOf(text).includes('release-ci/*.exe')
+
+  it('job 权限里有 `id-token: write` 与 `attestations: write`（少一个就签不出来）', () => {
+    const permissionsAt = yml.indexOf('\npermissions:')
+    expect(permissionsAt).toBeGreaterThan(-1)
+    const block = yml.slice(permissionsAt, yml.indexOf('\njobs:'))
+    expect(block).toContain('id-token: write')
+    expect(block).toContain('attestations: write')
+  })
+
+  it('用**官方 Action**且**钉版本**（不许用会漂的 @main / @master）', () => {
+    expect(yml).toContain('actions/attest@v')
+    expect(yml).not.toMatch(/actions\/attest[a-z-]*@(main|master)/)
+  })
+
+  it('subject 覆盖**两个 exe + 更新清单**（清单也是公开资产）', () => {
+    const subject = subjectOf(yml)
+    expect(subject).toContain('release-ci/*.exe')
+    expect(subject).toContain('release-ci/latest.json')
+  })
+
+  it('**两条路径都签发**（签过名的也签 —— 不冲突、不重复）', () => {
+    expect(stepBlock(yml, 'Attest build provenance')).toContain('if: ${{ !inputs.pack_only }}')
+  })
+
+  it('**必须排在产物定版之后**：清单生成之后、发 Release 之前', () => {
+    // ⚠️ 比的是**步骤位置**。签名路径的清单步骤在未签名路径之前 ⇒
+    //    排在未签名那步之后就同时满足了两条路径。
+    const manifestAt = yml.indexOf('- name: Write update manifest (unsigned)')
+    const attestAt = yml.indexOf('- name: Attest build provenance')
+    const publishAt = yml.indexOf('- name: Publish GitHub Release')
+    expect(manifestAt).toBeGreaterThan(-1)
+    expect(attestAt).toBeGreaterThan(manifestAt)
+    expect(publishAt).toBeGreaterThan(attestAt)
+  })
+
+  it('Release 说明**按实际形态**写（不许写死「已签名」或「没签名」）', () => {
+    const block = stepBlock(yml, 'Prepare release notes with checksums')
+    expect(block).toContain('SIGNED: ${{ inputs.sign }}')
+    expect(block).toContain("if ($env:SIGNED -eq 'true')")
+    // 两种形态各有一段文案。
+    expect(block).toContain('本版**已**做 Authenticode 代码签名')
+    expect(block).toContain('**本版没有代码签名**')
+  })
+
+  it('attestation 的页面地址进 Release 说明（用户得知道去哪验）', () => {
+    const block = stepBlock(yml, 'Prepare release notes with checksums')
+    expect(block).toContain('ATTEST_URL:')
+    expect(block).toContain('$env:ATTEST_URL')
+  })
+
+  it('**变异自证**：把 subject 改成不含 exe ⇒ 必被抓出来', () => {
+    const mutated = yml.replace(
+      /subject-path: '[^']*'/,
+      "subject-path: '${{ github.workspace }}/release-ci/latest.json'",
+    )
+    // 变异必须真的改到了东西（否则下面的断言就是在验一个没变过的文件）。
+    expect(mutated).not.toBe(yml)
+    // 用**同一套判定**跑变异体 ⇒ 必须判不通过（否则这个守卫是摆设）。
+    expect(coversExe(yml)).toBe(true)
+    expect(coversExe(mutated)).toBe(false)
+  })
+})

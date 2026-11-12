@@ -34,7 +34,11 @@ on:
       sign:
         # ⚠️ **默认 true** —— 签名是默认路径；未签名必须**显式**关掉（fail-closed 方向）。
         #    关掉后走「未签名发布」：断言产物**确实没有签名** → 生成清单 → 发 Release。
-        description: '发布时是否走 SignPath 签名（关掉 = 发布未签名产物；未签名路径会断言产物确实没签名）'
+        # ⚠️ **T87.17：SignPath Foundation 的申请已被拒**（可见度不足）⇒ 签名路径
+        #    目前**必然失败**在「Check SignPath configuration」（缺 5 个 secret/variable）。
+        #    ⇒ **当前发版请手动取消勾选本项**，走未签名路径；
+        #    未签名路径同样有**替代信任锚**（GitHub attestation，见下面的 Attest 步骤）。
+        description: '发布时是否走 SignPath 签名（SignPath 申请已被拒 ⇒ 当前请取消勾选；未签名路径会断言产物确实没签名，并生成构建来源证明）'
         required: false
         default: true
         type: boolean
@@ -47,6 +51,13 @@ concurrency:
 permissions:
   # ⚠️ 发 Release 需要写权限（上传资产 / 建 Release）。
   contents: write
+  # ⚠️ **T87.17：attestation（构建来源证明）需要这两项**：
+  #    `id-token: write`     ⇒ 换 Sigstore 短期签名证书用的 OIDC token；
+  #    `attestations: write` ⇒ 把 attestation 落进 GitHub 的 attestation 库。
+  #    ⇒ 这是**没有公开可信代码签名证书**时的「发布者身份」替代信任锚：
+  #       签发方是 GitHub（Sigstore），绑定**最终产物的 digest**。
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -205,10 +216,59 @@ jobs:
           UPDATE_NOTES: '本版未做代码签名（Windows 可能提示「未知发布者」）；详见 Release 说明。'
         run: node scripts/publish-manifest.mjs
 
+      # -----------------------------------------------------------------------
+      # T87.17：attestation —— 没有公开可信证书时的「发布者身份」信任锚
+      # -----------------------------------------------------------------------
+      #
+      # ⚠️ **为什么加这一步**：SignPath Foundation 的申请已被拒（可见度不足）⇒
+      #    公开产物**长期没有** Authenticode 签名 ⇒ 只给 sha256 不够
+      #    （sha256 与 exe 在**同一个 Release 页面** ⇒ 改得了页面就改得了两者）。
+      #    ⇒ 用 GitHub 官方的 **artifact attestation**（SLSA build provenance，
+      #       由 Sigstore 公共实例签发）补上这一层：它证明「这个文件确实是
+      #       **本仓库的 CI** 从**这个 tag** 构建出来的」，且换一字节就验不过。
+      #
+      # ⚠️ **顺序（错一步就等于签了个没用的东西）**：必须排在**产物定版之后** ——
+      #    - 签名路径：排在「Replace artifacts with signed ones」之后（签名改了字节）；
+      #    - 未签名路径：排在「Verify unsigned artifacts」之后；
+      #    - 且必须排在「Write update manifest (...)」**之后**（latest.json 得先存在）。
+      #
+      # ⚠️ **两条路径都签发**（`if: !pack_only`）⇒ 将来真拿到证书了，
+      #    这层信任锚照样在（不冲突、不重复）。
+
+      - name: Attest build provenance
+        if: ${{ !inputs.pack_only }}
+        id: attest
+        uses: actions/attest@v4
+        with:
+          # ⚠️ 用**官方 Action** 且**钉版本**（不许用会漂的 @main）。
+          #    `actions/attest-build-provenance` v4 起已只是它的包装器 ⇒ 直接用前者。
+          # ⚠️ subject 覆盖**两个 exe + 更新清单**（清单也是公开资产，也该可验证）。
+          subject-path: '${{ github.workspace }}/release-ci/*.exe, ${{ github.workspace }}/release-ci/latest.json'
+
+      - name: Summary (attestation)
+        if: ${{ !inputs.pack_only }}
+        # ⚠️ **脚本正文里一律不许有反引号**（PowerShell 的反引号是转义符）。
+        #    一律用**单引号**，Markdown 的行内代码改用「」。
+        run: |
+          $ErrorActionPreference = 'Stop'
+          echo '### 构建来源证明（attestation）' >> $env:GITHUB_STEP_SUMMARY
+          echo '' >> $env:GITHUB_STEP_SUMMARY
+          echo '本次发布的每个产物都附了 SLSA build provenance（由 GitHub / Sigstore 签发）。' >> $env:GITHUB_STEP_SUMMARY
+          echo '' >> $env:GITHUB_STEP_SUMMARY
+          echo 'attestation 页面：' >> $env:GITHUB_STEP_SUMMARY
+          echo '${{ steps.attest.outputs['attestation-url'] }}' >> $env:GITHUB_STEP_SUMMARY
+          echo '' >> $env:GITHUB_STEP_SUMMARY
+          echo '本地验证（需要 GitHub CLI）：' >> $env:GITHUB_STEP_SUMMARY
+          echo 'gh attestation verify FN-Music-Setup-版本号.exe --repo pure2199/sanlos-music' >> $env:GITHUB_STEP_SUMMARY
+
       - name: Prepare release notes with checksums
         if: ${{ !inputs.pack_only }}
         env:
           TAG: ${{ inputs.tag }}
+          # ⚠️ **T87.17**：说明里要区分「签过名 / 没签名」两种形态
+          #    ⇒ 不能写死一句话（写死就成了假陈述）。
+          SIGNED: ${{ inputs.sign }}
+          ATTEST_URL: ${{ steps.attest.outputs['attestation-url'] }}
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
@@ -230,7 +290,29 @@ jobs:
           #    在 Windows 上是 CRLF ⇒ 拼出来的说明会**混行尾**）。
           #    ⚠️ 用 `[char]10` 而不是反引号转义（工作流 run: 块里反引号是转义符）。
           $nl = [string][char]10
-          $extra = @('', '---', '', '## 下载校验（sha256）', '', '| 文件 | 字节数 | sha256 |', '|---|---|---|', ($rows -join $nl), '', '⚠️ 产物由 CI 构建，NSIS 安装器内嵌构建时间戳 ⇒ 两次构建的字节不同 ⇒ 校验值只对**本 Release**的资产有效。') -join $nl
+          # ⚠️ **T87.17**：这一段必须**按实际形态**写（签过名 / 没签名）——
+          #    写死一句话就变成了假陈述。
+          # ⚠️ **不要**用反引号（PowerShell 的反引号是转义符）；行内代码改用「」。
+          $verify = @()
+          if ($env:SIGNED -eq 'true') {
+            $verify = @(
+              '', '## 怎么确认这个安装包是官方的', '',
+              '本版**已**做 Authenticode 代码签名（Windows 会显示发布者，不再是「未知发布者」）。', '',
+              '此外，每个产物都附了**构建来源证明**（SLSA build provenance，由 GitHub / Sigstore 签发），可用 GitHub CLI 验证：', '',
+              ('    gh attestation verify FN-Music-Setup-' + $version + '.exe --repo pure2199/sanlos-music'), '',
+              ('attestation 页面：' + $env:ATTEST_URL)
+            )
+          } else {
+            $verify = @(
+              '', '## 怎么确认这个安装包是官方的', '',
+              '⚠️ **本版没有代码签名**（Windows 会提示「未知发布者」）。', '',
+              '替代方案是**构建来源证明**（SLSA build provenance，由 GitHub / Sigstore 签发）：它证明这个文件确实是**本仓库的 CI** 从对应标签构建出来的，换一字节就验不过。装好 GitHub CLI 后：', '',
+              ('    gh attestation verify FN-Music-Setup-' + $version + '.exe --repo pure2199/sanlos-music'), '',
+              ('attestation 页面：' + $env:ATTEST_URL), '',
+              '不想装 GitHub CLI 的话，用本页末尾的 **sha256** 表逐字比对即可。'
+            )
+          }
+          $extra = (@('', '---', '', '## 下载校验（sha256）', '', '| 文件 | 字节数 | sha256 |', '|---|---|---|', ($rows -join $nl), '', '⚠️ 产物由 CI 构建，NSIS 安装器内嵌构建时间戳 ⇒ 两次构建的字节不同 ⇒ 校验值只对**本 Release**的资产有效。') + $verify) -join $nl
           $outFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           # ⚠️ 写 UTF-8 **无 BOM**（PS 5.1 的 -Encoding utf8 会带 BOM ⇒ 页面开头多一个字符）。
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
