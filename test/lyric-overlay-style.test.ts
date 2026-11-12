@@ -113,10 +113,18 @@ describe('T77 桌面歌词：样式契约（透明 + 白字）', () => {
     )
   })
 
-  it('**共享组件一字未改**（词岛 / 歌词舞台 / 主界面仍是主题色 —— T71「三处一致」）', () => {
+  it('**共享组件仍是主题色**（词岛 / 歌词舞台 / 主界面 —— T71「三处一致」）；T89-⑪ 起全屏页用「校正过的强调色」', () => {
     const shared = readCss('src', 'ui', 'lyrics', 'lyric-view.css')
-    expect(blockOf(shared, '.fnm-lyricview__word--sung')).toMatch(/color:\s*var\(--accent\)/)
-    expect(blockOf(shared, '.fnm-lyricview__word--karaoke')).toContain('var(--accent)')
+    const sung = blockOf(shared, '.fnm-lyricview__word--sung')
+    const karaoke = blockOf(shared, '.fnm-lyricview__word--karaoke')
+    // ⚠ **T89-⑪：前提被推翻**（真机实测：强调色当文字色只有 **3.67** ⇒ 低于 AA 4.5）
+    //    ⇒ 共享组件在**全屏播放页**里改用「按取色背景校正过」的强调色（回退到 `--accent`）。
+    //    ⇒ **T77 的核心没变**：仍是**主题色**，绝不能变成浮层那个固定亮蓝。
+    expect(sung).toMatch(/color:\s*var\(--fnm-fullplayer__accent-text,\s*var\(--accent\)\)/)
+    expect(karaoke).toContain('var(--accent)')
+    // ⚠ 加码：共享组件**不许**被换成浮层那个固定亮蓝（T77 的原意）。
+    expect(sung).not.toContain('--lyric-float-accent')
+    expect(karaoke).not.toContain('--lyric-float-accent')
   })
 
   it('扫光令牌**两套主题同值**（不跟主题走 ⇒ 两边必须一样）', () => {

@@ -254,3 +254,77 @@ export function toFluentAccent(hex: string): FluentAccent | null {
     focusRing: hexWithAlpha(accent, FLUENT_ACCENT_FOCUS_ALPHA),
   }
 }
+
+// ---------------------------------------------------------------------------
+// 强调色当「文字色」用：按背景校正可读性（T89-⑪）
+// ---------------------------------------------------------------------------
+
+/**
+ * 强调色**当文字色**压在背景上要满足的对比度（WCAG AA = 4.5）。
+ *
+ * ⚠️ 与 {@link FLUENT_ACCENT_MIN_CONTRAST} **不是一回事**：
+ *    那个保证的是「**白字**压在强调色上」（强调色作**底色**的场合）；
+ *    这个保证的是「**强调色**压在背景上」（强调色当**文字/图标色**的场合）。
+ */
+export const ACCENT_TEXT_MIN_CONTRAST = 4.5
+
+/**
+ * 把强调色校正成「压在给定背景上仍然可读」的颜色。
+ *
+ * ⚠️ **为什么需要它**：全屏播放页的背景是封面的**平均色**，
+ *    而强调色是封面的**主色** ⇒ 两者来自**同一张图**、亮度天然接近
+ *    ⇒ 同一个强调色压在同一个背景上，对比度必然低（真机实测 2.94）。
+ *    ⇒ 这里只**调亮度**（色相与饱和度**不变** ⇒ 仍是那张封面的颜色），
+ *    直到与背景的对比度达标。
+ *
+ * ⚠️ **只压暗、不提亮**（真机实测后定的方向，T89-⑪）：
+ *    实测「强调色当文字色」的**真实落点**与它们**真正压着的背景**是：
+ *      · 歌词当前行（`.fnm-lyricview__line--whole`）⇒ 压在全屏页渐变上（实测 3.67）
+ *      · 悬停的底部控制按钮图标 ⇒ 压在 `--surface-sunken` 上（实测 3.91）
+ *    这两处背景**都是浅色** ⇒ 把强调色**压暗**必然提升对比度（且不会让任何一处变差）。
+ *    ⚠️ 反过来「提亮」会踩两个坑：
+ *      ① 强调色同时要当**底色**（上面压白字）⇒ 提亮会破坏「白字 ≥ 4.5」；
+ *      ② 全屏页背景是**渐变**（取色 → `--surface`）⇒ 提亮后在**下半页的浅色**上更看不清。
+ *
+ * ⚠️ **为什么不能反过来改全局强调色**：
+ *    全局强调色同时要当**底色**（上面压白字）⇒ 对**深色**封面来说，
+ *    「浅强调色」与「白字 ≥ 4.5」互相矛盾 ⇒ 校正只能在**局部语境**里做。
+ *
+ * ⚠️ **压暗也达不到 4.5 怎么办 ⇒ 原样返回**：
+ *    深色封面（取色背景本身就很深）时，**任何**颜色都不可能同时在渐变两端都 ≥ 4.5
+ *    （两端亮度的比值 < 20.25 ⇒ 数学上不可能）⇒ 这时**保持原色**，
+ *    把「深色取色背景」这个问题留给**页面背景**那一层（见台账 T89-⑪ 的遗留项），
+ *    而不是把强调色改成纯黑、丢掉「这是封面主色」的语义。
+ *
+ * @param accentHex 强调色（`#rrggbb`）。
+ * @param bgHex 背景色（`#rrggbb`）。
+ * @param minContrast 目标对比度（缺省 {@link ACCENT_TEXT_MIN_CONTRAST}）。
+ * @returns 校正后的颜色；**输入不合法、或压暗也达不到目标时原样返回**（不抛、不吞）。
+ */
+export function toReadableAccent(
+  accentHex: string,
+  bgHex: string,
+  minContrast: number = ACCENT_TEXT_MIN_CONTRAST,
+): string {
+  const accent = parseHexColor(accentHex)
+  const bg = parseHexColor(bgHex)
+  // ⚠️ 输入不合法 ⇒ **原样返回**（调用方保留自己的回退逻辑）。
+  if (!accent || !bg) return accentHex
+  // 已经达标 ⇒ 一律不动（不要把「本来就可读」的颜色改掉）。
+  if (contrastRatio(accentHex, bgHex) >= minContrast) return accentHex
+
+  const hsl = rgbToHsl(accent)
+  const { h, s } = hsl
+  const step = 0.02
+  let l = hsl.l
+  // ⚠️ 步长 0.02、最多 100 步 ⇒ 最远能走到 L=0（纯黑）。
+  for (let i = 0; i < 100; i += 1) {
+    const next = l - step
+    if (next < 0) break
+    l = next
+    const hex = hslToHex({ h, s, l })
+    if (contrastRatio(hex, bgHex) >= minContrast) return hex
+  }
+  // ⚠️ 压到纯黑仍没达标 ⇒ **原样返回**（深色取色背景 ⇒ 数学上无解，见上面的说明）。
+  return accentHex
+}

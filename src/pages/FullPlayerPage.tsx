@@ -61,6 +61,7 @@ import { QUEUE_ONLY_ONE_HINT, removeSongFromQueue } from '../components/PlayerBa
 import type { LyricSource } from '../../shared/lyricProvider'
 import { usePlayerStore } from '../state/playerStore'
 import { useAppPrefsStore } from '../state/appPrefsStore'
+import { toReadableAccent } from '../ui/accentColor'
 import {
   defaultEmbeddedLyricFetcher,
   defaultExternalLyricFetcher,
@@ -195,6 +196,15 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   const [tint, setTint] = useState<string | null>(null)
   /** 取色重试次数（失败后延迟重试；见 `MAX_TINT_ATTEMPTS`）。 */
   const [tintAttempt, setTintAttempt] = useState(0)
+  /**
+   * T89-⑪：**当文字/图标色用**的强调色（已按当前取色背景校正过）。
+   *
+   * ⚠️ 与全局 `--accent` **不是一回事**：全局那个要同时当**底色**（压白字），
+   *    对深色封面会与「白字 ≥ 4.5」冲突 ⇒ 校正只能在这个**局部语境**里做。
+   */
+  const [readableAccent, setReadableAccent] = useState<string | null>(null)
+  /** 同上，但对应 hover / active 态。 */
+  const [readableAccentHover, setReadableAccentHover] = useState<string | null>(null)
 
   const songId = current?.id ?? ''
   const coverId = current?.coverId ?? ''
@@ -370,6 +380,58 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     }
   }, [coverId, tintAttempt])
 
+  // --- 强调色当文字色：在取色背景上校正可读性（T89-⑪）----------------------
+  //
+  // ⚠️ **为什么在这儿做**：全屏页的背景是封面的**平均色**，强调色是封面的**主色**
+  //    ⇒ 两者来自同一张图、亮度天然接近 ⇒ 直接用 `--accent` 当文字色只有 2.94
+  //    （真机实测，T89-⑩）。⇒ 这里出一个**只用于文字/图标色**的校正版。
+  //
+  // ⚠️ **真机实测的「真实落点」与它们真正压着的背景**（T89-⑪ 诊断，修复前）：
+  //    · 歌词当前行 `.fnm-lyricview__line--whole` ⇒ 压在**全屏页渐变**上 ⇒ 3.67
+  //    · 悬停的底部控制按钮图标 ⇒ 压在 `--surface-sunken`（不透明）上 ⇒ 3.91
+  //    ⇒ 渐变那一处用**取色背景**校正；悬停那一处用它**自己真正的**背景校正。
+  //
+  // ⚠️ **「生效的强调色」从根元素上读**：Fluent 风是封面派生（`useCoverAccent`
+  //    写在根元素的内联 style 上），Apple 风是主题固定色（来自 `tokens.css`）
+  //    ⇒ 唯一无重复的真相源就是**根元素上生效的值**（不新建 store、不重复取色）。
+  useEffect(() => {
+    if (!tint) {
+      setReadableAccent(null)
+      setReadableAccentHover(null)
+      return
+    }
+    const compute = (): void => {
+      const root = document.documentElement
+      const style = getComputedStyle(root)
+      const accent = style.getPropertyValue('--accent').trim()
+      const hover = style.getPropertyValue('--accent-hover').trim()
+      // ⚠️ 悬停态按钮压的是 `--surface-sunken`（**不透明**）⇒ 那才是它真正的背景。
+      const sunken = style.getPropertyValue('--surface-sunken').trim()
+      setReadableAccent(accent ? toReadableAccent(accent, tint) : null)
+      setReadableAccentHover(
+        hover
+          ? toReadableAccent(hover, sunken || tint)
+          : accent
+            ? toReadableAccent(accent, sunken || tint)
+            : null,
+      )
+    }
+    compute()
+    // ⚠️ **两个竞态都要盯**：
+    //    ① 换歌时「主色」与「平均色」两处取色是**并发**的，完成顺序不确定
+    //       ⇒ 只在背景变化时算一次，会拿到**上一首歌的强调色**。
+    //       ⇒ 监听根元素 `style` 的变化（`applyCoverAccent` 写/删内联变量都会触发）。
+    //    ② 切主题改的是根元素的 `data-theme`（**不是** style 属性）
+    //       ⇒ `--accent`（Apple 固定色 / Fluent 封面派生）与 `--surface-sunken` 都变了
+    //       ⇒ 也要重算。
+    const observer = new MutationObserver(() => compute())
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['style', 'data-theme'],
+    })
+    return () => observer.disconnect()
+  }, [tint])
+
   // --- Esc 关闭 ------------------------------------------------------------
   useEffect(() => {
     if (!onClose) return
@@ -380,7 +442,15 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
-  const style: CssVars | undefined = tint ? { '--fnm-fullplayer__tint': tint } : undefined
+  const style: CssVars | undefined = useMemo(() => {
+    if (!tint) return undefined
+    const vars: Record<`--${string}`, string> = { '--fnm-fullplayer__tint': tint }
+    // ⚠️ **只给「文字/图标色」用**；「强调色作底色 + 白字」那几处仍用全局 `--accent`
+    //    （那条由 `toFluentAccent` 的「白字 ≥ 4.5」保证，**不要动**）。
+    if (readableAccent) vars['--fnm-fullplayer__accent-text'] = readableAccent
+    if (readableAccentHover) vars['--fnm-fullplayer__accent-text-hover'] = readableAccentHover
+    return vars as CssVars
+  }, [tint, readableAccent, readableAccentHover])
 
   const classes = className ? `fnm-fullplayer ${className}` : 'fnm-fullplayer'
 

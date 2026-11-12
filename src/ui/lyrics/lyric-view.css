@@ -100,9 +100,12 @@
  * ⚠️ **必须排在 `--active` 之后**：两者特异性相同 ⇒ 后者胜
  *    （`--active` 的 `color: var(--text-primary)` 会把它盖掉）。
  * ⚠️ **只用语义变量**（`--accent`）⇒ 两套主题自动一致。
+ * ⚠️ **T89-⑪**：全屏播放页里这行**压在取色渐变背景上** ⇒ 强调色与背景同源、
+ *    真机实测只有 3.67 ⇒ 改用「按取色背景校正过」的强调色
+ *    （`--fnm-fullplayer__accent-text`）；**不在全屏页里时回退到 `--accent`**。
  */
 .fnm-lyricview__line--whole {
-  color: var(--accent);
+  color: var(--fnm-fullplayer__accent-text, var(--accent));
 }
 
 /* 双行模式：两行字号一致、等粗（不把上一行降级成更弱的样子）。 */
@@ -215,8 +218,9 @@
 }
 
 /* 已经唱到的词。 */
+/* ⚠️ **T89-⑪**：同 `--whole` ⇒ 全屏页里用「按取色背景校正过」的强调色。 */
 .fnm-lyricview__word--sung {
-  color: var(--accent);
+  color: var(--fnm-fullplayer__accent-text, var(--accent));
 }
 
 /*
@@ -239,7 +243,10 @@
  */
 .fnm-lyricview__word--karaoke {
   color: transparent;
-  background-image: linear-gradient(90deg, var(--accent) 0%, var(--accent) 100%);
+  /* ⚠️ **T89-⑪**：同 `--whole` ⇒ 全屏页里用「按取色背景校正过」的强调色。
+   *    ⚠️ **必须写在一行**：`test/lyric-view-css.test.ts` 的 T48 契约钉着
+   *    `linear-gradient(90deg` 这个**连续**片段（换行就会红）。 */
+  background-image: linear-gradient(90deg, var(--fnm-fullplayer__accent-text, var(--accent)) 0%, var(--fnm-fullplayer__accent-text, var(--accent)) 100%);
   background-size: var(--fnm-lyricview__karaoke-progress, 100%) 100%;
   background-repeat: no-repeat;
   background-position: 0 0;

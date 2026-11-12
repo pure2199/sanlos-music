@@ -187,7 +187,10 @@
 }
 
 .fnm-fullplayer__queue-item--current {
-  color: var(--accent);
+  /* ⚠️ T89-⑪：**当文字色用** ⇒ 用「按取色背景校正过」的强调色。
+   *    全局 `--accent` 与本页背景（封面的平均色）来自同一张图 ⇒ 直接用只有 2.94 对比度。
+   *    ⚠️ 上面那些「accent 作底色 + 白字」的规则**不受影响**（那条由 toFluentAccent 保证）。 */
+  color: var(--fnm-fullplayer__accent-text, var(--accent));
   font-weight: 600;
 }
 
@@ -263,11 +266,12 @@
 
 .fnm-fullplayer__button:hover:not(:disabled) {
   background: var(--surface-sunken);
-  color: var(--accent);
+  /* ⚠️ T89-⑪：图标色同样压在取色背景上 ⇒ 用校正过的强调色（回退到全局 `--accent`）。 */
+  color: var(--fnm-fullplayer__accent-text, var(--accent));
 }
 
 .fnm-fullplayer__button:active:not(:disabled) {
-  color: var(--accent-hover);
+  color: var(--fnm-fullplayer__accent-text-hover, var(--accent-hover));
 }
 
 .fnm-fullplayer__button:focus-visible {
