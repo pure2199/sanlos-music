@@ -40,6 +40,7 @@ import { lyricFloatBounds, type LyricFloatDisplayLike } from '../shared/lyricFlo
 import { playingFromLyricMessage, shouldShowIsland } from './islandVisibility'
 import { createUpdateController } from './update'
 import { migrateLegacyUserData } from './userDataDir'
+import { cleanupUpdateDir } from './updateCleanup'
 
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
 // 生产模式（npm start / 打包后的应用）加载随包发布的 dist/index.html。
@@ -1010,12 +1011,30 @@ if (!isPrimaryInstance) {
       //     ⚠️ **出网走同一个 Chromium 分区栈**：更新服务器**不在 `TrustedHosts` 里**
       //     → 该分区对它的证书走 Chromium 默认校验（自签**不会**被放行）。
       //     ⚠️ **渲染层不碰网络**：检查 / 下载 / 启动全在主进程。
+      //
+      // 14a. **更新目录**（T89-③）：默认 `%TEMP%\fnmusic-update`。
+      //      ⚠️ `FNM_UPDATE_DIR` 可以改写它 —— **E2E 用它做隔离**：
+      //      E2E 只隔离了 `--user-data-dir`（userData），**没隔离 `%TEMP%`**
+      //      ⇒ 不隔离的话，E2E 会往用户真实的 `%TEMP%` 里写假安装包，
+      //      而且每次启动都会**清掉用户待装的安装包**。
+      const updateDir = process.env.FNM_UPDATE_DIR ?? path.join(app.getPath('temp'), 'fnmusic-update')
+      //
+      // 14b. **启动时清空更新目录**（T89-③）。
+      //      ⚠️ 为什么可以放心清：更新状态（`download` / `status`）是**内存态**
+      //      ⇒ 重启后点「启动安装」必然报「还没有已下载的安装包」
+      //      ⇒ 「下载了、关掉应用、明天再装」这个流程**本来就不存在**
+      //      ⇒ 启动时还躺在这里的文件**按定义就是上一轮会话的垃圾**。
+      //      ⚠️ 清不掉就算了（删文件失败不抛）⇒ 清理不会让启动失败。
+      const cleanup = cleanupUpdateDir(updateDir)
+      if (cleanup.removed.length > 0) {
+        console.log(`[update] 已清理更新目录里的 ${cleanup.removed.length} 个旧文件`)
+      }
       registerUpdateIpc({
         prefs,
         update: createUpdateController({
           fetchImpl: http.fetch,
           currentVersion: app.getVersion(),
-          destDir: path.join(app.getPath('temp'), 'fnmusic-update'),
+          destDir: updateDir,
         }),
       })
 

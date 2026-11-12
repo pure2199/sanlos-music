@@ -48,6 +48,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
 import { evaluateSignatureGate, matchesExpectedSigner, parseSignerCandidates } from '../shared/update'
+import { cleanupUpdateDir } from './updateCleanup'
 import type {
   UpdateCheckResult,
   UpdateDownloadResult,
@@ -579,6 +580,12 @@ export async function downloadUpdate(opts: DownloadUpdateOptions): Promise<Updat
     await rm(partPath, { force: true }).catch(() => undefined)
     return { status: 'error', message: `保存安装包失败：${readableError(cause)}` }
   }
+
+  // ⚠️ T89-③：本次下载成功了 ⇒ 把更新目录里**别的**旧文件清掉
+  //    （同一次会话里连下两版会白白占两份 86 MB；顺带清掉 `.part` 碎片）。
+  //    ⚠️ **下载失败时走不到这里** ⇒ 失败不会把用户已经有的那份弄丢。
+  //    ⚠️ 清不掉就算了（删文件失败不抛）⇒ 清理不会让下载失败。
+  cleanupUpdateDir(opts.destDir, { keep: safeName })
 
   const signature = await verifyAuthenticode(
     targetPath,

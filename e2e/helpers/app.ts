@@ -146,7 +146,12 @@ export async function launchApp(opts?: LaunchAppOptions): Promise<AppFixture> {
       // ⚠️ 第一个参数是**应用目录**（`package.json` 的 `main` 指向
       //    `dist-electron/main.js`）；后面跟的是 Chromium 开关。
       args: [APP_ROOT, `--user-data-dir=${userDataDir}`],
-      env: stringEnv(process.env),
+      // ⚠️ T89-③：**更新目录也要隔离** —— E2E 只隔离了 userData，
+      //    **没隔离 `%TEMP%`** ⇒ E2E 的自动更新用例会往用户真实的
+      //    `%TEMP%\fnmusic-update` 写一个假安装包，
+      //    而且应用启动时（清空更新目录）会**清掉用户待装的安装包**。
+      //    ⇒ 指向 userData 临时目录下的一个子目录：随 userData 一起用完即删。
+      env: { ...stringEnv(process.env), FNM_UPDATE_DIR: join(userDataDir, 'update') },
     })
   } catch (err) {
     // ⚠️ **只关自己创建的**（复用来的 mock 不能关）。
