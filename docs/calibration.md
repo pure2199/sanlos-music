@@ -11,7 +11,7 @@
 
 | 阶段 | 状态 |
 |---|---|
-| 单元测试 | ✅ **2304 条 / 110 个文件**全绿（2026-11-12 实测） |
+| 单元测试 | ✅ **2316 条 / 111 个文件**全绿（2026-11-12 实测） |
 | E2E（真实 Electron + 内嵌 mock NAS） | ✅ **34 条**全绿（2026-11-12 实测） |
 | 打包 + 打包产物启动冒烟 | ✅ 通过（证据见 [`build-verification.md`](./build-verification.md)） |
 | **公开发布** | ✅ **v0.2.5 已发布**（GitHub Release，3 个资产；**未签名** + 构建来源证明，见 [`packaging.md` 第 7.10 节](./packaging.md)） |
@@ -4605,3 +4605,65 @@ SignPath 线**保留**，批下来后从 **v0.2.6** 起启用签名。
 - ⬜ README 的 `### Code signing policy` 展示位 + `.github/CODEOWNERS`（SignPath 复议时必备）。
 - ⚠️ `sign` 输入默认仍是 **true**（既有契约不许削弱）⇒ 当前发版必须**手动取消勾选**（签名路径必然失败在缺 5 个 secret / variable）。
 - ⚠️ 剩下 2.52 GB 缓存清理、GitHub 2FA / 改口令、NAS 口令轮换等老待办**不变**。
+
+## 五十七、T89-②：userData 目录改名 —— `%APPDATA%\fnmusic-desktop` → `%APPDATA%\Sanlos Music`（2026-11-12）
+
+### 背景
+
+软件早已改名「Sanlos Music」（T49/T50），**用户数据目录**却还叫 `fnmusic-desktop`。
+目录名不是随便定的：`package.json` 的 `name` 决定 Electron 的 `app.getName()`
+⇒ 决定 userData 默认路径。
+
+⚠️ **不能直接改名**：那目录里放着**偏好**（`prefs.json`）、**登录凭据**（`session.bin`，
+DPAPI 加密）、**本地曲目登记**（`local-library.json`）以及 Chromium 自己的
+`Local Storage` / `Network` / `Preferences` ⇒ 直接换目录 = 用户升级后**配置与凭证全丢**，
+而且**不报错**、最难排查。
+
+### 探针实测（5 条结论，**不靠推理**）
+
+探针：`release/verify/t89-2-userdata-probe.cjs`（独立脚本）+
+`release/verify/t89-2-probe-app/`（带真实 `package.json` 的探针应用）。
+
+| # | 问题 | 实测结果 |
+|---|---|---|
+| ① | `app.getPath('appData')` / `app.getPath('userData')` 在 ready 之前能取到吗？ | ✅ 能（`appData` = `%APPDATA%`） |
+| ② | `app.setPath('userData', …)` 能用吗？要目录**已存在**吗？ | ✅ 能，**且不要求存在** |
+| ③ | ⚠️ `app.setPath('userData', …)` 会不会**覆盖** `--user-data-dir`？ | ⚠️⚠️ **会**（`userDataBefore` = 开关给的临时目录，`setPath` 之后变成我们指定的新路径）⇒ **这条路会摧毁 E2E 的数据隔离**（E2E 靠 `--user-data-dir` 把 userData 指到临时目录，见 `e2e/helpers/app.ts` 第 18–23 行）⇒ **弃用** |
+| ④ | `package.json` 加 `productName` 会怎样？ | ✅ `app.getName()` = `Sanlos Music`，userData = `%APPDATA%\Sanlos Music`；⚠️ **但带 `--user-data-dir` 时开关仍然优先** ⇒ **E2E 隔离不受影响** ⇒ **走这条** |
+| ⑤ | ⚠️ 模块**第一行**时，userData 目录**已经被创建**了吗？ | ⚠️ **已经创建了，而且是空的**（`existsAtFirstLine: true` 而 `entriesAtReady: []`）⇒ **Electron 在跑 main.js 之前就把目录建好了** ⇒ **不能整目录 `rename`**（目标已存在会失败）⇒ 只能「逐项搬入 + 同名不覆盖」 |
+
+### 落地
+
+- `package.json` 加 `"productName": "Sanlos Music"` ⇒ 目录名由它决定。
+  ⚠️ `name` **保留**（它就是旧目录名的由来）；⚠️ `appId`（`com.fnmusic.desktop`）**不动**
+  —— 它决定 Windows 安装路径 / 注册表项 / 升级链。
+  ⚠️ `electron-builder.yml` 本来就有 `productName: Sanlos Music` ⇒ **打包产物名一字不变**。
+- `electron/userDataDir.ts`（新）：把旧目录内容**逐项搬**进新目录：
+  - 同名 ⇒ **不覆盖**（旧的留在旧目录里）⇒ **没有任何数据被删**；
+  - 搬完写标记 `userdata-migration.json`（幂等锚点 + 「数据去哪了」的自述）；
+  - ⚠️ **有搬不动的项时绝不写标记** ⇒ 下次启动会**再试一次**（标记的含义是「已经搬完了」）；
+  - 跨设备改名失败（EXDEV）⇒ 降级为「复制 + **保留源**」⇒ 仍然不丢数据；
+  - 搬空之后的旧目录（空壳）被清掉 ⇒ 用户不用再看到一个陌生文件夹。
+- **守卫**（本任务最要紧的一层）：
+  - `userData` 被人为改走（E2E / 便携版）⇒ **完全不迁移** ⇒ 跑测试不会动用户真实数据；
+  - 当前生效的 userData **就是**旧目录 ⇒ 拒绝（不搬自己脚下的地板）。
+- 调用时机：`electron/main.ts` **模块作用域最前面**（`registerAppSchemes()` 之前）
+  ⇒ 早于 `app.whenReady()` ⇒ 早于 Chromium 读 profile ⇒ 搬过去的 Chromium 数据**能被读回来**。
+
+### 验证
+
+- `tsc --noEmit` exit 0；`vitest` **2316 passed / 111 files / 0 failed**（既有 2304 + 新增 12）。
+- 新增 `test/user-data-dir.test.ts` **12 条** —— 用**真实临时目录**（不 mock fs）
+  ⇒ 验的是真代码路径；只有「改名必失败」这一条靠**注入 fs** 制造（真造不出跨设备场景）。
+- **变异自证 4 处全部被抓住**（`release/verify/t89-2-mutation-check.mjs`，每轮都复原并校验 sha256）：
+  守卫失效 / 同名改成覆盖 / 去掉幂等锚点 / 有失败项也写标记 ⇒ 对应测试**立刻红**。
+- ⚠️ **自测当场抓到 2 个真 bug**（都已修）：
+  1. **守卫判定顺序反了** —— 「当前就在旧目录」被报成「被改走」⇒ 排查时指向错误的方向；
+  2. **幂等检查排在「旧目录是否存在」之后** —— 搬完旧目录已被删 ⇒ 第二次启动报成
+     `no-legacy`（而不是「已经迁过了」）⇒ 同样误导排查。
+
+### 待真机确认
+
+- [ ] 装 v0.2.6 后**首次启动**：旧目录被搬走、**偏好与登录态还在**（装完跑一次就知）。
+- [ ] **回滚到 v0.2.5** 的影响：旧目录已搬空 ⇒ 旧版本会显示「未登录 + 偏好回默认」
+  ⇒ **数据没丢**（在新版本里改回去即可）⇒ 这条要写进 v0.2.6 的发布说明。

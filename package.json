@@ -1,5 +1,6 @@
 {
   "name": "fnmusic-desktop",
+  "productName": "Sanlos Music",
   "version": "0.2.5",
   "private": true,
   "description": "Sanlos Music Windows 桌面客户端（直连 fnOS 飞牛音乐 NAS）",

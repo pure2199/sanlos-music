@@ -39,6 +39,7 @@ import { islandBounds, isPointInsideRect, ISLAND_WINDOW_HEIGHT, ISLAND_WINDOW_WI
 import { lyricFloatBounds, type LyricFloatDisplayLike } from '../shared/lyricFloatAnchor'
 import { playingFromLyricMessage, shouldShowIsland } from './islandVisibility'
 import { createUpdateController } from './update'
+import { migrateLegacyUserData } from './userDataDir'
 
 // dev 模式由 VITE_DEV_SERVER_URL 指向 vite dev server；
 // 生产模式（npm start / 打包后的应用）加载随包发布的 dist/index.html。
@@ -242,6 +243,33 @@ function lyricFloatDisplay(): LyricFloatDisplayLike {
 // 接线顺序（**顺序本身就是正确性的一部分**）
 // ---------------------------------------------------------------------------
 //
+// 0. **userData 目录改名 + 旧目录迁移**（T89-②）
+//
+//    ⚠️ **必须排在最前面**：Chromium 是在 `app.whenReady()` 前后才去装载 profile
+//    （`Local Storage` / `Preferences` / `Network/Cookies`）⇒ 旧目录里的数据
+//    要在**它读之前**就搬到新目录，否则这一轮读回来的是空 profile。
+//
+//    ⚠️ 目录名由 `package.json` 的 `productName` 决定（**不是** `app.setPath`，
+//    那个 API 会覆盖 `--user-data-dir` ⇒ 会摧毁 E2E 的数据隔离）。
+//    旧目录 `%APPDATA%\fnmusic-desktop` → 新目录 `%APPDATA%\Sanlos Music`。
+//
+//    ⚠️ 守卫在模块里：`userData` 被人为改走（E2E / 便携版）时**完全不迁移**
+//    ⇒ 跑测试不会动用户真实数据。
+const userDataMigration = migrateLegacyUserData({
+  userDataDir: app.getPath('userData'),
+  appDataDir: app.getPath('appData'),
+})
+if (userDataMigration.status === 'migrated') {
+  console.log(
+    `[userData] 已把旧目录迁移到「${userDataMigration.targetDir}」：搬入 ${userDataMigration.moved.length} 项` +
+      (userDataMigration.skipped.length > 0
+        ? `，跳过 ${userDataMigration.skipped.length} 项（新目录里已有同名项，旧的留在原处）`
+        : ''),
+  )
+} else if (userDataMigration.status === 'skipped') {
+  console.log(`[userData] 跳过目录迁移（${userDataMigration.reason}）—— userData 不是默认目录`)
+}
+
 // 1. **在 `app.whenReady()` 之前**注册**全部**自定义 scheme 的特权——
 //    Electron 的 `registerSchemesAsPrivileged()` **整个进程只能调用一次**，
 //    第二次会**静默覆盖**第一次的注册结果 → 所以 `fnm` 与 `fnml`
