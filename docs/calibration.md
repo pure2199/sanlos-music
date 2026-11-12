@@ -4794,3 +4794,136 @@ if (!download || download.status !== 'ok') {
 - [ ] ⚠️ **你现在用的是 Apple 风 ⇒ 这个效果默认看不到** ⇒ 切到「Windows 11 风」才看得到。
 - [ ] 切到 Fluent 后播不同歌曲 ⇒ 强调色是否随封面主色变化、观感是否可接受。
 - [ ] ⚠️ 全屏舞台的 `--accent` 在**封面取色背景**上的对比度（规格 `2026-11-09-…:163` 就写着「需真机看一眼」）。
+## 六十、T89-⑥：T87.18 本机 mock 实证（自动更新链路 · 无证书发布）
+
+> 日期：2026-11-12　　结论：**13 / 13 条全部成立**；过程中**发现并修掉一个 P0 缺陷**
+
+---
+
+### 一、为什么做这件事
+
+T87 定的「无证书可信发布」路线是「**诚实未签名 + GitHub attestation**」。
+但「未签名包能不能在**真机**上真的装上去」这件事，此前**从未被验证过**：
+
+| 覆盖手段 | 为什么没覆盖到「正路」 |
+|---|---|
+| E2E `smoke.spec.ts`「自动更新：检查到新版本 → 下载校验通过 → 签名不过就不许安装」 | 只测**负路**（未签名 ⇒ 「启动安装」按钮被**禁用**）⇒ **走不到启动那一步** |
+| `test/update.test.ts` | 全部**注入替身** `openPath` ⇒ 从不碰真实的启动器 |
+
+⇒ T87.18 就是把「正路」在**真 Electron + 真 86 MB 安装包**上跑一遍。
+
+---
+
+### 二、实证怎么做
+
+- **探针**：`release/verify/t89-6-entry.ts`（TS）→ esbuild 打包成 `release/verify/t89-6-bundle.cjs`
+  → `electron.exe` 直接跑（**与生产主进程同一套 esbuild CJS 打包** ⇒ 行为一致）。
+- **真实生产代码**：`electron/update.ts` 的 `createUpdateController` + `electron/http.ts` 的
+  `createHttpStack`（**Chromium 分区栈**，不是 Node 的 undici）。
+- **更新服务器**：回环 `http://127.0.0.1:38000` 上的 mock，静态托管 `release/` 目录
+  ⇒ 清单与安装包**天然同源**（`resolveFileUrl` 的同源硬要求天然满足）。
+- **清单**：**生产脚本** `scripts/publish-manifest.mjs` 生成的 `release/latest.json`
+  （version `0.2.6`，sha512 `5b822aba…`）。
+- **安装包**：**真的产物** `release/FN-Music-Setup-0.2.6.exe`（86,109,536 B），不是占位字节。
+- **模拟「用户当前装的是 0.2.5」**：`currentVersion` 传 `0.2.5`（生产里这个值来自 `app.getVersion()`）。
+- **安全约束**：安装器起来后**立刻 kill**（不点任何按钮）⇒ 不会覆盖已装的 0.2.5；
+  下载目录与 Electron userData 全在 `release/verify/` 下 ⇒ 不碰用户真实数据。
+
+---
+
+### 三、结论（13 条，全部成立）
+
+| # | 断言 | 实测 |
+|---|---|---|
+| F0 | 生产路径（`defaultOpenPath`）能取到 Electron 的 `shell` | 取到了 |
+| F0b | 对 86 MB 未签名安装包跑 PowerShell Authenticode 探测 | `NotSigned`，耗时 **599 ms** |
+| F1 | 回环 mock 服务器启动 | `http://127.0.0.1:38000` |
+| F2 | 清单来自生产脚本 | version `0.2.6`，1 个文件，86,109,536 B |
+| F3 | 检查更新（Chromium 分区栈） | `available`（0.2.6 > 0.2.5） |
+| F4 | 下载 + SHA-512 校验 | `ok`，`sha512Ok=true`，字节数与清单一致，**耗时 1.0 s** |
+| F5 | 下载产物的签名状态 | `NotSigned`（本项目未做代码签名） |
+| F6 | 落地文件有没有 Zone.Identifier（Mark of the Web） | **只有 `:$DATA`** ⇒ **没有 MotW** ⇒ 不触发 SmartScreen 蓝框 |
+| F7 | 未开「允许安装未签名包」时启动安装器 | **拒绝**：「安装包没有代码签名，且未开启…" |
+| F8 | 开了授权、走**生产路径** | **`ok` ⇒ 安装器真的被拉起来** |
+| F9 | 开了授权、显式注入 `shell.openPath` | `ok`，进程 `FN-Music-Setup-0.2.6#22260` |
+| F10 | 安装器起来后立刻 kill | 已受理，**残留 0** |
+| F11 | 下载后**篡改 1 字节**再装 | **拒绝**：「安装包 SHA-512 与清单不一致 → 不允许安装」 |
+
+⚠️ **F6 的含义**：应用内更新走的是**自己写的下载**（不是浏览器）⇒ 文件**天然不带 MotW**
+⇒ 用户点「启动安装」时**不会**看到 SmartScreen 蓝框（下载安装包时那个蓝框是在**浏览器**里出现的）。
+
+⚠️ **F11 的含义**：哈希闸门是**真的**在跑，不是摆设——下载完到启动之间改 1 字节就装不上。
+
+---
+
+### 四、⚠️ 实证过程里发现并修掉的 P0
+
+**「启动安装」在真机上必然失败。**
+
+- **根因**：`electron/update.ts` 的 `defaultOpenPath()` 用 `globalThis.require('electron')`
+  惰性取 `shell`，而 **Electron 主进程里 `globalThis.require` 是 `undefined`**
+  （实测 Electron 32.3.3 / Node 20.18.1；模块作用域的 `require` 则是 `function`）。
+- **症状**：点「启动安装」必报
+  「启动安装包失败：当前进程没有 Electron 运行时，无法启动安装包」。
+- **为什么一直没被发现**：E2E 只测负路；单测全部注入替身 ⇒ **真机路径从未被跑过**。
+- **它是孤例**：全仓库 7 个模块（`http` / `ipc` / `localLibrary` / `oauthWindow` / `tray` /
+  `session` / `schemes`）都用**模块作用域**的 `require`（`declare const require` + `typeof` 守卫），
+  **只有 `update.ts` 用错了** ⇒ 本次是**改回既有惯例**，不是引入新写法。
+  ⇒ 也正因如此，**出网栈**（自签 NAS 的证书放行）一直好使：`http.ts` 的
+  `resolveElectronSession()` 用的是模块作用域 `require` ⇒ 主进程里拿得到 `session`。
+- **修法**（两处都改）：
+  1. `electron/update.ts`：`resolveElectronShell()` 改成**优先用模块作用域的 `require`**；
+     抽出可注入的接缝 `pickRequire()` / `resolveElectronShellFrom()`（便于单测）。
+  2. `electron/main.ts`：`createUpdateController({ …, openPath: (target) => shell.openPath(target) })`
+     ⇒ 生产路径**不再依赖任何惰性解析**。
+- **修完复测**：F0 / F8 由 **FAIL 转 PASS** ⇒ **13 / 13**。
+- **回归测试**：新增 `test/update-launch-installer.test.ts`（**15 条**），
+  钉住 `require` 的**挑选顺序**、惰性解析的各种容错分支、`defaultOpenPath` 不抛错。
+
+---
+
+### 五、实证过程中踩到的坑（都是**工具链**的，不是产品的）
+
+1. **`electron.exe` 是 Windows GUI 子系统程序** ⇒ PowerShell 的 `&` **不等它**
+   ⇒ 探针「跑完了」其实**还在跑**（第一次实跑就是这样卡住的）。
+   ⇒ 改用 `Start-Process -Wait`。
+2. **`Get-Process` 与 `ForEach-Object` 分成两行** ⇒ 管道断开 ⇒ 拿到的是 PowerShell 的
+   **表格文本**（第一列是 Handles，**不是 PID**）⇒ `taskkill` 打空 ⇒ 「杀不掉」。
+   ⇒ 必须写成**一行**。
+3. **`powershell.exe -EncodedCommand` 从外层 PowerShell 调用会直接失败（exit -1、无输出）**，
+   但**从 Node 的 `execFile` 调用是好的** ⇒ **别在 bash 里用同样写法自测**（会误判成「脚本写错了」）。
+4. **`ConvertTo-Json -InputObject @()` 在 PowerShell 5.1 上对空数组会出错** ⇒ 改用逗号拼接。
+5. **Electron 的 `shell.openPath` 对不存在的路径是「永不 resolve」的** ⇒ 探针写报告时调它
+   ⇒ 整个探针挂住、报告写不出来。⇒ 只记录「能不能拿到 shell」，**别真调**。
+
+---
+
+### 六、这次实证**没有**覆盖的
+
+- 跑的是**仓库构建**（等价于 `electron .`），**不是打包产物** ⇒ 装上 v0.2.6 后
+  **仍需用户手动点一次「启动安装」复验**。
+- **没有点安装器的任何按钮** ⇒ 「点下一步会怎样」未验证。
+- 模拟的当前版本是 `0.2.5`（`currentVersion` 注入），**不是**真实的 `app.getVersion()`。
+- NSIS 安装器会在 `%TEMP%` 留 `ns*.tmp` 解压目录（本轮又留 1 个）⇒
+  **工作区外的目录**本机删不掉（可恢复删除通道只允许工作区外的**普通文件**）。
+
+---
+
+### 七、本机残留清单
+
+| 位置 | 内容 | 处置 |
+|---|---|---|
+| `%TEMP%\ns*.tmp` | NSIS 解压目录：本轮 `nsy48CB.tmp`；旧的 4 个在 2026-09-01 / 11-09 / 11-12 17:21 / 17:52 | 工作区外的**目录** ⇒ 本机删不掉，需用户执行 |
+| `release/verify/t89-6-tmp/update/` | 探针下载的 86 MB 安装包（**已被篡改 1 字节**） | **不可直接用**；随 `release/` 一起走 gitignore |
+| `release/verify/t89-6-{entry.ts,build.cjs,bundle.cjs,report.json,log.txt}` | 探针源码、bundle、报告、逐步日志 | 同上（gitignored） |
+
+---
+
+### 八、验证结果
+
+| 项 | 结果 |
+|---|---|
+| `tsc --noEmit` | ✅ exit 0 |
+| `vitest` | ✅ **2364 passed / 115 files / 0 failed**（既有 2349 一条不删 + 新增 15） |
+| 真机实证 | ✅ **13 / 13**（F0～F11） |
+| 既有 E2E | ✅ **34 passed**（`npm run build && npm run e2e:only`，26.0 s，exit 0）—— 主进程启动器改了，渲染层零改动 |

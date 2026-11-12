@@ -851,13 +851,70 @@ export function readableError(cause: unknown): string {
   return '未知错误'
 }
 
-/** 惰性取 Electron 的 `shell`（**不在模块顶层调用**）。 */
-function resolveElectronShell(): { openPath(path: string): Promise<string> } | null {
+// ---------------------------------------------------------------------------
+// 惰性取 Electron 的 `shell`
+// ---------------------------------------------------------------------------
+
+/**
+ * Electron 主进程里的 `require`（**只是类型声明**；运行时由 Node 的 CJS 包装器提供）。
+ *
+ * ⚠️ **为什么需要它（T87.18 真机实证，2026-11-12）**：
+ *    Electron 的**主进程**里 `globalThis.require` 是 **undefined**
+ *    （实测 Electron 32.3.3 / Node 20.18.1）⇒ 旧实现（只认 `globalThis.require`）
+ *    在主进程**永远**拿不到 `shell`
+ *    ⇒ 「启动安装」在真机上必然报
+ *    「启动安装包失败：当前进程没有 Electron 运行时，无法启动安装包」。
+ *    而**模块作用域**的 `require` 在主进程是有的
+ *    （esbuild 打成 CJS ⇒ Node 的 CJS 包装器提供 `require`）
+ *    ⇒ 改成**优先用模块作用域的 `require`**。
+ *
+ * ⚠️ **不能改成顶层 `import { shell } from 'electron'`**：本文件要能在
+ *    Vitest（普通 Node / ESM）里直接单测 ⇒ Electron 对象必须**惰性**解析
+ *    （与 `electron/http.ts` 是同一套纪律）。
+ */
+declare const require: ((id: string) => unknown) | undefined
+
+/** `require` 的形状。 */
+type RequireFn = (id: string) => unknown
+
+/**
+ * 在「模块作用域的 `require`」与「`globalThis.require`」之间挑一个。
+ *
+ * ⚠️ **顺序不可颠倒**：主进程只有**模块作用域**那个能用（`globalThis.require`
+ *    在主进程是 undefined）；单测环境（ESM）两个都没有 ⇒ `null`。
+ *
+ * @param moduleRequire 模块作用域的 `require`（没有就传 `undefined`）。
+ * @param globalRequire `globalThis.require`（没有就传 `undefined`）。
+ */
+export function pickRequire(
+  moduleRequire: RequireFn | undefined,
+  globalRequire: RequireFn | undefined,
+): RequireFn | null {
+  if (typeof moduleRequire === 'function') return moduleRequire
+  if (typeof globalRequire === 'function') return globalRequire
+  return null
+}
+
+/** 取当前环境里的 `require`（主进程 ⇒ 模块作用域那个；单测 ⇒ `null`）。 */
+function currentRequire(): RequireFn | null {
+  // ⚠️ `typeof` 守卫：ESM（Vitest）里 `require` 根本不存在 ⇒ 不会 ReferenceError。
+  const moduleRequire = typeof require === 'function' ? require : undefined
+  const globalRequire = (globalThis as unknown as { require?: RequireFn }).require
+  return pickRequire(moduleRequire, globalRequire)
+}
+
+/**
+ * 惰性取 Electron 的 `shell`（**不在模块顶层调用**）。
+ *
+ * @param requireImpl 取 `electron` 模块用的 `require`（**可注入** ⇒ 便于单测）。
+ * @returns 拿不到时返回 `null`。
+ */
+export function resolveElectronShellFrom(
+  requireImpl: RequireFn | null,
+): { openPath(path: string): Promise<string> } | null {
+  if (typeof requireImpl !== 'function') return null
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const req = (globalThis as unknown as { require?: (id: string) => unknown }).require
-    if (typeof req !== 'function') return null
-    const mod = req('electron') as { shell?: unknown } | string
+    const mod = requireImpl('electron') as { shell?: unknown } | string
     if (typeof mod !== 'object' || mod === null) return null
     const shell = (mod as { shell?: unknown }).shell
     if (typeof shell !== 'object' || shell === null) return null
@@ -867,6 +924,18 @@ function resolveElectronShell(): { openPath(path: string): Promise<string> } | n
   } catch {
     return null
   }
+}
+
+/**
+ * 惰性取 Electron 的 `shell`（生产路径）。
+ *
+ * @param requireImpl 覆盖用的 `require`；**省略** ⇒ 用当前环境里的那个。
+ */
+export function resolveElectronShell(
+  requireImpl?: RequireFn | null,
+): { openPath(path: string): Promise<string> } | null {
+  const req = requireImpl === undefined ? currentRequire() : requireImpl
+  return resolveElectronShellFrom(req)
 }
 
 /** 默认的启动执行器（Electron `shell.openPath`；拿不到就报错）。 */

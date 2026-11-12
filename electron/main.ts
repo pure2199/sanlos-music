@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeImage, screen, session as electronSession } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, screen, session as electronSession, shell } from 'electron'
 import path from 'node:path'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
@@ -1035,6 +1035,12 @@ if (!isPrimaryInstance) {
           fetchImpl: http.fetch,
           currentVersion: app.getVersion(),
           destDir: updateDir,
+          // ⚠️ **显式注入 `shell.openPath`**（T87.18 真机实证，2026-11-12）：
+          //    `electron/update.ts` 的惰性解析在 Electron 主进程里取不到
+          //    `globalThis.require` ⇒ 不注入的话「启动安装」在真机上**必然**报
+          //    「当前进程没有 Electron 运行时，无法启动安装包」。
+          //    ⇒ 这里直接把 `shell` 交进去 ⇒ 生产路径**不依赖任何惰性解析**。
+          openPath: (target) => shell.openPath(target),
         }),
       })
 
