@@ -1,6 +1,6 @@
 # 规格：安装包文件名改成与软件名一致（T89-㉔）
 
-> 状态：**已实现**（2026-11-13）
+> 状态：**已实现**（2026-11-13）—— ⚠️ **发布名第二轮修正为「去空格」写法**，见 §1.1
 > 关联任务：T89-㉔（清理残留 + 安装包改名）
 > 上游：T87（发版工作流）、T89-⑳/㉑/㉒（v0.2.9 发版链）
 
@@ -20,12 +20,32 @@
 
 | 角色 | 旧名 | 新名 |
 |---|---|---|
-| 安装包（NSIS） | `FN-Music-Setup-0.2.9.exe` | `Sanlos Music-Setup-0.2.9.exe` |
-| 便携版 | `FN-Music-Portable-0.2.9.exe` | `Sanlos Music-Portable-0.2.9.exe` |
+| 安装包（NSIS） | `FN-Music-Setup-0.2.9.exe` | `SanlosMusic-Setup-0.2.9.exe` |
+| 便携版 | `FN-Music-Portable-0.2.9.exe` | `SanlosMusic-Portable-0.2.9.exe` |
 
-**名字形式**：用户选定「**与软件名逐字一致（含空格）**」。
-代价：命令行里要加引号（`gh attestation verify "Sanlos Music-Setup-0.2.9.exe"`）⇒
-文档与工作流里**一律带引号**写。
+**名字形式**：用户选定「**与软件名一致**」⇒ 第一轮按「**逐字一致（含空格）**」实现；
+⚠️ **实测证明「含空格」在 GitHub 上做不到** ⇒ 第二轮改成「**软件名去掉空格**」
+= `SanlosMusic`（依据见 §1.1）。
+
+### 1.1 修正（第二轮，2026-11-13 实测）：为什么去掉空格
+
+⚠️ **「带空格逐字一致」在 GitHub 上不可实现** —— 三个实测事实：
+
+| # | 事实 | 证据 |
+|---|---|---|
+| 1 | **GitHub 把 Release 资产名里的空格换成点** | 上传 `Sanlos Music-Setup-0.2.9.exe` ⇒ API 里的资产名 = `Sanlos.Music-Setup-0.2.9.exe`，`browser_download_url` 也是点形 |
+| 2 | **带空格的下载 URL 直接 404** | `.../download/v0.2.9/Sanlos%20Music-Setup-0.2.9.exe` ⇒ **404**；点形 ⇒ **206** / 86,111,284 字节 |
+| 3 | 空格名会连带打断两处 | ① 自动更新清单里的 `url` 指向 404 ⇒ **下载失败**；② attestation 的 **subject 带文件名**（空格形）≠ 可下载文件名（点形）⇒ **`gh attestation verify` 验不过**（信任锚白做） |
+
+⇒ 用户在第二轮**改选**「**发布名去掉空格**」
+= `SanlosMusic-Setup-0.2.9.exe` / `SanlosMusic-Portable-0.2.9.exe`
+⇒ **规则**：**发布名前缀 = `productName` 去掉所有空白**（`Sanlos Music` ⇒ `SanlosMusic`）。
+⇒ 好处：**资产名 / 清单 url / attestation subject / 校验表 / 下载链接五处完全一致**。
+
+⚠️ **代价**：`electron-builder` 的 `${productName}` 宏**保留空格**（§2 的实测）⇒
+没有「去空格」的宏 ⇒ `artifactName` 只能写字面量 ⇒
+**它与 `productName` 的关系由单元测试钉住**（前缀 === productName 去掉空白），
+改软件名时测试会红 ⇒ 不会出现「两边对不上」。
 
 ---
 
@@ -39,17 +59,19 @@
 
 | 位置 | 改法 |
 |---|---|
-| `electron-builder.yml` | `artifactName: ${productName}-Setup-${version}.${ext}`（**electron-builder 官方宏**） |
-| `scripts/publish-manifest.mjs` | 读 `package.json` 的 `productName` ⇒ 拼出清单里的 `name` / `url` |
-| `.github/workflows/release.yml` | 「改名归一」步骤从 `package.json` 读 `productName` 算规范名 |
-| `.signpath/…/default.xml` | glob 改成 `Sanlos Music-Setup-*.exe`（SignPath 的配置**没法读 package.json**，只能写字面量） |
+| `electron-builder.yml` | `artifactName: "SanlosMusic-Setup-${version}.${ext}"`（**字面量**：官方宏保留空格 ⇒ 用不上；它与 productName 的关系由测试钉住） |
+| `scripts/publish-manifest.mjs` | 读 `package.json` 的 `productName` **去掉所有空白** ⇒ 拼出清单里的 `name` / `url` |
+| `.github/workflows/release.yml` | 「改名归一」步骤从 `package.json` 读 `productName` **去掉所有空白** 算规范名 |
+| `.signpath/…/default.xml` | glob 改成 `SanlosMusic-Setup-*.exe`（SignPath 的配置**没法读 package.json**，只能写字面量） |
 
 **宏展开实测**（不靠文档，靠本仓库锁定的 electron-builder 版本）：
 
 ```
 sanitizeFileName("Sanlos Music") = "Sanlos Music"        ← 空格保留
 expandMacro("${productName}-Setup-${version}.${ext}")
-  = "Sanlos Music-Setup-0.2.9.exe"                        ✅
+  = "Sanlos Music-Setup-0.2.9.exe"                       ← ⚠️ 空格**保留** ⇒ 这个宏**不能用**
+
+（⚠️ 第一轮的结论是「空格保留」；第二轮据此**放弃这个宏** ⇒ 改用字面量 + 测试锁定，见 §1.1。）
 ```
 
 ⚠️ **实测时踩到的两个坑**（都写进了 `release/verify/t89-24-check-macro.mjs`）：
@@ -111,12 +133,12 @@ Normalize asset names
 
 | # | 文件 | 改什么 |
 |---|---|---|
-| 1 | `electron-builder.yml` | 两个 `artifactName` → `${productName}-…` |
+| 1 | `electron-builder.yml` | 两个 `artifactName` → `SanlosMusic-…`（字面量 + 注释说明为什么不能带空格） |
 | 2 | `scripts/publish-manifest.mjs` | 清单里的文件名从 `package.json` 的 productName 派生（不再写死前缀） |
 | 3 | `.github/workflows/release.yml` | 新增「改名归一」步骤；4 处写死的资产名改用步骤输出；attestation 提示语加引号 |
 | 4 | `.signpath/artifact-configurations/default.xml` | 两个 `<pe-file path>` 的 glob + 注释 |
 | 5 | `mock-server/server.ts` | `MOCK_UPDATE_INSTALLER_NAME` |
-| 6 | `test/t87-ci-release-workflow.test.ts` | **4 条断言**（工作流 2 条 + SignPath 2 条）改成新名；另加 1 条「改名归一步骤必须在签发 attestation 之前」 |
+| 6 | `test/t87-ci-release-workflow.test.ts` | **4 条断言**（工作流 2 条 + SignPath 2 条）改成新名；另加 1 条「改名归一步骤必须在签发 attestation 之前」；**第二轮再加「前缀 === productName 去掉空白」的不许漂移断言**（打包配置 + SignPath 各一条） |
 | 7 | `README.md` / `CODE_SIGNING_POLICY.md` / `docs/packaging.md` / `docs/signing.md` / `docs/changelog.md` | 下载说明、产物表、示例清单 |
 | 8 | `docs/releases/v0.2.9.md` | 正文里那句 `gh attestation verify`（发布页正文会重新用这份文档拼） |
 
@@ -131,11 +153,11 @@ Normalize asset names
 |---|---|---|
 | 1 | `tsc --noEmit` | exit 0 |
 | 2 | `vitest run` | **全绿**，且**既有断言一条没删**（改写的 4 条是「资产名变了」这个前提被显式推翻 ⇒ 改写成对新名字的断言，强度不减） |
-| 3 | 宏展开 | `expandMacro` 实测 = `Sanlos Music-Setup-0.2.9.exe` |
+| 3 | 名字规则 | 三处（打包配置 / 清单脚本 / 工作流）算出的前缀**都等于** `productName` 去掉所有空白（由单元测试断言）；宏展开实测**保留空格** ⇒ 不使用宏 |
 | 4 | 线上资产 | v0.2.9 Release 上**只剩 3 个资产**，文件名全是新名 |
 | 5 | attestation | 每个新资产都有 attestation，subject 的 **digest 与文件名同时**对得上，`gitCommit` = `3d03b00…` |
 | 6 | 清单 | `latest.json` 的 `name` / `url` = 新名，`sha512` = 本地重算值，`size` = API 值 |
-| 7 | 发布说明 | 正文里的 sha256 表 = API `digest`；`gh attestation verify "Sanlos Music-Setup-0.2.9.exe" …` 这条命令**文件名与实际资产一致** |
+| 7 | 发布说明 | 正文里的 sha256 表 = API `digest`；`gh attestation verify "SanlosMusic-Setup-0.2.9.exe" …` 这条命令**文件名与实际资产一致** |
 | 8 | 本机 | 重装后 `D:\Sanlos Music\Sanlos Music.exe` 的版本 = 0.2.9，且安装包哈希 = 线上资产哈希 |
 
 ---
@@ -146,6 +168,6 @@ Normalize asset names
 |---|---|---|
 | **v0.2.9 的字节会变** | NSIS 内嵌构建时间戳 ⇒ 重新构建的字节必然不同 ⇒ **已发布过的 sha256 表作废**，改为新构建的值 | CI 自动重新生成 sha256 表（表 = 本次构建的真实值） |
 | **已经下载过 v0.2.9 的用户** | 手上的旧文件哈希与新表对不上 | 如实写进发布说明的校验小节；本机同步重装到新资产 |
-| **带空格的文件名** | 命令行要加引号；URL 要 `%20` | 客户端用 `new URL(text, manifestUrl)` ⇒ **自动编码**；`sanitizeFileName` 允许空格 ⇒ 落盘名与清单名一致（已查代码确认） |
+| ~~**带空格的文件名**~~ | ⚠️ **已排除**：GitHub 存资产名时把空格换成点，且带空格的 URL **404** ⇒ 空格名会让自动更新与验签都失效 | 第二轮改成**去空白**（§1.1）；客户端用 `new URL(text, manifestUrl)` ⇒ 相对路径解析照旧 |
 | **旧的 `FN-Music-*` 名字会消失** | 老的直链（若有）会 404 | 公开资产一直只有这几个，没有对外承诺过旧直链 |
 | **SignPath 路径** | 申请已被拒 ⇒ 签名路径本来就跑不通 | 顺带把 SignPath 的 glob 改成新名，将来真拿到证书时不会签错文件 |
