@@ -11,14 +11,16 @@
      ⇒ 待签产物的顶层结构就是 ZIP ⇒ 根元素必须是 `zip-file`。
 
   ⚠️ **签哪些文件**：只签**我们分发的两个产物**：
-     - `Sanlos Music-Setup-<版本>.exe`   —— NSIS 安装包（SmartScreen 看的就是它）
-     - `Sanlos Music-Portable-<版本>.exe` —— 免安装版
+     - `SanlosMusic-Setup-<版本>.exe`   —— NSIS 安装包（SmartScreen 看的就是它）
+     - `SanlosMusic-Portable-<版本>.exe` —— 免安装版
      其余文件（blockmap / latest.yml）**不签**（它们不是可执行文件，
      而且是基于**未签名**的 exe 算出来的 ⇒ 签名后即失效）。
 
-  ⚠️ **T89-㉔：文件名改成与软件名一致**（`productName` = "Sanlos Music"）
+  ⚠️ **T89-㉔：文件名改成与软件名一致**（`productName` = "Sanlos Music"
+     ⇒ 去掉空格 = "SanlosMusic"；**GitHub 的资产名不许空格**）
      ⇒ 这里的 glob 必须跟着改，否则**将来真拿到证书时会一个都签不上**
-     （SignPath 的配置读不到 package.json ⇒ 这里只能写字面量）。
+     （SignPath 的配置读不到 package.json ⇒ 这里只能写字面量；
+     它与 productName 的关系由 `test/t87-ci-release-workflow.test.ts` 锁住）。
 
   ⚠️ **安装到用户机器上的应用 exe 不在签名范围内**：NSIS 安装器是**压缩包**，
      SignPath 没法签它**里面**的文件（只能签安装器本身）。
@@ -30,10 +32,10 @@
 -->
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
   <zip-file>
-    <pe-file path="Sanlos Music-Setup-*.exe">
+    <pe-file path="SanlosMusic-Setup-*.exe">
       <authenticode-sign />
     </pe-file>
-    <pe-file path="Sanlos Music-Portable-*.exe">
+    <pe-file path="SanlosMusic-Portable-*.exe">
       <authenticode-sign />
     </pe-file>
   </zip-file>

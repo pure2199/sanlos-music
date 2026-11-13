@@ -101,20 +101,35 @@ describe('T87 发版工作流 —— 结构', () => {
   })
 
   it('**T89-㉔：资产名与软件名一致**（从 `productName` 派生，不是写死的前缀）', () => {
-    // ① 打包配置用 electron-builder 的官方宏 ⇒ 名字的单一真相源 = package.json。
+    // ① 打包配置：发布名 = **productName 去掉所有空白**。
+    //    ⚠️ **为什么去空白**（2026-11-13 实测，Release run #13）：
+    //    GitHub 会把 Release 资产名里的**空格换成点**，且**带空格的下载 URL 直接 404**
+    //    ⇒ 空格名会让「自动更新清单的 url」和「attestation 的 subject 名」都对不上。
     const builderYml = readRepoFile('electron-builder.yml')
-    expect(builderYml).toContain('artifactName: "${productName}-Setup-${version}.${ext}"')
-    expect(builderYml).toContain('artifactName: "${productName}-Portable-${version}.${ext}"')
-    // ② 清单脚本也**从 package.json 读 productName** ⇒ 两边不可能对不上。
+    expect(builderYml).toContain('artifactName: "SanlosMusic-Setup-${version}.${ext}"')
+    expect(builderYml).toContain('artifactName: "SanlosMusic-Portable-${version}.${ext}"')
+    // ② ⚠️ **字面量不许漂移**：前缀必须 === productName 去掉所有空白
+    //    （electron-builder 没有「去空格」的宏 ⇒ 只能写字面量 ⇒ 用测试锁住这一层关系）。
+    const pkg = JSON.parse(readRepoFile('package.json')) as { productName: string }
+    const prefix = pkg.productName.replace(/\s+/g, '')
+    expect(prefix).toBe('SanlosMusic')
+    expect(prefix).not.toMatch(/\s/)
+    expect(builderYml).toContain(`artifactName: "${prefix}-Setup-`)
+    expect(builderYml).toContain(`artifactName: "${prefix}-Portable-`)
+    // ③ 清单脚本也**从 package.json 读 productName** ⇒ 两边不可能对不上。
     const manifest = readRepoFile('scripts', 'publish-manifest.mjs')
     expect(manifest).toContain('productName')
     expect(manifest).toContain('-Setup-')
     expect(manifest).not.toContain("'FN-Music-Setup-'")
-    // ③ 工作流里的「改名归一」步骤必须存在，并把规范名喂给后面的步骤。
+    // ⚠️ 清单脚本必须**用同一条规则**（去空白）⇒ 两边算出的名字一致。
+    expect(manifest).toContain("replace(/\\s+/g, '')")
+    // ④ 工作流里的「改名归一」步骤必须存在，并把规范名喂给后面的步骤。
     expect(yml).toContain('Normalize asset names')
     expect(yml).toContain('id: names')
     expect(yml).toContain('steps.names.outputs.setup')
     expect(yml).toContain('steps.names.outputs.portable')
+    // ⚠️ 工作流也必须**用同一条规则**（去空白）。
+    expect(yml).toContain("($product -replace '\\s+', '')")
   })
 
   it('**T89-㉔：改名必须在「签发 attestation」之前**（subject 带文件名，顺序反了就白签）', () => {
@@ -147,9 +162,14 @@ describe('T87 SignPath artifact configuration', () => {
   })
 
   it('签**我们分发的两个产物**，且都用 `authenticode-sign`', () => {
-    // ⚠️ **T89-㉔**：glob 跟着对外发布的文件名走（带空格 ⇒ 与真实资产名逐字一致）。
-    expect(xml).toContain('Sanlos Music-Setup-*.exe')
-    expect(xml).toContain('Sanlos Music-Portable-*.exe')
+    // ⚠️ **T89-㉔**：glob 跟着对外发布的文件名走（**去空白**的 productName ⇒ 与真实资产名逐字一致）。
+    expect(xml).toContain('SanlosMusic-Setup-*.exe')
+    expect(xml).toContain('SanlosMusic-Portable-*.exe')
+    // ⚠️ 同样不许漂移：glob 的前缀 === productName 去掉所有空白。
+    const pkg = JSON.parse(readRepoFile('package.json')) as { productName: string }
+    const prefix = pkg.productName.replace(/\s+/g, '')
+    expect(xml).toContain(`${prefix}-Setup-*.exe`)
+    expect(xml).toContain(`${prefix}-Portable-*.exe`)
     expect(xml.match(/<authenticode-sign \/>/g)?.length).toBe(2)
   })
 })

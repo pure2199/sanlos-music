@@ -52,17 +52,28 @@ const MANIFEST_NAME = 'latest.json'
  * 读 `package.json` 里的**版本**与**软件名**（清单的 `version` 与文件名都取它们）。
  *
  * ⚠️ **T89-㉔：名字不再写死前缀** —— 改成从 `productName` 派生，
- *    与 `electron-builder.yml` 里的 `${productName}` 宏**同源**
+ *    与 `electron-builder.yml` 的 `artifactName` **同源**
  *    ⇒ 两边不可能对不上（旧做法是同一个前缀抄 6 遍，漏一处就发出去个错名字的包）。
+ *
+ * ⚠️ **发布名里不能有空格**（2026-11-13 实测，Release run #13）：
+ *    GitHub 会把 Release 资产名里的空格**换成点** ⇒ 带空格的下载 URL **404**
+ *    ⇒ 自动更新清单里的 `url` 会指向一个不存在的文件。
+ *    ⇒ 规则：**发布名前缀 = `productName` 去掉所有空白**
+ *    （"Sanlos Music" ⇒ "SanlosMusic"），
+ *    与 `electron-builder.yml` 的 `artifactName: "SanlosMusic-Setup-${version}.${ext}"`
+ *    **逐字对齐**（由 `test/t87-ci-release-workflow.test.ts` 锁住两边不许漂移）。
  */
-function readPackageMeta(): { version: string; productName: string } {
+function readPackageMeta(): { version: string; productName: string; prefix: string } {
   const raw = readFileSync(join(APP_ROOT, 'package.json'), 'utf8')
   const parsed = JSON.parse(raw)
   const version = typeof parsed.version === 'string' ? parsed.version.trim() : ''
   if (!version) throw new Error('package.json 里没有 version')
   const productName = typeof parsed.productName === 'string' ? parsed.productName.trim() : ''
   if (!productName) throw new Error('package.json 里没有 productName')
-  return { version, productName }
+  // ⚠️ **去掉所有空白**（不只是空格）：GitHub 的资产名不允许空格。
+  const prefix = productName.replace(/\s+/g, '')
+  if (!prefix) throw new Error('productName 去掉空白后是空的')
+  return { version, productName, prefix }
 }
 
 /** 流式算一个文件的 SHA-512（小写 hex）。 */
@@ -77,10 +88,10 @@ async function sha512Of(filePath) {
   return hash.digest('hex')
 }
 
-const { version, productName } = readPackageMeta()
-// ⚠️ 与 `electron-builder.yml` 的 `artifactName: "${productName}-Setup-${version}.${ext}"`
-//    **逐字对齐**（多了「-Setup-」这一段，其余同源）。
-const installerName = `${productName}-Setup-${version}.exe`
+const { version, prefix } = readPackageMeta()
+// ⚠️ 与 `electron-builder.yml` 的 `artifactName: "SanlosMusic-Setup-${version}.${ext}"`
+//    **逐字对齐**（多了「-Setup-」这一段，其余同源；前缀 = productName 去掉空白）。
+const installerName = `${prefix}-Setup-${version}.exe`
 const installerPath = join(RELEASE_DIR, installerName)
 
 let size

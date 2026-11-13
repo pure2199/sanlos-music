@@ -221,8 +221,9 @@ jobs:
       # -----------------------------------------------------------------------
       #
       # ⚠️ **为什么需要这一步**：
-      #   - 规范名 = `${productName}-Setup-<版本>.exe`（= "Sanlos Music-Setup-…"，
-      #     见 `electron-builder.yml`；名字的单一真相源 = package.json 的 productName）；
+      #   - 规范名 = **productName 去掉空白** + "-Setup-<版本>.exe"
+      #     （= "SanlosMusic-Setup-…"，见 `electron-builder.yml`；
+      #     单一真相源 = package.json 的 productName）；
       #   - 但 **`workflow_dispatch` 用的是「你选的分支」上的工作流 YAML**，
       #     而 `actions/checkout` 签出的是**标签的源码**
       #     ⇒ 标签里的 `electron-builder.yml` 还是旧名（`FN-Music-*`）
@@ -232,6 +233,14 @@ jobs:
       #   - ⚠️ **必须排在「签发 attestation」之前**：attestation 的 subject **带文件名**
       #     ⇒ 改名之后签发，subject 才是对外的名字（否则按新名验证必然失败）。
       #   ⇒ 对**未来的标签**是 no-op（那时构建出来就已经是规范名）。
+      #
+      # ⚠️ **为什么规范名里没有空格**（2026-11-13 实测，Release run #13）：
+      #   - GitHub 会把 Release 资产名里的**空格换成点**
+      #     ⇒ 上传 "Sanlos Music-Setup-0.2.9.exe" 实际存成 "Sanlos.Music-Setup-0.2.9.exe"；
+      #   - **带空格的下载 URL 直接 404**（点形才 206）
+      #     ⇒ 自动更新清单里的 `url` 指向空格名就会下载失败；
+      #   - attestation 的 subject 带文件名 ⇒ 空格名与可下载的点名对不上。
+      #   ⇒ 规范名一律**去空白**。
       - name: Normalize asset names
         id: names
         if: ${{ !inputs.pack_only }}
@@ -241,12 +250,24 @@ jobs:
           $version = $pkg.version
           $product = $pkg.productName
           if (-not $product) { throw 'package.json 里没有 productName' }
-          $setup = "$product-Setup-$version.exe"
-          $portable = "$product-Portable-$version.exe"
-          # ⚠️ 要收敛的旧名：① 历史标签的 `FN-Music-*`；② 宏没展开的怪名。
+          # ⚠️ **发布名去空白**（GitHub 不许空格，见上面的实测记录）。
+          $prefix = ($product -replace '\s+', '')
+          if (-not $prefix) { throw 'productName 去掉空白后是空的' }
+          $setup = "$prefix-Setup-$version.exe"
+          $portable = "$prefix-Portable-$version.exe"
+          # ⚠️ 要收敛的旧名：
+          #   ① 历史标签的 `FN-Music-*`；
+          #   ② 带空格的产品名（GitHub 存资产名时会把空格换成点 ⇒ 本地也可能是点形）；
+          #   ③ 宏没展开的怪名。
+          $spaced = $product
+          $dotted = $product -replace ' ', '.'
           $pairs = @(
             @("FN-Music-Setup-$version.exe", $setup),
             @("FN-Music-Portable-$version.exe", $portable),
+            @("$spaced-Setup-$version.exe", $setup),
+            @("$spaced-Portable-$version.exe", $portable),
+            @("$dotted-Setup-$version.exe", $setup),
+            @("$dotted-Portable-$version.exe", $portable),
             @('${productName}-Setup-' + $version + '.exe', $setup),
             @('${productName}-Portable-' + $version + '.exe', $portable)
           )

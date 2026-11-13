@@ -30,7 +30,7 @@ v0.2.8 发布的时候这两个功能**还没做** ⇒ 这一版把它们**一�
 | **记住播放位置续播** | 切歌 / 暂停 / **每 10 秒**记一次「播到第几秒」⇒ 下次打开从那里接着播 |
 | **什么情况才续** | 位置 **≥ 30 秒** **且** 距结尾 **≥ 15 秒**，**且**那首**还在曲库里**（三条都要满足）⇒ 不满足就**如实不恢复** |
 | **设置页「上次播放」** | 显示上次那首的歌名 / 歌手 / 位置 ＋ 一个**「清除上次播放记录」**按钮 |
-| **产物文件名** | 这一版的安装包 / 便携版**改名成与软件名一致**：`Sanlos Music-Setup-0.2.9.exe` / `Sanlos Music-Portable-0.2.9.exe`（⚠️ **名字带空格** ⇒ 命令行里要加引号；**更早的版本**叫 `FN-Music-*`） |
+| **产物文件名** | 这一版的安装包 / 便携版**改名成与软件名一致**：`SanlosMusic-Setup-0.2.9.exe` / `SanlosMusic-Portable-0.2.9.exe`（⚠️ **去掉了空格** —— GitHub 的资产名不许空格，带空格的下载链接会 404；**更早的版本**叫 `FN-Music-*`） |
 
 ### 技术变更（T89-⑲）
 
@@ -487,13 +487,16 @@ v0.2.7 发布说明里那句「**修法已定方向，待安排；本版未修**
 版本号取自 `package.json` 的 `version`，electron-builder 用它命名产物：
 
 ```
-Sanlos Music-Setup-<version>.exe
-Sanlos Music-Portable-<version>.exe
+SanlosMusic-Setup-<version>.exe
+SanlosMusic-Portable-<version>.exe
 ```
 
-> ⚠️ **T89-㉔ 起文件名与软件名一致**（`productName` = `Sanlos Music`）：
-> 名字从 `package.json` 派生（`electron-builder.yml` 用 `${productName}` 宏）⇒ 名字**带空格** ⇒
-> 命令行里要加引号。**更早的版本**（v0.2.8 及以前）叫 `FN-Music-Setup-<version>.exe`。
+> ⚠️ **T89-㉔ 起文件名与软件名一致**（`productName` = `Sanlos Music` ⇒ **去掉空白** = `SanlosMusic`）：
+> 名字从 `package.json` 派生（`electron-builder.yml`、`scripts/publish-manifest.mjs`、
+> 工作流「改名归一」三处用**同一条规则**：productName 去掉所有空白 ⇒ 三边不可能对不上）。
+> ⚠️ **为什么去空白**：GitHub 会把 Release 资产名里的**空格换成点**，且**带空格的下载 URL 直接 404**
+> ⇒ 空格名会让「自动更新清单的 url」与「attestation 的 subject 名」都对不上。
+> **更早的版本**（v0.2.8 及以前）叫 `FN-Music-Setup-<version>.exe`。
 
 打包产物的 exe 版本元数据也由它写入（实测：文件版本 `0.2.0` / 产品版本 `0.2.0.0` / 产品名 `Sanlos Music` / 公司 `fnmusic-desktop`）。
 

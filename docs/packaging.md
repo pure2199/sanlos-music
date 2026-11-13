@@ -95,15 +95,18 @@ npm run pack:probe
 
 | 产物 | 说明 |
 |---|---|
-| `Sanlos Music-Setup-<version>.exe` | NSIS 安装包（`oneClick: false`，可改安装目录） |
-| `Sanlos Music-Portable-<version>.exe` | 便携版（免安装） |
-| `Sanlos Music-Setup-<version>.exe.blockmap` | 安装包差分更新用 |
+| `SanlosMusic-Setup-<version>.exe` | NSIS 安装包（`oneClick: false`，可改安装目录） |
+| `SanlosMusic-Portable-<version>.exe` | 便携版（免安装） |
+| `SanlosMusic-Setup-<version>.exe.blockmap` | 安装包差分更新用 |
 | `win-unpacked/` | 解包后的目录（`Sanlos Music.exe` + `resources/app.asar`） |
 
 > ⚠️ **T89-㉔ 起文件名与软件名一致**（`productName` = `Sanlos Music`）⇒
-> 名字的**单一真相源 = `package.json`**：`electron-builder.yml` 用 `${productName}` 宏，
-> `scripts/publish-manifest.mjs` 从 `package.json` 读同一个字段 ⇒ 两边不可能对不上。
-> ⚠️ 名字**带空格** ⇒ 命令行里要加引号；URL 里是 `%20`（客户端用 `new URL()` 自动编码）。
+> 名字的**单一真相源 = `package.json`**：`electron-builder.yml`、`scripts/publish-manifest.mjs`
+> 与工作流「改名归一」三处都按**同一条规则**算 —— **`productName` 去掉所有空白**
+> （`Sanlos Music` ⇒ `SanlosMusic`）⇒ 三边不可能对不上
+> （`test/t87-ci-release-workflow.test.ts` 把这条关系钉成断言）。
+> ⚠️ **为什么去空白**：GitHub 会把 Release 资产名里的**空格换成点**，且**带空格的下载 URL 直接 404**
+> ⇒ 空格名会让「自动更新清单的 url」与「attestation 的 subject 名」都对不上。
 
 **app.asar 内应只有**：`package.json`、`dist/**`、`dist-electron/**` —— **不含 `node_modules`**。
 
@@ -215,8 +218,8 @@ npm run typecheck # 跑 tsc --noEmit（开着 noUnusedLocals / noUnusedParameter
   "notes": "这次更新了什么（可空）",
   "files": [
     {
-      "name": "Sanlos Music-Setup-1.2.3.exe",
-      "url": "Sanlos Music-Setup-1.2.3.exe",
+      "name": "SanlosMusic-Setup-1.2.3.exe",
+      "url": "SanlosMusic-Setup-1.2.3.exe",
       "sha512": "<128 位小写 hex>",
       "size": 90231360
     }
@@ -239,7 +242,7 @@ npm run typecheck # 跑 tsc --noEmit（开着 noUnusedLocals / noUnusedParameter
 ### 7.3 怎么发布
 
 ```bash
-npm run pack              # 1. 打出产物（release/Sanlos Music-Setup-<version>.exe）
+npm run pack              # 1. 打出产物（release/SanlosMusic-Setup-<version>.exe）
 npm run publish:manifest  # 2. 生成 release/latest.json（自动算 SHA-512）
 ```
 
@@ -502,7 +505,7 @@ ParserError: … The Unicode escape sequence is not valid.
 | 成本 | **公开仓库全部计划免费**（旧 Bronze / Silver / Gold 计划除外） |
 | Action | `actions/attest@v4`（`actions/attest-build-provenance` v4 起已只是它的包装器） |
 | 需要的权限 | `id-token: write`（换 OIDC 拿 Sigstore 证书）+ `attestations: write`（落库） |
-| 用户怎么验 | `gh attestation verify "Sanlos Music-Setup-0.2.9.exe" --repo pure2199/sanlos-music`（⚠️ **文件名带空格 ⇒ 要加引号**；`gh attestation verify` **只接受文件路径、没有 `--digest`** ⇒ 文件名必须与发布时的资产名逐字一致） |
+| 用户怎么验 | `gh attestation verify "SanlosMusic-Setup-0.2.9.exe" --repo pure2199/sanlos-music`（`gh attestation verify` **只接受文件路径、没有 `--digest`** ⇒ 文件名必须与发布时的资产名逐字一致；⚠️ 文件名**不带空格** —— 带空格时 GitHub 存成点形，验不过） |
 
 #### 发版操作（当前）
 

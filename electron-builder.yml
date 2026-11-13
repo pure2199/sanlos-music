@@ -77,15 +77,31 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  # ⚠️ **T89-㉔**：文件名与**软件名**一致 ⇒ 用 electron-builder 的官方宏 `${productName}`
-  #    （`package.json` 的 `productName` = "Sanlos Music"）。
-  #    实测展开 = "Sanlos Music-Setup-0.2.9.exe"（**空格保留**，
-  #    见 `release/verify/t89-24-check-macro.mjs`）。
-  #    ⇒ 名字的**单一真相源 = package.json**，别再把前缀抄成第二份。
-  artifactName: "${productName}-Setup-${version}.${ext}"
+  # ⚠️ **T89-㉔：文件名与软件名一致，但**不能带空格**。
+  #
+  #    规则：**发布名前缀 = `package.json` 的 `productName` 去掉所有空白**
+  #    （"Sanlos Music" ⇒ "SanlosMusic"）⇒ 产物名 = `SanlosMusic-Setup-<版本>.exe`。
+  #
+  #    ⚠️ **为什么不能带空格**（2026-11-13 实测，Release run #13）：
+  #    - **GitHub 会把 Release 资产名里的空格换成点** ⇒ 上传
+  #      "Sanlos Music-Setup-0.2.9.exe" 实际存成 "Sanlos.Music-Setup-0.2.9.exe"
+  #      ⇒ 页面上的名字、资产名、下载链接**全都不是**逐字一致；
+  #    - **带空格的下载 URL 直接 404**（实测：`.../download/v0.2.9/Sanlos%20Music-Setup-0.2.9.exe`
+  #      ⇒ 404；点形 ⇒ 206 / 86111284 字节）
+  #      ⇒ 自动更新清单里的 `url` 指向它就会**下载失败**；
+  #    - **attestation 的 subject 带文件名** ⇒ 空格名与可下载的点名对不上
+  #      ⇒ `gh attestation verify` 验不过（信任锚白做）。
+  #
+  #    ⚠️ electron-builder 的 `${productName}` 宏**保留空格**（实测：
+  #    `expandMacro("${productName}-Setup-${version}.${ext}")` = "Sanlos Music-Setup-0.2.9.exe"，
+  #    见 `release/verify/t89-24-check-macro.mjs`）⇒ 没有「去空格」的宏
+  #    ⇒ 这里只能写字面量。**它与 `productName` 的关系由单元测试锁住**
+  #    （`test/t87-ci-release-workflow.test.ts`：前缀 === productName 去掉空白），
+  #    改软件名时测试会红 ⇒ 不会出现「两边对不上」。
+  artifactName: "SanlosMusic-Setup-${version}.${ext}"
 
 portable:
-  artifactName: "${productName}-Portable-${version}.${ext}"
+  artifactName: "SanlosMusic-Portable-${version}.${ext}"
 
 # ---------------------------------------------------------------------------
 # 自动更新（Task 23）

@@ -27,12 +27,14 @@ binaries are Authenticode-signed:
 
 | Artifact | File name pattern | Notes |
 |---|---|---|
-| NSIS installer | `Sanlos Music-Setup-<version>.exe` | The file a user downloads and runs — this is the one Windows SmartScreen judges |
-| Portable build | `Sanlos Music-Portable-<version>.exe` | The self-extracting single-file build |
+| NSIS installer | `SanlosMusic-Setup-<version>.exe` | The file a user downloads and runs — this is the one Windows SmartScreen judges |
+| Portable build | `SanlosMusic-Portable-<version>.exe` | The self-extracting single-file build |
 
-> ⚠️ **T89-㉔ 起文件名与软件名一致**（`productName` = `Sanlos Music`）⇒
-> 名字里**带空格** ⇒ 命令行里要加引号：
-> `gh attestation verify "Sanlos Music-Setup-<version>.exe" --repo pure2199/sanlos-music`。
+> ⚠️ **T89-㉔ 起文件名与软件名一致**（`productName` = `Sanlos Music` ⇒ **去掉空格** = `SanlosMusic`）⇒
+> `gh attestation verify "SanlosMusic-Setup-<version>.exe" --repo pure2199/sanlos-music`。
+> ⚠️ **为什么去掉空格**（2026-11-13 实测）：GitHub 会把 Release 资产名里的**空格换成点**，
+> 且**带空格的下载 URL 直接 404** ⇒ 空格名会让「自动更新清单的 url」与
+> 「attestation 的 subject 名」都对不上（信任锚白做）。
 > 更早的版本（v0.2.8 及以前）叫 `FN-Music-Setup-<version>.exe`。
 
 Everything else in a release (update manifest `latest.json`, release notes) is not code and is

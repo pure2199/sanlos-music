@@ -89,10 +89,11 @@ export const MOCK_UPDATE_VERSION = '9.9.9'
 /**
  * 清单里的假安装包文件名。
  *
- * ⚠️ **T89-㉔**：与真实产物**同名**（`productName` = "Sanlos Music"）
+ * ⚠️ **T89-㉔**：与真实产物**同名**（`productName` = "Sanlos Music"
+ *    ⇒ 去掉空格 = "SanlosMusic"；**GitHub 的资产名不许空格**）
  *    ⇒ mock 的行为才与线上等价（客户端挑的是 `.exe`，名字只是展示）。
  */
-export const MOCK_UPDATE_INSTALLER_NAME = `Sanlos Music-Setup-${MOCK_UPDATE_VERSION}.exe`
+export const MOCK_UPDATE_INSTALLER_NAME = `SanlosMusic-Setup-${MOCK_UPDATE_VERSION}.exe`
 
 /** 假安装包的字节内容（**不是真的 PE**——只够跑通「下载 + 哈希校验」）。 */
 const MOCK_UPDATE_INSTALLER_BYTES = Buffer.from('MOCK-UPDATE-INSTALLER-PLACEHOLDER', 'utf8')
