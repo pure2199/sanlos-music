@@ -790,8 +790,11 @@ export interface PrefsStoreOptions {
  *    那是 `session.bin`（DPAPI 加密）的职责，两者**不许混**。
  *    本类用**白名单**实现这一点：`write()` 只接受 `theme` / `closeBehavior` /
  *    `windowBounds` / `eq` / `lyricOverlay` / `downloadDir` / `localFirst` /
- *    `playMode` / `streamQuality` / `update` / `lyric` 这十一个键，其余键**一律丢弃**——
+ *    `playMode` / `streamQuality` / `update` / `lyric` / `autoplay` 这十二个键，其余键**一律丢弃**——
  *    渲染进程就算塞进来也写不进去。
+ *    ⚠️ **T89-⑲**：「上次播到哪」那条**记录**是**运行状态**，**绝不进这里**
+ *    （它住 `localStorage`，见 `src/player/resume.ts`）；
+ *    这里只多认一个 `autoplay` **开关**。
  * 2. 写盘**原子化**：先写 `<file>.tmp` 再 `rename` 覆盖，
  *    避免写到一半崩溃留下截断的偏好文件。
  * 3. 读盘**容错**：文件不存在 / 内容损坏 → 返回默认值，**不抛异常**
@@ -1021,6 +1024,14 @@ function sanitizePatch(patch: unknown): Partial<AppPrefs> {
   const streamQuality = record['streamQuality']
   if (typeof streamQuality === 'string' && (STREAM_QUALITIES as readonly string[]).includes(streamQuality)) {
     out.streamQuality = streamQuality as StreamQuality
+  }
+
+  // 「启动时自动播放」（T89-⑲）：**只认布尔**（`'true'` 字符串一律丢弃）。
+  // ⚠️ 缺省**不写**（`undefined`）→ 渲染进程按「开启」处理。
+  // ⚠️ 这里**只有开关**：「上次播到哪」那条记录是运行状态，住 `localStorage`，
+  //    **绝不进 `prefs.json`**（主进程把播放状态定性为「临时态，不落盘」）。
+  if (typeof record['autoplay'] === 'boolean') {
+    out.autoplay = record['autoplay']
   }
 
   // 自动更新偏好（Task 23）：更新服务器地址 + 预期的代码签名者。

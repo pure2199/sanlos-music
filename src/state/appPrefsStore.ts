@@ -40,6 +40,16 @@ import { DEFAULT_STREAM_QUALITY, normalizeStreamQuality } from '../player/transc
 export const DEFAULT_CLOSE_BEHAVIOR: CloseBehavior = 'hide'
 
 /**
+ * 默认的「**启动时自动播放**」（T89-⑲）。
+ *
+ * ⚠️ **缺省 = 开启**，但**只有存在「未播完的上次那首」时才会真的出声**
+ *    ⇒ 老用户升级后行为**一字不变**（他们没有那条记录）。
+ * ⚠️ **只有「开关」住这里**；「上次播到哪」那条记录是**运行状态**，
+ *    住 `localStorage`（见 `src/player/resume.ts`），**绝不进 `prefs.json`**。
+ */
+export const DEFAULT_AUTOPLAY = true
+
+/**
  * 默认的桌面歌词样式（T45）：**经典悬浮窗**。
  *
  * ⚠️ 老用户升级后行为必须**一字不变** → 缺省就是 `classic`。
@@ -114,6 +124,15 @@ export interface AppPrefsStore {
   streamQuality: StreamQuality
   /** 切换音质偏好（乐观应用 + 写回主进程；失败则回滚）。 */
   setStreamQuality: (quality: StreamQuality) => Promise<void>
+  /**
+   * 「**启动时自动播放**」（T89-⑲）：打开软件时要不要自动继续播上次那首。
+   *
+   * ⚠️ **缺省 = 开启**（`DEFAULT_AUTOPLAY`）。
+   * ⚠️ 关掉它**只停「启动时恢复」**，**位置照记**（用户临时关一下再打开，还能续上）。
+   */
+  autoplay: boolean
+  /** 切换「启动时自动播放」（乐观应用 + 写回主进程；失败则回滚）。 */
+  setAutoplay: (enabled: boolean) => Promise<void>
 }
 
 /** 应用偏好镜像 store（生产用）。 */
@@ -126,6 +145,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
   lyricTemplate: '',
   lyricPriority: DEFAULT_LYRIC_PRIORITY,
   streamQuality: DEFAULT_STREAM_QUALITY,
+  autoplay: DEFAULT_AUTOPLAY,
   error: null,
 
   load: async (): Promise<void> => {
@@ -141,6 +161,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricTemplate: '',
         lyricPriority: DEFAULT_LYRIC_PRIORITY,
         streamQuality: DEFAULT_STREAM_QUALITY,
+        autoplay: DEFAULT_AUTOPLAY,
         error: null,
       })
       return
@@ -157,6 +178,9 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricPriority: normalizeLyricPriority(prefs.lyric?.priority),
         // ⚠️ 外部数据**不可信**：`prefs.json` 是用户可编辑的文件 → 陌生值压成缺省档。
         streamQuality: normalizeStreamQuality(prefs.streamQuality),
+        // ⚠️ **外部数据不可信**：`prefs.json` 是用户可编辑的文件 ⇒
+        //    只有**显式 `false`** 才算「关掉」，其余一律按「开启」处理。
+        autoplay: prefs.autoplay === false ? false : DEFAULT_AUTOPLAY,
         error: null,
       })
     } catch {
@@ -170,6 +194,7 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
         lyricTemplate: '',
         lyricPriority: DEFAULT_LYRIC_PRIORITY,
         streamQuality: DEFAULT_STREAM_QUALITY,
+        autoplay: DEFAULT_AUTOPLAY,
         error: null,
       })
     }
@@ -309,6 +334,29 @@ export const useAppPrefsStore = create<AppPrefsStore>()((set, get) => ({
     } catch {
       // 写回失败 → 回滚（界面不能停在一个「没被记住」的音质档位上）。
       set({ streamQuality: previous, error: '音质偏好保存失败，已恢复原设置' })
+    }
+  },
+
+  /**
+   * 切换「启动时自动播放」（T89-⑲）。
+   *
+   * ⚠️ **乐观应用**：开关必须即时反馈（用户改完就该知道它生效了）。
+   * ⚠️ **写回失败要回滚**：界面不能停在一个「没被记住」的状态上。
+   * ⚠️ 关掉它**只停「启动时恢复」**，**位置照记**（见 `src/player/resume.ts`）。
+   */
+  setAutoplay: async (enabled: boolean): Promise<void> => {
+    const next = enabled !== false
+    const previous = get().autoplay
+    set({ autoplay: next, error: null })
+
+    const bridge = playerBridge()
+    // 没有桥 → 只在本地生效（浏览器预览；不崩、也不静默写盘）。
+    if (!bridge) return
+
+    try {
+      await bridge.setPrefs({ autoplay: next })
+    } catch {
+      set({ autoplay: previous, error: '设置保存失败，已恢复原设置' })
     }
   },
 }))

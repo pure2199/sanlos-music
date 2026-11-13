@@ -42,8 +42,18 @@ import { usePlayerStore } from '../state/playerStore'
 import { useUpdateStore } from '../state/updateStore'
 import { detectFfmpegStatus, hasFfmpegSupport } from '../player/fallback'
 import { probeServerTranscode } from '../player/transcode'
+import { resumePort } from '../player/resumeBridge'
+import type { ResumeRecord } from '../player/resume'
 import { formatBytes } from './DownloadButton'
 import './settings-panel.css'
+
+/** 秒 → `m:ss`（显示「已播到 1:23」）。 */
+function formatSeconds(seconds: number): string {
+  const total = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0
+  const minutes = Math.floor(total / 60)
+  const rest = total % 60
+  return `${minutes}:${String(rest).padStart(2, '0')}`
+}
 
 /** 设置页的分类。 */
 export type SettingsCategory = 'general' | 'lyrics' | 'download' | 'decoder' | 'update' | 'about'
@@ -84,6 +94,38 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   // --- 音质偏好（T54）------------------------------------------------------
   const streamQuality = useAppPrefsStore((state) => state.streamQuality)
   const setStreamQuality = useAppPrefsStore((state) => state.setStreamQuality)
+
+  // --- 启动时自动播放（T89-⑲）---------------------------------------------
+  //
+  // ⚠️ **两样东西住在不同的地方**（别混）：
+  // - 「**开关**」是**偏好** ⇒ 主进程 `prefs.json`（经 `useAppPrefsStore`）；
+  // - 「**上次播到哪**」是**运行状态** ⇒ `localStorage`（经 `resumePort`）。
+  const autoplay = useAppPrefsStore((state) => state.autoplay)
+  const setAutoplay = useAppPrefsStore((state) => state.setAutoplay)
+  /** 「上次播放」的记录（`null` = 没有 / 已清除）。 */
+  const [lastResume, setLastResume] = useState<ResumeRecord | null>(null)
+  useEffect(() => {
+    void resumePort
+      .load()
+      .then((record) => {
+        setLastResume(record)
+      })
+      .catch(() => {
+        // ⚠️ 读不出来（隐私模式 / 存储不可用）⇒ 静默当作「没有记录」。
+        setLastResume(null)
+      })
+  }, [])
+  /** 清除「上次播放」记录（下次启动就不会自动续播了）。 */
+  const handleClearResume = useCallback(() => {
+    void resumePort
+      .clear()
+      .then(() => {
+        setLastResume(null)
+      })
+      .catch(() => {
+        // ⚠️ 清不掉就**如实**不动界面（不假装清掉了）。
+      })
+  }, [])
   /**
    * 服务端转码能力的**探测结果**（`null` = 还没探测过）。
    *
@@ -433,6 +475,47 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               </label>
             </fieldset>
             <p className="fnm-settings__hint">窗口位置与尺寸会自动记住，下次启动时恢复。</p>
+
+            <fieldset className="fnm-settings__group">
+              <legend className="fnm-settings__legend">启动时自动播放</legend>
+              <label className="fnm-settings__option">
+                <input
+                  type="checkbox"
+                  name="fnm-autoplay"
+                  checked={autoplay}
+                  onChange={(event) => {
+                    void setAutoplay(event.target.checked)
+                  }}
+                />
+                <span>打开软件时自动继续播放上次那首</span>
+              </label>
+              <p className="fnm-settings__hint">
+                只有「上次那首**还没播完**」时才会自动出声；没有记录、或上次已经播到结尾，
+                都不会自动播放。关掉这个开关**不会**停止记录播放进度。
+              </p>
+            </fieldset>
+
+            <fieldset className="fnm-settings__group">
+              <legend className="fnm-settings__legend">上次播放</legend>
+              {lastResume ? (
+                <>
+                  <p className="fnm-settings__hint" data-testid="last-resume">
+                    {`${lastResume.title} · ${lastResume.artist} —— 已播到 ${formatSeconds(
+                      lastResume.positionSec,
+                    )}（全长 ${formatSeconds(lastResume.duration)}）`}
+                  </p>
+                  <div className="fnm-settings__row">
+                    <button type="button" className="fnm-settings__button" onClick={handleClearResume}>
+                      清除上次播放记录
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="fnm-settings__hint" data-testid="last-resume">
+                  还没有播放记录。
+                </p>
+              )}
+            </fieldset>
           </>
         )}
 

@@ -43,6 +43,8 @@ import {
 } from '../player/eq'
 import { Queue } from '../player/queue'
 import { eqPrefsPort } from '../player/eqPrefsBridge'
+import { resumePort } from '../player/resumeBridge'
+import type { ResumePort, ResumeRecord } from '../player/resume'
 import {
   normalizePlayMode,
   type PlayModePrefsPort,
@@ -154,6 +156,14 @@ export interface PlayerStore {
   setEqEnabled: (enabled: boolean) => void
   /** 复位（平直 + 手动偏移清零；**不动启用开关**）。 */
   resetEq: () => void
+  /**
+   * **恢复上次播放**（T89-⑲）：起播 `song` 并定位到 `positionSec`。
+   *
+   * ⚠️ **定位是延后的**：引擎的 `seek()` 直接写 `element.currentTime`，
+   *    而元数据（时长）未就绪时写会**落空** ⇒ 这里先记下目标位置，
+   *    等引擎报出 `duration > 0` 之后再真正定位。
+   */
+  resumePlayback: (song: Song, positionSec: number) => void
 }
 
 /**
@@ -174,6 +184,13 @@ export interface PlayerStoreOptions {
    * ⚠️ 不给端口时播放模式**只在本次运行内有效**（不崩、不静默写盘）。
    */
   playModePrefs?: PlayModePrefsPort
+  /**
+   * 「上次播放」记录的持久化端口（T89-⑲，**可选**）。
+   *
+   * ⚠️ 不给端口时**不记录、不恢复**（不崩、不静默写盘）——
+   *    与 `eqPrefs` / `playModePrefs` 同一套纪律。
+   */
+  resume?: ResumePort
 }
 
 /**
@@ -292,6 +309,61 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
     }
   }
 
+  // --- 上次播放记录（T89-⑲）-------------------------------------------------
+  //
+  // ⚠️ **写盘不是每秒写**：进度每秒变 ⇒ 每秒写会把存储打爆。
+  //    规矩只有三条：**切歌 / 暂停 / 每 10 秒**写一次。
+  //    代价：异常退出最多丢 10 秒进度（规格 D1 已写明）。
+  //
+  // ⚠️ **恢复时的定位是延后的**：引擎的 `seek()` 直接写 `element.currentTime`，
+  //    而元数据（时长）未就绪时写会**落空** ⇒ 先记下目标位置，
+  //    等引擎报出 `duration > 0` 之后再真正定位（规格 D5）。
+  /** 两次写盘之间的最小间隔（毫秒）。 */
+  const RESUME_SAVE_INTERVAL_MS = 10_000
+  /** 上次写盘的时刻（毫秒）。 */
+  let lastResumeWriteAt = 0
+  /** 待定位的秒数（`null` = 没有待定位）。 */
+  let pendingSeekSec: number | null = null
+
+  /**
+   * 把「上次播放」写出去（T89-⑲）。
+   *
+   * @param song        当前曲目（`null` = 什么都没在播 ⇒ 不写）。
+   * @param positionSec 播放位置（秒）。
+   * @param durationSec 时长（秒）；`0` 时退回 `song.duration`。
+   * @param force       `true` = 立刻写（切歌 / 暂停）；`false` = 受节流约束。
+   */
+  const persistResume = (
+    song: Song | null,
+    positionSec: number,
+    durationSec: number,
+    force: boolean,
+  ): void => {
+    const port = options?.resume
+    if (!port || !song) return
+    const now = Date.now()
+    if (!force && now - lastResumeWriteAt < RESUME_SAVE_INTERVAL_MS) return
+    lastResumeWriteAt = now
+    const duration = durationSec > 0 ? durationSec : song.duration
+    // ⚠️ 时长都拿不到 ⇒ **不写**（写一条会被 `normalizeResumeRecord` 丢弃的半截记录，
+    //    等于制造「看起来存了、其实读不出来」的假状态）。
+    if (duration <= 0) return
+    const record: ResumeRecord = {
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      coverId: song.coverId,
+      duration,
+      positionSec: positionSec > 0 ? positionSec : 0,
+      updatedAt: now,
+    }
+    void Promise.resolve()
+      .then(() => port.save(record))
+      .catch(() => {
+        // ⚠️ 写失败**不影响播放**（记录不是关键路径）。
+      })
+  }
+
   const store = create<PlayerStore>()((set, get) => ({
     current: null,
     queue: [],
@@ -334,6 +406,8 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       engine.setQueue?.(queue.items)
       set({ queue: [...queue.items], current: song })
       engine.play(song)
+      // ⚠️ T89-⑲：**切歌就换记录**（新曲、位置从 0 起）。
+      persistResume(song, 0, song.duration, true)
     },
 
     togglePlay: () => {
@@ -360,6 +434,8 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       engine.setQueue?.(queue.items)
       set({ queue: [...queue.items], current: song })
       engine.play(song)
+      // ⚠️ T89-⑲：**切歌就换记录**（新曲、位置从 0 起）。
+      persistResume(song, 0, song.duration, true)
     },
 
     prev: () => {
@@ -370,6 +446,8 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       // 进度 > 3 秒时 queue.prev 返回的是**当前曲**：
       // 重播当前曲 = 回到本曲开头（引擎内部会把 currentTime 归 0）。
       engine.play(song)
+      // ⚠️ T89-⑲：**切歌就换记录**（新曲、位置从 0 起）。
+      persistResume(song, 0, song.duration, true)
     },
 
     seek: (sec) => {
@@ -498,6 +576,25 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       pushEqToChain(get())
       persistEq(get())
     },
+
+    /**
+     * **恢复上次播放**（T89-⑲）：起播 `song` 并定位到 `positionSec`。
+     *
+     * ⚠️ **定位是延后的**：`engine.seek()` 直接写 `element.currentTime`，
+     *    元数据未就绪时写会**落空** ⇒ 这里只记下目标位置，
+     *    等引擎报出 `duration > 0` 之后再真正定位（见下方 `onStateChange`）。
+     */
+    resumePlayback: (song, positionSec) => {
+      const value =
+        typeof positionSec === 'number' && Number.isFinite(positionSec) && positionSec > 0
+          ? positionSec
+          : 0
+      get().playTrack(song)
+      // ⚠️ `playTrack` 刚写了一条「位置 0」的记录 ⇒ 把**原位置**写回去，
+      //    免得「恢复没成功 ⇒ 记录丢了 ⇒ 下次也没得恢复」。
+      persistResume(song, value, song.duration, true)
+      pendingSeekSec = value > 0 ? value : null
+    },
   }))
 
   // --- EQ 偏好读回（追加要求 F：重启后要能恢复）---------------------------
@@ -565,6 +662,22 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       qualityNote: state.qualityNote ?? null,
       outputLatencySec: state.outputLatencySec ?? 0,
     })
+
+    // ⚠️ T89-⑲：**延后定位**（规格 D5）。
+    //    ⚠️ **必须在 setState 之后**：引擎的 `seek()` 会**同步**再 emit 一次 ⇒
+    //    若在 setState 之前 seek，内层那次 emit 写进去的 position 会被外层
+    //    （旧快照）**覆盖掉** ⇒ 定位丢失。
+    if (pendingSeekSec !== null && state.duration > 0) {
+      const target = pendingSeekSec
+      // ⚠️ **先清再 seek**（防重入）：seek 会再触发一次 emit。
+      pendingSeekSec = null
+      engine.seek(target)
+    }
+
+    // ⚠️ T89-⑲：记录「上次播放」。
+    // - 正在播 ⇒ **节流**写（每 10 秒最多一次）；
+    // - 暂停了 ⇒ **立刻**写一次（别让用户白丢进度）。
+    persistResume(state.current, state.position, state.duration, !state.isPlaying)
   })
 
   // 本曲播完 → 切下一首（顺序/循环模式由 `Queue` 决定；没有下一首就停）。
@@ -618,5 +731,8 @@ export const usePlayerStore = createPlayerStore(
     //    就必须真的接上主进程的 `prefs:get` / `prefs:set`。
     //    没有桥的环境（浏览器 / 单元测试）里自动降级为 no-op。
     playModePrefs: playModePrefsPort,
+    // ⚠️ T89-⑲：注入「上次播放」记录端口（住 `localStorage`）。
+    //    没有 `localStorage` 的环境里自动降级为 no-op（不记录、不恢复）。
+    resume: resumePort,
   },
 )

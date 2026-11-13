@@ -24,6 +24,8 @@ import { getBridge } from './lib/bridge'
 import type { DetailKind } from './state/libraryStore'
 import { useAppPrefsStore } from './state/appPrefsStore'
 import { usePlayerStore } from './state/playerStore'
+import { findSongById, restoreLastPlayback } from './state/resumeFlow'
+import { resumePort } from './player/resumeBridge'
 import { useSessionStore } from './state/sessionStore'
 import { useCoverAccent } from './ui/useCoverAccent'
 import './styles/global.css'
@@ -144,6 +146,24 @@ function NavButton({ label, active, onSelect }: NavButtonProps): ReactElement {
   )
 }
 
+/**
+ * 启动时读主进程偏好的**共享 Promise**（T89-⑲）。
+ *
+ * ⚠️ **为什么要有它**：「启动时自动播放」这个开关住在 `prefs.json`，
+ *    是**异步**读回来的 ⇒ 若「恢复上次播放」抢在它前面读，
+ *    读到的是**默认值**（= 开启）⇒ 用户明明关掉了却还是自动播。
+ *    ⇒ 两条路径**共用同一个 Promise**，谁先来都在等同一份结果。
+ */
+let prefsLoadPromise: Promise<void> | null = null
+
+/** 确保偏好读回来（**多次调用共享同一个 Promise**）。 */
+function ensurePrefsLoaded(): Promise<void> {
+  if (!prefsLoadPromise) {
+    prefsLoadPromise = useAppPrefsStore.getState().load()
+  }
+  return prefsLoadPromise
+}
+
 export default function App() {
   const [fullPlayerOpen, setFullPlayerOpen] = useState(false)
   const [view, setView] = useState<MainView>('local')
@@ -203,11 +223,43 @@ export default function App() {
     setView(next)
   }, [])
 
-  // 启动时读一次主进程的偏好（主题 / 关闭窗口的行为）并应用（Task 6 / Task 8）。
+  // 启动时读一次主进程的偏好（主题 / 关闭窗口的行为 / 启动时自动播放）并应用。
   // ⚠️ 偏好的**单一真相源在主进程**（`prefs.json`），这里只是把它读回来。
   useEffect(() => {
-    void useAppPrefsStore.getState().load()
+    void ensurePrefsLoaded()
   }, [])
+
+  // -------------------------------------------------------------------------
+  // 启动时恢复上次播放（T89-⑲）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **必须等两件事**：
+  // - `restored`（会话恢复完了）；
+  // - `connected`（真的连上了 NAS）—— 没登录就拿不到播放地址。
+  // ⇒ 两者都满足才恢复，且**只恢复一次**（ref 守卫）。
+  //
+  // ⚠️ **必须等偏好读回来**：开关是**异步**读回来的 ⇒ 抢在它前面读到的
+  //    会是默认值（= 开启）⇒ 用户明明关掉了却还是自动播。
+  const resumeAttempted = useRef(false)
+  useEffect(() => {
+    if (!restored || !connected) return
+    if (resumeAttempted.current) return
+    resumeAttempted.current = true
+    void (async () => {
+      await ensurePrefsLoaded()
+      // ⚠️ **失败一律不崩**：`restoreLastPlayback` 内部把每一步都兜住了，
+      //    最多就是「这次没恢复」（原因它自己会说）。
+      await restoreLastPlayback({
+        autoplayEnabled: () => useAppPrefsStore.getState().autoplay,
+        load: () => resumePort.load(),
+        findSong: findSongById,
+        // ⚠️ **不抢用户的操作**：查曲库是异步的 ⇒ 这中间用户完全可能自己点了歌
+        //    ⇒ 那时「当前没有任何东西在播」就不成立 ⇒ 恢复让位。
+        canPlay: () => usePlayerStore.getState().current === null,
+        play: (song, positionSec) => usePlayerStore.getState().resumePlayback(song, positionSec),
+      })
+    })()
+  }, [restored, connected])
 
   // -------------------------------------------------------------------------
   // Fluent 主题的强调色取自封面主色（T89-④）
