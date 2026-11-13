@@ -1,7 +1,7 @@
 {
   "name": "fnmusic-desktop",
   "productName": "Sanlos Music",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "description": "Sanlos Music Windows 桌面客户端（直连 fnOS 飞牛音乐 NAS）",
   "author": "pure2199 (广西闪链时空网络科技有限公司)",
