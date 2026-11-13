@@ -27,8 +27,13 @@ binaries are Authenticode-signed:
 
 | Artifact | File name pattern | Notes |
 |---|---|---|
-| NSIS installer | `FN-Music-Setup-<version>.exe` | The file a user downloads and runs — this is the one Windows SmartScreen judges |
-| Portable build | `FN-Music-Portable-<version>.exe` | The self-extracting single-file build |
+| NSIS installer | `Sanlos Music-Setup-<version>.exe` | The file a user downloads and runs — this is the one Windows SmartScreen judges |
+| Portable build | `Sanlos Music-Portable-<version>.exe` | The self-extracting single-file build |
+
+> ⚠️ **T89-㉔ 起文件名与软件名一致**（`productName` = `Sanlos Music`）⇒
+> 名字里**带空格** ⇒ 命令行里要加引号：
+> `gh attestation verify "Sanlos Music-Setup-<version>.exe" --repo pure2199/sanlos-music`。
+> 更早的版本（v0.2.8 及以前）叫 `FN-Music-Setup-<version>.exe`。
 
 Everything else in a release (update manifest `latest.json`, release notes) is not code and is
 not signed.

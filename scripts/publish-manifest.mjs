@@ -48,16 +48,21 @@ const RELEASE_DIR = process.env.FNM_PACK_OUTPUT
   : join(APP_ROOT, 'release')
 const MANIFEST_NAME = 'latest.json'
 
-/** 清单里用的文件名（与 `electron-builder.yml` 的 `artifactName` 对齐）。 */
-const INSTALLER_PREFIX = 'FN-Music-Setup-'
-
-/** 读包版本（清单的 `version` 取它）。 */
-function readVersion() {
+/**
+ * 读 `package.json` 里的**版本**与**软件名**（清单的 `version` 与文件名都取它们）。
+ *
+ * ⚠️ **T89-㉔：名字不再写死前缀** —— 改成从 `productName` 派生，
+ *    与 `electron-builder.yml` 里的 `${productName}` 宏**同源**
+ *    ⇒ 两边不可能对不上（旧做法是同一个前缀抄 6 遍，漏一处就发出去个错名字的包）。
+ */
+function readPackageMeta(): { version: string; productName: string } {
   const raw = readFileSync(join(APP_ROOT, 'package.json'), 'utf8')
   const parsed = JSON.parse(raw)
   const version = typeof parsed.version === 'string' ? parsed.version.trim() : ''
   if (!version) throw new Error('package.json 里没有 version')
-  return version
+  const productName = typeof parsed.productName === 'string' ? parsed.productName.trim() : ''
+  if (!productName) throw new Error('package.json 里没有 productName')
+  return { version, productName }
 }
 
 /** 流式算一个文件的 SHA-512（小写 hex）。 */
@@ -72,8 +77,10 @@ async function sha512Of(filePath) {
   return hash.digest('hex')
 }
 
-const version = readVersion()
-const installerName = `${INSTALLER_PREFIX}${version}.exe`
+const { version, productName } = readPackageMeta()
+// ⚠️ 与 `electron-builder.yml` 的 `artifactName: "${productName}-Setup-${version}.${ext}"`
+//    **逐字对齐**（多了「-Setup-」这一段，其余同源）。
+const installerName = `${productName}-Setup-${version}.exe`
 const installerPath = join(RELEASE_DIR, installerName)
 
 let size

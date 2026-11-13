@@ -936,7 +936,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             </p>
             <p className="fnm-settings__hint" data-testid="update-verify-howto">
               <strong>怎么验证这个安装包</strong>：① 用 GitHub CLI 验证**构建来源**——
-              <code>gh attestation verify FN-Music-Setup-版本号.exe --repo pure2199/sanlos-music</code>
+              <code>gh attestation verify "Sanlos Music-Setup-版本号.exe" --repo pure2199/sanlos-music</code>
               （证明它确实是本仓库的 CI 从对应标签构建出来的，换一字节就验不过）；
               ② 或与 Release 页面末尾的 <strong>sha256</strong> 表逐字比对。
               应用内更新还会再核对清单里的 <strong>SHA-512</strong>（不符一律拒绝安装）。

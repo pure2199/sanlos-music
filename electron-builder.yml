@@ -77,10 +77,15 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  artifactName: FN-Music-Setup-${version}.${ext}
+  # ⚠️ **T89-㉔**：文件名与**软件名**一致 ⇒ 用 electron-builder 的官方宏 `${productName}`
+  #    （`package.json` 的 `productName` = "Sanlos Music"）。
+  #    实测展开 = "Sanlos Music-Setup-0.2.9.exe"（**空格保留**，
+  #    见 `release/verify/t89-24-check-macro.mjs`）。
+  #    ⇒ 名字的**单一真相源 = package.json**，别再把前缀抄成第二份。
+  artifactName: "${productName}-Setup-${version}.${ext}"
 
 portable:
-  artifactName: FN-Music-Portable-${version}.${ext}
+  artifactName: "${productName}-Portable-${version}.${ext}"
 
 # ---------------------------------------------------------------------------
 # 自动更新（Task 23）

@@ -14,7 +14,7 @@
 > 技术栈：Electron 32 + React 18 + TypeScript 5（`strict`）+ Vite 5 + Zustand 4 + Vitest 2 + Playwright。
 > 目标平台：Windows 10 1809 及以上 / x64。
 
-> **⬇️ 不想自己编译？直接下载现成的安装包** —— 当前版本 **v0.2.5**（安装版 / 便携版）在
+> **⬇️ 不想自己编译？直接下载现成的安装包** —— 当前版本 **v0.2.9**（安装版 / 便携版）在
 > [Releases · 最新版](https://github.com/pure2199/sanlos-music/releases/latest)，
 > **免登录直接下载**，装完连上你自己的 NAS 就能用（不连 NAS 也能当本地播放器用）。
 
@@ -107,42 +107,46 @@ Windows 10 1809+ / x64. MIT licensed.
 ### 下载安装
 
 **普通用户看这一节就够了**（要自己编译的往下翻「开发」）。Windows 10 1809+ / x64，
-到 [Releases · v0.2.5](https://github.com/pure2199/sanlos-music/releases/tag/v0.2.5) 下载：
+到 [Releases · v0.2.9](https://github.com/pure2199/sanlos-music/releases/tag/v0.2.9) 下载：
 
 | 文件 | 说明 |
 |---|---|
-| `FN-Music-Setup-0.2.5.exe` | **安装版**（NSIS，可改安装目录） |
-| `FN-Music-Portable-0.2.5.exe` | **便携版**（免安装，双击即用） |
+| `Sanlos Music-Setup-0.2.9.exe` | **安装版**（NSIS，可改安装目录） |
+| `Sanlos Music-Portable-0.2.9.exe` | **便携版**（免安装，双击即用） |
+
+> ℹ️ **文件名与软件名一致**（`Sanlos Music`）—— T89-㉔ 起改的；
+> ⚠️ **更早的版本**（v0.2.8 及以前）的文件名叫 `FN-Music-Setup-<版本>.exe`，别混。
 
 > ℹ️ **字节数与 sha256 在哪看**：**每个版本自己的 Release 页面**（说明末尾有「下载校验（sha256）」一节）
-> 与 [`docs/releases/v0.2.5.md`](./docs/releases/v0.2.5.md) 都列了**该版本产物**的字节数与 sha256
+> 与 [`docs/releases/v0.2.9.md`](./docs/releases/v0.2.9.md) 都列了**该版本产物**的字节数与 sha256
 > ⇒ **对不上就别装**。
 > ⚠️ **为什么不给「一份通用」的哈希表**：产物由 **CI 构建**，而 NSIS 安装器**内嵌构建时间戳**
 > ⇒ **两次构建的字节必然不同** ⇒ 哈希只能**逐版本**给。
 > （老版本的哈希仍能在**它自己的** Release 页面查到。）
 
-> ⚠️ **v0.2.5 及更早的产物未做代码签名**：Windows SmartScreen 会拦（蓝色「Windows 已保护你的电脑」）。
+> ⚠️ **v0.2.9 及更早的产物未做代码签名**：Windows SmartScreen 会拦（蓝色「Windows 已保护你的电脑」）。
 > ⇒ **三种绕法，任选其一**：
 > - 点「更多信息」→「仍要运行」；
 > - **更省事（推荐）**：右键安装包 → **属性** → 底部勾「**解除锁定**」→ 应用 ⇒ **蓝框直接消失**；
 > - **命令行一次搞定**（PowerShell）：
 >   ```powershell
->   Unblock-File .\FN-Music-Setup-0.2.5.exe
+>   Unblock-File '.\Sanlos Music-Setup-0.2.9.exe'
 >   # 批量：Get-ChildItem . -Filter *.exe | Unblock-File
 >   ```
 >
 > ℹ️ **为什么勾「解除锁定」就行**：Windows 的 SmartScreen 下载拦截是**因为文件带「来自互联网」标记**
 > （Mark of the Web）才触发的 ⇒ 去掉这个标记，它就不再拦。
 > ⚠️ **这不代表文件安全** —— 仍要核对上面的 sha256。
-> 需要静默安装可用 `FN-Music-Setup-0.2.5.exe /S`。
+> 需要静默安装可用 `Sanlos Music-Setup-0.2.9.exe /S`。
 >
 > ℹ️ **怎么确认下载到的是官方产物**（没有签名时的替代办法）：
 > ① **构建来源证明** —— 本仓库用 GitHub 官方的 attestation（SLSA build provenance，
 > 由 Sigstore 签发）给每个产物签了「来源证明」：它证明这个文件确实是**本仓库的 CI**
 > 从对应标签构建出来的，**换一字节就验不过**。装好 [GitHub CLI](https://cli.github.com/) 后：
 > ```bash
-> gh attestation verify FN-Music-Setup-0.2.5.exe --repo pure2199/sanlos-music
+> gh attestation verify "Sanlos Music-Setup-0.2.9.exe" --repo pure2199/sanlos-music
 > ```
+> ⚠️ **文件名里有空格 ⇒ 必须加引号**。
 > ② 或者直接与上面的 **sha256** 逐字比对。
 > ⚠️ 应用内「一键更新」下载的包还会再核对更新清单里的 **SHA-512**（不符一律拒绝安装）。
 >
@@ -185,8 +189,8 @@ npm run pack      # 打包 → release/
 
 | 文件 | 说明 |
 |---|---|
-| `release/FN-Music-Setup-<version>.exe` | NSIS 安装包（可改安装目录） |
-| `release/FN-Music-Portable-<version>.exe` | 便携版（免安装） |
+| `release/Sanlos Music-Setup-<version>.exe` | NSIS 安装包（可改安装目录） |
+| `release/Sanlos Music-Portable-<version>.exe` | 便携版（免安装） |
 | `release/win-unpacked/` | 解包后的目录，可直接运行 |
 
 > 打包口径、可复现的定义与离线打包条件见 [`docs/packaging.md`](./docs/packaging.md)。
@@ -259,7 +263,7 @@ A：兜底解码需要本地文件副本。请先点下载，等它完成再播�
 A：产物**未做代码签名**（本项目暂未取得公开可信的代码签名证书，签名申请已被拒），这是预期状态；
 可以按上面「怎么确认下载到的是官方产物」验证（构建来源证明 / sha256）。
 **最省事的处理**：右键安装包 → **属性** → 底部勾「**解除锁定**」→ 应用（**蓝框直接消失**）；
-或命令行（PowerShell）：`Unblock-File .\FN-Music-Setup-0.2.5.exe`。
+或命令行（PowerShell）：`Unblock-File '.\Sanlos Music-Setup-0.2.9.exe'`。
 ⚠️ 开了 **Smart App Control** 的 Windows 11 是**硬拦**（没有「仍要运行」按钮）⇒ 那类机器装不了未签名的版本。
 
 **Q：连不上 / 地址无效？**

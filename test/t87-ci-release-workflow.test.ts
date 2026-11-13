@@ -87,14 +87,46 @@ describe('T87 发版工作流 —— 结构', () => {
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const list = yml.slice(start, end)
-    expect(list).toContain('FN-Music-Setup-$version.exe')
-    expect(list).toContain('FN-Music-Portable-$version.exe')
+    // ⚠️ **T89-㉔**：资产名**不再写死** ⇒ 清单里引用的是「改名归一」那一步的输出
+    //    （`SETUP_NAME` / `PORTABLE_NAME`）⇒ 这里断言的是**引用关系**，
+    //    名字本身由 productName 派生（见下面那条断言）。
+    expect(list).toContain('$env:SETUP_NAME')
+    expect(list).toContain('$env:PORTABLE_NAME')
     expect(list).toContain('release-ci/latest.json')
     // ⚠️ **不许**把失效的资产发出去。
     expect(list).not.toContain('latest.yml')
     expect(list).not.toContain('blockmap')
     // ⚠️ 恰好 3 个（多一个少一个都要红）。
     expect(list.split('\n').filter((line) => line.includes('"release-ci/')).length).toBe(3)
+  })
+
+  it('**T89-㉔：资产名与软件名一致**（从 `productName` 派生，不是写死的前缀）', () => {
+    // ① 打包配置用 electron-builder 的官方宏 ⇒ 名字的单一真相源 = package.json。
+    const builderYml = readRepoFile('electron-builder.yml')
+    expect(builderYml).toContain('artifactName: "${productName}-Setup-${version}.${ext}"')
+    expect(builderYml).toContain('artifactName: "${productName}-Portable-${version}.${ext}"')
+    // ② 清单脚本也**从 package.json 读 productName** ⇒ 两边不可能对不上。
+    const manifest = readRepoFile('scripts', 'publish-manifest.mjs')
+    expect(manifest).toContain('productName')
+    expect(manifest).toContain('-Setup-')
+    expect(manifest).not.toContain("'FN-Music-Setup-'")
+    // ③ 工作流里的「改名归一」步骤必须存在，并把规范名喂给后面的步骤。
+    expect(yml).toContain('Normalize asset names')
+    expect(yml).toContain('id: names')
+    expect(yml).toContain('steps.names.outputs.setup')
+    expect(yml).toContain('steps.names.outputs.portable')
+  })
+
+  it('**T89-㉔：改名必须在「签发 attestation」之前**（subject 带文件名，顺序反了就白签）', () => {
+    const normalizeAt = yml.indexOf('- name: Normalize asset names')
+    const attestAt = yml.indexOf('- name: Attest build provenance')
+    expect(normalizeAt).toBeGreaterThan(-1)
+    expect(attestAt).toBeGreaterThan(-1)
+    expect(normalizeAt).toBeLessThan(attestAt)
+    // ⚠️ 也必须在「写清单」之后（标签里的 publish-manifest.mjs 认的是旧名）。
+    const manifestAt = yml.indexOf('- name: Write update manifest (unsigned)')
+    expect(manifestAt).toBeGreaterThan(-1)
+    expect(normalizeAt).toBeGreaterThan(manifestAt)
   })
 
   it('用 **Node 22**（Node 26 上 electron 的 install.js 会挂起）', () => {
@@ -115,8 +147,9 @@ describe('T87 SignPath artifact configuration', () => {
   })
 
   it('签**我们分发的两个产物**，且都用 `authenticode-sign`', () => {
-    expect(xml).toContain('FN-Music-Setup-*.exe')
-    expect(xml).toContain('FN-Music-Portable-*.exe')
+    // ⚠️ **T89-㉔**：glob 跟着对外发布的文件名走（带空格 ⇒ 与真实资产名逐字一致）。
+    expect(xml).toContain('Sanlos Music-Setup-*.exe')
+    expect(xml).toContain('Sanlos Music-Portable-*.exe')
     expect(xml.match(/<authenticode-sign \/>/g)?.length).toBe(2)
   })
 })

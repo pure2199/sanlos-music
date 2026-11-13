@@ -54,7 +54,7 @@ SignPath 官方 Action 提交签名请求
 在 PowerShell 里：
 
 ```powershell
-Get-AuthenticodeSignature .\FN-Music-Setup-0.2.5.exe |
+Get-AuthenticodeSignature '.\Sanlos Music-Setup-0.2.9.exe' |
   Format-List Status, SignerCertificate, TimeStamperCertificate
 ```
 

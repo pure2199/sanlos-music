@@ -217,6 +217,66 @@ jobs:
         run: node scripts/publish-manifest.mjs
 
       # -----------------------------------------------------------------------
+      # T89-㉔：产物改名归一（把「构建出来的名字」收敛成「对外发布的名字」）
+      # -----------------------------------------------------------------------
+      #
+      # ⚠️ **为什么需要这一步**：
+      #   - 规范名 = `${productName}-Setup-<版本>.exe`（= "Sanlos Music-Setup-…"，
+      #     见 `electron-builder.yml`；名字的单一真相源 = package.json 的 productName）；
+      #   - 但 **`workflow_dispatch` 用的是「你选的分支」上的工作流 YAML**，
+      #     而 `actions/checkout` 签出的是**标签的源码**
+      #     ⇒ 标签里的 `electron-builder.yml` 还是旧名（`FN-Music-*`）
+      #     ⇒ 这一步把产物改名成规范名；
+      #   - ⚠️ **必须排在「写清单」之后**：标签里的 `publish-manifest.mjs` 认的是旧名
+      #     （它跑在标签的源码上）⇒ 它跑完产出 latest.json 之后才能改名；
+      #   - ⚠️ **必须排在「签发 attestation」之前**：attestation 的 subject **带文件名**
+      #     ⇒ 改名之后签发，subject 才是对外的名字（否则按新名验证必然失败）。
+      #   ⇒ 对**未来的标签**是 no-op（那时构建出来就已经是规范名）。
+      - name: Normalize asset names
+        id: names
+        if: ${{ !inputs.pack_only }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $version = $pkg.version
+          $product = $pkg.productName
+          if (-not $product) { throw 'package.json 里没有 productName' }
+          $setup = "$product-Setup-$version.exe"
+          $portable = "$product-Portable-$version.exe"
+          # ⚠️ 要收敛的旧名：① 历史标签的 `FN-Music-*`；② 宏没展开的怪名。
+          $pairs = @(
+            @("FN-Music-Setup-$version.exe", $setup),
+            @("FN-Music-Portable-$version.exe", $portable),
+            @('${productName}-Setup-' + $version + '.exe', $setup),
+            @('${productName}-Portable-' + $version + '.exe', $portable)
+          )
+          foreach ($pair in $pairs) {
+            $target = Join-Path 'release-ci' $pair[1]
+            if (Test-Path -LiteralPath $target) { continue }
+            $source = Join-Path 'release-ci' $pair[0]
+            if (-not (Test-Path -LiteralPath $source)) { continue }
+            Rename-Item -LiteralPath $source -NewName $pair[1]
+            Write-Output "已改名：$($pair[0]) -> $($pair[1])"
+          }
+          # ⚠️ **必须两个都在**（缺一个就是打包出问题 ⇒ 立刻失败，别发出去）。
+          foreach ($name in @($setup, $portable)) {
+            if (-not (Test-Path -LiteralPath (Join-Path 'release-ci' $name))) {
+              throw "缺少产物：release-ci/$name"
+            }
+          }
+          # ⚠️ 清单里的 name / url 同步改名（**sha512 与 size 不变** —— 字节没变，只是文件名）。
+          $manifest = Join-Path 'release-ci' 'latest.json'
+          if (Test-Path -LiteralPath $manifest) {
+            $text = Get-Content -LiteralPath $manifest -Raw -Encoding UTF8
+            foreach ($pair in $pairs) { $text = $text.Replace($pair[0], $pair[1]) }
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($manifest, $text, $utf8NoBom)
+          }
+          "setup=$setup" >> $env:GITHUB_OUTPUT
+          "portable=$portable" >> $env:GITHUB_OUTPUT
+          Write-Output "规范名：$setup / $portable"
+
+      # -----------------------------------------------------------------------
       # T87.17：attestation —— 没有公开可信证书时的「发布者身份」信任锚
       # -----------------------------------------------------------------------
       #
@@ -248,6 +308,9 @@ jobs:
       - name: Summary (attestation)
         if: ${{ !inputs.pack_only }}
         # ⚠️ **脚本正文里一律不许有反引号**（PowerShell 的反引号是转义符）。
+        env:
+          ATTEST_URL: ${{ steps.attest.outputs['attestation-url'] }}
+          SETUP_NAME: ${{ steps.names.outputs.setup }}
         #    一律用**单引号**，Markdown 的行内代码改用「」。
         run: |
           $ErrorActionPreference = 'Stop'
@@ -259,7 +322,8 @@ jobs:
           echo '${{ steps.attest.outputs['attestation-url'] }}' >> $env:GITHUB_STEP_SUMMARY
           echo '' >> $env:GITHUB_STEP_SUMMARY
           echo '本地验证（需要 GitHub CLI）：' >> $env:GITHUB_STEP_SUMMARY
-          echo 'gh attestation verify FN-Music-Setup-版本号.exe --repo pure2199/sanlos-music' >> $env:GITHUB_STEP_SUMMARY
+          # ⚠️ **文件名带空格 ⇒ 必须加引号**（T89-㉔）。
+          echo ('gh attestation verify "' + $env:SETUP_NAME + '" --repo pure2199/sanlos-music') >> $env:GITHUB_STEP_SUMMARY
 
       - name: Prepare release notes with checksums
         if: ${{ !inputs.pack_only }}
@@ -269,6 +333,9 @@ jobs:
           #    ⇒ 不能写死一句话（写死就成了假陈述）。
           SIGNED: ${{ inputs.sign }}
           ATTEST_URL: ${{ steps.attest.outputs['attestation-url'] }}
+          # ⚠️ **T89-㉔**：资产名由「改名归一」那一步算出来（单一真相源 = productName）。
+          SETUP_NAME: ${{ steps.names.outputs.setup }}
+          PORTABLE_NAME: ${{ steps.names.outputs.portable }}
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
@@ -279,7 +346,7 @@ jobs:
           #    （简体中文机器 = 936 / GBK）⇒ 不指定就会把 UTF-8 的中文读成乱码。
           $base = Get-Content -Path $notesFile -Raw -Encoding UTF8
           $rows = @()
-          foreach ($name in @("FN-Music-Setup-$version.exe", "FN-Music-Portable-$version.exe")) {
+          foreach ($name in @($env:SETUP_NAME, $env:PORTABLE_NAME)) {
             $p = Join-Path 'release-ci' $name
             if (-not (Test-Path $p)) { throw "缺少资产：$p" }
             $hash = (Get-FileHash -Path $p -Algorithm SHA256).Hash.ToLower()
@@ -299,7 +366,7 @@ jobs:
               '', '## 怎么确认这个安装包是官方的', '',
               '本版**已**做 Authenticode 代码签名（Windows 会显示发布者，不再是「未知发布者」）。', '',
               '此外，每个产物都附了**构建来源证明**（SLSA build provenance，由 GitHub / Sigstore 签发），可用 GitHub CLI 验证：', '',
-              ('    gh attestation verify FN-Music-Setup-' + $version + '.exe --repo pure2199/sanlos-music'), '',
+              ('    gh attestation verify "' + $env:SETUP_NAME + '" --repo pure2199/sanlos-music'), '',
               ('attestation 页面：' + $env:ATTEST_URL)
             )
           } else {
@@ -307,7 +374,7 @@ jobs:
               '', '## 怎么确认这个安装包是官方的', '',
               '⚠️ **本版没有代码签名**（Windows 会提示「未知发布者」）。', '',
               '替代方案是**构建来源证明**（SLSA build provenance，由 GitHub / Sigstore 签发）：它证明这个文件确实是**本仓库的 CI** 从对应标签构建出来的，换一字节就验不过。装好 GitHub CLI 后：', '',
-              ('    gh attestation verify FN-Music-Setup-' + $version + '.exe --repo pure2199/sanlos-music'), '',
+              ('    gh attestation verify "' + $env:SETUP_NAME + '" --repo pure2199/sanlos-music'), '',
               ('attestation 页面：' + $env:ATTEST_URL), '',
               '不想装 GitHub CLI 的话，用本页末尾的 **sha256** 表逐字比对即可。'
             )
@@ -324,15 +391,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
+          # ⚠️ **T89-㉔**：资产名由「改名归一」那一步算出来（单一真相源 = productName）。
+          SETUP_NAME: ${{ steps.names.outputs.setup }}
+          PORTABLE_NAME: ${{ steps.names.outputs.portable }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           # ⚠️ 说明文件来自上一步（**带 sha256 与字节数**的副本）。
           $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
           if (-not (Test-Path $notesFile)) { throw "找不到带校验值的发布说明：$notesFile" }
           $assets = @(
-            "release-ci/FN-Music-Setup-$version.exe",
-            "release-ci/FN-Music-Portable-$version.exe",
+            "release-ci/$env:SETUP_NAME",
+            "release-ci/$env:PORTABLE_NAME",
             "release-ci/latest.json"
           )
           foreach ($asset in $assets) {

@@ -30,6 +30,7 @@ v0.2.8 发布的时候这两个功能**还没做** ⇒ 这一版把它们**一�
 | **记住播放位置续播** | 切歌 / 暂停 / **每 10 秒**记一次「播到第几秒」⇒ 下次打开从那里接着播 |
 | **什么情况才续** | 位置 **≥ 30 秒** **且** 距结尾 **≥ 15 秒**，**且**那首**还在曲库里**（三条都要满足）⇒ 不满足就**如实不恢复** |
 | **设置页「上次播放」** | 显示上次那首的歌名 / 歌手 / 位置 ＋ 一个**「清除上次播放记录」**按钮 |
+| **产物文件名** | 这一版的安装包 / 便携版**改名成与软件名一致**：`Sanlos Music-Setup-0.2.9.exe` / `Sanlos Music-Portable-0.2.9.exe`（⚠️ **名字带空格** ⇒ 命令行里要加引号；**更早的版本**叫 `FN-Music-*`） |
 
 ### 技术变更（T89-⑲）
 
@@ -486,9 +487,13 @@ v0.2.7 发布说明里那句「**修法已定方向，待安排；本版未修**
 版本号取自 `package.json` 的 `version`，electron-builder 用它命名产物：
 
 ```
-FN-Music-Setup-<version>.exe
-FN-Music-Portable-<version>.exe
+Sanlos Music-Setup-<version>.exe
+Sanlos Music-Portable-<version>.exe
 ```
+
+> ⚠️ **T89-㉔ 起文件名与软件名一致**（`productName` = `Sanlos Music`）：
+> 名字从 `package.json` 派生（`electron-builder.yml` 用 `${productName}` 宏）⇒ 名字**带空格** ⇒
+> 命令行里要加引号。**更早的版本**（v0.2.8 及以前）叫 `FN-Music-Setup-<version>.exe`。
 
 打包产物的 exe 版本元数据也由它写入（实测：文件版本 `0.2.0` / 产品版本 `0.2.0.0` / 产品名 `Sanlos Music` / 公司 `fnmusic-desktop`）。
 
