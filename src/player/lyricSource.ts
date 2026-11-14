@@ -34,6 +34,8 @@
 // ---------------------------------------------------------------------------
 
 import type { ExternalLyricResult, LyricPriority, LyricSource } from '../../shared/lyricProvider'
+// ⚠️ T93：占位歌词的判定（与主进程**同一个**判定 ⇒ 两层不漂移）。
+import { isPlaceholderLyric } from '../../shared/lyricPlaceholder'
 import type { LyricEntry } from '../api/types'
 
 // ---------------------------------------------------------------------------
@@ -397,13 +399,17 @@ async function loadOnlineFirst(
 
   if (outcome.kind === 'result' && outcome.result.status === 'ok') {
     const entries = toExternalEntries(songId, outcome.result)
-    if (entries.length > 0) {
+    // ⚠️ **T93**：原文是**占位提示**（如咪咕的「此歌曲为纯音乐，请欣赏」）⇒
+    //    **视同没匹配上** ⇒ 往内嵌回落（**兜底**：
+    //    主进程那条源链已经拦过一次，这里再拦一次 ⇒ 缓存里的旧结果也不会把占位顶上来）。
+    if (entries.length > 0 && !isPlaceholderLyric(outcome.result.original)) {
       // ⚠️ 线上匹配上 ⇒ **用线上的**（本地那份**不用**）。
       //    代价：线上没翻译时，这首歌就没翻译（用户已拍板接受）。
       // ⚠️ T73：带上**实际命中的那个源**（源链是依次试的，未必是首选源）。
       return { entries, origin: 'external', externalSource: outcome.result.source, reason: null }
     }
     // ⚠️ `ok` 但原文与翻译**都为空** ⇒ 视同**匹配不上** ⇒ 回落本地。
+    // ⚠️ T93：`ok` 但原文是**占位** ⇒ 同样视同**匹配不上** ⇒ 回落本地（内嵌 → NAS）。
   }
 
   // --- 线上匹配不上（not-found / error / 超时 / ok 但内容空）⇒ 回落本地（**内嵌 → NAS**，T83）----

@@ -47,6 +47,8 @@ import type {
   ExternalLyricResult,
   LyricSource,
 } from '../shared/lyricProvider'
+// ⚠️ T93：占位歌词（「此歌曲为纯音乐，请欣赏」这种）**不算命中** ⇒ 链子继续试下一个源。
+import { isPlaceholderLyric } from '../shared/lyricPlaceholder'
 
 import {
   qrcToEnhancedLrc,
@@ -1797,7 +1799,14 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
         // ⚠️ 记下**首选源**的结果（它才是这次查询的「口径」）。
         if (candidate === source) preferredResult = result
         // ⚠️ 命中（`ok` 且原文非空）⇒ **立刻返回**，不再问后面的源。
-        if (result.status === 'ok' && result.original.trim() !== '') {
+        // ⚠️ **T93**：原文是**占位提示**（如咪咕的「此歌曲为纯音乐，请欣赏」）⇒
+        //    **视同没匹配上** ⇒ 链子**继续试下一个源** ⇒ 别让一句占位把整条链卡住
+        //    （实测后果：链子提前返回 ⇒ 渲染层那条「回落内嵌」的分支**根本没被触发**）。
+        if (
+          result.status === 'ok' &&
+          result.original.trim() !== '' &&
+          !isPlaceholderLyric(result.original)
+        ) {
           writeCache(key, result)
           return result
         }
