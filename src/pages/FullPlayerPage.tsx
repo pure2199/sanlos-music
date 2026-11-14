@@ -142,6 +142,7 @@ const SOURCE_LABEL: Record<LyricSource, string> = {
   qq: 'QQ 音乐',
   kugou: '酷狗音乐',
   kuwo: '酷我音乐',
+  migu: '咪咕音乐',
   custom: '自定义 API',
   off: '不用外部',
 }

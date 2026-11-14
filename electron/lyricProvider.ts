@@ -34,6 +34,7 @@
 // | QQ 音乐（T33）    | 200，**814ms**   | 200，**70ms**，明文 LRC + 翻译 | 通（内置备选）|
 // | 酷狗（T90-⑤）    | 200，293ms       | 200，46ms，**KRC 真逐字**     | 通（已进兜底链）|
 // | 酷我（T90-⑥）    | 200，204ms       | 200，181ms，**lrcx 真逐字**   | 通（已进兜底链）|
+// | 咪咕（T90-⑦）    | 200，102–338ms   | 200，108–230ms，**mrc 真逐字** | 通（已进兜底链）|
 //
 // ⚠️ 网易云 / QQ 都是**非官方**公开 Web 接口：没有 SLA、条款上属灰色、接口可能变更。
 //    ⇒ **不押注一家**：默认网易云（国内最快），内置 lrclib 可切，
@@ -54,10 +55,16 @@ import {
   krcToEnhancedLrc,
   kuwoToEnhancedLrc,
   kuwoToPlainLrc,
+  miguToEnhancedLrc,
+  miguToPlainLrc,
 } from './lyricWordFormat'
 import { decodeQrc } from './lyricCodecs/qrc'
 import { decodeKrcPayload, decodeKrcPlainPayload } from './lyricCodecs/krc'
 import { decodeKuwoLrcxPayload } from './lyricCodecs/kuwo'
+import { decryptMiguMrc } from './lyricCodecs/migu'
+// ⚠️ 只借 `md5` 这一个**纯函数**（本仓库既有的十六进制 MD5 助手）。
+//    ⇒ 咪咕搜索要签名（规格 §15.3）⇒ **不引新依赖**。
+import { md5 } from './sign'
 
 /**
  * 网易云 yrc → 增强 LRC 的转换器。
@@ -174,6 +181,57 @@ const KUWO_LYRIC_URL = 'https://mlyric.kuwo.cn/mobi.s'
  *    ⇒ 5 秒余量很足（规格 §6 风险 4：源级超时预算要单独放宽）。
  */
 export const KUWO_SOURCE_TIMEOUT_MS = 5000
+
+/**
+ * 咪咕音乐搜索接口（**https**、**要签名**）。
+ *
+ * ⚠️ **必须 https**（规格 §15.1）：本应用的 Chromium 分区栈**全局拦 http 明文**
+ *    ⇒ 洛雪上游注释里的那些 `http://` 老端点**在生产路径走不通**。
+ */
+const MIGU_SEARCH_URL = 'https://jadeite.migu.cn/music_search/v3/search/searchAll'
+
+/**
+ * 咪咕的**歌词信息**接口（**https**）—— POST `resourceId=<songId>`。
+ *
+ * ⚠️ **必须传 `songId`**（不是 `copyrightId`！传 `copyrightId` ⇒ `resource: []`
+ *    ⇒ 拿不到 `mrcUrl` ⇒ 逐字就没了）—— 洛雪上游这里传参错位（规格 §8.1 第 2 条）。
+ */
+const MIGU_RESOURCEINFO_URL =
+  'https://c.musicapp.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do?resourceType=2'
+
+/**
+ * 咪咕源的**专用超时预算**（毫秒）。
+ *
+ * ⚠️ 咪咕一次取词要走**三跳**（搜索 → resourceinfo → 取载荷）
+ *    实测 102–338ms + 52–111ms + 108–230ms ≈ **0.3–0.7 s**
+ *    ⇒ 5 秒余量很足（规格 §15.8）。
+ */
+export const MIGU_SOURCE_TIMEOUT_MS = 5000
+
+/**
+ * 咪咕搜索的**固定密钥**（规格 §15.3）—— 洛雪上游同款。
+ *
+ * ⚠️ 这些是**公开的**客户端常量（不是用户凭证）⇒ 放在源码里没问题。
+ */
+const MIGU_SIGNATURE_MD5 = '6cdc72a439cef99a3418d2a78aa28c73'
+const MIGU_SALT = 'yyapp2d16148780a1dcc7408e06336b98cfd50'
+const MIGU_DEVICE_ID = '963B7AA0D21511ED807EE5846EC87D20'
+
+/** 咪咕搜索要带的客户端标识（洛雪上游同款）。 */
+const MIGU_UI_VERSION = 'A_music_3.6.1'
+const MIGU_CHANNEL = '0146921'
+
+/** 咪咕搜索用的 Android UA（洛雪上游同款）。 */
+const MIGU_ANDROID_UA =
+  'Mozilla/5.0 (Linux; U; Android 11.0.0; zh-cn; MI 11 Build/OPR1.170623.032) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30'
+
+/**
+ * 咪咕搜索的 `searchSwitch`（哪些结果类型要搜）。
+ *
+ * ⚠️ **逐字来源**（洛雪上游同款）：`song` / `tagSong` / `bestShow` / `lyricSong`。
+ */
+const MIGU_SEARCH_SWITCH =
+  '{"song":1,"album":0,"singer":0,"tagSong":1,"mvSong":0,"bestShow":1,"songlist":0,"lyricSong":0}'
 
 /**
  * 时长容差（**秒**）。
@@ -1205,6 +1263,246 @@ async function fetchKuwo(
 }
 
 // ---------------------------------------------------------------------------
+// 咪咕音乐适配器（T90-⑦）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **咪咕的 mrc（逐字）是加密的** ⇒ 解密在 `electron/lyricCodecs/migu.ts`，
+//    转换在 `electron/lyricWordFormat.ts`。
+// ⚠️ **有翻译**（trcUrl，明文行级 LRC）⇒ 与原文**同时间戳**（实测 127/127）。
+// ⚠️ 咪咕**没有**罗马音 ⇒ 一律空串（**如实不显示**第三行）。
+
+/** 咪咕搜索结果里的一首歌。 */
+interface MiguSong {
+  songId?: unknown
+  copyrightId?: unknown
+  name?: unknown
+  singerList?: unknown
+  duration?: unknown
+  lrcUrl?: unknown
+  mrcurl?: unknown
+  trcUrl?: unknown
+}
+
+/** 一个咪咕候选（比通用候选多带 `songId` 与三个歌词地址）。 */
+interface MiguCandidate extends Candidate {
+  /** 咪咕的歌曲 id（**`resourceinfo` 要的就是它**）。 */
+  songId: string
+  /** 版权 id（**`resourceinfo` 不认它** —— 洛雪上游传参错位）。 */
+  copyrightId: string
+  /** 行级 LRC 地址（搜索结果里一般也有）。 */
+  lrcUrl: string
+  /** 逐字（mrc）地址 —— **搜索结果里通常是空的**，要靠 `resourceinfo` 拿。 */
+  mrcUrl: string
+  /** 翻译（trc）地址。 */
+  trcUrl: string
+}
+
+/**
+ * 把咪咕的搜索结果读成候选列表。
+ *
+ * ⚠️ 响应的形状是 `songResultData.resultList` = **二维数组**（外层分组、内层歌曲）
+ *    ⇒ 必须**摊平**（实测每组 3–6 首）。
+ * ⚠️ 歌手在 `singerList`（数组，每项 `{ name }`）⇒ 多个歌手用 `、` 连接。
+ * ⚠️ `duration` 是**秒**（实测《孤勇者》= 256）⇒ 与 `pickCandidate` 的口径一致。
+ */
+function readMiguCandidates(payload: unknown): MiguCandidate[] {
+  const root = asRecord(payload)
+  const groups = root?.['songResultData']
+  const groupRecord = asRecord(groups)
+  const list = groupRecord?.['resultList']
+  if (!Array.isArray(list)) return []
+  const out: MiguCandidate[] = []
+  for (const group of list) {
+    if (!Array.isArray(group)) continue
+    for (const raw of group) {
+      const item = asRecord(raw) as MiguSong | null
+      if (!item) continue
+      const songId = readString(item.songId) ?? ''
+      if (!songId) continue
+      const title = typeof item.name === 'string' ? stripHighlightTags(item.name) : ''
+      if (!title) continue
+      // ⚠️ 歌手：`singerList` 是数组（每项 `{ name }`）。
+      const singers: string[] = []
+      if (Array.isArray(item.singerList)) {
+        for (const one of item.singerList) {
+          const record = asRecord(one)
+          const name = record ? readString(record['name']) : null
+          if (name) singers.push(name)
+        }
+      }
+      const durationRaw =
+        typeof item.duration === 'number'
+          ? item.duration
+          : Number(readString(item.duration) ?? Number.NaN)
+      const duration = Number.isFinite(durationRaw) ? durationRaw : 0
+      out.push({
+        id: songId,
+        songId,
+        copyrightId: readString(item.copyrightId) ?? '',
+        title,
+        artist: singers.join('、'),
+        duration,
+        lrcUrl: readString(item.lrcUrl) ?? '',
+        // ⚠️ 搜索结果里的逐字字段叫 **`mrcurl`**（小写 c）—— 洛雪上游也这么读。
+        mrcUrl: readString(item.mrcurl) ?? '',
+        trcUrl: readString(item.trcUrl) ?? '',
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * 咪咕搜索的签名（规格 §15.3）。
+ *
+ * ⚠️ `sign = md5(关键词 + signatureMd5 + salt + deviceId + timestamp)`
+ *    —— **关键词是参与签名的原文**（不是 URL 编码后的）。
+ */
+function createMiguSignature(timestamp: string, keyword: string): { sign: string; deviceId: string } {
+  return {
+    sign: md5(`${keyword}${MIGU_SIGNATURE_MD5}${MIGU_SALT}${MIGU_DEVICE_ID}${timestamp}`),
+    deviceId: MIGU_DEVICE_ID,
+  }
+}
+
+/**
+ * 走咪咕音乐取歌词（**真逐字** + **翻译**）。
+ *
+ * **链路（3 跳）**：
+ * 1. 搜索（**带签名**）→ 候选（`songId` / 歌名 / 歌手 / 时长）；
+ * 2. `resourceinfo`（POST `resourceId=<songId>`）→ `mrcUrl` / `lrcUrl` / `trcUrl`；
+ * 3. 取载荷：`mrcUrl`（**hex 密文** ⇒ 解密 ⇒ 增强 LRC）或 `lrcUrl`（明文行级 LRC）
+ *    + `trcUrl`（明文行级 LRC ⇒ 翻译）。
+ *
+ * ⚠️ **逐字优先**（洛雪上游同款）：有 `mrcUrl` 就用 mrc，没有才用 lrc。
+ * ⚠️ **`resourceinfo` 失败不致命**：拿不到逐字地址时**退回搜索结果里的 `lrcUrl`**
+ *    （搜索结果里 `lrcUrl` 是有的 ⇒ 至少还有行级歌词；只是没有逐字）。
+ */
+async function fetchMigu(
+  fetchImpl: FetchLike,
+  query: ExternalLyricQuery,
+): Promise<ExternalLyricResult> {
+  const keyword = [query.title, query.artist].filter((part) => part.trim() !== '').join(' ')
+
+  // --- ① 搜索（要签名）-------------------------------------------------------
+  const timestamp = String(Date.now())
+  const { sign, deviceId } = createMiguSignature(timestamp, keyword)
+  const searchUrl =
+    `${MIGU_SEARCH_URL}?isCorrect=0&isCopyright=1&searchSwitch=${encodeURIComponent(MIGU_SEARCH_SWITCH)}` +
+    `&pageSize=20&text=${encodeURIComponent(keyword)}&pageNo=1&sort=0&sid=USS`
+  const searchRes = await fetchImpl(searchUrl, {
+    headers: {
+      uiVersion: MIGU_UI_VERSION,
+      deviceId,
+      timestamp,
+      sign,
+      channel: MIGU_CHANNEL,
+      'user-agent': MIGU_ANDROID_UA,
+    },
+  })
+  if (!searchRes.ok) {
+    return { status: 'error', message: `咪咕搜索返回 ${searchRes.status}` }
+  }
+  let searchPayload: unknown
+  try {
+    searchPayload = JSON.parse(await searchRes.text()) as unknown
+  } catch {
+    return { status: 'error', message: '咪咕搜索返回的不是 JSON' }
+  }
+  // ⚠️ 咪咕搜索用 `code` 报状态（`'000000'` = 成功），不是 HTTP 状态码。
+  const code = readString(asRecord(searchPayload)?.['code'])
+  if (code !== null && code !== '000000') {
+    return { status: 'error', message: `咪咕搜索返回 code=${code}` }
+  }
+  const candidate = pickCandidate(readMiguCandidates(searchPayload), query)
+  if (!candidate) return { status: 'not-found' }
+
+  // --- ② 歌词信息（`resourceinfo`）--------------------------------------------
+  // ⚠️ **必须传 `songId`**（传 `copyrightId` ⇒ `resource: []` ⇒ 没有 `mrcUrl`）。
+  let lrcUrl = candidate.lrcUrl
+  let mrcUrl = candidate.mrcUrl
+  let trcUrl = candidate.trcUrl
+  try {
+    const infoRes = await fetchImpl(MIGU_RESOURCEINFO_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'user-agent': USER_AGENT,
+      },
+      body: `resourceId=${encodeURIComponent(candidate.songId)}`,
+    })
+    if (infoRes.ok) {
+      const infoPayload = (await infoRes.json()) as unknown
+      // ⚠️ `resource` 是**数组** ⇒ 取第 0 项。
+      const list = asRecord(infoPayload)?.['resource']
+      const item = Array.isArray(list) ? asRecord(list[0]) : null
+      if (item) {
+        lrcUrl = readString(item['lrcUrl']) ?? lrcUrl
+        mrcUrl = readString(item['mrcUrl']) ?? mrcUrl
+        trcUrl = readString(item['trcUrl']) ?? trcUrl
+      }
+    }
+  } catch {
+    // ⚠️ **`resourceinfo` 挂了不是致命的** ⇒ 退回搜索结果里的地址（行级歌词仍在）。
+  }
+
+  // --- ③ 取载荷 --------------------------------------------------------------
+  let original = ''
+  if (mrcUrl) {
+    // ⚠️ mrc 是 **hex 文本密文** ⇒ 必须解密（解密失败 ⇒ 如实报错，不产出乱码歌词）。
+    const mrcRes = await fetchImpl(mrcUrl, {
+      headers: { accept: '*/*', 'user-agent': USER_AGENT },
+    })
+    if (!mrcRes.ok) {
+      return { status: 'error', message: `咪咕歌词返回 ${mrcRes.status}` }
+    }
+    let plain = ''
+    try {
+      plain = decryptMiguMrc(await mrcRes.text())
+    } catch (cause) {
+      return { status: 'error', message: `咪咕歌词解密失败：${readableError(cause)}` }
+    }
+    try {
+      original = miguToEnhancedLrc(plain, { title: candidate.title })
+    } catch (cause) {
+      return { status: 'error', message: `咪咕歌词解析失败：${readableError(cause)}` }
+    }
+  } else if (lrcUrl) {
+    const lrcRes = await fetchImpl(lrcUrl, {
+      headers: { accept: 'text/plain', 'user-agent': USER_AGENT },
+    })
+    if (!lrcRes.ok) {
+      return { status: 'error', message: `咪咕歌词返回 ${lrcRes.status}` }
+    }
+    try {
+      original = miguToPlainLrc(await lrcRes.text(), { title: candidate.title })
+    } catch (cause) {
+      return { status: 'error', message: `咪咕歌词解析失败：${readableError(cause)}` }
+    }
+  }
+  if (!looksLikeLrc(original)) return { status: 'not-found' }
+
+  // --- ④ 翻译（trc）----------------------------------------------------------
+  // ⚠️ **翻译挂了不是致命的** ⇒ 翻译留空（渲染层照常显示原文）——
+  //    「没有翻译」与「歌词源坏了」是两回事，不能因为翻译 404 就把整首歌的歌词丢掉。
+  let translation = ''
+  if (trcUrl) {
+    try {
+      const trcRes = await fetchImpl(trcUrl, {
+        headers: { accept: 'text/plain', 'user-agent': USER_AGENT },
+      })
+      if (trcRes.ok) {
+        translation = miguToPlainLrc(await trcRes.text())
+      }
+    } catch {
+      translation = ''
+    }
+  }
+
+  return { status: 'ok', source: 'migu', original, translation }
+}
+
+// ---------------------------------------------------------------------------
 // 自定义模板适配器
 // ---------------------------------------------------------------------------
 
@@ -1285,6 +1583,9 @@ export interface LyricProvider {
  * ⚠️ **T90-⑥**：酷我（'kuwo'）也进了兜底链（排在 kugou 之后、custom 之前）
  *    ⇒ 兜底链 = **netease → lrclib → qq → kugou → kuwo → custom**；
  *    ⇒ 同样沿用「**位置不影响都能兜底**」这条既有口径（最小改动）。
+ * ⚠️ **T90-⑦**：咪咕（'migu'）也进了兜底链（排在 kuwo 之后、custom 之前）
+ *    ⇒ 兜底链 = **netease → lrclib → qq → kugou → kuwo → migu → custom**；
+ *    ⇒ 仍是「**不破坏既有源的相对顺序**」的最小改动。
  */
 export const ONLINE_SOURCE_ORDER: readonly LyricSource[] = [
   'netease',
@@ -1292,6 +1593,7 @@ export const ONLINE_SOURCE_ORDER: readonly LyricSource[] = [
   'qq',
   'kugou',
   'kuwo',
+  'migu',
   'custom',
 ]
 
@@ -1299,8 +1601,8 @@ export const ONLINE_SOURCE_ORDER: readonly LyricSource[] = [
  * 每个源**各自**的限时（毫秒）（T73）。
  *
  * ⚠️ 实测正常的源 < 500ms ⇒ 3 秒足够区分「慢」与「挂」。
- * ⚠️ **T90-⑥ 后**：链上最多 **6** 个源（netease / lrclib / qq / kugou / kuwo / custom）
- *    ⇒ **最坏**总预算 3 + 3 + 8 + 6 + 5 + 3 = **28 秒**，
+ * ⚠️ **T90-⑦ 后**：链上最多 **7** 个源（netease / lrclib / qq / kugou / kuwo / migu / custom）
+ *    ⇒ **最坏**总预算 3 + 3 + 8 + 6 + 5 + 5 + 3 = **33 秒**，
  *    而**渲染层**那边是 **12 秒** ⇒ 极端情况（每个源都卡到超时）下
  *    渲染层会先放弃、回落 NAS 本地的歌词。
  *    ⚠️ 这是**既有**行为（QQ 的 8 秒预算加上其余源就已经超过 12 秒了）；
@@ -1410,6 +1712,7 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
     //    （实测 ≈0.42s，6s 余量很足）。
     //    ⚠️ **酷我走两跳**（搜索 → 歌词）⇒ 单独放宽到 5s（实测 ≈0.39–0.64s）。
     //    单测**显式注入**的 `perSourceTimeoutMs` 优先（那是测试钩子，语义不变）。
+    // ⚠️ T90-⑦：咪咕走三跳（搜索 → resourceinfo → 取载荷）⇒ 单独放宽到 5s。
     const budget =
       opts.perSourceTimeoutMs !== undefined
         ? perSourceTimeoutMs
@@ -1419,7 +1722,9 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
             ? KUGOU_SOURCE_TIMEOUT_MS
             : candidate === 'kuwo'
               ? KUWO_SOURCE_TIMEOUT_MS
-              : perSourceTimeoutMs
+              : candidate === 'migu'
+                ? MIGU_SOURCE_TIMEOUT_MS
+                : perSourceTimeoutMs
     let timer: ReturnType<typeof setTimeout> | null = null
     const timeoutPromise = new Promise<ExternalLyricResult>((resolve) => {
       timer = setTimeout(() => {
@@ -1433,6 +1738,7 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
         if (candidate === 'qq') return await fetchQq(opts.fetchImpl, query)
         if (candidate === 'kugou') return await fetchKugou(opts.fetchImpl, query)
         if (candidate === 'kuwo') return await fetchKuwo(opts.fetchImpl, query)
+        if (candidate === 'migu') return await fetchMigu(opts.fetchImpl, query)
         return await fetchCustom(opts.fetchImpl, template, query)
       })().catch((cause: unknown): ExternalLyricResult => ({
         status: 'error',

@@ -39,6 +39,7 @@ import {
 import { toExternalEntries } from '../src/player/lyricSource'
 import { parseLyricEntries } from '../src/ui/lyrics/parse'
 import { PrefsStore, registerLyricIpc, type IpcMainEventsLike } from '../electron/ipc'
+import { makeMiguPayload } from './helpers/miguCipher'
 
 // ---------------------------------------------------------------------------
 // 工具
@@ -737,13 +738,28 @@ describe('源链（T73）', () => {
   it('首选源排第一，其余按固定顺序跟上', () => {
     // ⚠️ T90-⑤-b（用户拍板「所有歌词 API 都进入自动切换」）⇒ 酷狗也进了兜底链
     // ⚠️ T90-⑥（酷我源）⇒ 酷我也进了兜底链（排在酷狗之后、custom 之前）
-    //    ⇒ 这三条断言的**前提被显式推翻** ⇒ 改写为**含酷狗与酷我**的精确相等断言
+    // ⚠️ T90-⑦（咪咕源）⇒ 咪咕也进了兜底链（排在酷我之后、custom 之前）
+    //    ⇒ 这几条断言的**前提被显式推翻** ⇒ 改写为**含酷狗、酷我与咪咕**的精确相等断言
     //    （仍是 toEqual 全等 ⇒ 强度不变、**不弱化**）。
-    expect(buildSourceChain('lrclib', '')).toEqual(['lrclib', 'netease', 'qq', 'kugou', 'kuwo'])
+    expect(buildSourceChain('lrclib', '')).toEqual([
+      'lrclib',
+      'netease',
+      'qq',
+      'kugou',
+      'kuwo',
+      'migu',
+    ])
   })
 
   it('`custom` 没有模板 → 不进链', () => {
-    expect(buildSourceChain('netease', '')).toEqual(['netease', 'lrclib', 'qq', 'kugou', 'kuwo'])
+    expect(buildSourceChain('netease', '')).toEqual([
+      'netease',
+      'lrclib',
+      'qq',
+      'kugou',
+      'kuwo',
+      'migu',
+    ])
   })
 
   it('`custom` 有模板 → 进链，且排在**用户选的位置**', () => {
@@ -754,6 +770,7 @@ describe('源链（T73）', () => {
       'qq',
       'kugou',
       'kuwo',
+      'migu',
     ])
   })
 })
@@ -1228,8 +1245,15 @@ describe('酷狗适配器（T90-⑤）', () => {
 
   it('⚠️ **用户选酷狗时它是首选源**（其余源照旧兜底）', () => {
     // ⚠️ T90-⑤-b 之后酷狗也进了兜底链 ⇒ 链里会有它自己（去重）。
-    // ⚠️ T90-⑥ ⇒ 链里还有酷我。
-    expect(buildSourceChain('kugou', '')).toEqual(['kugou', 'netease', 'lrclib', 'qq', 'kuwo'])
+    // ⚠️ T90-⑥ ⇒ 链里还有酷我；T90-⑦ ⇒ 链里还有咪咕。
+    expect(buildSourceChain('kugou', '')).toEqual([
+      'kugou',
+      'netease',
+      'lrclib',
+      'qq',
+      'kuwo',
+      'migu',
+    ])
   })
 
   it('⚠️ **normalizeLyricSource 认得 kugou**（陌生值仍回落默认）', () => {
@@ -1395,11 +1419,258 @@ describe('T90-⑥ · 酷我适配器', () => {
   })
 
   it('⚠️ **用户选酷我时它是首选源**（其余源照旧兜底）', () => {
-    expect(buildSourceChain('kuwo', '')).toEqual(['kuwo', 'netease', 'lrclib', 'qq', 'kugou'])
+    expect(buildSourceChain('kuwo', '')).toEqual([
+      'kuwo',
+      'netease',
+      'lrclib',
+      'qq',
+      'kugou',
+      'migu',
+    ])
   })
 
   it('⚠️ **normalizeLyricSource 认得 kuwo**（陌生值仍回落默认）', () => {
     expect(normalizeLyricSource('kuwo')).toBe('kuwo')
+    expect(normalizeLyricSource('不存在的源')).toBe(DEFAULT_LYRIC_SOURCE)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T90-⑦：咪咕适配器
+// ---------------------------------------------------------------------------
+
+describe('T90-⑦ · 咪咕适配器', () => {
+  /** 咪咕的歌曲 id（`resourceinfo` 要的就是它）。 */
+  const SONG_ID = '1000096429'
+  /** 咪咕的版权 id（**`resourceinfo` 不认它** ⇒ 洛雪上游传参错位）。 */
+  const COPYRIGHT_ID = '6005663SX43'
+
+  const MRC_URL = 'https://d.musicapp.migu.cn/data/oss/resource/mrc'
+  const LRC_URL = 'https://d.musicapp.migu.cn/data/oss/resource/lrc'
+  const TRC_URL = 'https://d.musicapp.migu.cn/data/oss/resource/trc'
+
+  /** 造的搜索响应（`resultList` 是**二维数组**；逐字字段叫 `mrcurl`）。 */
+  const searchBody = JSON.stringify({
+    code: '000000',
+    songResultData: {
+      totalCount: 1,
+      resultList: [
+        [
+          {
+            songId: SONG_ID,
+            copyrightId: COPYRIGHT_ID,
+            name: '占位歌名',
+            singerList: [{ id: '116', name: '占位歌手' }],
+            duration: 200,
+            lrcUrl: LRC_URL,
+            mrcurl: '',
+            trcUrl: TRC_URL,
+          },
+        ],
+      ],
+    },
+  })
+
+  /** 造的 `resourceinfo` 响应（**逐字地址只在这里给**）。 */
+  const infoBody = JSON.stringify({
+    resource: [{ songId: SONG_ID, lrcUrl: LRC_URL, mrcUrl: MRC_URL, trcUrl: TRC_URL }],
+  })
+
+  /** 造的 mrc 明文（**自己编的歌词**）。 */
+  const MRC_PLAIN = '[2000,2000]占(2000,500)位(2500,500)'
+  /** 造的翻译（trc）明文。 */
+  const TRC_PLAIN = '[00:02.00]占位翻译'
+  /** 造的原文（lrc）明文。 */
+  const LRC_PLAIN = '[00:02.00]占位原文'
+
+  /** 一次请求的记录（**URL + 请求头 + 请求体**）。 */
+  interface Call {
+    url: string
+    init?: RequestInit
+  }
+
+  /**
+   * 造的 fetch 替身（**比通用那个多记请求头与请求体**）
+   * —— 咪咕的 `resourceinfo` 是 **POST 表单** ⇒ 必须能断言 body。
+   */
+  function makeMiguFetch(
+    routes: { match: string; status?: number; body: string }[],
+  ): { fetchImpl: (input: string, init?: RequestInit) => Promise<Response>; calls: Call[] } {
+    const calls: Call[] = []
+    const fetchImpl = async (input: string, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: input, init })
+      const hit = routes.find((route) => input.includes(route.match))
+      if (!hit) return new Response('not found', { status: 404 })
+      return new Response(hit.body, {
+        status: hit.status ?? 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return { fetchImpl, calls }
+  }
+
+  /** 三跳都通的路由表（⚠️ **override 必须排在前面** —— `find` 取**第一个**命中）。 */
+  const routes = (overrides: { match: string; status?: number; body: string }[] = []) => [
+    ...overrides,
+    { match: 'jadeite.migu.cn', body: searchBody },
+    { match: 'resourceinfo.do', body: infoBody },
+    { match: 'resource/mrc', body: makeMiguPayload(MRC_PLAIN) },
+    { match: 'resource/lrc', body: LRC_PLAIN },
+    { match: 'resource/trc', body: TRC_PLAIN },
+  ]
+
+  it('三跳走通 → **原文是带逐字标签的增强 LRC**；**翻译是行级 LRC**', async () => {
+    const { fetchImpl } = makeMiguFetch(routes())
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.source).toBe('migu')
+    // ⚠️ 词时间是**绝对毫秒**（行首 2000 ⇒ 首词也是 2000 ⇒ 不加行首）。
+    expect(result.original).toBe('[00:02.00]<00:02.00>占<00:02.50>位')
+    expect(result.translation).toBe('[00:02.00]占位翻译')
+  })
+
+  it('⚠️ **端点必须全是 https** + **三跳顺序** + **`resourceinfo` 必须传 `songId`**', async () => {
+    const { fetchImpl, calls } = makeMiguFetch(routes())
+    const provider = createLyricProvider({ fetchImpl })
+    await provider.fetchExternalLyric('migu', '', QUERY)
+
+    const miguCalls = calls.filter((call) => call.url.includes('migu.cn'))
+    expect(miguCalls.length).toBeGreaterThan(0)
+    for (const call of miguCalls) {
+      expect(call.url.startsWith('https://')).toBe(true)
+    }
+    // ⚠️ 三跳的**顺序**：搜索 → resourceinfo → 逐字载荷 → 翻译。
+    expect(miguCalls[0]!.url).toContain('jadeite.migu.cn')
+    expect(miguCalls[1]!.url).toContain('resourceinfo.do')
+    expect(miguCalls[2]!.url).toContain('resource/mrc')
+    expect(miguCalls[3]!.url).toContain('resource/trc')
+    // ⚠️ **`resourceinfo` 必须传 `songId`**（传 `copyrightId` ⇒ 拿不到 `mrcUrl`）。
+    const body = String(miguCalls[1]!.init?.body ?? '')
+    expect(body).toContain(`resourceId=${SONG_ID}`)
+    expect(body).not.toContain(COPYRIGHT_ID)
+    // ⚠️ 搜索**必须带签名**（洛雪上游同款：没有 sign 就搜不到）。
+    const headers = (miguCalls[0]!.init?.headers ?? {}) as Record<string, string>
+    expect(String(headers['sign'] ?? '')).toMatch(/^[0-9a-f]{32}$/)
+    expect(String(headers['deviceId'] ?? '')).not.toBe('')
+  })
+
+  it('⚠️ **没有 `mrcUrl` ⇒ 退回行级 LRC**（仍然有歌词，不是报错）', async () => {
+    const { fetchImpl } = makeMiguFetch(
+      routes([
+        {
+          match: 'resourceinfo.do',
+          body: JSON.stringify({
+            resource: [{ songId: SONG_ID, lrcUrl: LRC_URL, mrcUrl: '', trcUrl: TRC_URL }],
+          }),
+        },
+      ]),
+    )
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.original).toBe('[00:02.00]占位原文')
+    expect(result.translation).toBe('[00:02.00]占位翻译')
+  })
+
+  it('⚠️ **`resourceinfo` 挂了不致命** ⇒ 退回搜索结果里的行级地址', async () => {
+    const { fetchImpl } = makeMiguFetch(routes([{ match: 'resourceinfo.do', status: 500, body: 'boom' }]))
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    // ⚠️ 搜索结果里的 `lrcUrl` 仍然在 ⇒ 至少还有**行级**歌词。
+    expect(result.original).toBe('[00:02.00]占位原文')
+  })
+
+  it('⚠️ **翻译挂了不致命** ⇒ 翻译留空，原文照常给', async () => {
+    const { fetchImpl } = makeMiguFetch(routes([{ match: 'resource/trc', status: 500, body: 'boom' }]))
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.original).toBe('[00:02.00]<00:02.00>占<00:02.50>位')
+    expect(result.translation).toBe('')
+  })
+
+  it('搜索结果里没有对得上的 → `not-found`（不是错误）', async () => {
+    const { fetchImpl } = makeMiguFetch([
+      { match: 'jadeite.migu.cn', body: JSON.stringify({ code: '000000', songResultData: { resultList: [] } }) },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('not-found')
+  })
+
+  it('搜索接口返回 500 → `error` + 可读原因（**不抛异常**）', async () => {
+    const { fetchImpl } = makeMiguFetch([{ match: 'jadeite.migu.cn', status: 500, body: 'boom' }])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('500')
+  })
+
+  it('搜索接口返回的不是 JSON → `error`', async () => {
+    const { fetchImpl } = makeMiguFetch([{ match: 'jadeite.migu.cn', body: 'not json' }])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('error')
+  })
+
+  it('⚠️ **搜索返回 `code` 不是 `000000` → `error`**（咪咕用 code 报状态）', async () => {
+    const { fetchImpl } = makeMiguFetch([
+      { match: 'jadeite.migu.cn', body: JSON.stringify({ code: '999999', info: '签名错误' }) },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('999999')
+  })
+
+  it('逐字接口返回 500 → `error` + 可读原因', async () => {
+    const { fetchImpl } = makeMiguFetch(routes([{ match: 'resource/mrc', status: 500, body: 'boom' }]))
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('500')
+  })
+
+  it('⚠️ **载荷不是咪咕密文 ⇒ 如实报错**（不静默吞掉、不产出乱码歌词）', async () => {
+    // ⚠️ 载荷要**够长**（≥ 32 个 hex 字符）才走「解密」这条路
+    //    （更短的 ⇒ 上游同款口径：不当密文、原样返回）。
+    const { fetchImpl } = makeMiguFetch(routes([{ match: 'resource/mrc', body: 'z'.repeat(64) }]))
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('咪咕')
+  })
+
+  it('⚠️ **载荷太短 ⇒ 不当密文** ⇒ 解析不出歌词 ⇒ `not-found`', async () => {
+    const { fetchImpl } = makeMiguFetch(routes([{ match: 'resource/mrc', body: '这不是咪咕密文' }]))
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('migu', '', QUERY)
+    expect(result.status).toBe('not-found')
+  })
+
+  it('⚠️ **用户选咪咕时它是首选源**（其余源照旧兜底）', () => {
+    expect(buildSourceChain('migu', '')).toEqual([
+      'migu',
+      'netease',
+      'lrclib',
+      'qq',
+      'kugou',
+      'kuwo',
+    ])
+  })
+
+  it('⚠️ **normalizeLyricSource 认得 migu**（陌生值仍回落默认）', () => {
+    expect(normalizeLyricSource('migu')).toBe('migu')
     expect(normalizeLyricSource('不存在的源')).toBe(DEFAULT_LYRIC_SOURCE)
   })
 })

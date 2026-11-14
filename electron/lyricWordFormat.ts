@@ -1191,3 +1191,173 @@ export function kuwoToPlainLrc(plain: string): string {
   }
   return out.join('\n')
 }
+
+// ---------------------------------------------------------------------------
+// 咪咕 mrc（真逐字）→ 增强 LRC（T90-⑦）
+// ---------------------------------------------------------------------------
+//
+// 行形状（2026-11-14 本机实测，孤勇者 / Counting Stars 等 26 份真实载荷）：
+//
+//     [行开始ms,行时长ms]词1(起ms,时ms)词2(起ms,时ms)词3(起ms,时ms)
+//
+// ⚠️ **与 QQ / 酷狗 / 酷我的三处关键差异**（转换器必须区别对待）：
+//
+// 1. 词元组是**圆括号** `(起,时)`（不是尖括号 / 不是 `<起,时,0>`）；
+// 2. ⚠️ **词时间是绝对毫秒**（实测：行头 `[2045,649]` 的第一个词标签是 `(2045,499)`
+//    ⇒ 词起点 == 行首；且「下一词起点 − 当前词起点 == 当前词时长」**553/553** 全中
+//    ⇒ 词与词首尾相接、铺满整行）⇒ **不加行首**；
+// 3. ⚠️ **标签在词之后**（不是之前）：实测「文本片段数 − 标签数」**恒为 1**、
+//    **行首片段恒非空**、**行尾片段恒为空**（68/68）
+//    ⇒ 若按「标签在词之前」解读，每行行首都会多出一个**没有时间**的残片
+//    ⇒ 与观测矛盾 ⇒ 词 i 的文本 = **第 i 段**（标签**之前**的那一段）。
+//
+// ⚠️ **元信息行的规则与 QRC 共用**（`isQrcMetaLine`）：咪咕的 mrc 里
+//    制作信息被**合并成一行**（行头 `[0,0]` + 一堆 `(0,0)` 零时长词元组）
+//    ⇒ 判定只能用**去掉词元组后的文本**；
+//    ⚠️ **不能用酷我那套「零时长 ⇒ 翻译」判据**（咪咕的零时长行是**制作信息**）。
+
+/** 咪咕 mrc 的行头：`[行开始ms,行时长ms]`。 */
+const MIGU_LINE_HEAD = /^\[(\d+),(\d+)\]/
+
+/** 咪咕 mrc 的词元组：`(起ms,词时长ms)`（**绝对**毫秒）。 */
+const MIGU_WORD_TUPLE = /\((\d+),(\d+)\)/g
+
+/**
+ * 把 **咪咕 mrc 明文**（逐字）转成**增强 LRC**（`[mm:ss.xx]<mm:ss.xx>词…`）。
+ *
+ * **规则（定死，规格 §15.7）**：
+ * 1. 行头只认 `[起ms,时长ms]`；**无行头**的行（`[ti:]` / `[ar:]` 之类）**丢掉**
+ *    （实测《孤勇者》71 行里 **2 行**是无行头的元信息）；
+ * 2. **元信息行**（制作信息 / 标题行）**丢掉**（见 {@link isQrcMetaLine}）
+ *    —— 制作信息在 mrc 里是**合并成一行**的（行头 `[0,0]`）；
+ * 3. 行内按**顺序扫描**找词元组 ⇒ 词文本里的圆括号**不会错位**；
+ * 4. **词文本 = 标签之前的那一段**（标签在词之后 ⇒ 第 i 段配第 i 个标签）；
+ * 5. **词的绝对时间 = 标签里的毫秒**（**不加行首**）；
+ * 6. **零时长词** → **并入前一个词**，不单独成词；
+ * 7. **空文本的词** → **不产出标签**（没有文字的「词」不是词）；
+ * 8. ⚠️ **纯空格的词元组必须保留**（渲染层会把它 trim 掉，
+ *    但**行文本**仍保留那个空格 ⇒ 丢了它英文歌词会显示成 `CountingStars`）；
+ * 9. **词内含空白** → 走 {@link splitWordsAtWhitespace}（防御性；
+ *    实测咪咕的词**不含**内部空白 ⇒ 当前是 no-op）；
+ * 10. 一行里**没有有效词** → **跳过该行**；
+ * 11. 空串 / 非串 → 返回空串（**不抛异常**）。
+ *
+ * @param plain 解密后的咪咕 mrc 明文。
+ * @param hint 标题识别提示（**可选**：咪咕的标题行可以很长 ⇒ 靠**歌名**认更准）。
+ * @returns 标准增强 LRC（多行，行间 `\n`）。
+ */
+export function miguToEnhancedLrc(plain: string, hint?: QrcTitleHint): string {
+  if (typeof plain !== 'string' || plain === '') return ''
+  // --- ① 解析出所有**带行头**的候选行 -----------------------------------------
+  const candidates: { lineStart: number; rest: string; candidateIndex: number }[] = []
+  for (const rawLine of plain.split(/\r\n|\r|\n/)) {
+    // ⚠️ 解密后的明文**可能带 UTF-8 BOM** ⇒ 显式剥掉。
+    const line = rawLine.replace(/^\uFEFF/, '').trim()
+    if (!line) continue
+    const head = MIGU_LINE_HEAD.exec(line)
+    if (!head) continue // 无行头（`[ti:]` / `[ar:]` 之类）→ 丢掉
+    const lineStart = Number(head[1])
+    if (!Number.isFinite(lineStart)) continue
+    candidates.push({
+      lineStart,
+      rest: line.slice(head[0].length),
+      // 带行头的候选行的序号（0 起）—— 标题行规则用。
+      candidateIndex: candidates.length,
+    })
+  }
+
+  // --- ② 丢掉**元信息行**（制作信息 / 标题行）--------------------------------
+  // ⚠️ **被丢掉的行不参与「下一行行时间」的计算** ⇒ 与渲染层看到的一致。
+  const lyricLines: typeof candidates = []
+  for (const item of candidates) {
+    const plainText = item.rest.replace(MIGU_WORD_TUPLE, '').trim()
+    if (isQrcMetaLine(plainText, item.candidateIndex, hint)) continue
+    lyricLines.push(item)
+  }
+
+  // --- ③ 转换 ----------------------------------------------------------------
+  const out: string[] = []
+  for (let index = 0; index < lyricLines.length; index += 1) {
+    const { lineStart, rest } = lyricLines[index]!
+    // ⚠️ **行尾** = 下一行的行时间（与渲染层 `assemble` 同口径）。
+    const nextLineStart = lyricLines[index + 1]?.lineStart
+    const lineEnd = nextLineStart !== undefined ? nextLineStart : lineStart + 500
+
+    // 词元组（**按顺序扫描** ⇒ 词文本里的圆括号不会错位）。
+    const pattern = new RegExp(MIGU_WORD_TUPLE.source, 'g')
+    const marks: { start: number; dur: number; from: number; to: number }[] = []
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(rest)) !== null) {
+      marks.push({
+        start: Number(match[1]),
+        dur: Number(match[2]),
+        from: match.index + match[0].length,
+        to: match.index,
+      })
+    }
+    if (!marks.length) continue
+
+    // 零时长词**并入前一个词**，不单独成词。
+    const words: { start: number; text: string }[] = []
+    for (let i = 0; i < marks.length; i += 1) {
+      const mark = marks[i]!
+      // ⚠️ **标签在词之后** ⇒ 词 i 的文本 = 「上一段结束 → 本标签开始」这一段。
+      const textFrom = i === 0 ? 0 : marks[i - 1]!.from
+      const text = rest.slice(textFrom, mark.to)
+      if (mark.dur === 0) {
+        const previous = words[words.length - 1]
+        if (previous) previous.text += text
+        continue
+      }
+      // ⚠️ **空文本的词** → **不产出标签**（没有文字的「词」不是词）。
+      if (text === '') continue
+      // ⚠️ 咪咕的词时间是**绝对毫秒** ⇒ **不加行首**。
+      words.push({ start: mark.start, text })
+    }
+    if (!words.length) continue
+
+    // ⚠️ **词内含空白** ⇒ 拆成多个独立词（防御性；实测咪咕已是 no-op）。
+    const expanded = splitWordsAtWhitespace(words, lineEnd)
+    const body = expanded.map((word) => `<${msToLrcTag(word.start)}>${word.text}`).join('')
+    out.push(`[${msToLrcTag(lineStart)}]${body}`)
+  }
+  return out.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// 咪咕 lrc / trc（**明文行级 LRC**）→ 行级 LRC（T90-⑦）
+// ---------------------------------------------------------------------------
+
+/**
+ * 把 **咪咕的明文 LRC**（`lrcUrl` = 原文行级；`trcUrl` = 翻译）转成**行级 LRC**。
+ *
+ * **规则（定死，规格 §15.6）**：
+ * 1. 行头只认 `[mm:ss.xx]` / `[mm:ss.xxx]`；
+ * 2. **无行头**的行（`[ti:]` / `[ar:]` 之类）**丢掉**；
+ * 3. **元信息行**（制作信息 / 标题行）**丢掉**（见 {@link isQrcMetaLine}）
+ *    —— 实测咪咕的 lrc 里有「作词：X」「作曲：X」等制作信息行，
+ *    trc 里还有「歌曲名 X 歌手名 Y」这种**标题行变体**；
+ * 4. 其余行**原样输出**（不做逐字转换 —— 这两个 URL 本来就是行级的）。
+ *
+ * @param lrc 明文的行级 LRC。
+ * @param hint 标题识别提示（**可选**）。
+ * @returns 行级 LRC（多行，行间 `\n`）。
+ */
+export function miguToPlainLrc(lrc: string, hint?: QrcTitleHint): string {
+  if (typeof lrc !== 'string' || lrc === '') return ''
+  const out: string[] = []
+  let candidateIndex = 0
+  for (const rawLine of lrc.split(/\r\n|\r|\n/)) {
+    const line = rawLine.replace(/^\uFEFF/, '').trim()
+    if (!line) continue
+    const head = /^\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/.exec(line)
+    if (!head) continue
+    const currentIndex = candidateIndex
+    candidateIndex += 1
+    const text = line.slice(head[0].length).trim()
+    if (!text) continue
+    if (isQrcMetaLine(text, currentIndex, hint)) continue
+    out.push(line)
+  }
+  return out.join('\n')
+}
