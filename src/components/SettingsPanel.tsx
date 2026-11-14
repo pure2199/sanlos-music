@@ -568,7 +568,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               <legend className="fnm-settings__legend">歌词来源</legend>
               <p className="fnm-settings__hint">
                 这里是先用哪个外部源；这个源匹配不上时，会自动按顺序试下一个线上源
-                （网易云 → lrclib → QQ → 酷狗 → 自定义模板），全都试完才回落到 NAS 自带的。
+                （网易云 → lrclib → QQ → 酷狗 → 酷我 → 自定义模板），全都试完才回落到 NAS 自带的。
                 谁优先（线上还是 NAS 自带的），见下一组「歌词优先级」。
               </p>
               <label className="fnm-settings__option fnm-settings__option--stack">
@@ -587,6 +587,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   <option value="lrclib">lrclib.net（开源、免费）</option>
                   <option value="qq">QQ 音乐（Lyricify 同款词源）</option>
                   <option value="kugou">酷狗音乐（KRC 真逐字）</option>
+                  <option value="kuwo">酷我音乐（lrcx 逐字 + 翻译）</option>
                   <option value="custom">自定义歌词 API（URL 模板）</option>
                   <option value="off">不用外部（只用 NAS）</option>
                 </select>

@@ -912,3 +912,268 @@ export function krcToEnhancedLrc(krc: string, hint?: QrcTitleHint): string {
   }
   return out.join('\n')
 }
+
+// ---------------------------------------------------------------------------
+// 酷我 lrcx（真逐字）→ 增强 LRC（T90-⑥）
+// ---------------------------------------------------------------------------
+//
+// 行形状（2026-11-14 本机**真实 Electron 主进程**实测，三首：孤勇者 /
+// Counting Stars / 一路向北）：
+//
+//     [mm:ss.xxx]<a,b>词文本<a,b>词文本…
+//
+// ⚠️ **与 QRC / KRC 的三处关键差异**（转换器必须区别对待）：
+//
+// 1. **行头是 `[mm:ss.xxx]`**（时间标签），**不是** `[起ms,时长ms]`
+//    ⇒ 解析器要另写一条分支；
+// 2. `<a,b>` **不是**「开始毫秒 + 时长毫秒」，而是**经过缩放**的一对数
+//    ⇒ 必须先读文件里的 `[kuwo:八进制]` 偏移参数（见 §14.3）；
+// 3. **翻译行**与原文行**混在同一个时间戳下**（翻译行排在前面，
+//    词标签**全为 `<0,0>`**）⇒ 见 §14.4。
+//
+// ⚠️ **元信息行的规则与 QRC / KRC 共用**（`isQrcMetaLine`）
+//    （实测酷我也有「词：唐恬」「曲：钱雷」这类制作信息 + 标题行）。
+//
+// ⚠️ **词内空白**：酷我**已经把英文按词拆开**（空格是独立的词元组）
+//    ⇒ 实测**没有**「整段英文塞进一个词元组」的情况
+//    ⇒ 但仍走 `splitWordsAtWhitespace` 作**防御**（当前实测是 no-op）。
+
+/** 酷我的行头：`[mm:ss.xxx]`（也接受 `[mm:ss.xx]`）。 */
+const KUWO_LINE_HEAD = /^\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/
+
+/** 酷我的词标签：`<a,b>`（`a` / `b` **可负**；可选第三段）。 */
+const KUWO_WORD_TAG = /<(-?\d+),(-?\d+)(?:,-?\d+)?>/g
+
+/** 酷我的偏移参数标签：`[kuwo:八进制数]`。 */
+const KUWO_SCALE_TAG = /\[kuwo:\s*([^\]]*)\]/i
+
+/**
+ * 酷我 lrcx 的**偏移参数**（来自 `[kuwo:八进制数]`）。
+ *
+ * ⚠️ **三首实测各不相同**（`[kuwo:034]`→(2,8)、`[kuwo:140]`→(9,6)、`[kuwo:061]`→(4,9)）
+ *    ⇒ **不能写死**。
+ */
+interface KuwoScale {
+  /** 词**开始**时间的除数因子（`offset × 2`）。 */
+  offset: number
+  /** 词**时长**的除数因子（`offset2 × 2`）。 */
+  offset2: number
+}
+
+/**
+ * 读出文件里的 `[kuwo:八进制数]` 偏移参数。
+ *
+ * **规则（定死，规格 §14.3）**：
+ * 1. 文件里**没有** `[kuwo:…]` ⇒ 缺省 `offset = offset2 = 1`（洛雪的缺省口径）；
+ * 2. 有 ⇒ 内容按**八进制**解析（`parseInt(content, 8)`），
+ *    再拆成 `offset = trunc(v / 10)`、`offset2 = trunc(v % 10)`；
+ * 3. `offset` 或 `offset2` **小于 1**（含 0 与 NaN）⇒ **抛错**
+ *    （除零 ⇒ 这份歌词的时间轴全错 ⇒ 如实报错，不产出错的歌词）。
+ *
+ * ⚠️ `[kuwo:…]` **可以出现在任何一行** ⇒ 解析行**之前**先全量扫一遍。
+ */
+function readKuwoScale(plain: string): KuwoScale {
+  const match = KUWO_SCALE_TAG.exec(plain)
+  if (!match) return { offset: 1, offset2: 1 }
+  let content = (match[1] ?? '').trim()
+  // ⚠️ 洛雪的口径：`][` 之后的内容**不算**参数（兼容参数里带别的标签的形状）。
+  const cut = content.indexOf('][')
+  if (cut >= 0) content = content.slice(0, cut).trim()
+  const value = parseInt(content, 8)
+  if (!Number.isFinite(value)) {
+    throw new Error(`酷我歌词的 [kuwo:] 参数不是八进制数（${JSON.stringify(content)}）`)
+  }
+  const offset = Math.trunc(value / 10)
+  const offset2 = Math.trunc(value % 10)
+  if (offset < 1 || offset2 < 1) {
+    throw new Error(`酷我歌词的 [kuwo:] 参数无效（offset=${offset} offset2=${offset2}）`)
+  }
+  return { offset, offset2 }
+}
+
+/** 解析出来的一个酷我词。 */
+interface KuwoWord {
+  /** **相对行首**的开始毫秒。 */
+  relStart: number
+  /** **相对行首**的时长毫秒。 */
+  relDur: number
+  /** 词文本（**原样**，不 trim 词内空格）。 */
+  text: string
+}
+
+/** 解析出来的一行酷我歌词。 */
+interface KuwoLine {
+  /** 行首（**绝对**毫秒）。 */
+  lineStart: number
+  /** 行正文（行头之后的文本）。 */
+  rest: string
+  /** 词表（时间**相对行首**）。 */
+  words: KuwoWord[]
+  /** 第一个词标签**之前**的文本（实测通常为空）。 */
+  leading: string
+  /** 行正文（去掉词标签、trim 过）。 */
+  plainText: string
+  /** 这一行是不是**翻译行**（词标签全为零时长）。 */
+  isTranslation: boolean
+}
+
+/**
+ * 解析酷我 lrcx 明文 ⇒ 行列表。
+ *
+ * ⚠️ **翻译行的判据（规格 §14.4）**：词标签**全为零时长**的行 = 翻译行。
+ *    实测三首：原文行里的零时长词 = **0** ⇒ 判据**零误判风险**。
+ */
+function parseKuwoLines(plain: string, scale: KuwoScale): KuwoLine[] {
+  const out: KuwoLine[] = []
+  for (const rawLine of plain.split(/\r\n|\r|\n/)) {
+    // ⚠️ 解密后的明文**可能带 UTF-8 BOM** ⇒ 显式剥掉。
+    const line = rawLine.replace(/^\uFEFF/, '').trim()
+    if (!line) continue
+    const head = KUWO_LINE_HEAD.exec(line)
+    if (!head) continue // 没有行头（`[ti:]` / `[kuwo:034]` / `[ml:1.0]` 之类）→ 丢掉
+    const fraction = head[3] ?? '0'
+    const millis =
+      fraction.length === 1
+        ? Number(fraction) * 100
+        : fraction.length === 2
+          ? Number(fraction) * 10
+          : Number(fraction)
+    const lineStart = Number(head[1]) * 60_000 + Number(head[2]) * 1000 + millis
+    const rest = line.slice(head[0].length)
+
+    // 词标签（**按顺序扫描** ⇒ 词文本里的尖括号不会错位）。
+    const pattern = new RegExp(KUWO_WORD_TAG.source, 'g')
+    const marks: { start: number; dur: number; from: number; to: number }[] = []
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(rest)) !== null) {
+      const a = Number(match[1])
+      const b = Number(match[2])
+      marks.push({
+        // ⚠️ **相对行首**（规格 §14.3）：开始 = |a+b| / (offset×2)，
+        //    时长 = |a-b| / (offset2×2) ⇒ 绝对 = 行首 + 相对。
+        start: Math.trunc(Math.abs((a + b) / (scale.offset * 2))),
+        dur: Math.trunc(Math.abs((a - b) / (scale.offset2 * 2))),
+        from: match.index + match[0].length,
+        to: match.index,
+      })
+    }
+    const words: KuwoWord[] = []
+    for (let i = 0; i < marks.length; i += 1) {
+      const mark = marks[i]!
+      const textEnd = i + 1 < marks.length ? marks[i + 1]!.to : rest.length
+      words.push({ relStart: mark.start, relDur: mark.dur, text: rest.slice(mark.from, textEnd) })
+    }
+    const hasRealTiming = words.some((word) => word.relDur > 0)
+    out.push({
+      lineStart,
+      rest,
+      words,
+      leading: marks.length ? rest.slice(0, marks[0]!.to).trim() : rest.trim(),
+      plainText: rest.replace(new RegExp(KUWO_WORD_TAG.source, 'g'), '').trim(),
+      // ⚠️ **没有词标签**的行**不算**翻译行（实测是空行 / 行级歌词行）。
+      isTranslation: words.length > 0 && !hasRealTiming,
+    })
+  }
+  return out
+}
+
+/**
+ * 把 **酷我 lrcx 明文**（逐字）转成**增强 LRC**（`[mm:ss.xx]<mm:ss.xx>词…`）。
+ *
+ * **规则（定死，规格 §14.8）**：
+ * 1. 先全量读 `[kuwo:…]` 偏移参数（缺省 1 / 1；无效 ⇒ 抛错）；
+ * 2. 行头只认 `[mm:ss.xxx]`；**没有行头**的行（各种标签行）**丢掉**；
+ * 3. **翻译行**（词标签全为零时长）**不产出原文**（走 {@link kuwoToPlainLrc}）；
+ * 4. **元信息行**（制作信息 / 标题行）**丢掉**（见 {@link isQrcMetaLine}）；
+ * 5. 词的**绝对时间** = **行首 + 相对毫秒**；
+ * 6. **零时长词** → **并入前一个词**，不单独成词；
+ * 7. **空文本的词** → **不产出标签**（没有文字的「词」不是词）；
+ * 8. ⚠️ **纯空格的词元组必须保留**（渲染层会把它 trim 掉，
+ *    但**行文本**仍保留那个空格 ⇒ 丢了它英文歌词会显示成 `CountingStars`）；
+ * 9. **词内含空白** → 走 {@link splitWordsAtWhitespace}（防御性）；
+ * 10. 一行里**没有有效词** → **跳过该行**；
+ * 11. 空串 / 非串 → 返回空串（**不抛异常**）。
+ *
+ * @param plain 解密后的酷我 lrcx 明文。
+ * @param hint 标题识别提示（**可选**：酷我的标题行可以很长 ⇒ 靠**歌名**认更准）。
+ * @returns 标准增强 LRC（多行，行间 `\n`）。
+ */
+export function kuwoToEnhancedLrc(plain: string, hint?: QrcTitleHint): string {
+  if (typeof plain !== 'string' || plain === '') return ''
+  const scale = readKuwoScale(plain)
+  const parsed = parseKuwoLines(plain, scale)
+
+  // --- ① 拆出**原文行**（翻译行另走 {@link kuwoToPlainLrc}）--------------------
+  const originals = parsed.filter((line) => !line.isTranslation)
+
+  // --- ② 丢掉**元信息行**（制作信息 / 标题行）--------------------------------
+  // ⚠️ **被丢掉的行不参与「下一行行时间」的计算** ⇒ 与渲染层看到的一致。
+  // ⚠️ `candidateIndex` = 该行在**原文行**里的序号（**过滤前**）——
+  //    与 QRC / KRC 的口径一致（标题行的兜底规则只看「前 5 条候选行」）。
+  const lyricLines: typeof originals = []
+  for (let index = 0; index < originals.length; index += 1) {
+    const item = originals[index]!
+    if (isQrcMetaLine(item.plainText, index, hint)) continue
+    lyricLines.push(item)
+  }
+
+  // --- ③ 转换 ----------------------------------------------------------------
+  const out: string[] = []
+  for (let index = 0; index < lyricLines.length; index += 1) {
+    const line = lyricLines[index]!
+    // ⚠️ **行尾** = 下一行的行时间（与渲染层 `assemble` 同口径）。
+    const nextLineStart = lyricLines[index + 1]?.lineStart
+    const lineEnd = nextLineStart !== undefined ? nextLineStart : line.lineStart + 500
+
+    // 零时长词**并入前一个词**；空文本的词**不产出标签**。
+    const words: { start: number; text: string }[] = []
+    for (const word of line.words) {
+      if (word.relDur === 0) {
+        const previous = words[words.length - 1]
+        if (previous) previous.text += word.text
+        continue
+      }
+      if (word.text === '') continue
+      // ⚠️ 酷我的词时间**相对行首** ⇒ 绝对 = 行首 + 相对。
+      words.push({ start: line.lineStart + word.relStart, text: word.text })
+    }
+    if (!words.length) continue
+
+    // 第一个词标签**之前**的文本（实测通常为空）→ 并进第一个词。
+    if (line.leading) {
+      const first = words[0]
+      if (first) first.text = line.leading + first.text
+    }
+
+    // ⚠️ **词内含空白** ⇒ 拆成多个独立词（防御性；实测酷我已是 no-op）。
+    const expanded = splitWordsAtWhitespace(words, lineEnd)
+    const body = expanded.map((word) => `<${msToLrcTag(word.start)}>${word.text}`).join('')
+    out.push(`[${msToLrcTag(line.lineStart)}]${body}`)
+  }
+  return out.join('\n')
+}
+
+/**
+ * 把 **酷我 lrcx 明文**里的**翻译行**转成**行级 LRC**。
+ *
+ * ⚠️ 翻译行**没有逐字时间**（实测词标签全是 `<0,0>`）
+ *    ⇒ 只保留文本（词标签**整条摘掉**）。
+ * ⚠️ **制作信息行同样丢掉**（与 {@link kuwoToEnhancedLrc} 同一口径），
+ *    但**不套**标题行规则（标题提示是给原文用的）。
+ *
+ * @param plain 解密后的酷我 lrcx 明文。
+ */
+export function kuwoToPlainLrc(plain: string): string {
+  if (typeof plain !== 'string' || plain === '') return ''
+  const scale = readKuwoScale(plain)
+  const parsed = parseKuwoLines(plain, scale)
+  const out: string[] = []
+  for (const line of parsed) {
+    if (!line.isTranslation) continue
+    const text = line.plainText
+    if (!text) continue
+    if (isQrcCreditLine(text)) continue
+    out.push(`[${msToLrcTag(line.lineStart)}]${text}`)
+  }
+  return out.join('\n')
+}

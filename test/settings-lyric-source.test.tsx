@@ -98,15 +98,16 @@ describe('设置面板：歌词来源', () => {
 
   // ⚠️ **前提已被推翻**（T33：用户批准新增「QQ 音乐」内置源）→ 本断言改写为**新行为**。
   //    旧断言是 `['netease', 'lrclib', 'custom', 'off']`（四个选项）。
-  it('**六个**选项都在（网易云 / lrclib / **QQ 音乐** / **酷狗音乐** / 自定义 / 不用外部）', () => {
+  it('**七个**选项都在（网易云 / lrclib / **QQ 音乐** / **酷狗音乐** / **酷我音乐** / 自定义 / 不用外部）', () => {
     installBridge()
     renderLyricSettings()
 
     const values = Array.from(sourceSelect().options).map((option) => option.value)
-    // ⚠️ T90-⑤ 新增「酷狗音乐」（KRC 真逐字）⇒ **这条断言的前提被规格 §9 显式推翻**
+    // ⚠️ T90-⑤ 新增「酷狗音乐」（KRC 真逐字）、T90-⑥ 新增「酷我音乐」（lrcx 逐字）
+    //    ⇒ **这条断言的前提被规格 §9 显式推翻**
     //    （新增源必须**同时**加选项，否则就是「有选项但用不了」）⇒
-    //    改写为**六个**选项的**精确相等**断言（强度不变、**不弱化**）。
-    expect(values).toEqual(['netease', 'lrclib', 'qq', 'kugou', 'custom', 'off'])
+    //    改写为**七个**选项的**精确相等**断言（强度不变、**不弱化**）。
+    expect(values).toEqual(['netease', 'lrclib', 'qq', 'kugou', 'kuwo', 'custom', 'off'])
   })
 
   it('选「QQ 音乐」→ **模板输入框仍禁用**（只有自定义才要填模板）', () => {

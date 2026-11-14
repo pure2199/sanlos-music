@@ -39,9 +39,11 @@
  *   明文 LRC + 翻译，**无逐字**）；
  * - `kugou`：酷狗音乐的公开 Web 接口（**非官方**；**KRC 真逐字**，
  *   T90-⑤ 实测三首全有逐字；**没有**翻译与罗马音）；
+ * - `kuwo`：酷我音乐的公开 Web 接口（**非官方**；**lrcx 真逐字**，
+ *   T90-⑥ 实测三首全有逐字；英文歌**有翻译**、**没有**罗马音）；
  * - `custom`：用户自己配的 **URL 模板**（返回**纯文本 LRC**）。
  */
-export type LyricSource = 'off' | 'netease' | 'lrclib' | 'qq' | 'kugou' | 'custom'
+export type LyricSource = 'off' | 'netease' | 'lrclib' | 'qq' | 'kugou' | 'kuwo' | 'custom'
 
 /**
  * 歌词来源的**优先级**（T70）。
@@ -148,6 +150,7 @@ export const LYRIC_SOURCES: readonly LyricSource[] = [
   'lrclib',
   'qq',
   'kugou',
+  'kuwo',
   'custom',
 ]
 

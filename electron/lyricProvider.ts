@@ -32,6 +32,8 @@
 // | 网易云（默认）    | 200，18–235ms    | 200，31–41ms，带时间戳 | 10/10 全绿 |
 // | lrclib.net（备选）| 200，366–1300ms  | —                  | **偶发 503** |
 // | QQ 音乐（T33）    | 200，**814ms**   | 200，**70ms**，明文 LRC + 翻译 | 通（内置备选）|
+// | 酷狗（T90-⑤）    | 200，293ms       | 200，46ms，**KRC 真逐字**     | 通（已进兜底链）|
+// | 酷我（T90-⑥）    | 200，204ms       | 200，181ms，**lrcx 真逐字**   | 通（已进兜底链）|
 //
 // ⚠️ 网易云 / QQ 都是**非官方**公开 Web 接口：没有 SLA、条款上属灰色、接口可能变更。
 //    ⇒ **不押注一家**：默认网易云（国内最快），内置 lrclib 可切，
@@ -45,9 +47,17 @@ import type {
   LyricSource,
 } from '../shared/lyricProvider'
 
-import { qrcToEnhancedLrc, qrcToPlainLrc, yrcToEnhancedLrc, krcToEnhancedLrc } from './lyricWordFormat'
+import {
+  qrcToEnhancedLrc,
+  qrcToPlainLrc,
+  yrcToEnhancedLrc,
+  krcToEnhancedLrc,
+  kuwoToEnhancedLrc,
+  kuwoToPlainLrc,
+} from './lyricWordFormat'
 import { decodeQrc } from './lyricCodecs/qrc'
 import { decodeKrcPayload, decodeKrcPlainPayload } from './lyricCodecs/krc'
+import { decodeKuwoLrcxPayload } from './lyricCodecs/kuwo'
 
 /**
  * 网易云 yrc → 增强 LRC 的转换器。
@@ -137,6 +147,33 @@ const KUGOU_HEADERS: Record<string, string> = {
  *    （规格 §6 风险 4：源级超时预算要单独放宽）。
  */
 export const KUGOU_SOURCE_TIMEOUT_MS = 6000
+
+/**
+ * 酷我音乐搜索接口（**https**、**免签名**）。
+ *
+ * ⚠️ **必须 https**（规格 §14.1）：本应用的 Chromium 分区栈**全局拦 http 明文**
+ *    （实测 `http://search.kuwo.cn/r.s` 与 `http://mlyric.kuwo.cn/mobi.s` 都是
+ *    `net::ERR_BLOCKED_BY_CLIENT`）⇒ T74a 规格里记的 http 端点**在生产路径走不通**。
+ * ⚠️ **与酷狗不同**：酷狗是「换域名」（`mobilecdn` 证书主机名不匹配），
+ *    酷我是「**同域名换协议**」⇒ 端点参数与洛雪上游完全一致。
+ */
+const KUWO_SEARCH_URL = 'https://search.kuwo.cn/r.s'
+
+/**
+ * 酷我音乐的**歌词**接口（**https**）—— `lrcx=1` 要**逐字**。
+ *
+ * ⚠️ 响应是**二进制**（不是 JSON）⇒ 走 `res.arrayBuffer()`。
+ */
+const KUWO_LYRIC_URL = 'https://mlyric.kuwo.cn/mobi.s'
+
+/**
+ * 酷我源的**专用超时预算**（毫秒）。
+ *
+ * ⚠️ 酷我只走**两跳**（搜索 → 歌词），实测 204 + 181 ≈ **0.39s**、
+ *    292 + 163 ≈ 0.46s、396 + 61 ≈ 0.46s、577 + 63 ≈ 0.64s
+ *    ⇒ 5 秒余量很足（规格 §6 风险 4：源级超时预算要单独放宽）。
+ */
+export const KUWO_SOURCE_TIMEOUT_MS = 5000
 
 /**
  * 时长容差（**秒**）。
@@ -1028,6 +1065,146 @@ async function fetchKugou(
 }
 
 // ---------------------------------------------------------------------------
+// 酷我音乐适配器（T90-⑥）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **端点必须 https**（规格 §14.1）：本应用的 Chromium 分区栈**全局拦 http 明文**
+//    ⇒ 洛雪上游那两个 http 端点**在生产路径走不通**。
+//    ⇒ **同域名换协议**就能用（实测 200 / 204ms、200 / 181ms）。
+//
+// ⚠️ **两跳**（洛雪上游同一套链路）：
+//   ① 搜索（`search.kuwo.cn/r.s`）→ `rid`；
+//   ② 歌词（`mlyric.kuwo.cn/mobi.s`，`lrcx=1`）→ **二进制 lrcx 密文**。
+//
+// ⚠️ **真逐字**：酷我的 lrcx 带**逐字标签** `<a,b>`（**相对行首**）
+//    ⇒ 解密在 `electron/lyricCodecs/kuwo.ts`，转换在 `electron/lyricWordFormat.ts`。
+//
+// ⚠️ **有翻译**（英文歌才有）：翻译行与原文行**同时间戳**、排在原文行**之前**、
+//    词标签**全为 `<0,0>`** ⇒ 转换层拆成「行级 LRC」。
+
+/** 酷我搜索结果里的一首歌。 */
+interface KuwoSong {
+  MUSICRID?: unknown
+  SONGNAME?: unknown
+  ARTIST?: unknown
+  ALBUM?: unknown
+  DURATION?: unknown
+}
+
+/** 一个酷我候选（比通用候选多带一个 **rid**）。 */
+interface KuwoCandidate extends Candidate {
+  /** 酷我的歌曲 id（`MUSICRID` 去掉 `MUSIC_` 前缀）。 */
+  rid: string
+}
+
+/**
+ * 把酷我的搜索结果读成候选列表。
+ *
+ * ⚠️ `MUSICRID` 形如 `MUSIC_198554068` ⇒ **去掉 `MUSIC_` 前缀**才是歌词接口要的 `rid`；
+ * ⚠️ `DURATION` 是**秒**（实测《孤勇者》= 256）⇒ 与 `pickCandidate` 的口径一致。
+ */
+function readKuwoCandidates(payload: unknown): KuwoCandidate[] {
+  const root = asRecord(payload)
+  const list = root?.['abslist']
+  if (!Array.isArray(list)) return []
+  const out: KuwoCandidate[] = []
+  for (const raw of list) {
+    const item = asRecord(raw) as KuwoSong | null
+    if (!item) continue
+    const rawId = readString(item.MUSICRID) ?? ''
+    const rid = rawId.replace('MUSIC_', '')
+    if (!rid) continue
+    const title = typeof item.SONGNAME === 'string' ? stripHighlightTags(item.SONGNAME) : ''
+    if (!title) continue
+    const artist = readString(item.ARTIST) ?? ''
+    // ⚠️ `DURATION` 实测是**字符串**（`"256"`）⇒ 两种都认。
+    const durationRaw =
+      typeof item.DURATION === 'number'
+        ? item.DURATION
+        : Number(readString(item.DURATION) ?? Number.NaN)
+    const duration = Number.isFinite(durationRaw) ? durationRaw : 0
+    out.push({ id: rid, rid, title, artist, duration })
+  }
+  return out
+}
+
+/**
+ * 走酷我音乐取歌词（**真逐字** + **翻译**）。
+ *
+ * **链路**：
+ * 1. 搜索 → 候选（`rid` / 歌名 / 歌手 / 时长）；
+ * 2. 歌词（`lrcx=1`）→ **二进制 lrcx 密文** → **解密** → **增强 LRC**（原文）
+ *    + **行级 LRC**（翻译）。
+ *
+ * ⚠️ 酷我**没有**罗马音 ⇒ 一律空串（**如实不显示**第三行）。
+ */
+async function fetchKuwo(
+  fetchImpl: FetchLike,
+  query: ExternalLyricQuery,
+): Promise<ExternalLyricResult> {
+  const keyword = [query.title, query.artist].filter((part) => part.trim() !== '').join(' ')
+
+  // --- ① 搜索（免签名）-------------------------------------------------------
+  const searchRes = await fetchImpl(
+    `${KUWO_SEARCH_URL}?client=kt&all=${encodeURIComponent(keyword)}` +
+      '&pn=0&rn=10&uid=794762570&ver=kwplayer_ar_9.2.2.1&vipver=1&show_copyright_off=1' +
+      '&newver=1&ft=music&cluster=0&strategy=2012&encoding=utf8&rformat=json&vermerge=1' +
+      '&mobi=1&issubtitle=1',
+    {
+      headers: {
+        accept: 'application/json',
+        referer: 'https://www.kuwo.cn/',
+        'user-agent': USER_AGENT,
+      },
+    },
+  )
+  if (!searchRes.ok) {
+    return { status: 'error', message: `酷我搜索返回 ${searchRes.status}` }
+  }
+  let searchPayload: unknown
+  try {
+    searchPayload = JSON.parse(await searchRes.text()) as unknown
+  } catch {
+    return { status: 'error', message: '酷我搜索返回的不是 JSON' }
+  }
+  const candidate = pickCandidate(readKuwoCandidates(searchPayload), query)
+  if (!candidate) return { status: 'not-found' }
+
+  // --- ② 歌词（lrcx=1 ⇒ 逐字）------------------------------------------------
+  const lyricRes = await fetchImpl(
+    `${KUWO_LYRIC_URL}?f=web&type=lyric&lrcx=1&rid=${encodeURIComponent(candidate.rid)}&encode=utf8`,
+    {
+      headers: {
+        accept: '*/*',
+        referer: 'https://www.kuwo.cn/',
+        'user-agent': USER_AGENT,
+      },
+    },
+  )
+  if (!lyricRes.ok) {
+    return { status: 'error', message: `酷我歌词返回 ${lyricRes.status}` }
+  }
+  // ⚠️ 响应是**二进制** ⇒ 走 `arrayBuffer()`（不是 `text()`）。
+  const bytes = new Uint8Array(await lyricRes.arrayBuffer())
+  let plain = ''
+  try {
+    plain = decodeKuwoLrcxPayload(bytes)
+  } catch (cause) {
+    return { status: 'error', message: `酷我歌词解密失败：${readableError(cause)}` }
+  }
+  let original = ''
+  let translation = ''
+  try {
+    original = kuwoToEnhancedLrc(plain, { title: candidate.title })
+    translation = kuwoToPlainLrc(plain)
+  } catch (cause) {
+    return { status: 'error', message: `酷我歌词解析失败：${readableError(cause)}` }
+  }
+  if (!looksLikeLrc(original)) return { status: 'not-found' }
+  return { status: 'ok', source: 'kuwo', original, translation }
+}
+
+// ---------------------------------------------------------------------------
 // 自定义模板适配器
 // ---------------------------------------------------------------------------
 
@@ -1104,12 +1281,17 @@ export interface LyricProvider {
  *    ⇒ 链会走完全部源；位置只影响「某个源卡住时，后面的源还来不来得及」。
  *    ⇒ 排在 qq 之后是**最小改动**（保持既有相对顺序），也与 T74a 规格的原意一致
  *      （「只把 'kugou' 加进源链，位置与『用户选的源排第一』的既有规则不变」）。
+ *
+ * ⚠️ **T90-⑥**：酷我（'kuwo'）也进了兜底链（排在 kugou 之后、custom 之前）
+ *    ⇒ 兜底链 = **netease → lrclib → qq → kugou → kuwo → custom**；
+ *    ⇒ 同样沿用「**位置不影响都能兜底**」这条既有口径（最小改动）。
  */
 export const ONLINE_SOURCE_ORDER: readonly LyricSource[] = [
   'netease',
   'lrclib',
   'qq',
   'kugou',
+  'kuwo',
   'custom',
 ]
 
@@ -1117,8 +1299,8 @@ export const ONLINE_SOURCE_ORDER: readonly LyricSource[] = [
  * 每个源**各自**的限时（毫秒）（T73）。
  *
  * ⚠️ 实测正常的源 < 500ms ⇒ 3 秒足够区分「慢」与「挂」。
- * ⚠️ **T90-⑤-b 后**：链上最多 **5** 个源（netease / lrclib / qq / kugou / custom）
- *    ⇒ **最坏**总预算 3 + 3 + 8 + 6 + 3 = **23 秒**，
+ * ⚠️ **T90-⑥ 后**：链上最多 **6** 个源（netease / lrclib / qq / kugou / kuwo / custom）
+ *    ⇒ **最坏**总预算 3 + 3 + 8 + 6 + 5 + 3 = **28 秒**，
  *    而**渲染层**那边是 **12 秒** ⇒ 极端情况（每个源都卡到超时）下
  *    渲染层会先放弃、回落 NAS 本地的歌词。
  *    ⚠️ 这是**既有**行为（QQ 的 8 秒预算加上其余源就已经超过 12 秒了）；
@@ -1226,6 +1408,7 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
     //    （实测 ≈1.5s，通用 3s 余量太薄 ⇒ 网络一抖整个 QQ 源就超时）。
     //    ⚠️ **酷狗也要走三跳**（搜索 → accesskey → 下载）⇒ 同样单独放宽
     //    （实测 ≈0.42s，6s 余量很足）。
+    //    ⚠️ **酷我走两跳**（搜索 → 歌词）⇒ 单独放宽到 5s（实测 ≈0.39–0.64s）。
     //    单测**显式注入**的 `perSourceTimeoutMs` 优先（那是测试钩子，语义不变）。
     const budget =
       opts.perSourceTimeoutMs !== undefined
@@ -1234,7 +1417,9 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
           ? QQ_SOURCE_TIMEOUT_MS
           : candidate === 'kugou'
             ? KUGOU_SOURCE_TIMEOUT_MS
-            : perSourceTimeoutMs
+            : candidate === 'kuwo'
+              ? KUWO_SOURCE_TIMEOUT_MS
+              : perSourceTimeoutMs
     let timer: ReturnType<typeof setTimeout> | null = null
     const timeoutPromise = new Promise<ExternalLyricResult>((resolve) => {
       timer = setTimeout(() => {
@@ -1247,6 +1432,7 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
         if (candidate === 'lrclib') return await fetchLrclib(opts.fetchImpl, query)
         if (candidate === 'qq') return await fetchQq(opts.fetchImpl, query)
         if (candidate === 'kugou') return await fetchKugou(opts.fetchImpl, query)
+        if (candidate === 'kuwo') return await fetchKuwo(opts.fetchImpl, query)
         return await fetchCustom(opts.fetchImpl, template, query)
       })().catch((cause: unknown): ExternalLyricResult => ({
         status: 'error',

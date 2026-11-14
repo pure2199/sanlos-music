@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { deflateSync } from 'node:zlib'
 
 import type { ExternalLyricQuery } from '../shared/lyricProvider'
 import { DEFAULT_LYRIC_SOURCE, normalizeLyricSource } from '../shared/lyricProvider'
@@ -56,7 +57,7 @@ const QUERY: ExternalLyricQuery = {
 
 /** 造的 fetch 替身：按「URL 包含什么」返回对应响应。 */
 function makeFetch(
-  routes: { match: string; status?: number; body: string; contentType?: string }[],
+  routes: { match: string; status?: number; body: string | Uint8Array; contentType?: string }[],
 ): { fetchImpl: (input: string) => Promise<Response>; calls: string[] } {
   const calls: string[] = []
   const fetchImpl = async (input: string): Promise<Response> => {
@@ -65,10 +66,17 @@ function makeFetch(
     if (!hit) {
       return new Response('not found', { status: 404 })
     }
-    return new Response(hit.body, {
-      status: hit.status ?? 200,
-      headers: { 'content-type': hit.contentType ?? 'application/json' },
-    })
+    return typeof hit.body === 'string'
+      ? new Response(hit.body, {
+          status: hit.status ?? 200,
+          headers: { 'content-type': hit.contentType ?? 'application/json' },
+        })
+      : // ⚠️ **二进制**（酷我的歌词载荷）⇒ 交给 `Response` 的是**字节**，
+        //    不是 UTF-8 文本（`slice()` 会**复制**一份，`buffer` 就是干净的 `ArrayBuffer`）。
+        new Response(hit.body.slice().buffer as ArrayBuffer, {
+          status: hit.status ?? 200,
+          headers: { 'content-type': hit.contentType ?? 'application/json' },
+        })
   }
   return { fetchImpl, calls }
 }
@@ -728,13 +736,14 @@ describe('源链（T73）', () => {
 
   it('首选源排第一，其余按固定顺序跟上', () => {
     // ⚠️ T90-⑤-b（用户拍板「所有歌词 API 都进入自动切换」）⇒ 酷狗也进了兜底链
-    //    ⇒ 这三条断言的**前提被显式推翻** ⇒ 改写为**含酷狗**的精确相等断言
+    // ⚠️ T90-⑥（酷我源）⇒ 酷我也进了兜底链（排在酷狗之后、custom 之前）
+    //    ⇒ 这三条断言的**前提被显式推翻** ⇒ 改写为**含酷狗与酷我**的精确相等断言
     //    （仍是 toEqual 全等 ⇒ 强度不变、**不弱化**）。
-    expect(buildSourceChain('lrclib', '')).toEqual(['lrclib', 'netease', 'qq', 'kugou'])
+    expect(buildSourceChain('lrclib', '')).toEqual(['lrclib', 'netease', 'qq', 'kugou', 'kuwo'])
   })
 
   it('`custom` 没有模板 → 不进链', () => {
-    expect(buildSourceChain('netease', '')).toEqual(['netease', 'lrclib', 'qq', 'kugou'])
+    expect(buildSourceChain('netease', '')).toEqual(['netease', 'lrclib', 'qq', 'kugou', 'kuwo'])
   })
 
   it('`custom` 有模板 → 进链，且排在**用户选的位置**', () => {
@@ -744,6 +753,7 @@ describe('源链（T73）', () => {
       'lrclib',
       'qq',
       'kugou',
+      'kuwo',
     ])
   })
 })
@@ -1217,13 +1227,149 @@ describe('酷狗适配器（T90-⑤）', () => {
   })
 
   it('⚠️ **用户选酷狗时它是首选源**（其余源照旧兜底）', () => {
-    // ⚠️ `ONLINE_SOURCE_ORDER` 本任务**不动**（源链位置归 T90-⑧）
-    //    ⇒ 酷狗**只在用户主动选它时**排第一，不进兜底链。
-    expect(buildSourceChain('kugou', '')).toEqual(['kugou', 'netease', 'lrclib', 'qq'])
+    // ⚠️ T90-⑤-b 之后酷狗也进了兜底链 ⇒ 链里会有它自己（去重）。
+    // ⚠️ T90-⑥ ⇒ 链里还有酷我。
+    expect(buildSourceChain('kugou', '')).toEqual(['kugou', 'netease', 'lrclib', 'qq', 'kuwo'])
   })
 
   it('⚠️ **normalizeLyricSource 认得 kugou**（陌生值仍回落默认）', () => {
     expect(normalizeLyricSource('kugou')).toBe('kugou')
+    expect(normalizeLyricSource('不存在的源')).toBe(DEFAULT_LYRIC_SOURCE)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T90-⑥：酷我适配器
+// ---------------------------------------------------------------------------
+
+describe('T90-⑥ · 酷我适配器', () => {
+  /** 造的搜索响应（`MUSICRID` 带 `MUSIC_` 前缀；`DURATION` 是**秒**）。 */
+  const searchBody = JSON.stringify({
+    abslist: [
+      {
+        MUSICRID: 'MUSIC_198554068',
+        SONGNAME: '占位歌名',
+        ARTIST: '占位歌手',
+        ALBUM: '占位专辑',
+        DURATION: '200',
+      },
+    ],
+  })
+
+  /** 酷我的 XOR 密钥（**独立手写** ⇒ 生产密钥写错时用例会红）。 */
+  const KEY_LITERAL: readonly number[] = [121, 101, 101, 108, 105, 111, 110]
+
+  /** 造一份**合成的**酷我 lrcx 载荷（原始字节）。 */
+  function kuwoPayload(plain: string): Uint8Array {
+    const inner = Buffer.from(plain, 'utf8')
+    for (let i = 0; i < inner.length; i += 1) {
+      inner[i] = inner[i]! ^ KEY_LITERAL[i % KEY_LITERAL.length]!
+    }
+    const base64 = Buffer.from(inner.toString('base64'), 'utf8')
+    const deflated = deflateSync(base64)
+    const head = Buffer.from('TP=content\r\nlrcx=1\r\n\r\n', 'latin1')
+    return new Uint8Array(Buffer.concat([head, deflated]))
+  }
+
+  /** 占位 lrcx 明文（**自己编的歌词**）。 */
+  const LRCX = [
+    '[kuwo:034]',
+    '[00:01.000]<4000,-4000>占<5000,-3000>位',
+    // 翻译行（同时间戳、排在原文行之前、词标签全 `<0,0>`）
+    '[00:02.000]<0,0>占<0,0>位',
+  ].join('\n')
+
+  it('两跳走通 → **原文是带逐字标签的增强 LRC**；**翻译是行级 LRC**', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'search.kuwo.cn', body: searchBody },
+      { match: 'mlyric.kuwo.cn', body: kuwoPayload(LRCX), contentType: 'application/octet-stream' },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kuwo', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.source).toBe('kuwo')
+    // ⚠️ 词时间是「行首 + 相对」⇒ 1000ms 与 1500ms。
+    expect(result.original).toBe('[00:01.00]<00:01.00>占<00:01.50>位')
+    expect(result.translation).toBe('[00:02.00]占位')
+  })
+
+  it('⚠️ **端点必须全是 https**（本任务最容易回归的一条）', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      { match: 'search.kuwo.cn', body: searchBody },
+      { match: 'mlyric.kuwo.cn', body: kuwoPayload(LRCX), contentType: 'application/octet-stream' },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    await provider.fetchExternalLyric('kuwo', '', QUERY)
+    const kuwoCalls = calls.filter((url) => url.includes('kuwo.cn'))
+    expect(kuwoCalls.length).toBeGreaterThan(0)
+    for (const url of kuwoCalls) {
+      expect(url.startsWith('https://')).toBe(true)
+    }
+    // ⚠️ 两跳的**顺序**：搜索 → 歌词。
+    expect(kuwoCalls[0]).toContain('search.kuwo.cn')
+    expect(kuwoCalls[1]).toContain('mlyric.kuwo.cn')
+    // ⚠️ 歌词请求要 **`lrcx=1`**（要逐字）与**去掉 `MUSIC_` 前缀的 rid**。
+    expect(kuwoCalls[1]).toContain('lrcx=1')
+    expect(kuwoCalls[1]).toContain('rid=198554068')
+    expect(kuwoCalls[1]).not.toContain('MUSIC_')
+  })
+
+  it('搜索结果里没有对得上的 → `not-found`（不是错误）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'search.kuwo.cn', body: JSON.stringify({ abslist: [] }) },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kuwo', '', QUERY)
+    expect(result.status).toBe('not-found')
+  })
+
+  it('搜索接口返回 500 → `error` + 可读原因（**不抛异常**）', async () => {
+    const { fetchImpl } = makeFetch([{ match: 'search.kuwo.cn', status: 500, body: 'boom' }])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kuwo', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('500')
+  })
+
+  it('搜索接口返回的不是 JSON → `error`', async () => {
+    const { fetchImpl } = makeFetch([{ match: 'search.kuwo.cn', body: 'not json' }])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kuwo', '', QUERY)
+    expect(result.status).toBe('error')
+  })
+
+  it('歌词接口返回 500 → `error` + 可读原因', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'search.kuwo.cn', body: searchBody },
+      { match: 'mlyric.kuwo.cn', status: 500, body: 'boom' },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kuwo', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('500')
+  })
+
+  it('⚠️ **载荷不是酷我密文 ⇒ 如实报错**（不静默吞掉、不产出乱码歌词）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'search.kuwo.cn', body: searchBody },
+      { match: 'mlyric.kuwo.cn', body: Buffer.from('这不是酷我密文', 'utf8') },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kuwo', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('酷我')
+  })
+
+  it('⚠️ **用户选酷我时它是首选源**（其余源照旧兜底）', () => {
+    expect(buildSourceChain('kuwo', '')).toEqual(['kuwo', 'netease', 'lrclib', 'qq', 'kugou'])
+  })
+
+  it('⚠️ **normalizeLyricSource 认得 kuwo**（陌生值仍回落默认）', () => {
+    expect(normalizeLyricSource('kuwo')).toBe('kuwo')
     expect(normalizeLyricSource('不存在的源')).toBe(DEFAULT_LYRIC_SOURCE)
   })
 })
