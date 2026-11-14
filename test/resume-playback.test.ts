@@ -28,6 +28,7 @@ import {
   type ResumeRecord,
 } from '../src/player/resume'
 import { createResumePort, type ResumeStorageLike } from '../src/player/resumeBridge'
+import type { PlayOptions } from '../src/player/engine'
 import { restoreLastPlayback } from '../src/state/resumeFlow'
 import { createPlayerStore, type PlayerEngineLike } from '../src/state/playerStore'
 import type { PlayMode, PlayerState, Song } from '../shared/types'
@@ -82,11 +83,14 @@ class FakeEngine implements PlayerEngineLike {
   }
   played: Song[] = []
   seeks: number[] = []
+  /** 每次 `play()` 收到的**起播选项**（按调用顺序；T92：淡入请求）。 */
+  playOptionsList: Array<PlayOptions | undefined> = []
   private stateListeners: ((state: PlayerState) => void)[] = []
   private endedListeners: ((song: Song | null) => void)[] = []
 
-  play(songToPlay: Song): void {
+  play(songToPlay: Song, options?: PlayOptions): void {
     this.played.push(songToPlay)
+    this.playOptionsList.push(options)
     this.state = { ...this.state, current: songToPlay, isPlaying: true, error: null }
     this.emit()
   }
@@ -489,5 +493,53 @@ describe('T89-⑲ 「启动时自动播放」偏好', () => {
     const dumped = JSON.stringify(prefs.read())
     expect(dumped).not.toContain('positionSec')
     expect(dumped).not.toContain('fnmusic-resume')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 7. 启动自动播放的**音量淡入**（T92）
+// ---------------------------------------------------------------------------
+//
+// 启动自动播放的第一声**突兀**（T91 真机复验：软件零淡入，第一声 34 ms 拉满）。
+// ⇒ 恢复播放时给引擎一个**淡入请求**；手动点歌**不**淡入（用户自己点的，本来就有准备）。
+//
+// ---------------------------------------------------------------------------
+
+describe('T92 启动自动播放的淡入请求', () => {
+  /** 造一个带假端口的 store。 */
+  function setup() {
+    const engine = new FakeEngine()
+    const store = createPlayerStore(engine, {
+      resume: {
+        load: async () => null,
+        save: async () => undefined,
+        clear: async () => undefined,
+      },
+    })
+    return { engine, store }
+  }
+
+  it('恢复播放 ⇒ 起播**带**淡入请求（时长落在 200–400 ms 里）', () => {
+    const { engine, store } = setup()
+    store.getState().resumePlayback(song('a'), 42)
+    const fadeInMs = engine.playOptionsList[0]?.fadeInMs
+    expect(typeof fadeInMs).toBe('number')
+    expect(fadeInMs!).toBeGreaterThanOrEqual(200)
+    expect(fadeInMs!).toBeLessThanOrEqual(400)
+  })
+
+  it('手动点歌 ⇒ **不带**淡入请求（既有行为一字不变）', () => {
+    const { engine, store } = setup()
+    store.getState().playTrack(song('a'))
+    expect(engine.playOptionsList[0]?.fadeInMs).toBeUndefined()
+  })
+
+  it('切到下一首 ⇒ **不带**淡入请求（淡入只治「启动自动播放」）', () => {
+    const { engine, store } = setup()
+    store.getState().playTrack(song('a'), [song('a'), song('b')])
+    store.getState().next()
+    // ⚠️ 第 2 次 `play()`（下一首）**不带**淡入。
+    expect(engine.playOptionsList).toHaveLength(2)
+    expect(engine.playOptionsList[1]?.fadeInMs).toBeUndefined()
   })
 })

@@ -24,7 +24,7 @@
 import { create } from 'zustand'
 
 import type { PlayMode, PlayerState, Song } from '../../shared/types'
-import { PlayerEngine, type PlayerEngineLike } from '../player/engine'
+import { PlayerEngine, AUTOPLAY_FADE_IN_MS, type PlayerEngineLike, type PlayOptions } from '../player/engine'
 import {
   EqChain,
   EQ_CUSTOM_PRESET,
@@ -107,8 +107,10 @@ export interface PlayerStore {
    * @param song 要播放的曲目。
    * @param list 可选的队列上下文（例如用户在某个列表里点了这首歌）——
    *             给了就整队入队并定位到点击的那首；不给就把这首并入当前队列。
+   * @param options 可选的**起播选项**（T92：`fadeInMs` = 起播时做一次音量淡入；
+   *                 不给 = **不淡入**，既有行为一字不变）。
    */
-  playTrack: (song: Song, list?: Song[]) => void
+  playTrack: (song: Song, list?: Song[], options?: PlayOptions) => void
   /** 播放 / 暂停切换。 */
   togglePlay: () => void
   /** 下一首（按当前播放模式）。 */
@@ -386,7 +388,7 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
     eqGains: initialEqGains,
     eqBands: buildBands(initialEq.bandCount, initialEqGains),
 
-    playTrack: (song, list) => {
+    playTrack: (song, list, options) => {
       if (Array.isArray(list) && list.length > 0) {
         // 整队入队，并定位到点击的那首。
         queue.clear()
@@ -405,7 +407,7 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
 
       engine.setQueue?.(queue.items)
       set({ queue: [...queue.items], current: song })
-      engine.play(song)
+      engine.play(song, options)
       // ⚠️ T89-⑲：**切歌就换记录**（新曲、位置从 0 起）。
       persistResume(song, 0, song.duration, true)
     },
@@ -589,7 +591,9 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
         typeof positionSec === 'number' && Number.isFinite(positionSec) && positionSec > 0
           ? positionSec
           : 0
-      get().playTrack(song)
+      // ⚠️ T92：**启动自动播放** ⇒ 第一声做一次音量淡入（不突兀）。
+      //    手动点歌**不**淡入（用户自己点的，本来就有心理准备）。
+      get().playTrack(song, undefined, { fadeInMs: AUTOPLAY_FADE_IN_MS })
       // ⚠️ `playTrack` 刚写了一条「位置 0」的记录 ⇒ 把**原位置**写回去，
       //    免得「恢复没成功 ⇒ 记录丢了 ⇒ 下次也没得恢复」。
       persistResume(song, value, song.duration, true)

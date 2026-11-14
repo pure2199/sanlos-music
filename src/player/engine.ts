@@ -117,10 +117,27 @@ export interface AudioNodeLike {
   disconnect(destination?: unknown): void
 }
 
+/**
+ * `AudioParam` 的最小接口（音量参数）。
+ *
+ * ⚠️ **排程方法全部是可选的**：老 Chromium / 测试替身没有它们 ⇒
+ *    引擎必须能**降级**（淡入时直接给目标音量，**而不是**留下静音）。
+ */
+export interface AudioParamLike {
+  /** 当前值（瞬时赋值 ≈ `setValueAtTime(value, now)`）。 */
+  value: number
+  /** 线性爬坡到 `value`（在 `endTime` 时刻到达）。 */
+  linearRampToValueAtTime?(value: number, endTime: number): void
+  /** 在 `startTime` 时刻把值设为 `value`。 */
+  setValueAtTime?(value: number, startTime: number): void
+  /** 取消 `cancelTime` 之后（含）的排程事件。 */
+  cancelScheduledValues?(cancelTime: number): void
+}
+
 /** 增益节点（音量）。 */
 export interface GainNodeLike extends AudioNodeLike {
   /** 增益参数。 */
-  gain: { value: number }
+  gain: AudioParamLike
 }
 
 /** 媒体元素源节点。 */
@@ -192,6 +209,12 @@ export interface AudioBufferSourceNodeLike extends AudioNodeLike {
 export interface AudioContextLike {
   /** 上下文状态（`running` / `suspended` / `closed`）。 */
   readonly state: string
+  /**
+   * 上下文的当前时刻（秒）；**可选**（拿不到时按 0 处理）。
+   *
+   * ⚠️ 淡入的爬坡要用它算「什么时候到目标值」（T92）。
+   */
+  readonly currentTime?: number
   /** 采样率（Hz）；**可选**（拿不到时用 `SPECTRUM_FALLBACK_SAMPLE_RATE` 兜底）。 */
   readonly sampleRate?: number
   /**
@@ -416,6 +439,29 @@ export interface FallbackPreparation {
   detail?: string | null
 }
 
+/**
+ * 启动自动播放的**淡入时长**（毫秒）。
+ *
+ * ⚠️ 取用户给的 200–400 ms 区间的**中值**。
+ * ⚠️ 真机实测（`release/verify/t92-03-single-clock.json`）：`playing` 事件离
+ *    **第一声**只差 **48 ms**（= 设备输出延迟）⇒ 300 ms 的爬坡正好盖住开头那一下。
+ */
+export const AUTOPLAY_FADE_IN_MS = 300
+
+/**
+ * 起播选项（**全部可选** ⇒ 既有实现与测试替身不受影响）。
+ */
+export interface PlayOptions {
+  /**
+   * 起播时做一次**音量淡入**（毫秒）。
+   *
+   * ⚠️ 不给 / ≤ 0 = **不淡入**（既有行为一字不变）。
+   * ⚠️ 淡入**只改增益的时间曲线**、**不改终点值** ⇒ 淡入结束后的输出与
+   *    淡入之前**逐值相同**（音量滑块不动、状态不变、界面不闪）。
+   */
+  fadeInMs?: number
+}
+
 /** 引擎的构造参数（全部可注入）。 */
 export interface PlayerEngineOptions {
   /** 音频元素；缺省时在**真正播放**时创建 `<audio>`。 */
@@ -479,7 +525,7 @@ export interface PlayerEngineOptions {
 /** 引擎的对外接口（store 依赖它；也是单测替身的形状）。 */
 export interface PlayerEngineLike {
   /** 播放一首歌。 */
-  play(song: Song): void
+  play(song: Song, options?: PlayOptions): void
   /** 暂停。 */
   pause(): void
   /** 继续播放。 */
@@ -579,6 +625,18 @@ export class PlayerEngine implements PlayerEngineLike {
   private positionSec = 0
   private durationSec = 0
   private volumeValue = 1
+  /**
+   * 本次起播要淡入的时长（毫秒）；`0` = **不淡入**（T92）。
+   *
+   * ⚠️ 只在**这一次**起播里有意义（手动点歌不带这个请求）。
+   */
+  private fadeInMs = 0
+  /**
+   * 淡入是否**已上膛**（增益已压到 0，等 `playing` 事件爬坡）。
+   *
+   * ⚠️ 上膛期间任何异常路径都必须把它清掉并恢复音量 ⇒ **绝不留下永久静音**。
+   */
+  private fadeArmed = false
   private modeValue: PlayMode = 'sequence'
   private errorMessage: string | null = null
   /**
@@ -734,7 +792,7 @@ export class PlayerEngine implements PlayerEngineLike {
    * 4. 把 `audio.src` 指到 `fnm://srv/track/stream?guid=…`；
    * 5. 起播并推进进度。
    */
-  play(song: Song): void {
+  play(song: Song, options?: PlayOptions): void {
     // ⚠️ **作废在飞的兜底准备**：切歌后旧结果回来**不得**改状态。
     this.fallbackGeneration += 1
     const generation = this.fallbackGeneration
@@ -745,11 +803,11 @@ export class PlayerEngine implements PlayerEngineLike {
     // T54：标准音质 → 走服务端转码（**失败自动回退原始音质**）。
     const quality = this.options.streamQuality?.() ?? 'original'
     if (quality === 'standard' && this.options.prepareStandardSource) {
-      this.playViaStandardQuality(song, generation)
+      this.playViaStandardQuality(song, generation, options)
       return
     }
 
-    this.playResolved(song, generation)
+    this.playResolved(song, generation, options)
   }
 
   /**
@@ -758,11 +816,11 @@ export class PlayerEngine implements PlayerEngineLike {
    * ⚠️ 这是 `play()` 与「标准音质失败后的回退」**共用**的一段——
    *    两处走**同一条**既有路径，回退时既有行为（兜底 / 报错）**一字不变**。
    */
-  private playResolved(song: Song, generation: number): void {
+  private playResolved(song: Song, generation: number, options?: PlayOptions): void {
     const undecodable = undecodableFormat(song.codec, songFormatExtension(song))
     if (undecodable !== null) {
       if (this.options.prepareSource) {
-        this.playViaFallback(song, undecodable, generation)
+        this.playViaFallback(song, undecodable, generation, options)
         return
       }
       // 不可解格式：**不静默失败**——停下当前播放并把可读错误写进状态。
@@ -777,7 +835,7 @@ export class PlayerEngine implements PlayerEngineLike {
       return
     }
 
-    this.startPlayback(song, this.resolveSource(song), false)
+    this.startPlayback(song, this.resolveSource(song), false, options)
   }
 
   /**
@@ -788,10 +846,10 @@ export class PlayerEngine implements PlayerEngineLike {
    *    **不黑屏、不卡死**。
    * ⚠️ **过时结果一律丢弃**：`generation` 变了（用户已经切歌）→ 不改状态。
    */
-  private playViaStandardQuality(song: Song, generation: number): void {
+  private playViaStandardQuality(song: Song, generation: number, options?: PlayOptions): void {
     const prepare = this.options.prepareStandardSource
     if (!prepare) {
-      this.playResolved(song, generation)
+      this.playResolved(song, generation, options)
       return
     }
 
@@ -814,18 +872,18 @@ export class PlayerEngine implements PlayerEngineLike {
         this.qualityPreparing = false
         if (typeof url === 'string' && url.length > 0) {
           // 转码产物 → 直接起播（**不**算兜底：那是服务端产物，不是本机有损转码）。
-          this.startPlayback(song, url, false)
+          this.startPlayback(song, url, false, options)
           return
         }
         // 空串 → 这一曲**不需要**转码（本地副本 / 本地曲目）→ 静默走既有路径。
-        this.playResolved(song, generation)
+        this.playResolved(song, generation, options)
       })
       .catch((err: unknown) => {
         if (generation !== this.fallbackGeneration) return
         this.qualityPreparing = false
         // ⚠️ **回退原始音质**：说明写**灰字**（不是错误），音乐照常播。
         this.qualityNote = standardQualityUnavailableMessage(errorDetail(err))
-        this.playResolved(song, generation)
+        this.playResolved(song, generation, options)
       })
   }
 
@@ -837,7 +895,7 @@ export class PlayerEngine implements PlayerEngineLike {
    *    转码成功 → 用产物地址起播；失败 → 写**友好提示**（说清楚缺什么、下一步做什么）。
    * ⚠️ **过时结果一律丢弃**：`generation` 变了（用户已经切歌 / 取消）→ 不改状态。
    */
-  private playViaFallback(song: Song, label: string, generation: number): void {
+  private playViaFallback(song: Song, label: string, generation: number, options?: PlayOptions): void {
     const prepare = this.options.prepareSource
     if (!prepare) return
 
@@ -859,7 +917,7 @@ export class PlayerEngine implements PlayerEngineLike {
         this.preparing = false
         const url = typeof result?.url === 'string' ? result.url : ''
         if (url.length > 0) {
-          this.startPlayback(song, url, true)
+          this.startPlayback(song, url, true, options)
           return
         }
         this.errorMessage = fallbackUnavailableMessage(
@@ -885,11 +943,16 @@ export class PlayerEngine implements PlayerEngineLike {
    * @param song         要播的曲目。
    * @param url          播放地址（普通路径 = `fnm://` / `fnml://`；兜底路径 = 转码产物地址）。
    * @param viaFallback  是不是兜底产物（决定界面要不要注明「音质有损」）。
+   * @param options      起播选项（**淡入**请求；不给 = 不淡入）。
    */
-  private startPlayback(song: Song, url: string, viaFallback: boolean): void {
+  private startPlayback(song: Song, url: string, viaFallback: boolean, options?: PlayOptions): void {
     const element = this.ensureAudioElement()
     if (!element) return
     if (!this.ensureAudioGraph(element)) return
+
+    // ⚠️ T92：淡入**只在这里上膛**（增益置 0，等 `playing` 事件再爬坡）。
+    //    放在建图之后 ⇒ 增益节点一定在；放在起播之前 ⇒ 声音出来前增益已经压住。
+    this.prepareFadeIn(options?.fadeInMs)
 
     this.errorMessage = null
     this.preparing = false
@@ -924,6 +987,8 @@ export class PlayerEngine implements PlayerEngineLike {
 
   /** 暂停。 */
   pause(): void {
+    // ⚠️ T92：**任何**暂停都要撤销淡入（增益绝不能留在 0 上）。
+    this.cancelFade()
     // ⚠️ **正在兜底转码时按暂停 = 取消这次转码**：
     //    不作废的话，转码完成后仍会自己起播——用户明明按了暂停却在放歌。
     if (this.preparing) {
@@ -980,7 +1045,14 @@ export class PlayerEngine implements PlayerEngineLike {
     //    应用恢复上次的音量、或用户在首播前拖过音量条，都走这条路。
     //    否则第一首歌会按音量 1 播，用户以为设置没生效。
     else if (this.injectedElement) this.injectedElement.volume = clamped
-    if (this.gain) this.gain.gain.value = clamped
+    if (this.gain) {
+      const param = this.gain.gain
+      // ⚠️ **先取消已排的爬坡**：按 Web Audio 规范，「`setValueAtTime` + 后面的
+      //    `linearRamp`」会让爬坡从**新值**再爬回**旧目标** ⇒ 用户拖音量会被拽回去。
+      //    （今天没有排程事件 ⇒ **既有行为一字不变**。）
+      param.cancelScheduledValues?.(this.contextNow())
+      param.value = clamped
+    }
     this.emit()
   }
 
@@ -994,6 +1066,93 @@ export class PlayerEngine implements PlayerEngineLike {
   setMode(mode: PlayMode): void {
     this.modeValue = mode
     this.emit()
+  }
+
+  // --- T92：启动自动播放的**音量淡入** ---------------------------------------
+  //
+  // 机制：**上膛 → 静音 → `playing` 事件 → 线性爬坡到当前音量**。
+  //
+  // ⚠️ 锚点为什么是 `playing` 事件（真机实测，`release/verify/t92-03-single-clock.json`）：
+  //    建图时刻比第一声**早 1.5 s**（锚在那里 ⇒ 爬坡在声音出来前就结束了 ⇒ 等于没淡入）；
+  //    而 `playing` 离第一声只差 **48 ms**（= 设备输出延迟）⇒ 300 ms 的爬坡正好盖住开头。
+  //
+  // ⚠️ **绝不留下永久静音**：上膛期间增益是 0 ⇒ 任何「没能爬坡」的路径都必须
+  //    把增益恢复成当前音量（老环境没有 ramp API / 出错 / 暂停 / 换歌）。
+  //
+
+  /**
+   * 上膛 / 撤销淡入（**起播时**调用）。
+   *
+   * - 有淡入请求 ⇒ 把增益**置 0**（静音），等 `playing` 事件再爬坡；
+   * - 没有 ⇒ 把增益**恢复成当前音量**（顺带取消上一次可能残留的静音 / 排程）。
+   */
+  private prepareFadeIn(fadeInMs: number | undefined): void {
+    const ms =
+      typeof fadeInMs === 'number' && Number.isFinite(fadeInMs) && fadeInMs > 0 ? fadeInMs : 0
+    this.fadeInMs = ms
+    this.fadeArmed = ms > 0
+    if (!this.fadeArmed) {
+      this.restoreGainToVolume()
+      return
+    }
+    const param = this.gain?.gain
+    if (!param) {
+      // 没有增益节点（音频图都没建起来）⇒ 淡入无从谈起 ⇒ 不上膛。
+      this.fadeArmed = false
+      return
+    }
+    param.cancelScheduledValues?.(this.contextNow())
+    // ⚠️ **上膛 = 静音**：此刻媒体还在加载、**还没有声音** ⇒ 静音不损失任何东西。
+    param.value = 0
+  }
+
+  /**
+   * `playing` 事件 ⇒ 开始爬坡（`0 → 当前音量`，`fadeInMs` 毫秒，线性）。
+   *
+   * ⚠️ 锚点**只用 `playing`**，不用 `canplay`：`canplay` 只说明「数据到了」，
+   *    可能**早于**真正出声 ⇒ 用它当锚点会让爬坡提前结束（等于没淡入）。
+   */
+  private beginFadeRamp(): void {
+    if (!this.fadeArmed) return
+    this.fadeArmed = false
+    const param = this.gain?.gain
+    if (!param) return
+    const target = this.volumeValue
+    const now = this.contextNow()
+    if (typeof param.linearRampToValueAtTime !== 'function') {
+      // 老环境没有 ramp API ⇒ 直接给目标音量（= 不淡入，但**不是**静音）。
+      param.value = target
+      return
+    }
+    param.cancelScheduledValues?.(now)
+    param.setValueAtTime?.(0, now)
+    // ⚠️ **终点值 = 当前音量** ⇒ 淡入结束后的输出与淡入之前**逐值相同**。
+    param.linearRampToValueAtTime(target, now + this.fadeInMs / 1000)
+  }
+
+  /**
+   * 取消淡入（**上膛**期间出错 / 暂停 / 换歌）。
+   *
+   * ⚠️ **爬坡中不打断**：让它自己爬到目标值（中途打断会把音量冻在半路）。
+   */
+  private cancelFade(): void {
+    if (!this.fadeArmed) return
+    this.fadeArmed = false
+    this.restoreGainToVolume()
+  }
+
+  /** 把增益恢复成「当前音量」（并取消已排的自动化事件）。 */
+  private restoreGainToVolume(): void {
+    const param = this.gain?.gain
+    if (!param) return
+    param.cancelScheduledValues?.(this.contextNow())
+    param.value = this.volumeValue
+  }
+
+  /** 音频上下文的当前时刻（秒）；拿不到时按 0 处理。 */
+  private contextNow(): number {
+    const t = this.context?.currentTime
+    return typeof t === 'number' && Number.isFinite(t) ? t : 0
   }
 
   // --- Task 21（EQ）接缝 ---------------------------------------------------
@@ -1210,6 +1369,8 @@ export class PlayerEngine implements PlayerEngineLike {
         // ⚠️ 用户主动暂停 → 不是「缓冲」，把提示收掉（否则暂停着还显示「缓冲中…」）。
         this.setBuffering(false)
         this.stopTicking()
+        // ⚠️ T92：暂停 ⇒ 撤销淡入（**绝不**把增益留在 0 上）。
+        this.cancelFade()
         this.emit()
       }],
       ['ended', () => this.handleEnded()],
@@ -1218,7 +1379,13 @@ export class PlayerEngine implements PlayerEngineLike {
       ['stalled', () => this.handleStalled()],
       ['waiting', () => this.handleWaiting()],
       // 数据到了 → 缓冲提示自动消失。
-      ['playing', () => this.handleResumed()],
+      //
+      // ⚠️ T92：`playing` 是**淡入的锚点**（离第一声只差 48 ms）⇒ 这里开始爬坡；
+      //    `canplay` 只说明「数据到了」、可能早于出声 ⇒ **不能**当锚点。
+      ['playing', () => {
+        this.handleResumed()
+        this.beginFadeRamp()
+      }],
       ['canplay', () => this.handleResumed()],
       ['emptied', () => this.handleLoadCycleStart()],
       ['loadstart', () => this.handleLoadCycleStart()],
@@ -1256,6 +1423,8 @@ export class PlayerEngine implements PlayerEngineLike {
     this.playing = false
     this.buffering = false
     this.stopTicking()
+    // ⚠️ T92：曲终 ⇒ 撤销淡入（增益绝不能留在 0 上）。
+    this.cancelFade()
     if (this.durationSec > 0) this.positionSec = this.durationSec
     this.emit()
     const song = this.currentSong
@@ -1277,6 +1446,8 @@ export class PlayerEngine implements PlayerEngineLike {
     // ⚠️ **真出错了** → 缓冲提示收掉（错误优先，界面只显示一条）。
     this.buffering = false
     this.stopTicking()
+    // ⚠️ T92：出错 ⇒ 撤销淡入（增益绝不能留在 0 上）。
+    this.cancelFade()
     this.emit()
   }
 
@@ -1355,6 +1526,8 @@ export class PlayerEngine implements PlayerEngineLike {
     this.playing = false
     this.buffering = false
     this.stopTicking()
+    // ⚠️ T92：真实中止 ⇒ 撤销淡入（增益绝不能留在 0 上）。
+    this.cancelFade()
     this.emit()
   }
 

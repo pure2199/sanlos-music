@@ -74,8 +74,43 @@ class FakeNode implements AudioNodeLike {
   }
 }
 
-/** 假增益节点。 */
+/** 假增益参数（**带调用记录** —— 用来断言「淡入爬坡」）。 */
+interface FakeParam {
+  value: number
+  linearRampToValueAtTime: (value: number, endTime: number) => void
+  setValueAtTime: (value: number, startTime: number) => void
+  cancelScheduledValues: (cancelTime: number) => void
+}
+
+/** 假增益节点（**带** ramp 记录）。 */
 class FakeGainNode extends FakeNode implements GainNodeLike {
+  /** `linearRampToValueAtTime` 的调用记录（目标值 + 结束时刻）。 */
+  ramps: Array<{ value: number; endTime: number }> = []
+  /** `setValueAtTime` 的调用记录（值）。 */
+  setValueCalls: number[] = []
+  /** `cancelScheduledValues` 的调用记录（时刻）。 */
+  cancels: number[] = []
+  gain: FakeParam
+
+  constructor() {
+    super()
+    this.gain = {
+      value: 1,
+      linearRampToValueAtTime: (value: number, endTime: number): void => {
+        this.ramps.push({ value, endTime })
+      },
+      setValueAtTime: (value: number): void => {
+        this.setValueCalls.push(value)
+      },
+      cancelScheduledValues: (cancelTime: number): void => {
+        this.cancels.push(cancelTime)
+      },
+    }
+  }
+}
+
+/** 假增益节点（**没有** ramp API —— 模拟老 Chromium / 老环境）。 */
+class FakePlainGainNode extends FakeNode implements GainNodeLike {
   gain = { value: 1 }
 }
 
@@ -87,11 +122,23 @@ class FakeAudioContext implements AudioContextLike {
   /** `createMediaElementSource` 被调用的元素（按调用顺序记录）。 */
   sourceElements: unknown[] = []
   lastGain: FakeGainNode | null = null
+  /** 「没有 ramp API」那一次造出来的增益节点。 */
+  lastPlainGain: FakePlainGainNode | null = null
   lastSource: FakeNode | null = null
+  /** 上下文的当前时刻（秒）—— ramp 的时间轴用它。 */
+  currentTime = 0
+  /** 增益节点**要不要**带 ramp API（false = 模拟老环境）。 */
+  gainHasRamp = true
 
-  createGain(): FakeGainNode {
-    this.lastGain = new FakeGainNode()
-    return this.lastGain
+  createGain(): GainNodeLike {
+    if (!this.gainHasRamp) {
+      const plain = new FakePlainGainNode()
+      this.lastPlainGain = plain
+      return plain
+    }
+    const gain = new FakeGainNode()
+    this.lastGain = gain
+    return gain
   }
 
   createMediaElementSource(element: unknown): MediaElementSourceLike {
@@ -1036,5 +1083,106 @@ describe('playerStore', () => {
     expect(dump.toLowerCase()).not.toContain('token')
     expect(dump.toLowerCase()).not.toContain('password')
     expect(dump.toLowerCase()).not.toContain('cookie')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T92：启动自动播放的**音量淡入**
+// ---------------------------------------------------------------------------
+//
+// 这组用例钉住「启动自动播放的第一声不突兀」的全部机制：
+// 1. **上膛**：带 `fadeInMs` 起播 ⇒ 增益先置 0（静音），等 `playing` 事件；
+// 2. **爬坡**：`playing` 之后按 `fadeInMs` 线性爬到**当前音量**；
+// 3. **手动播放不受影响**：不带选项 ⇒ 既不静音也不爬坡（既有行为一字不变）；
+// 4. **绝不留下永久静音**：没有 ramp API / 换歌 / 暂停 ⇒ 增益都回到当前音量；
+// 5. **用户改音量不被拽回**：爬坡中改音量 ⇒ 旧的 ramp 必须被取消。
+//
+// ⚠️ 锚点是 **`playing` 事件**：真机实测「playing → 第一声」只差 **48 ms**
+//    （`release/verify/t92-03-single-clock.json`）⇒ 300 ms 的 ramp 正好盖住开头。
+//
+// ---------------------------------------------------------------------------
+
+describe('PlayerEngine：启动自动播放的音量淡入（T92）', () => {
+  it('带 fadeInMs 起播 ⇒ 先上膛静音（等 playing 事件再爬坡）', () => {
+    const { engine, element, context } = createEngine()
+    engine.play(song('a'), { fadeInMs: 300 })
+    // ⚠️ 上膛 = 静音：**此时还没有声音**（媒体还在加载）⇒ 静音不损失任何东西。
+    expect(context.lastGain!.gain.value).toBe(0)
+    // ⚠️ 还没到 `playing` ⇒ **不许**爬坡（爬了也是白爬，声音还没出来）。
+    expect(context.lastGain!.ramps).toHaveLength(0)
+    element.emit('playing', { target: element })
+  })
+
+  it('playing 之后按 300 ms 线性爬到「当前音量」', () => {
+    const { engine, element, context } = createEngine()
+    engine.play(song('a'), { fadeInMs: 300 })
+    element.emit('playing', { target: element })
+    expect(context.lastGain!.ramps).toEqual([{ value: 1, endTime: 0.3 }])
+    // ⚠️ 爬坡的起点必须是 0（否则第一声还是「一步到位」）。
+    expect(context.lastGain!.setValueCalls).toContain(0)
+  })
+
+  it('不带 fadeInMs 起播 ⇒ 不静音、不爬坡（手动播放，既有行为一字不变）', () => {
+    const { engine, element, context } = createEngine()
+    engine.play(song('a'))
+    expect(context.lastGain!.gain.value).toBe(1)
+    element.emit('playing', { target: element })
+    expect(context.lastGain!.ramps).toHaveLength(0)
+  })
+
+  it('环境没有 ramp API ⇒ 直接给目标音量（**绝不**留下永久静音）', () => {
+    const { engine, element, context } = createEngine()
+    context.gainHasRamp = false
+    engine.play(song('a'), { fadeInMs: 300 })
+    expect(context.lastPlainGain!.gain.value).toBe(0)
+    element.emit('playing', { target: element })
+    // ⚠️ 爬不了 ⇒ 立刻给目标音量（= 不淡入，但**不是**静音）。
+    expect(context.lastPlainGain!.gain.value).toBe(1)
+  })
+
+  it('淡入上膛期间换歌（不带 fadeInMs）⇒ 增益回到当前音量', () => {
+    const { engine, context } = createEngine()
+    engine.play(song('a'), { fadeInMs: 300 })
+    expect(context.lastGain!.gain.value).toBe(0)
+    engine.play(song('b'))
+    expect(context.lastGain!.gain.value).toBe(1)
+  })
+
+  it('淡入上膛期间暂停 ⇒ 增益回到当前音量', () => {
+    const { engine, context } = createEngine()
+    engine.play(song('a'), { fadeInMs: 300 })
+    // ⚠️ 前置：**确实上膛了**（否则下面那条断言会平凡通过，测不出任何东西）。
+    expect(context.lastGain!.gain.value).toBe(0)
+    engine.pause()
+    expect(context.lastGain!.gain.value).toBe(1)
+  })
+
+  it('爬坡中用户改音量 ⇒ 旧的 ramp 被取消（音量不会被拽回旧值）', () => {
+    const { engine, element, context } = createEngine()
+    engine.play(song('a'), { fadeInMs: 300 })
+    element.emit('playing', { target: element })
+    const cancelsBefore = context.lastGain!.cancels.length
+    engine.setVolume(0.5)
+    expect(context.lastGain!.cancels.length).toBeGreaterThan(cancelsBefore)
+    expect(context.lastGain!.gain.value).toBe(0.5)
+  })
+
+  it('爬坡的目标是「当前音量」，不是写死的 1', () => {
+    const { engine, element, context } = createEngine()
+    engine.setVolume(0.5)
+    engine.play(song('a'), { fadeInMs: 300 })
+    element.emit('playing', { target: element })
+    expect(context.lastGain!.ramps).toEqual([{ value: 0.5, endTime: 0.3 }])
+  })
+
+  it('淡入是**一次性**的：同一首重播不再淡入', () => {
+    const { engine, element, context } = createEngine()
+    engine.play(song('a'), { fadeInMs: 300 })
+    element.emit('playing', { target: element })
+    // ⚠️ 前置：第一遍**确实爬过一次**（否则下面那条断言会平凡通过）。
+    expect(context.lastGain!.ramps).toHaveLength(1)
+    engine.play(song('a'))
+    element.emit('playing', { target: element })
+    expect(context.lastGain!.ramps).toHaveLength(1)
   })
 })
