@@ -45,6 +45,17 @@ import type {
   LyricSource,
 } from '../shared/lyricProvider'
 
+import { qrcToEnhancedLrc, qrcToPlainLrc, yrcToEnhancedLrc } from './lyricWordFormat'
+import { decodeQrc } from './lyricCodecs/qrc'
+
+/**
+ * 网易云 yrc → 增强 LRC 的转换器。
+ *
+ * ⚠️ **实现已搬到 `electron/lyricWordFormat.ts`**（逐字格式转换都放一处）；
+ *    这里**原样 re-export**，⇒ 既有 import 路径（`electron/lyricProvider`）**不变**。
+ */
+export { yrcToEnhancedLrc } from './lyricWordFormat'
+
 // ---------------------------------------------------------------------------
 // 常量
 // ---------------------------------------------------------------------------
@@ -66,6 +77,26 @@ const QQ_SEARCH_URL = 'https://c.y.qq.com/soso/fcgi-bin/client_search_cp'
 
 /** QQ 音乐歌词接口（公开 Web 接口，**非官方**；返回**明文** LRC + 翻译）。 */
 const QQ_LYRIC_URL = 'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg'
+
+/**
+ * QQ 音乐的**统一接口**（`musicu.fcg`）—— **逐字**歌词走这里。
+ *
+ * ⚠️ 需要 **POST JSON**（请求体里带 `comm` / `req` 两段）。
+ * ⚠️ **不需要签名**（洛雪的 `musicu.fcg` 搜索要 `signRequest`，我们**不用**那条路）。
+ */
+const QQ_MUSICU_URL = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
+
+/**
+ * QQ 源的**专用超时预算**（毫秒）。
+ *
+ * ⚠️ QQ 一次取词要走**三跳**（搜索 → 行级歌词 → 逐字 `musicu.fcg`），
+ *    实测 1364ms + 65ms + 62ms ≈ **1.5 s** ⇒ 通用的 3 s 预算**余量太薄**
+ *    （网络一抖就整源超时 ⇒ 用户的 QQ 源直接失效）。
+ * ⇒ 本源**单独放宽**到 8 s（规格 §6 风险 4 已写明「源级超时预算要单独放宽」）。
+ *
+ * ⚠️ 单测注入的 `perSourceTimeoutMs` **优先**（那是显式的测试钩子，语义不变）。
+ */
+export const QQ_SOURCE_TIMEOUT_MS = 8000
 
 /**
  * 时长容差（**秒**）。
@@ -152,117 +183,6 @@ export function decodeMaybeBase64(text: string): string {
 export function isLoopbackHost(hostname: string): boolean {
   const host = hostname.trim().toLowerCase()
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
-}
-
-// ---------------------------------------------------------------------------
-// 网易云 yrc（真逐字）→ 增强 LRC（T67）
-// ---------------------------------------------------------------------------
-//
-// 为什么要有它
-// ---------------------------------------------------------------------------
-// 官方飞牛 APP 与 Lyricify 这类工具拿到的**逐字**歌词（enhanced LRC / yrc / qrc），
-// 才有**真的跟嘴**的卡拉OK 填色。我们此前只有**行级** LRC ⇒ 逐字是**推算**的。
-//
-// 网易云的 `yrc` 字段就是**真逐字**（实测 2026-11-06，匿名请求）：
-//
-//     [行开始ms,行时长ms](词开始ms,词时长ms,0)词文本(词开始ms,词时长ms,0)词文本
-//
-// - 词时间是**绝对毫秒**（从歌开头算起），**跨行连续递增**；
-// - 词元组**之间没有分隔符**；
-// - **词时长可以为 0**（标点 / 停顿占位）。
-//
-// ⇒ 这里把它转成**标准增强 LRC**（`<mm:ss.xx>` 逐字标签），
-//   交给**现有**解析器（`parseWordSegments` 早就在等喂）⇒ **渲染层零改动**。
-// ---------------------------------------------------------------------------
-
-/**
- * yrc 的**词元组**：`(开始ms, 时长ms, 0)`。
- *
- * ⚠️ **只认数字形状**的元组 ⇒ 词文本里含 `(` / `)` 也不会错位
- *    （实测样本的词文本里就有标点）。
- */
-const YRC_WORD_PATTERN = /\((-?\d+),(-?\d+),(-?\d+)\)/g
-
-/**
- * 毫秒 → LRC 时间标签。
- *
- * - 整除 10 ⇒ 用**厘秒**（`[mm:ss.xx]`），否则用**毫秒**（`[mm:ss.xxx]`）
- *   ⇒ **既短又不丢精度**（实测 yrc 的时间基本都是 10 的倍数）。
- */
-function msToLrcTag(ms: number): string {
-  const total = Math.max(0, Math.round(ms))
-  const minutes = Math.floor(total / 60_000)
-  const seconds = Math.floor((total % 60_000) / 1000)
-  const rest = total % 1000
-  const fraction =
-    rest % 10 === 0 ? String(rest / 10).padStart(2, '0') : String(rest).padStart(3, '0')
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${fraction}`
-}
-
-/**
- * 把网易云的 **yrc（真逐字）** 转成**增强 LRC**（`<mm:ss.xx>` 逐字标签）。
- *
- * **规则（定死）**：
- * 1. **逐行**扫描；行头用 `^\[(\d+),(\d+)\]` 取「行开始 ms」；
- * 2. 行内按**顺序扫描**找词元组（只认数字形状）⇒ 词文本里的括号**不会错位**；
- * 3. 每个词 → `<mm:ss.xx>`（词开始 ms）+ **原样**的词文本
- *    （**不 trim 词内的空格**：英文歌的词间空格要靠它；
- *    渲染层的整行底层文本本来就会保留空格）；
- * 4. **零时长词**（实测是标点 / 停顿占位）→ **并入前一个词**，不单独成词
- *    （没有前词可并 ⇒ 丢弃）；
- * 5. 词开始早于行开始（异常数据）→ **钳到行开始**；
- * 6. 一行里**没有有效词** → **跳过该行**（不产生歌词行）；
- * 7. 空串 / 非串 → 返回空串（**不抛异常**）。
- *
- * @returns 标准增强 LRC（多行，行间 `\n`）。
- */
-export function yrcToEnhancedLrc(yrc: string): string {
-  if (typeof yrc !== 'string' || yrc === '') return ''
-  const out: string[] = []
-  for (const rawLine of yrc.split(/\r\n|\r|\n/)) {
-    const line = rawLine.trim()
-    if (!line) continue
-    const head = /^\[(\d+),(\d+)\]/.exec(line)
-    if (!head) continue
-    const lineStart = Number(head[1])
-    const rest = line.slice(head[0].length)
-
-    // 行内按**顺序扫描**找词元组（只认数字形状 ⇒ 词文本里的括号不会错位）。
-    const pattern = new RegExp(YRC_WORD_PATTERN.source, 'g')
-    const marks: { start: number; dur: number; from: number; to: number }[] = []
-    let match: RegExpExecArray | null
-    while ((match = pattern.exec(rest)) !== null) {
-      marks.push({
-        start: Number(match[1]),
-        dur: Number(match[2]),
-        from: match.index + match[0].length,
-        to: match.index,
-      })
-    }
-    if (!marks.length) continue
-
-    // 零时长词**并入前一个词**（实测是标点 / 停顿占位），不单独成词。
-    const words: { start: number; text: string }[] = []
-    for (let i = 0; i < marks.length; i++) {
-      const mark = marks[i]!
-      const textEnd = i + 1 < marks.length ? marks[i + 1]!.to : rest.length
-      const text = rest.slice(mark.from, textEnd)
-      if (mark.dur === 0) {
-        const previous = words[words.length - 1]
-        if (previous) previous.text += text
-        continue
-      }
-      words.push({ start: Math.max(lineStart, mark.start), text })
-    }
-    if (!words.length) continue
-
-    // 第一个词元组**之前**的文本（实测通常为空）→ 放在行标签之后
-    //    ⇒ 渲染层的 `parseWordSegments` 会把它当成该行的首段。
-    const leading = rest.slice(0, marks[0]!.to).trim()
-    const body = words.map((word) => `<${msToLrcTag(word.start)}>${word.text}`).join('')
-    out.push(`[${msToLrcTag(lineStart)}]${leading}${body}`)
-  }
-  return out.join('\n')
 }
 
 /**
@@ -367,13 +287,14 @@ function sameName(a: string, b: string): boolean {
  * ⚠️ 时长筛**过严**时（各源时长口径不同）会误杀 → 故先在「名字+歌手都对」的
  *    候选里按时长挑；全都对不上时长就退回「名字+歌手都对」的第一条。
  *
+ * @param candidates 候选（**泛型** ⇒ 选中项保留源特有的字段，如 QQ 的 `songId`）。
  * @returns 选中的候选；没有合适的返回 `null`。
  */
-export function pickCandidate(
-  candidates: Candidate[],
+export function pickCandidate<T extends Candidate>(
+  candidates: T[],
   query: ExternalLyricQuery,
   tolerance: number = DURATION_TOLERANCE_SECONDS,
-): Candidate | null {
+): T | null {
   if (!candidates.length) return null
   const byTitle = candidates.filter((item) => sameName(item.title, query.title))
   const pool = byTitle.length ? byTitle : candidates
@@ -585,7 +506,7 @@ async function fetchLrclib(
 }
 
 // ---------------------------------------------------------------------------
-// QQ 音乐适配器（T33）
+// QQ 音乐适配器（T33 行级 + T90-④ 逐字）
 // ---------------------------------------------------------------------------
 //
 // Lyricify（Fusion）**没有**可供第三方调用的公开歌词 API：它的「歌词源」是**客户端
@@ -601,32 +522,54 @@ async function fetchLrclib(
 // - `u.y.qq.com` 的 `DoSearchForQQMusicDesktop` → 200 但**列表为空**；
 // - ✅ 唯一可用：`c.y.qq.com/soso/fcgi-bin/client_search_cp`（200 / 814ms）。
 //
-// ⚠️ QQ 的歌词是**明文 LRC**（带 base64 时也只是**传输编码**，**不是加密**）
-//    → **零解密成本**；但该端点**不返回 `qrc`** → **拿不到逐字**（逐字在
-//    `u.y.qq.com` 的 `PlayLyricInfo`，`qrc` 是**密文**）。
+// ⚠️ QQ 的**行级**歌词是**明文 LRC**（带 base64 时也只是**传输编码**，**不是加密**）
+//    → **零解密成本**；但该端点**不返回 `qrc`** → 逐字要走
+//    `u.y.qq.com/cgi-bin/musicu.fcg` 的 `GetPlayLyricInfo`，那里 `qrc` 是**密文**
+//    （T90-④ 已接上，解密见 `electron/lyricCodecs/qrc.ts`）。
 //
 // ⚠️ **歌词端点强制要求 `Referer`**（**搜索端点不要求**）：带 → `retcode=0`；
 //    不带 → **`retcode=-1310`**、歌词长度 0 → **静默失败**（HTTP 仍是 200）。
 //    ⇒ 那个 `referer` 头是**必需的**。已在**真实 Electron 主进程**里验过：
 //    `session.fetch` **会保留** `Referer`（不带 → `retcode=-1310`）。
+//
+// ⚠️⚠️ **T90-② 的结论要更正**（2026-11-14 实测）：T90-② 记的是「QQ 旧端点 6/6 全 404
+//    ⇒ QQ 源已坏」—— **不成立**。当时探针测的是**少了 `fcgi-bin/` 的 URL 变体**
+//    （`/lyric/fcg_query_lyric_new.fcg` ⇒ 404），
+//    而**生产在用的** `/lyric/fcgi-bin/fcg_query_lyric_new.fcg`
+//    实测 **200 + `retcode=0` + 歌词 1743 字符** ⇒ **QQ 行级源一直是好的**。
+//    ⇒ T90-④ 的定位因此是「**给可用的 QQ 源加逐字**」，**只增不减**。
 
 /** QQ 音乐搜索结果里的一首歌。 */
 interface QqSong {
   songmid?: unknown
+  /**
+   * **数字歌曲 id**（逐字接口 `GetPlayLyricInfo` 要它）。
+   *
+   * ⚠️ 实测（2026-11-14）：`client_search_cp` 的每条候选**都带** `songid`
+   *    （数值型，与 `musicu.fcg` 查出来的 `track_info.id` 一致）
+   *    ⇒ **省掉「songmid → songID」那一跳**（实测 213ms）。
+   */
+  songid?: unknown
   songname?: unknown
   albumname?: unknown
   interval?: unknown
   singer?: unknown
 }
 
+/** 一个 QQ 候选（比通用候选多带一个**数字 songID**）。 */
+interface QqCandidate extends Candidate {
+  /** 数字歌曲 id（逐字接口要它）；**没有就是 0**（= 未知）。 */
+  songId: number
+}
+
 /** 把 QQ 音乐的搜索结果读成候选列表。 */
-function readQqCandidates(payload: unknown): Candidate[] {
+function readQqCandidates(payload: unknown): QqCandidate[] {
   const root = asRecord(payload)
   const data = asRecord(root?.['data'])
   const song = asRecord(data?.['song'])
   const list = song?.['list']
   if (!Array.isArray(list)) return []
-  const out: Candidate[] = []
+  const out: QqCandidate[] = []
   for (const raw of list) {
     const item = asRecord(raw) as QqSong | null
     if (!item) continue
@@ -644,16 +587,165 @@ function readQqCandidates(payload: unknown): Candidate[] {
     //    → 与 `pickCandidate` 的口径**一致**，**不需要**除以 1000。
     const duration =
       typeof item.interval === 'number' && Number.isFinite(item.interval) ? item.interval : 0
-    out.push({ id, title, artist: names.join(','), duration })
+    // ⚠️ `songid` 实测是**数字**；字符串也认（两个源口径不一致的防御）。
+    const rawSongId = item.songid
+    const songId =
+      typeof rawSongId === 'number' && Number.isFinite(rawSongId)
+        ? rawSongId
+        : Number(readString(rawSongId) ?? Number.NaN)
+    out.push({
+      id,
+      title,
+      artist: names.join(','),
+      duration,
+      songId: Number.isFinite(songId) ? songId : 0,
+    })
   }
   return out
+}
+
+/** QQ 取词的一路结果（行级 / 逐字共用）。 */
+type QqPathResult =
+  | { ok: true; original: string; translation: string; romanization: string }
+  | { ok: false; status: 'not-found' | 'error'; message: string }
+
+/**
+ * QQ 的**行级**歌词（`fcg_query_lyric_new.fcg`）。
+ *
+ * ⚠️ 这一路是**既有生产路径**（T33 起就在用）⇒ **一行都不改**：
+ *    - 端点、参数、`referer` 头、错误语义全部保持原样；
+ *    - `retcode ≠ 0` ⇒ `error`（不是「确实没有」）。
+ */
+async function fetchQqLineLevel(fetchImpl: FetchLike, songmid: string): Promise<QqPathResult> {
+  const lyricRes = await fetchImpl(
+    `${QQ_LYRIC_URL}?songmid=${encodeURIComponent(songmid)}&format=json&nobase64=1`,
+    {
+      headers: {
+        accept: 'application/json',
+        referer: 'https://y.qq.com/',
+        'user-agent': USER_AGENT,
+      },
+    },
+  )
+  if (!lyricRes.ok) {
+    return { ok: false, status: 'error', message: `QQ 音乐歌词返回 ${lyricRes.status}` }
+  }
+  const lyricText = await lyricRes.text()
+  let lyricPayload: { retcode?: unknown; lyric?: unknown; trans?: unknown }
+  try {
+    lyricPayload = JSON.parse(lyricText) as { retcode?: unknown; lyric?: unknown; trans?: unknown }
+  } catch {
+    return { ok: false, status: 'error', message: 'QQ 音乐歌词返回的不是 JSON' }
+  }
+  // ⚠️ **`retcode` 非 0 = 源本身报错**（实测 `-1310` = 缺少 `Referer` → HTTP 仍是 **200**，
+  //    但歌词长度 0 → **静默失败**）。此时**如实报「源不可用」**，别报「确实没有」，
+  //    否则用户会以为这首歌就是没歌词。
+  const retcode = typeof lyricPayload.retcode === 'number' ? lyricPayload.retcode : 0
+  if (retcode !== 0) {
+    return { ok: false, status: 'error', message: `QQ 音乐歌词返回错误码 ${retcode}` }
+  }
+  const original = decodeMaybeBase64(
+    typeof lyricPayload.lyric === 'string' ? lyricPayload.lyric : '',
+  )
+  const translation = decodeMaybeBase64(
+    typeof lyricPayload.trans === 'string' ? lyricPayload.trans : '',
+  )
+  // ⚠️ 纯文本歌词（没有时间戳）交给解析器会得到**空数组** → 如实报「没找到」。
+  if (!looksLikeLrc(original)) return { ok: false, status: 'not-found', message: '' }
+  return { ok: true, original, translation, romanization: '' }
+}
+
+/**
+ * QQ 的**逐字**歌词（`musicu.fcg` 的 `GetPlayLyricInfo`）。
+ *
+ * ⚠️ **返回的是 hex 密文**（3DES 非标准 S 盒 + zlib）⇒ 解密在
+ *    `electron/lyricCodecs/qrc.ts` 里做（纯 JS 3DES，**不引新依赖**）。
+ * ⚠️ `songID` 为 0（搜索结果里没带 `songid`）⇒ 直接放弃这一路（**不出网**）。
+ */
+async function fetchQqWordLevel(
+  fetchImpl: FetchLike,
+  songId: number,
+): Promise<QqPathResult> {
+  if (!songId) return { ok: false, status: 'not-found', message: '' }
+  const lyricRes = await fetchImpl(QQ_MUSICU_URL, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      referer: 'https://y.qq.com/',
+      'user-agent': USER_AGENT,
+    },
+    body: JSON.stringify({
+      comm: { ct: '19', cv: '1859', uin: '0' },
+      req: {
+        module: 'music.musichallSong.PlayLyricInfo',
+        method: 'GetPlayLyricInfo',
+        param: {
+          format: 'json',
+          crypt: 1,
+          ct: 19,
+          cv: 1873,
+          interval: 0,
+          lrc_t: 0,
+          qrc: 1,
+          qrc_t: 0,
+          roma: 1,
+          roma_t: 0,
+          songID: songId,
+          trans: 1,
+          trans_t: 0,
+          type: -1,
+        },
+      },
+    }),
+  })
+  if (!lyricRes.ok) {
+    return { ok: false, status: 'error', message: `QQ 音乐逐字歌词返回 ${lyricRes.status}` }
+  }
+  const lyricText = await lyricRes.text()
+  let lyricPayload: {
+    req?: { data?: { lyric?: unknown; trans?: unknown; roma?: unknown } }
+  }
+  try {
+    lyricPayload = JSON.parse(lyricText) as {
+      req?: { data?: { lyric?: unknown; trans?: unknown; roma?: unknown } }
+    }
+  } catch {
+    return { ok: false, status: 'error', message: 'QQ 音乐逐字歌词返回的不是 JSON' }
+  }
+  const data = lyricPayload.req?.data
+  const lyricHex = typeof data?.lyric === 'string' ? data.lyric : ''
+  if (!lyricHex) return { ok: false, status: 'not-found', message: '' }
+  const qrc = await decodeQrc(lyricHex)
+  if (!qrc) {
+    // ⚠️ 解不开 ⇒ 如实报「源不可用」（**不静默吞掉**：否则用户以为这首歌没逐字）。
+    return { ok: false, status: 'error', message: 'QQ 音乐逐字歌词解密失败' }
+  }
+  const original = qrcToEnhancedLrc(qrc)
+  if (!looksLikeLrc(original)) return { ok: false, status: 'not-found', message: '' }
+  // ⚠️ 翻译 / 罗马音在 QQ 里也是 **QRC 密文**（**没有词元组** ⇒ 转成行级 LRC）。
+  //    实测这两个字段常常是**空串** ⇒ 没有就当「没有」，**不报错**。
+  const transQrc = await decodeQrc(typeof data?.trans === 'string' ? data.trans : '')
+  const romaQrc = await decodeQrc(typeof data?.roma === 'string' ? data.roma : '')
+  const translation = transQrc ? qrcToPlainLrc(transQrc) : ''
+  const romanization = romaQrc ? qrcToPlainLrc(romaQrc) : ''
+  return { ok: true, original, translation, romanization }
 }
 
 /**
  * 走 QQ 音乐取歌词。
  *
- * ⚠️ **原文与翻译分两个字段**（`lyric` / `trans`）→ 与网易云同构，
- *    渲染层自动出双语。
+ * **链路（行级先、逐字后 —— 能力只增不减）**：
+ *
+ * 1. 搜索（`client_search_cp`，**不动**）→ `songmid` + `songid`；
+ * 2. **行级**歌词（`fcg_query_lyric_new.fcg`，**不动**）→ 原文 + 翻译；
+ * 3. **逐字**歌词（`musicu.fcg` 的 `GetPlayLyricInfo`）→ 解密 → 增强 LRC；
+ * 4. 合并：**逐字成功 ⇒ 原文用逐字**；**逐字失败 ⇒ 回落行级**；
+ *    翻译**优先用行级**（已经是明文 LRC、时间轴与行级原文一致）；
+ *    罗马音只来自逐字（行级端点没有这个字段）。
+ *
+ * ⚠️ **为什么行级在前**：既有生产路径与既有测试都认「行级是第 2 个请求」
+ *    ⇒ 保持顺序 ⇒ 既有行为与既有断言**一条不改**。
  */
 async function fetchQq(
   fetchImpl: FetchLike,
@@ -681,42 +773,25 @@ async function fetchQq(
   const candidate = pickCandidate(readQqCandidates(searchPayload), query)
   if (!candidate) return { status: 'not-found' }
 
-  const lyricRes = await fetchImpl(
-    `${QQ_LYRIC_URL}?songmid=${encodeURIComponent(candidate.id)}&format=json&nobase64=1`,
-    {
-      headers: {
-        accept: 'application/json',
-        referer: 'https://y.qq.com/',
-        'user-agent': USER_AGENT,
-      },
-    },
-  )
-  if (!lyricRes.ok) {
-    return { status: 'error', message: `QQ 音乐歌词返回 ${lyricRes.status}` }
+  const line = await fetchQqLineLevel(fetchImpl, candidate.id)
+  const word = await fetchQqWordLevel(fetchImpl, candidate.songId)
+
+  // ⚠️ 原文：**逐字优先**，逐字没有才用行级。
+  const original = word.ok ? word.original : line.ok ? line.original : ''
+  if (!original) {
+    // ⚠️ 两路都没有原文 ⇒ 报**行级**的结果（它是用户原本就在用的那一路）。
+    if (!line.ok && line.status === 'error') {
+      return { status: 'error', message: line.message }
+    }
+    return { status: 'not-found' }
   }
-  const lyricText = await lyricRes.text()
-  let lyricPayload: { retcode?: unknown; lyric?: unknown; trans?: unknown }
-  try {
-    lyricPayload = JSON.parse(lyricText) as { retcode?: unknown; lyric?: unknown; trans?: unknown }
-  } catch {
-    return { status: 'error', message: 'QQ 音乐歌词返回的不是 JSON' }
-  }
-  // ⚠️ **`retcode` 非 0 = 源本身报错**（实测 `-1310` = 缺少 `Referer` → HTTP 仍是 **200**，
-  //    但歌词长度 0 → **静默失败**）。此时**如实报「源不可用」**，别报「确实没有」，
-  //    否则用户会以为这首歌就是没歌词。
-  const retcode = typeof lyricPayload.retcode === 'number' ? lyricPayload.retcode : 0
-  if (retcode !== 0) {
-    return { status: 'error', message: `QQ 音乐歌词返回错误码 ${retcode}` }
-  }
-  const original = decodeMaybeBase64(
-    typeof lyricPayload.lyric === 'string' ? lyricPayload.lyric : '',
-  )
-  const translation = decodeMaybeBase64(
-    typeof lyricPayload.trans === 'string' ? lyricPayload.trans : '',
-  )
-  // ⚠️ 纯文本歌词（没有时间戳）交给解析器会得到**空数组** → 如实报「没找到」。
-  if (!looksLikeLrc(original)) return { status: 'not-found' }
-  return { status: 'ok', source: 'qq', original, translation }
+  // ⚠️ 翻译**优先用行级**（明文 LRC、时间轴与行级原文一致）；
+  //    行级没有才用逐字转出来的行级 LRC。
+  const translation = line.ok && line.translation ? line.translation : word.ok ? word.translation : ''
+  const romanization = word.ok ? word.romanization : ''
+  return romanization
+    ? { status: 'ok', source: 'qq', original, translation, romanization }
+    : { status: 'ok', source: 'qq', original, translation }
 }
 
 // ---------------------------------------------------------------------------
@@ -895,11 +970,20 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
     template: string,
     query: ExternalLyricQuery,
   ): Promise<ExternalLyricResult> {
+    // ⚠️ **QQ 一次取词要走三跳**（搜索 → 行级 → 逐字）⇒ 单独放宽预算
+    //    （实测 ≈1.5s，通用 3s 余量太薄 ⇒ 网络一抖整个 QQ 源就超时）。
+    //    单测**显式注入**的 `perSourceTimeoutMs` 优先（那是测试钩子，语义不变）。
+    const budget =
+      opts.perSourceTimeoutMs !== undefined
+        ? perSourceTimeoutMs
+        : candidate === 'qq'
+          ? QQ_SOURCE_TIMEOUT_MS
+          : perSourceTimeoutMs
     let timer: ReturnType<typeof setTimeout> | null = null
     const timeoutPromise = new Promise<ExternalLyricResult>((resolve) => {
       timer = setTimeout(() => {
         resolve({ status: 'error', message: `歌词源 ${candidate} 响应超时` })
-      }, perSourceTimeoutMs)
+      }, budget)
     })
     try {
       const work = (async (): Promise<ExternalLyricResult> => {
