@@ -727,11 +727,14 @@ describe('源链（T73）', () => {
   })
 
   it('首选源排第一，其余按固定顺序跟上', () => {
-    expect(buildSourceChain('lrclib', '')).toEqual(['lrclib', 'netease', 'qq'])
+    // ⚠️ T90-⑤-b（用户拍板「所有歌词 API 都进入自动切换」）⇒ 酷狗也进了兜底链
+    //    ⇒ 这三条断言的**前提被显式推翻** ⇒ 改写为**含酷狗**的精确相等断言
+    //    （仍是 toEqual 全等 ⇒ 强度不变、**不弱化**）。
+    expect(buildSourceChain('lrclib', '')).toEqual(['lrclib', 'netease', 'qq', 'kugou'])
   })
 
   it('`custom` 没有模板 → 不进链', () => {
-    expect(buildSourceChain('netease', '')).toEqual(['netease', 'lrclib', 'qq'])
+    expect(buildSourceChain('netease', '')).toEqual(['netease', 'lrclib', 'qq', 'kugou'])
   })
 
   it('`custom` 有模板 → 进链，且排在**用户选的位置**', () => {
@@ -740,6 +743,7 @@ describe('源链（T73）', () => {
       'netease',
       'lrclib',
       'qq',
+      'kugou',
     ])
   })
 })
