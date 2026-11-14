@@ -45,8 +45,9 @@ import type {
   LyricSource,
 } from '../shared/lyricProvider'
 
-import { qrcToEnhancedLrc, qrcToPlainLrc, yrcToEnhancedLrc } from './lyricWordFormat'
+import { qrcToEnhancedLrc, qrcToPlainLrc, yrcToEnhancedLrc, krcToEnhancedLrc } from './lyricWordFormat'
 import { decodeQrc } from './lyricCodecs/qrc'
+import { decodeKrcPayload, decodeKrcPlainPayload } from './lyricCodecs/krc'
 
 /**
  * 网易云 yrc → 增强 LRC 的转换器。
@@ -97,6 +98,45 @@ const QQ_MUSICU_URL = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
  * ⚠️ 单测注入的 `perSourceTimeoutMs` **优先**（那是显式的测试钩子，语义不变）。
  */
 export const QQ_SOURCE_TIMEOUT_MS = 8000
+
+/**
+ * 酷狗音乐搜索接口（**https**、**免签名**）。
+ *
+ * ⚠️ **必须 https**（规格 §13.1）：本应用的 Chromium 分区栈**全局拦 http 明文**
+ *    （实测 `http://mobilecdn.kugou.com` 与 `http://example.com` 都
+ *    `net::ERR_BLOCKED_BY_CLIENT`）⇒ T74a 规格里记的三个 http 端点**在生产路径走不通**。
+ * ⚠️ `https://mobilecdn.kugou.com` 的证书**主机名不匹配**
+ *    （`ERR_CERT_COMMON_NAME_INVALID`）⇒ 只有 `mobileservice` 这条能用
+ *    （字段与 mobilecdn **完全一致**：实测本机 Electron 200 / 293ms）。
+ */
+const KUGOU_SEARCH_URL = 'https://mobileservice.kugou.com/api/v3/search/song'
+
+/** 酷狗的 **accesskey** 接口（**https**）—— 取 `id` + `accesskey`。 */
+const KUGOU_ACCESSKEY_URL = 'https://lyrics.kugou.com/search'
+
+/** 酷狗的**歌词下载**接口（**https**）—— `fmt=krc` 真逐字 / `fmt=lrc` 行级。 */
+const KUGOU_LYRICS_URL = 'https://lyrics.kugou.com/download'
+
+/**
+ * 酷狗的**请求头**（与实测探针一致）。
+ *
+ * ⚠️ `User-Agent` 是酷狗客户端的老 UA（洛雪上游也这么设）；
+ *    Chromium 可能会用自己的 UA 覆盖它 ⇒ **不依赖**它，只当"锦上添花"。
+ */
+const KUGOU_HEADERS: Record<string, string> = {
+  'KG-RC': '1',
+  'KG-THash': 'expand_search_manager.cpp:852736169:451',
+  'User-Agent': 'KuGou2012-9020-ExpandSearchManager',
+}
+
+/**
+ * 酷狗源的**专用超时预算**（毫秒）。
+ *
+ * ⚠️ 酷狗一次取词要走**三跳**（搜索 → accesskey → 下载）
+ *    实测 293ms + 81ms + 46ms ≈ **0.42 s** ⇒ 6 秒余量很足
+ *    （规格 §6 风险 4：源级超时预算要单独放宽）。
+ */
+export const KUGOU_SOURCE_TIMEOUT_MS = 6000
 
 /**
  * 时长容差（**秒**）。
@@ -798,6 +838,196 @@ async function fetchQq(
 }
 
 // ---------------------------------------------------------------------------
+// 酷狗音乐适配器（T90-⑤）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **端点必须 https**（规格 §13.1）：本应用的 Chromium 分区栈**全局拦 http 明文**
+//    （实测连 `http://example.com` 都是 `net::ERR_BLOCKED_BY_CLIENT`）
+//    ⇒ T74a 规格里记的三个 http 端点**在生产路径走不通**。
+//    ⚠️ **Node 的 fetch 能走 http** ⇒ 探针在 Node 里通 ≠ 生产能通
+//    ⇒ 下面这三个端点**全部在真实 Electron 主进程里**实测过（200 / 293ms、200 / 81ms、
+//    200 / 46ms）。
+//
+// ⚠️ **三跳**（洛雪上游同一套链路）：
+//   ① 搜索（`mobileservice`，免签名）→ `hash`；
+//   ② accesskey（`lyrics.kugou.com/search`）→ `id` + `accesskey`；
+//   ③ 下载（`lyrics.kugou.com/download`）→ `content`（base64）。
+//
+// ⚠️ **真逐字**：下载回来的 `content` 是 **KRC 密文**（base64 → 跳 `krc1` → XOR → zlib）
+//    ⇒ 解密在 `electron/lyricCodecs/krc.ts`，转换在 `electron/lyricWordFormat.ts`。
+
+/** 酷狗搜索结果里的一首歌。 */
+interface KugouSong {
+  hash?: unknown
+  songname?: unknown
+  singername?: unknown
+  duration?: unknown
+}
+
+/** 一个酷狗候选（比通用候选多带一个 **hash**）。 */
+interface KugouCandidate extends Candidate {
+  /** 酷狗的歌曲 hash（accesskey 接口要它）。 */
+  hash: string
+}
+
+/** 把酷狗的搜索结果读成候选列表。 */
+function readKugouCandidates(payload: unknown): KugouCandidate[] {
+  const root = asRecord(payload)
+  const data = asRecord(root?.['data'])
+  const list = data?.['info']
+  if (!Array.isArray(list)) return []
+  const out: KugouCandidate[] = []
+  for (const raw of list) {
+    const item = asRecord(raw) as KugouSong | null
+    if (!item) continue
+    const hash = readString(item.hash)
+    // ⚠️ 歌名可能带高亮标签 → **必须剥掉**，否则永远匹配不上查询的歌名。
+    const title = typeof item.songname === 'string' ? stripHighlightTags(item.songname) : ''
+    if (!hash || !title) continue
+    const artist = readString(item.singername) ?? ''
+    // ⚠️ 酷狗搜索结果的 `duration` 是**秒**（实测《孤勇者》= 256）
+    //    ⇒ 与 `pickCandidate` 的口径**一致**，**不需要**除以 1000。
+    const duration =
+      typeof item.duration === 'number' && Number.isFinite(item.duration) ? item.duration : 0
+    out.push({ id: hash, hash, title, artist, duration })
+  }
+  return out
+}
+
+/** 酷狗的 accesskey 响应里的一条候选。 */
+interface KugouAccessKey {
+  id?: unknown
+  accesskey?: unknown
+  contenttype?: unknown
+  krctype?: unknown
+}
+
+/** 酷狗的歌词下载响应。 */
+interface KugouDownloadPayload {
+  status?: unknown
+  info?: unknown
+  fmt?: unknown
+  content?: unknown
+}
+
+/**
+ * 走酷狗音乐取歌词（**真逐字**）。
+ *
+ * **链路**：
+ * 1. 搜索 → 候选（`hash` / 歌名 / 歌手 / 时长）；
+ * 2. accesskey → `id` + `accesskey`（外加 `krctype` / `contenttype`）；
+ * 3. 下载 → `content`（base64 密文）→ **KRC 解密** → **增强 LRC**。
+ *
+ * ⚠️ **逐字优先、失败回退行级**（能力只增不减）：
+ *    `krctype === 1 && contenttype !== 1` ⇒ 该歌**有**逐字 ⇒ 先试 `fmt=krc`；
+ *    否则先试 `fmt=lrc`。**任何一种失败都会再试另一种**
+ *    ⇒ 歌词**不会因为「没有逐字」而整首丢掉**。
+ *
+ * ⚠️ 酷狗**没有**翻译与罗马音 ⇒ 一律空串（**如实不显示**第三行）。
+ */
+async function fetchKugou(
+  fetchImpl: FetchLike,
+  query: ExternalLyricQuery,
+): Promise<ExternalLyricResult> {
+  const keyword = [query.title, query.artist].filter((part) => part.trim() !== '').join(' ')
+
+  // --- ① 搜索（免签名）-------------------------------------------------------
+  const searchRes = await fetchImpl(
+    `${KUGOU_SEARCH_URL}?format=json&keyword=${encodeURIComponent(keyword)}&page=1&pagesize=20&showtype=1`,
+    {
+      headers: {
+        accept: 'application/json',
+        referer: 'https://www.kugou.com/',
+        ...KUGOU_HEADERS,
+      },
+    },
+  )
+  if (!searchRes.ok) {
+    return { status: 'error', message: `酷狗搜索返回 ${searchRes.status}` }
+  }
+  let searchPayload: unknown
+  try {
+    searchPayload = JSON.parse(await searchRes.text()) as unknown
+  } catch {
+    return { status: 'error', message: '酷狗搜索返回的不是 JSON' }
+  }
+  const candidate = pickCandidate(readKugouCandidates(searchPayload), query)
+  if (!candidate) return { status: 'not-found' }
+
+  // --- ② accesskey ------------------------------------------------------------
+  // ⚠️ `timelength` 传**秒**（与酷狗搜索结果的 `duration` 同口径）。
+  const timelength = Math.round(candidate.duration > 0 ? candidate.duration : query.duration)
+  const accessRes = await fetchImpl(
+    `${KUGOU_ACCESSKEY_URL}?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(keyword)}` +
+      `&hash=${encodeURIComponent(candidate.hash)}&timelength=${timelength}&lrctxt=1`,
+    { headers: { accept: 'application/json', ...KUGOU_HEADERS } },
+  )
+  if (!accessRes.ok) {
+    return { status: 'error', message: `酷狗 accesskey 返回 ${accessRes.status}` }
+  }
+  let accessPayload: { candidates?: unknown }
+  try {
+    accessPayload = JSON.parse(await accessRes.text()) as { candidates?: unknown }
+  } catch {
+    return { status: 'error', message: '酷狗 accesskey 返回的不是 JSON' }
+  }
+  const accessList = Array.isArray(accessPayload.candidates) ? accessPayload.candidates : []
+  const access = asRecord(accessList[0]) as KugouAccessKey | null
+  const accessId = readString(access?.id)
+  const accessKey = readString(access?.accesskey)
+  if (!accessId || !accessKey) return { status: 'not-found' }
+  const krctype = typeof access?.krctype === 'number' ? access.krctype : 0
+  const contenttype = typeof access?.contenttype === 'number' ? access.contenttype : 0
+
+  // --- ③ 下载（krc 优先，失败回退 lrc）--------------------------------------
+  // ⚠️ `fmt` 的首选顺序按洛雪的口径（`krctype == 1 && contenttype != 1` ⇒ 有逐字）。
+  const preferKrc = krctype === 1 && contenttype !== 1
+  const formats: readonly string[] = preferKrc ? ['krc', 'lrc'] : ['lrc', 'krc']
+  let lastError = ''
+  for (const fmt of formats) {
+    const lyricRes = await fetchImpl(
+      `${KUGOU_LYRICS_URL}?ver=1&client=pc&id=${encodeURIComponent(accessId)}` +
+        `&accesskey=${encodeURIComponent(accessKey)}&fmt=${fmt}&charset=utf8`,
+      { headers: { accept: 'application/json', ...KUGOU_HEADERS } },
+    )
+    if (!lyricRes.ok) {
+      lastError = `酷狗歌词返回 ${lyricRes.status}`
+      continue
+    }
+    let payload: KugouDownloadPayload
+    try {
+      payload = JSON.parse(await lyricRes.text()) as KugouDownloadPayload
+    } catch {
+      lastError = '酷狗歌词返回的不是 JSON'
+      continue
+    }
+    const content = typeof payload.content === 'string' ? payload.content : ''
+    if (!content) {
+      lastError = '酷狗歌词返回空内容'
+      continue
+    }
+    try {
+      // ⚠️ `fmt=krc` ⇒ base64 → XOR → zlib ⇒ 明文 ⇒ 增强 LRC；
+      //    `fmt=lrc` ⇒ 只 base64 ⇒ 明文 LRC（已是行级）。
+      const original =
+        fmt === 'krc'
+          ? krcToEnhancedLrc(decodeKrcPayload(content), { title: candidate.title })
+          : decodeKrcPlainPayload(content)
+      if (!looksLikeLrc(original)) {
+        lastError = '酷狗歌词解析后不是 LRC'
+        continue
+      }
+      return { status: 'ok', source: 'kugou', original, translation: '' }
+    } catch (cause) {
+      lastError = `酷狗${fmt === 'krc' ? '逐字' : '行级'}歌词处理失败：${readableError(cause)}`
+      continue
+    }
+  }
+  // ⚠️ 两种格式都失败 ⇒ 如实报「源不可用」（**不静默吞掉**）。
+  return { status: 'error', message: lastError || '酷狗歌词不可用' }
+}
+
+// ---------------------------------------------------------------------------
 // 自定义模板适配器
 // ---------------------------------------------------------------------------
 
@@ -975,13 +1205,17 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
   ): Promise<ExternalLyricResult> {
     // ⚠️ **QQ 一次取词要走三跳**（搜索 → 行级 → 逐字）⇒ 单独放宽预算
     //    （实测 ≈1.5s，通用 3s 余量太薄 ⇒ 网络一抖整个 QQ 源就超时）。
+    //    ⚠️ **酷狗也要走三跳**（搜索 → accesskey → 下载）⇒ 同样单独放宽
+    //    （实测 ≈0.42s，6s 余量很足）。
     //    单测**显式注入**的 `perSourceTimeoutMs` 优先（那是测试钩子，语义不变）。
     const budget =
       opts.perSourceTimeoutMs !== undefined
         ? perSourceTimeoutMs
         : candidate === 'qq'
           ? QQ_SOURCE_TIMEOUT_MS
-          : perSourceTimeoutMs
+          : candidate === 'kugou'
+            ? KUGOU_SOURCE_TIMEOUT_MS
+            : perSourceTimeoutMs
     let timer: ReturnType<typeof setTimeout> | null = null
     const timeoutPromise = new Promise<ExternalLyricResult>((resolve) => {
       timer = setTimeout(() => {
@@ -993,6 +1227,7 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
         if (candidate === 'netease') return await fetchNetease(opts.fetchImpl, query)
         if (candidate === 'lrclib') return await fetchLrclib(opts.fetchImpl, query)
         if (candidate === 'qq') return await fetchQq(opts.fetchImpl, query)
+        if (candidate === 'kugou') return await fetchKugou(opts.fetchImpl, query)
         return await fetchCustom(opts.fetchImpl, template, query)
       })().catch((cause: unknown): ExternalLyricResult => ({
         status: 'error',

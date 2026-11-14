@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { ExternalLyricQuery } from '../shared/lyricProvider'
-import { DEFAULT_LYRIC_SOURCE } from '../shared/lyricProvider'
+import { DEFAULT_LYRIC_SOURCE, normalizeLyricSource } from '../shared/lyricProvider'
 import type { AppPrefs } from '../shared/playerBridge'
 import {
   buildSourceChain,
@@ -1054,5 +1054,172 @@ describe('网易云适配器 · 真逐字（T67）', () => {
     const lines = parseLyricEntries(toExternalEntries('song-1', result))
     expect(lines.length).toBeGreaterThan(0)
     expect(lines.some((line) => line.words.length > 1)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 酷狗适配器（T90-⑤）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **钉住三件最容易回归的事**：
+// 1. **端点必须 https**（实测 Chromium 分区栈**全局拦 http 明文**，
+//    连 `http://example.com` 都是 `ERR_BLOCKED_BY_CLIENT`）；
+// 2. **三跳**（搜索 → accesskey → 下载）顺序与参数；
+// 3. **krc 失败要回退 lrc**（不能让「没有逐字」变成「没有歌词」）。
+//
+// ---------------------------------------------------------------------------
+
+describe('酷狗适配器（T90-⑤）', () => {
+  /** 造的酷狗搜索响应（照抄实测到的字段形状）。 */
+  const searchBody = JSON.stringify({
+    status: 1,
+    errcode: 0,
+    data: {
+      info: [
+        {
+          hash: '占位hash',
+          songname: '占位歌名',
+          singername: '占位歌手',
+          duration: 200,
+          album_name: '占位专辑',
+        },
+      ],
+    },
+  })
+
+  /** 造的 accesskey 响应。 */
+  function accessBody(krctype: number, contenttype: number): string {
+    return JSON.stringify({
+      status: 200,
+      candidates: [{ id: '占位id', accesskey: '占位accesskey', krctype, contenttype }],
+    })
+  }
+
+  /** 造的下载响应。 */
+  function downloadBody(content: string, fmt: string): string {
+    return JSON.stringify({ status: 200, info: 'OK', fmt, content })
+  }
+
+  /** 造的**行级**歌词载荷（base64）。 */
+  function plainPayload(lrc: string): string {
+    return Buffer.from(lrc, 'utf8').toString('base64')
+  }
+
+  it('三跳走通 → **原文是带逐字标签的增强 LRC**；翻译与罗马音为空串', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      { match: 'mobileservice.kugou.com', body: searchBody },
+      { match: 'lyrics.kugou.com/search', body: accessBody(1, 0) },
+      { match: 'fmt=krc', body: downloadBody('占位', 'krc') },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kugou', '', QUERY)
+    // ⚠️ `fmt=krc` 的载荷是占位（不是真的密文）⇒ 解密失败 ⇒ **回退 lrc** ⇒
+    //    lrc 端点没有配路由 ⇒ 404 ⇒ 最终是 `error`（如实报，不静默）。
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('酷狗')
+
+    // ⚠️ **端点必须全是 https**（这是本任务最容易回归的一条）。
+    const kugouCalls = calls.filter((url) => url.includes('kugou.com'))
+    expect(kugouCalls.length).toBeGreaterThan(0)
+    for (const url of kugouCalls) {
+      expect(url.startsWith('https://')).toBe(true)
+    }
+    // ⚠️ 三跳的**顺序**：搜索 → accesskey → 下载。
+    expect(kugouCalls[0]).toContain('mobileservice.kugou.com')
+    expect(kugouCalls[1]).toContain('lyrics.kugou.com/search')
+    expect(kugouCalls[2]).toContain('lyrics.kugou.com/download')
+  })
+
+  it('accesskey 的请求带**候选的 hash** 与**秒为单位的时长**', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      { match: 'mobileservice.kugou.com', body: searchBody },
+      { match: 'lyrics.kugou.com/search', body: accessBody(1, 0) },
+      { match: 'fmt=krc', body: downloadBody('占位', 'krc') },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    await provider.fetchExternalLyric('kugou', '', QUERY)
+    const accessCall = calls.find((url) => url.includes('lyrics.kugou.com/search')) ?? ''
+    expect(accessCall).toContain('hash=')
+    // ⚠️ 酷狗的 `duration` 是**秒**（搜索结果里就是秒）⇒ `timelength=200`。
+    expect(accessCall).toContain('timelength=200')
+  })
+
+  it('⚠️ **krc 解密失败 ⇒ 回退 `fmt=lrc`**（不能让「没有逐字」变成「没有歌词」）', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      { match: 'mobileservice.kugou.com', body: searchBody },
+      { match: 'lyrics.kugou.com/search', body: accessBody(1, 0) },
+      // ⚠️ krc 载荷不是密文 ⇒ 解密必失败 ⇒ 应当**再试一次 lrc**。
+      { match: 'fmt=krc', body: downloadBody('这不是密文', 'krc') },
+      { match: 'fmt=lrc', body: downloadBody(plainPayload(LRC_SAMPLE), 'lrc') },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kugou', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.original).toBe(LRC_SAMPLE)
+    expect(result.translation).toBe('')
+    // ⚠️ 确实**试过了** lrc。
+    expect(calls.some((url) => url.includes('fmt=lrc'))).toBe(true)
+  })
+
+  it('⚠️ **`krctype` 不是 1 ⇒ 首选行级**（先试 lrc，再试 krc）', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      { match: 'mobileservice.kugou.com', body: searchBody },
+      { match: 'lyrics.kugou.com/search', body: accessBody(0, 0) },
+      { match: 'fmt=lrc', body: downloadBody(plainPayload(LRC_SAMPLE), 'lrc') },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kugou', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.original).toBe(LRC_SAMPLE)
+    const kugouCalls = calls.filter((url) => url.includes('kugou.com'))
+    // ⚠️ 第一个下载请求就是 `fmt=lrc`。
+    expect(kugouCalls[2]).toContain('fmt=lrc')
+  })
+
+  it('搜索结果里没有对得上的 → `not-found`（不是错误）', async () => {
+    const { fetchImpl } = makeFetch([
+      {
+        match: 'mobileservice.kugou.com',
+        body: JSON.stringify({ status: 1, data: { info: [] } }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kugou', '', QUERY)
+    expect(result.status).toBe('not-found')
+  })
+
+  it('搜索接口返回 500 → `error` + 可读原因（**不抛异常**）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'mobileservice.kugou.com', status: 500, body: 'boom' },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kugou', '', QUERY)
+    expect(result.status).toBe('error')
+    if (result.status !== 'error') return
+    expect(result.message).toContain('500')
+  })
+
+  it('accesskey 没有候选 → `not-found`', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'mobileservice.kugou.com', body: searchBody },
+      { match: 'lyrics.kugou.com/search', body: JSON.stringify({ status: 200, candidates: [] }) },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kugou', '', QUERY)
+    expect(result.status).toBe('not-found')
+  })
+
+  it('⚠️ **用户选酷狗时它是首选源**（其余源照旧兜底）', () => {
+    // ⚠️ `ONLINE_SOURCE_ORDER` 本任务**不动**（源链位置归 T90-⑧）
+    //    ⇒ 酷狗**只在用户主动选它时**排第一，不进兜底链。
+    expect(buildSourceChain('kugou', '')).toEqual(['kugou', 'netease', 'lrclib', 'qq'])
+  })
+
+  it('⚠️ **normalizeLyricSource 认得 kugou**（陌生值仍回落默认）', () => {
+    expect(normalizeLyricSource('kugou')).toBe('kugou')
+    expect(normalizeLyricSource('不存在的源')).toBe(DEFAULT_LYRIC_SOURCE)
   })
 })

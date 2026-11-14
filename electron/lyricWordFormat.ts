@@ -6,15 +6,18 @@
 //
 // - **网易云 yrc**（T67）：`[行开始ms,行时长ms](词开始ms,词时长ms,0)词文本…`
 // - **QQ qrc**（T90-④）：`[行开始ms,行时长ms](词开始ms,词时长ms)词文本…`
+// - **酷狗 KRC**（T90-⑤）：`[行开始ms,行时长ms]<相对ms,词时长ms,0>词文本…`
+//   （⚠️ 词时间是**相对行开始**的 ⇒ 绝对 = 行首 + 相对）
 //
-// ⇒ 两者都转成**标准增强 LRC**（`[mm:ss.xx]<mm:ss.xx>词…`），
+// ⇒ 三者都转成**标准增强 LRC**（`[mm:ss.xx]<mm:ss.xx>词…`），
 //    交给**现有**的 `parseWordSegments` ⇒ **渲染层解析器一字不改**。
 //
 // ⚠️ **只放纯函数**：不碰网络、不碰 Electron、不碰 Node 内置模块
 //    （`electron/lyricProvider.ts` 的纪律：模块顶层不得 import Electron）。
 //
-// ⚠️ **解密**不在这里 —— QQ 的 qrc 解密在 `electron/lyricCodecs/qrc.ts`
-//    （3DES 是 **Node 专属**的纯 JS 实现，与本模块刻意分开）。
+// ⚠️ **解密**不在这里 —— QQ 的 qrc 解密在 `electron/lyricCodecs/qrc.ts`，
+//    酷狗的 krc 解密在 `electron/lyricCodecs/krc.ts`
+//    （两者都是 **Node 专属**的纯实现，与本模块刻意分开）。
 // ---------------------------------------------------------------------------
 
 /**
@@ -304,6 +307,11 @@ const QRC_WORD_TUPLE = /\((\d+),(\d+)\)/g
 const QRC_META_ROLES: readonly string[] = [
   '词',
   '曲',
+  // ↓ 酷狗 KRC 实测到的（T90-⑤）：QQ 的 QRC 写「词：X」「曲：X」，
+  //    酷狗的 KRC 写的是「**作词**：X」「**作曲**：X」⇒ 不补这两个会**漏网**
+  //    （制作信息会被当成歌词显示出来）。
+  '作词',
+  '作曲',
   '编曲',
   '监制',
   '出品',
@@ -357,6 +365,11 @@ const QRC_META_ROLES: readonly string[] = [
  *    （「他在敲鼓：」这种 ⇒ 不能误杀歌词行）。
  */
 const QRC_META_SUFFIXES: readonly string[] = [
+  // ↓ 酷狗 KRC 实测（T90-⑤）：「作词」「作曲」是 **2 字** ⇒ 可以安全进后缀表
+  //    （覆盖「联合作词：X」这种带修饰前缀的复合角色词）。
+  //    ⚠️ 单字 `词` / `曲` **仍然不进**（见上面的说明：「词不达意：」那种歌词行会被误杀）。
+  '作词',
+  '作曲',
   '出品方',
   '出品',
   '监制',
@@ -759,6 +772,143 @@ export function qrcToPlainLrc(qrc: string): string {
     if (!text) continue
     if (isQrcMetaLine(text, currentIndex)) continue
     out.push(`[${msToLrcTag(lineStart)}]${text}`)
+  }
+  return out.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// 酷狗 KRC（真逐字）→ 增强 LRC（T90-⑤）
+// ---------------------------------------------------------------------------
+//
+// 行形状（2026-11-14 本机实测，三首：孤勇者 / 一路向北 / Counting Stars）：
+//
+//     [行开始ms,行时长ms]<相对ms,词时长ms,0>词文本<相对ms,词时长ms,0>词文本…
+//
+// ⚠️ **与 QRC 的两处关键差异**（转换器必须区别对待）：
+//
+// 1. 词元组是**尖括号** `<>`（不是圆括号）；
+// 2. 词时间是**相对行开始**的毫秒 ⇒ **绝对 = 行首 + 相对**
+//    ⇒ ⚠️ **不能**用 QRC 那套「相对值 ≥ 行首 ⇒ 判绝对」的逐词判据
+//       （KRC 的行内相对值**可以超过行首的毫秒数** ⇒ 长句会误判 ⇒ 填色偏 1 秒）。
+//
+// ⚠️ **元信息行的规则与 QRC 共用**（`isQrcMetaLine`）：
+//    QQ 的 QRC 与酷狗的 KRC 在这一点上**同形**（制作信息 + 标题行）
+//    ⇒ 同一套规则 ⇒ 两个源的行为一致（否则同一个角色词在两个源上判定不同，
+//    行为不可预测）。
+//    ⚠️ 酷狗实测的角色词里多了「**作词**」「**作曲**」⇒ 已补进白名单。
+
+/** KRC 的行头：`[行开始ms,行时长ms]`。 */
+const KRC_LINE_HEAD = /^\[(\d+),(\d+)\]/
+
+/** KRC 的词元组：`<相对ms,词时长ms,0>`。 */
+const KRC_WORD_TUPLE = /<(\d+),(\d+),(\d+)>/g
+
+/**
+ * 把 **KRC 明文**（逐字）转成**增强 LRC**（`[mm:ss.xx]<mm:ss.xx>词…`）。
+ *
+ * **规则（定死，规格 §13.4）**：
+ * 1. 行头只认 `[起ms,时长ms]`；**无行头**的行（`[id:]` / `[ti:]` / `[ar:]` 之类）**丢掉**
+ *    （实测《孤勇者》81 行里 **11 行**是无行头的元信息）；
+ * 2. **元信息行**（制作信息 / 标题行）**丢掉**（见 {@link isQrcMetaLine}）；
+ * 3. 行内按**顺序扫描**找词元组（只认数字形状）⇒ 词文本里的尖括号**不会错位**；
+ * 4. 词文本 = 词元组之间的内容（**原样保留**，不 trim 词内空格）；
+ * 5. 词的绝对时间 = **行首 + 相对毫秒**（KRC 的词时间**一律相对**）；
+ * 6. **零时长词**（实测《孤勇者》4 个）→ **并入前一个词**，不单独成词；
+ * 7. **空文本的词** → **不产出标签**（没有文字的「词」不是词）；
+ * 8. **词内含空白** → **拆成多个独立词**（见 {@link splitWordsAtWhitespace}）
+ *    ⇒ 渲染层不会拆它 ⇒ 卡拉OK 填色**不会分段重置**
+ *    （实测《Counting Stars》**432 / 547** 个词元组含空白 ⇒ 不拆必然错）；
+ * 9. 一行里**没有有效词** → **跳过该行**；
+ * 10. 空串 / 非串 → 返回空串（**不抛异常**）。
+ *
+ * @param krc 解密后的 KRC 明文。
+ * @param hint 标题识别提示（**可选**：酷狗的标题行可以很长 ⇒ 靠**歌名**认更准）。
+ * @returns 标准增强 LRC（多行，行间 `\n`）。
+ */
+export function krcToEnhancedLrc(krc: string, hint?: QrcTitleHint): string {
+  if (typeof krc !== 'string' || krc === '') return ''
+  // --- ① 解析出所有**带行头**的候选行 -----------------------------------------
+  // ⚠️ **要两遍**：拆词需要「**下一行行时间**」（= 渲染层给的行尾）⇒ 得先知道全部行。
+  const candidates: { lineStart: number; rest: string; candidateIndex: number }[] = []
+  for (const rawLine of krc.split(/\r\n|\r|\n/)) {
+    // ⚠️ 解密后的明文**可能带 UTF-8 BOM**（实测部分文件带）⇒ 显式剥掉。
+    const line = rawLine.replace(/^\uFEFF/, '').trim()
+    if (!line) continue
+    const head = KRC_LINE_HEAD.exec(line)
+    if (!head) continue // 无行头（`[id:]` 之类 / 不是歌词行）→ 丢掉
+    const lineStart = Number(head[1])
+    if (!Number.isFinite(lineStart)) continue
+    candidates.push({
+      lineStart,
+      rest: line.slice(head[0].length),
+      // 带行头的候选行的序号（0 起）—— 标题行规则用。
+      candidateIndex: candidates.length,
+    })
+  }
+
+  // --- ② 丢掉**元信息行**（制作信息 / 标题行）--------------------------------
+  // ⚠️ **被丢掉的行不参与「下一行行时间」的计算** ⇒ 与渲染层看到的一致。
+  const lyricLines: typeof candidates = []
+  for (const item of candidates) {
+    const plainText = item.rest.replace(KRC_WORD_TUPLE, '').trim()
+    if (isQrcMetaLine(plainText, item.candidateIndex, hint)) continue
+    lyricLines.push(item)
+  }
+
+  // --- ③ 转换 ----------------------------------------------------------------
+  const out: string[] = []
+  for (let index = 0; index < lyricLines.length; index += 1) {
+    const { lineStart, rest } = lyricLines[index]!
+    // ⚠️ **行尾** = 下一行的行时间（与渲染层 `assemble` 同口径）。
+    //    ⚠️ **KRC 自带的行时长不能用**（实测行 11 的行时长 7433ms，
+    //    而「下一行行首 − 行首」= 7499ms ⇒ 是源给的另一套口径）。
+    const nextLineStart = lyricLines[index + 1]?.lineStart
+    const lineEnd = nextLineStart !== undefined ? nextLineStart : lineStart + 500
+
+    // 词元组（**按顺序扫描** ⇒ 词文本里的尖括号不会错位）。
+    const pattern = new RegExp(KRC_WORD_TUPLE.source, 'g')
+    const marks: { start: number; dur: number; from: number; to: number }[] = []
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(rest)) !== null) {
+      marks.push({
+        start: Number(match[1]),
+        dur: Number(match[2]),
+        from: match.index + match[0].length,
+        to: match.index,
+      })
+    }
+    if (!marks.length) continue
+
+    // 零时长词**并入前一个词**（实测是标点 / 停顿占位），不单独成词。
+    const words: { start: number; text: string }[] = []
+    for (let i = 0; i < marks.length; i += 1) {
+      const mark = marks[i]!
+      const textEnd = i + 1 < marks.length ? marks[i + 1]!.to : rest.length
+      const text = rest.slice(mark.from, textEnd)
+      if (mark.dur === 0) {
+        const previous = words[words.length - 1]
+        if (previous) previous.text += text
+        continue
+      }
+      // ⚠️ **空文本的词** → **不产出标签**（没有文字的「词」不是词）。
+      if (text === '') continue
+      // ⚠️ KRC 的词时间是**相对行开始**的 ⇒ 绝对 = 行首 + 相对。
+      words.push({ start: lineStart + mark.start, text })
+    }
+    if (!words.length) continue
+
+    // 第一个词元组**之前**的文本（实测通常为空）→ 并进第一个词。
+    const leading = rest.slice(0, marks[0]!.to).trim()
+    if (leading) {
+      const first = words[0]
+      if (first) first.text = leading + first.text
+    }
+
+    // ⚠️ **词内含空白** ⇒ 拆成多个独立词（酷狗的 KRC **也**把整段英文塞进一个词元组
+    //    ⇒ 否则渲染层会把填色分段重置）。
+    const expanded = splitWordsAtWhitespace(words, lineEnd)
+    const body = expanded.map((word) => `<${msToLrcTag(word.start)}>${word.text}`).join('')
+    out.push(`[${msToLrcTag(lineStart)}]${body}`)
   }
   return out.join('\n')
 }

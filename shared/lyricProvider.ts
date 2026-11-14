@@ -37,9 +37,11 @@
  * - `lrclib`：`lrclib.net`（开源、官方、免费；实测偶发 503）；
  * - `qq`：QQ 音乐的公开 Web 接口（**非官方**；与 Lyricify 同款词源；
  *   明文 LRC + 翻译，**无逐字**）；
+ * - `kugou`：酷狗音乐的公开 Web 接口（**非官方**；**KRC 真逐字**，
+ *   T90-⑤ 实测三首全有逐字；**没有**翻译与罗马音）；
  * - `custom`：用户自己配的 **URL 模板**（返回**纯文本 LRC**）。
  */
-export type LyricSource = 'off' | 'netease' | 'lrclib' | 'qq' | 'custom'
+export type LyricSource = 'off' | 'netease' | 'lrclib' | 'qq' | 'kugou' | 'custom'
 
 /**
  * 歌词来源的**优先级**（T70）。
@@ -140,7 +142,14 @@ export type ExternalLyricResult =
 // ---------------------------------------------------------------------------
 
 /** 合法的歌词源（**白名单**）。 */
-export const LYRIC_SOURCES: readonly LyricSource[] = ['off', 'netease', 'lrclib', 'qq', 'custom']
+export const LYRIC_SOURCES: readonly LyricSource[] = [
+  'off',
+  'netease',
+  'lrclib',
+  'qq',
+  'kugou',
+  'custom',
+]
 
 /**
  * 默认的歌词源。

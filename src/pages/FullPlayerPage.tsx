@@ -140,6 +140,7 @@ const SOURCE_LABEL: Record<LyricSource, string> = {
   netease: '网易云音乐',
   lrclib: 'lrclib.net',
   qq: 'QQ 音乐',
+  kugou: '酷狗音乐',
   custom: '自定义 API',
   off: '不用外部',
 }
