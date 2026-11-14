@@ -1161,6 +1161,11 @@ export function kuwoToEnhancedLrc(plain: string, hint?: QrcTitleHint): string {
  * ⚠️ **制作信息行同样丢掉**（与 {@link kuwoToEnhancedLrc} 同一口径），
  *    但**不套**标题行规则（标题提示是给原文用的）。
  *
+ * ⚠️⚠️ **翻译行的时间戳要「回退」到「上一句」原文**（规格 §14.4 / §14.8 第 12 条，
+ *    洛雪上游 `sortLrcArr` 同款）：酷我把翻译行排在它对应的那句英文**之前**，
+ *    但**翻译行自带的时间戳是「下一句」英文的**
+ *    ⇒ 不回退的话，渲染层会按时间戳把中文挂到**下一句**英文上（**整体偏移一行**）。
+ *
  * @param plain 解密后的酷我 lrcx 明文。
  */
 export function kuwoToPlainLrc(plain: string): string {
@@ -1168,12 +1173,21 @@ export function kuwoToPlainLrc(plain: string): string {
   const scale = readKuwoScale(plain)
   const parsed = parseKuwoLines(plain, scale)
   const out: string[] = []
+  // ⚠️ 「前面最近一条**原文行**」的行首毫秒（**文件原序**）。
+  let previousOriginalStart: number | null = null
   for (const line of parsed) {
-    if (!line.isTranslation) continue
+    if (!line.isTranslation) {
+      // ⚠️ **含元信息行**（标题行 / 制作信息行也是「原文行」）：
+      //    它们会被原文侧滤掉 ⇒ 它们对应的翻译也无处可挂 ⇒ 一样是「不显示」。
+      previousOriginalStart = line.lineStart
+      continue
+    }
     const text = line.plainText
     if (!text) continue
     if (isQrcCreditLine(text)) continue
-    out.push(`[${msToLrcTag(line.lineStart)}]${text}`)
+    // ⚠️ **没有前序原文行 ⇒ 丢掉这条翻译**（洛雪同款：`lrc.length < 2` ⇒ `continue`）。
+    if (previousOriginalStart === null) continue
+    out.push(`[${msToLrcTag(previousOriginalStart)}]${text}`)
   }
   return out.join('\n')
 }

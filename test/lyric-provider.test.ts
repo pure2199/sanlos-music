@@ -1291,7 +1291,37 @@ describe('T90-⑥ · 酷我适配器', () => {
     expect(result.source).toBe('kuwo')
     // ⚠️ 词时间是「行首 + 相对」⇒ 1000ms 与 1500ms。
     expect(result.original).toBe('[00:01.00]<00:01.00>占<00:01.50>位')
-    expect(result.translation).toBe('[00:02.00]占位')
+    // ⚠️⚠️ **翻译行的时间戳回退到「上一句」原文**（T90-⑥-b 修正了前提）：
+    //    翻译行**自带**的时间戳是 02.000，但它属于 01.000 那句原文
+    //    ⇒ 洛雪 `sortLrcArr` 同款 ⇒ 回退成 01.000。
+    expect(result.translation).toBe('[00:01.00]占位')
+  })
+
+  it('⚠️ **翻译行回退到「上一句」原文**（洛雪 `sortLrcArr` 同款：翻译行排在原文行**之前**）', async () => {
+    // ⚠️ **真实行序**：翻译行（零时长）在前、同戳的原文行在后。
+    const realistic = [
+      '[kuwo:034]',
+      '[00:01.000]<4000,-4000>占<5000,-3000>位',
+      '[00:02.000]<0,0>占<0,0>位',
+      '[00:02.000]<4000,-4000>占<5000,-3000>位',
+    ].join('\n')
+    const { fetchImpl } = makeFetch([
+      { match: 'search.kuwo.cn', body: searchBody },
+      {
+        match: 'mlyric.kuwo.cn',
+        body: kuwoPayload(realistic),
+        contentType: 'application/octet-stream',
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('kuwo', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    // ⚠️ 原文两行（01.000 / 02.000）。
+    expect(result.original.split('\n')).toHaveLength(2)
+    // ⚠️ **翻译的时间戳 = 01.000**（上一句原文），**不是**它自己的 02.000。
+    expect(result.translation).toBe('[00:01.00]占位')
+    expect(result.translation).not.toContain('[00:02.00]')
   })
 
   it('⚠️ **端点必须全是 https**（本任务最容易回归的一条）', async () => {
