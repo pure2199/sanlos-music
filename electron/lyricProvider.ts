@@ -661,10 +661,13 @@ async function fetchQqLineLevel(fetchImpl: FetchLike, songmid: string): Promise<
  * ⚠️ **返回的是 hex 密文**（3DES 非标准 S 盒 + zlib）⇒ 解密在
  *    `electron/lyricCodecs/qrc.ts` 里做（纯 JS 3DES，**不引新依赖**）。
  * ⚠️ `songID` 为 0（搜索结果里没带 `songid`）⇒ 直接放弃这一路（**不出网**）。
+ *
+ * @param songTitle 搜索命中的**歌名**（用来认 QRC 里的**标题行** —— 实测那条有 45 字）。
  */
 async function fetchQqWordLevel(
   fetchImpl: FetchLike,
   songId: number,
+  songTitle?: string,
 ): Promise<QqPathResult> {
   if (!songId) return { ok: false, status: 'not-found', message: '' }
   const lyricRes = await fetchImpl(QQ_MUSICU_URL, {
@@ -721,7 +724,7 @@ async function fetchQqWordLevel(
     // ⚠️ 解不开 ⇒ 如实报「源不可用」（**不静默吞掉**：否则用户以为这首歌没逐字）。
     return { ok: false, status: 'error', message: 'QQ 音乐逐字歌词解密失败' }
   }
-  const original = qrcToEnhancedLrc(qrc)
+  const original = qrcToEnhancedLrc(qrc, { title: songTitle })
   if (!looksLikeLrc(original)) return { ok: false, status: 'not-found', message: '' }
   // ⚠️ 翻译 / 罗马音在 QQ 里也是 **QRC 密文**（**没有词元组** ⇒ 转成行级 LRC）。
   //    实测这两个字段常常是**空串** ⇒ 没有就当「没有」，**不报错**。
@@ -774,7 +777,7 @@ async function fetchQq(
   if (!candidate) return { status: 'not-found' }
 
   const line = await fetchQqLineLevel(fetchImpl, candidate.id)
-  const word = await fetchQqWordLevel(fetchImpl, candidate.songId)
+  const word = await fetchQqWordLevel(fetchImpl, candidate.songId, candidate.title)
 
   // ⚠️ 原文：**逐字优先**，逐字没有才用行级。
   const original = word.ok ? word.original : line.ok ? line.original : ''

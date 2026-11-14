@@ -235,6 +235,22 @@ describe('qrcToEnhancedLrc（QRC → 增强 LRC）', () => {
     expect(qrcToEnhancedLrc(qrc)).toBe('[00:10.00]<00:10.00>甲，<00:11.00>乙')
   })
 
+  it('⚠️ **空文本的词**（实测：QRC 每行末尾的终止标记）→ **不产出标签**', () => {
+    // 第三个词元组**没有文字**（时长还不为零）⇒ 它不是词 ⇒ 不该出标签。
+    const qrc = '[10000,2000](10000,500)甲(10500,500)乙(11000,100)'
+    expect(qrcToEnhancedLrc(qrc)).toBe('[00:10.00]<00:10.00>甲<00:10.50>乙')
+  })
+
+  it('⚠️ **真机回归补的洞**：给了**歌名提示** ⇒ **长标题行**被丢掉', () => {
+    // ⚠️ 实测《孤勇者》的 QRC 标题行 **45 字** ⇒ 「≤30 字」的启发式认不出 ⇒ 显示成歌词。
+    const title = '占位歌名 (《占位动画剧集》中文主题曲) - 占位歌手 (Placeholder Name)'
+    const qrc = `[0,5000](0,1000)${title}\n[10000,2000](10000,500)甲`
+    // 没有提示 ⇒ **既有行为不变**（这条长标题行会被留下）。
+    expect(qrcToEnhancedLrc(qrc)).toContain('占位歌名')
+    // 给了歌名 ⇒ 标题行被丢掉（只留真正的歌词行）。
+    expect(qrcToEnhancedLrc(qrc, { title: '占位歌名' })).toBe('[00:10.00]<00:10.00>甲')
+  })
+
   it('空串 / 非串 → 空串（**不抛异常**）', () => {
     expect(qrcToEnhancedLrc('')).toBe('')
     expect(qrcToEnhancedLrc('不是歌词')).toBe('')
@@ -307,6 +323,19 @@ describe('元信息行判定', () => {
     expect(isQrcCreditLine('她说：不要走')).toBe(false)
   })
 
+  it('⚠️ **真机回归补的洞**：QQ 实测到的两个角色词（`人声录音棚` / `Vocal edite`）', () => {
+    // ⚠️ 这两个是 2026-11-14 真机回归**实测漏网**的（它们会**当成歌词显示出来**）。
+    expect(isQrcCreditLine('人声录音棚：占位录音室')).toBe(true)
+    expect(isQrcCreditLine('Vocal edite：占位人名')).toBe(true)
+  })
+
+  it('⚠️ **英文角色词**：**多词**形态才算（单个英文词不能误杀歌词）', () => {
+    expect(isQrcCreditLine('Mixing Engineer：占位人名')).toBe(true)
+    // ⚠️ **单个**英文词 ⇒ 不算（`Baby：Don't cry` 这种是歌词 ⇒ 不能误杀）。
+    expect(isQrcCreditLine('Baby：占位歌词')).toBe(false)
+    expect(isQrcCreditLine('Mixing：占位人名')).toBe(false)
+  })
+
   it('标题行：**三个条件全满足**才判是（前 5 条候选行 + ≤30 字 + 含 ` - `）', () => {
     expect(isQrcTitleLine('占位歌名 - 占位歌手', 0)).toBe(true)
     // ① 不在前 5 条候选行内
@@ -315,6 +344,21 @@ describe('元信息行判定', () => {
     expect(isQrcTitleLine(`${'长'.repeat(29)} - 占位歌手`, 0)).toBe(false)
     // ③ 没有 ` - `
     expect(isQrcTitleLine('占位歌名占位歌手', 0)).toBe(false)
+  })
+
+  it('⚠️ **真机回归补的洞**：长标题行靠**歌名提示**认（QQ 实测那条有 45 字）', () => {
+    // ⚠️ 实测《孤勇者》的 QRC 标题行 45 字 ⇒ 「≤30 字」的启发式**认不出** ⇒ 整行显示成歌词。
+    const longTitle = '占位歌名 (《占位动画剧集》中文主题曲) - 占位歌手 (Placeholder Name)'
+    expect(longTitle.length).toBeGreaterThan(30)
+    // 没有提示 ⇒ 认不出（兜底启发式仍然生效 ⇒ **既有行为不变**）。
+    expect(isQrcTitleLine(longTitle, 0)).toBe(false)
+    // 给了歌名 ⇒ 认得出（**不论多长、不论在第几条**）。
+    expect(isQrcTitleLine(longTitle, 0, { title: '占位歌名' })).toBe(true)
+    // ⚠️ 歌名带后缀（`占位歌名 (Live)`）⇒ 取「括号前」的那部分去比对。
+    expect(isQrcTitleLine(longTitle, 0, { title: '占位歌名 (Live)' })).toBe(true)
+    // ⚠️ **防误杀**：只是「包含」歌名不够 —— 必须是**开头**，且这一行得像标题。
+    expect(isQrcTitleLine(`歌词里出现${longTitle}`, 0, { title: '占位歌名' })).toBe(false)
+    expect(isQrcTitleLine('占位歌名占位歌手', 0, { title: '占位歌名' })).toBe(false)
   })
 
   it('isQrcMetaLine = 制作信息 **或** 标题行', () => {

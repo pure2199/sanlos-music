@@ -206,6 +206,8 @@ const QRC_META_ROLES: readonly string[] = [
   '曲版权管理方',
   '录音作品及MV版权',
   '联合出品方',
+  '人声录音棚',
+  'Vocal edite',
 ]
 
 /**
@@ -226,6 +228,7 @@ const QRC_META_SUFFIXES: readonly string[] = [
   '混音',
   '母带',
   '录音',
+  '录音棚',
   '吉他',
   '贝斯',
   '和声',
@@ -269,6 +272,7 @@ const QRC_META_PREFIXES: readonly string[] = [
   '出品',
   '制作人',
   '录音',
+  '录音棚',
   '混音',
   '母带',
   '和声',
@@ -307,6 +311,18 @@ const QRC_META_TAIL_MAX_LENGTH = 12
 const QRC_META_ROLE_FORBIDDEN = /[\s：:，。！？、；,.;!?]/
 
 /**
+ * **英文**角色词（QQ 的 QRC 里偶尔出现，实测 `Vocal edite：…`）。
+ *
+ * ⚠️ **只收「多词」形态**（**必须含空格**）：单个英文词（`Mixing` / `Baby`）
+ *    极容易撞上歌词（「Baby：Don't cry」这种 ⇒ **不能误杀歌词行**）。
+ * ⇒ `Vocal edite` / `Mixing Engineer` / `Arranged by` 这类**两个词以上**的才收。
+ */
+const QRC_META_ENGLISH_ROLE = /^[A-Za-z]+(?:\s+[A-Za-z]+)+$/
+
+/** 英文角色词的**长度上限**（防「一整句英文歌词」被当成角色词）。 */
+const QRC_META_ENGLISH_ROLE_MAX_LENGTH = 20
+
+/**
  * 判断一行文本**是不是制作信息行**（`词：X` / `混音/母带：X` / `联合出品方：X` …）。
  *
  * **规则（定死）**：先把**第一个冒号**之前当作「角色部分」，再三选一：
@@ -315,11 +331,17 @@ const QRC_META_ROLE_FORBIDDEN = /[\s：:，。！？、；,.;!?]/
  * - **B. 后缀命中**：角色部分 **≤ 6 字**且以某个**多字**角色词**结尾**
  *   （覆盖 `联合出品方` 这类**带修饰前缀**的复合角色词）；
  * - **C. 前缀命中**：角色部分以某个**多字**角色词**开头**，且剩下的 ≤ 12 字、
- *   **不含标点 / 空白**（覆盖 `录音作品及MV版权`）。
+ *   **不含标点 / 空白**（覆盖 `录音作品及MV版权`）；
+ * - **D. 英文多词角色词**：角色部分**只由拉丁字母与空格**组成、**至少含一个空格**
+ *   且 ≤ 20 字符（覆盖 QQ 实测到的 `Vocal edite：…`）。
  *
  * ⚠️ 比 T74a **更严**（T74a 是「前缀白名单命中 ⇒ 无条件跳过」）——
  *    本仓库实测发现「只按前缀」既会**误杀歌词行**（歌词里以「曲」「词」开头的句子很多），
  *    又会**漏掉复合角色词**（`联合出品方`）⇒ 必须三管齐下。
+ *
+ * ⚠️ **D 为什么要「必须含空格」**：`Mixing` / `Baby` 这种**单个**英文词
+ *    很容易撞上歌词（「Baby：Don't cry」）⇒ **宁可漏掉一行制作信息，
+ *    也不能误杀一句歌词**（丢内容比多显示一行严重得多）。
  *
  * @param text 该行正文（**已去掉词元组**、已 trim）。
  */
@@ -331,6 +353,13 @@ export function isQrcCreditLine(text: string): boolean {
   if (!role) return false
   // A. 精确命中
   if (QRC_META_ROLES.includes(role)) return true
+  // D. 英文**多词**角色词（实测 `Vocal edite：…`）
+  if (
+    role.length <= QRC_META_ENGLISH_ROLE_MAX_LENGTH &&
+    QRC_META_ENGLISH_ROLE.test(role)
+  ) {
+    return true
+  }
   // B. 后缀命中（角色部分要**短**）
   if (role.length <= QRC_META_ROLE_MAX_LENGTH) {
     for (const suffix of QRC_META_SUFFIXES) {
@@ -349,21 +378,67 @@ export function isQrcCreditLine(text: string): boolean {
 }
 
 /**
+ * **标题行的识别提示**（来自**搜索结果**的歌名）。
+ *
+ * ⚠️ **为什么需要它**（真机回归实测，2026-11-14）：
+ *    QQ 的 QRC 标题行**不短** —— 实测《孤勇者》的那一行有 **45 字**：
+ *    `孤勇者 (《英雄联盟：双城之战》动画剧集中文主题曲) - 陈奕迅 (Eason Chan)`
+ *    ⇒ 「长度 ≤ 30」的启发式**判不出**它 ⇒ **整行标题被当成歌词显示出来**。
+ *
+ * ⇒ 有了**歌名**，判据就精确了：**这一行以歌名开头** ⇒ 它就是标题行
+ *    （不论多长、不论在第几条）。
+ */
+export interface QrcTitleHint {
+  /** 歌名（**搜索结果里的歌名**）。 */
+  title?: string
+}
+
+/**
+ * 从歌名里取出「**括号前**的那一段」（`孤勇者 (Live)` ⇒ `孤勇者`）。
+ *
+ * ⚠️ QQ 的 QRC 标题行常常在歌名后面**跟一段括号说明** ⇒ 用「括号前的部分」
+ *    去比对，才对得上（搜索到的歌名可能带后缀，QRC 里的也可能带）。
+ */
+function titleCore(title: string): string {
+  const trimmed = title.trim()
+  const cut = trimmed.search(/[（(【\[「『]/)
+  const core = cut >= 0 ? trimmed.slice(0, cut).trim() : trimmed
+  return core
+}
+
+/**
  * 判断一行文本**是不是标题行**（`歌名 - 歌手`）。
  *
- * **三个条件全满足**才判是（T74a 同口径）：
- * ① 出现在**前 5 条带行头的候选行**内；② 长度 ≤ 30 字；③ 含 ` - `（两侧空格）。
+ * **两条判据（任一命中即是）**：
+ *
+ * - **① 带提示时**：这一行**以歌名开头**且含 ` - `
+ *   （⇒ 长标题行也能认出来；实测《孤勇者》那条 45 字的标题行）；
+ * - **② 无提示时（兜底）**：**前 5 条带行头的候选行**内、长度 ≤ 30 字、含 ` - `
+ *   （T74a 同口径；**既有行为与既有断言一条不改**）。
  *
  * ⚠️ **为什么是「前 5 条候选行」而不是「前 5 条源行」**：
  *    QQ 的 QRC 头部有 **12 行无行头**的元信息（`[ti:]` 之类）⇒ 按源行数计，
  *    「前 5 行」永远是头部 ⇒ 标题行规则**永不生效**（等于没有）⇒ 改成按
  *    **带行头的候选行**计数才有意义。
  *
+ * ⚠️ **① 为什么要「含 ` - `」**：光「以歌名开头」会误杀**歌词里出现歌名**的行
+ *    （《孤勇者》的歌词里就有「孤勇者」三个字）⇒ 必须再要求这一行**像**标题
+ *    （含 `歌名 - 歌手` 的分隔）。
+ *
  * @param text 该行正文（**已去掉词元组**、已 trim）。
  * @param candidateIndex 该行是**第几条带行头的候选行**（0 起）。
+ * @param hint 标题识别提示（**可选**；不给就走兜底判据）。
  */
-export function isQrcTitleLine(text: string, candidateIndex: number): boolean {
+export function isQrcTitleLine(
+  text: string,
+  candidateIndex: number,
+  hint?: QrcTitleHint,
+): boolean {
   if (typeof text !== 'string' || text === '') return false
+  // ① 带提示：**以歌名开头** + 含 ` - ` ⇒ 标题行（不看长度、不看位置）。
+  const core = titleCore(hint?.title ?? '')
+  if (core && text.startsWith(core) && text.includes(' - ')) return true
+  // ② 兜底（T74a 同口径）。
   if (candidateIndex >= 5) return false
   if (text.length > 30) return false
   return text.includes(' - ')
@@ -374,9 +449,14 @@ export function isQrcTitleLine(text: string, candidateIndex: number): boolean {
  *
  * @param text 该行正文（**已去掉词元组**、已 trim）。
  * @param candidateIndex 该行是**第几条带行头的候选行**（0 起）。
+ * @param hint 标题识别提示（**可选**）。
  */
-export function isQrcMetaLine(text: string, candidateIndex: number): boolean {
-  return isQrcCreditLine(text) || isQrcTitleLine(text, candidateIndex)
+export function isQrcMetaLine(
+  text: string,
+  candidateIndex: number,
+  hint?: QrcTitleHint,
+): boolean {
+  return isQrcCreditLine(text) || isQrcTitleLine(text, candidateIndex, hint)
 }
 
 /**
@@ -407,13 +487,16 @@ function resolveWordTime(wordMs: number, lineStartMs: number): number {
  * 4. 词元组之间的文本 = 该词的文本（**原样保留**，不 trim 词内空格）；
  * 5. 词时间按 {@link resolveWordTime} 归一 ⇒ 输出**绝对**毫秒；
  * 6. **零时长词**（实测是标点 / 停顿占位）→ **并入前一个词**，不单独成词；
- * 7. 一行里**没有有效词** → 只输出行级标签（行级 LRC）；
- * 8. 空串 / 非串 → 返回空串（**不抛异常**）。
+ * 7. **空文本的词**（实测：QRC **每行末尾**都有一个「没有文字的终止标记」）
+ *    → **不产出标签**（没有文字的「词」不是词）；
+ * 8. 一行里**没有有效词** → 只输出行级标签（行级 LRC）；
+ * 9. 空串 / 非串 → 返回空串（**不抛异常**）。
  *
  * @param qrc 解密后的 QRC 明文。
+ * @param hint 标题识别提示（**可选**：QQ 的 QRC 标题行可以很长 ⇒ 靠**歌名**认更准）。
  * @returns 标准增强 LRC（多行，行间 `\n`）。
  */
-export function qrcToEnhancedLrc(qrc: string): string {
+export function qrcToEnhancedLrc(qrc: string, hint?: QrcTitleHint): string {
   if (typeof qrc !== 'string' || qrc === '') return ''
   const out: string[] = []
   /** 带行头的候选行的序号（0 起）—— 标题行规则用。 */
@@ -442,9 +525,9 @@ export function qrcToEnhancedLrc(qrc: string): string {
       })
     }
 
-    // ⚠️ **元信息行**（制作信息 / 标题行）→ 丢掉（实测 QQ 的 QRC 里混着 10 行制作信息）。
+    // ⚠️ **元信息行**（制作信息 / 标题行）→ 丢掉（实测 QQ 的 QRC 里混着 14 行制作信息）。
     const plainText = rest.replace(QRC_WORD_TUPLE, '').trim()
-    if (isQrcMetaLine(plainText, currentIndex)) continue
+    if (isQrcMetaLine(plainText, currentIndex, hint)) continue
 
     if (!marks.length) {
       // 没有词元组 ⇒ **行级**歌词行（翻译 / 罗马音就是这个形状）。
@@ -465,6 +548,13 @@ export function qrcToEnhancedLrc(qrc: string): string {
         if (previous) previous.text += text
         continue
       }
+      // ⚠️ **空文本的词** → **不产出标签**。
+      //    实测（2026-11-14，孤勇者）：QRC **每行末尾**都有一个「没有文字的终止标记」
+      //    （57 行 ⇒ 57 个）⇒ 若照样产出标签，增强 LRC 里就会多出 57 个空标签。
+      //    ⇒ 渲染层的 `parseWordSegments` 本来也会把它们丢掉（空文本 ⇒ 不成词），
+      //    所以**用户看不到**；但那是有 57 个「词」的**假数据**（词数对不上、时间轴带噪点）
+      //    ⇒ 在**转换层**就滤掉。
+      if (text === '') continue
       words.push({ start: resolveWordTime(mark.start, lineStart), text })
     }
     if (!words.length) continue
