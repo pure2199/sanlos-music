@@ -167,10 +167,17 @@ export function toEmbeddedEntries(songId: string, content: string): LyricEntry[]
 }
 
 /**
- * 把外部源返回的原文 / 翻译包成 `LyricEntry[]`。
+ * 把外部源返回的原文 / 翻译 / 罗马音包成 `LyricEntry[]`（T90-③）。
  *
- * ⚠️ **顺序很重要**：第一条必须是**原文**，第二条是**翻译**
+ * ⚠️ **顺序很重要**：第一条必须是**原文**，后面是**翻译**、**罗马音**
  *    —— `parseLyricEntries` 按「第一条作原文、其余作翻译」的规则合并。
+ *
+ * ⚠️ **每条都带 `role`**（T90-③）：角色标记是「三行」的依据 ——
+ *    没有它就只能靠位置猜（第一条原文、第二条翻译），加第三行时必然歧义。
+ *    `parseLyricEntries` 对**没有 `role`** 的条目仍然走旧的位置约定
+ *    ⇒ **既有数据（NAS / 内嵌）行为一条不变**。
+ *
+ * ⚠️ **没有罗马音就不产第三条**（多数源本来就没有）⇒ 解析与渲染层**不会**多出一行。
  *
  * @param songId 歌曲 guid（只用来拼一个不冲突的 guid）。
  * @param result 外部源的结果。
@@ -181,6 +188,9 @@ export function toExternalEntries(songId: string, result: ExternalLyricResult): 
   const entries: LyricEntry[] = []
   const original = result.original.trim()
   const translation = result.translation.trim()
+  // ⚠️ 罗马音是**可选**字段（`ExternalLyricResult.romanization`）⇒ 老调用点没有它。
+  const rawRomanization = typeof result.romanization === 'string' ? result.romanization : ''
+  const romanization = rawRomanization.trim()
   if (original) {
     entries.push({
       guid: `${EXTERNAL_GUID_PREFIX}:${songId}:original`,
@@ -191,6 +201,7 @@ export function toExternalEntries(songId: string, result: ExternalLyricResult): 
       // ⚠️ 外部源给的就是**带时间戳的 LRC**（主进程那边判过 `looksLikeLrc`）。
       isLRC: true,
       offset: 0,
+      role: 'original',
     })
   }
   if (translation) {
@@ -202,6 +213,19 @@ export function toExternalEntries(songId: string, result: ExternalLyricResult): 
       updatedAt: null,
       isLRC: true,
       offset: 0,
+      role: 'translation',
+    })
+  }
+  if (romanization) {
+    entries.push({
+      guid: `${EXTERNAL_GUID_PREFIX}:${songId}:romanization`,
+      source: result.source,
+      content: rawRomanization,
+      createdAt: null,
+      updatedAt: null,
+      isLRC: true,
+      offset: 0,
+      role: 'romanization',
     })
   }
   return entries

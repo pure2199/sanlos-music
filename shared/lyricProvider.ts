@@ -120,6 +120,15 @@ export type ExternalLyricResult =
       original: string
       /** 翻译 LRC（**可能为空串** —— 很多歌没有翻译）。 */
       translation: string
+      /**
+       * 罗马音 LRC（**可选** —— 只有网易云 / QQ 给罗马音，酷狗 / 酷我 / 咪咕没有）。
+       *
+       * ⚠️ **可选字段、不是必填**（T90-③）：既有代码与既有测试**手写**的是
+       *    `{ status, source, original, translation }` ⇒ 必填会让它们**全部编译不过**
+       *    ⇒ 违反「既有测试一条不许改」的硬约束。
+       * ⚠️ 缺省 / 空串 ⇒ **没有罗马音** ⇒ 渲染层**不渲染**第三行。
+       */
+      romanization?: string
     }
   /** 外部源**确实没有**这首歌的歌词（不是错误）。 */
   | { status: 'not-found' }

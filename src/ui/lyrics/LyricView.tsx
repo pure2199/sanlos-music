@@ -577,6 +577,13 @@ interface RenderLineOptions {
    *    全量模式只给**当前行**传 `true`（没有当前行时**回落到第一行**，见 `AllLyricLine`）。
    */
   showTranslation?: boolean
+  /**
+   * 要不要渲染**罗马音副行**（T90-③ 的第三行）。
+   *
+   * ⚠️ **缺省 = 跟着 `showTranslation`** ⇒ 翻译与罗马音**同一条显示规则**
+   *    （全量模式下都只有当前行显示 ⇒ 「槽位等高」的前提不破）。
+   */
+  showRomanization?: boolean
 }
 
 /**
@@ -597,6 +604,11 @@ interface RenderLineOptions {
  *
  * 翻译（`line.translation` 非空时）挂在下面当副行；**没有翻译时不渲染任何空的翻译节点**
  * （不渲染空的第二行）。
+ *
+ * ⚠️ **T90-③：罗马音（`line.romanization`）是第三行** —— 与翻译**同一层级**的副行：
+ *    - 副行顺序：**原文 → 翻译 → 罗马音**；
+ *    - **没有值就不渲染**（不占位、不渲染空的第三行）；
+ *    - 罗马音**没有词级时间戳** ⇒ 与翻译同理，**不参与推进**。
  */
 function renderLine(options: RenderLineOptions): ReactElement {
   const { line, index, progress, active, onSeek, slot, style } = options
@@ -686,6 +698,23 @@ function renderLine(options: RenderLineOptions): ReactElement {
     </span>
   ) : null
 
+  // ⚠️ **T90-③：罗马音是第三行**（副行）。
+  // - **没有值就不渲染**（不占位、不渲染空的第三行）——
+  //   多数源本来就没有罗马音（只有网易云 / QQ 有）；
+  // - 显示规则与翻译**同一条**（`showRomanization` 缺省跟着 `showTranslation`）；
+  // - 罗马音**没有词级时间戳** ⇒ 与翻译同理，**不参与推进**。
+  const showRomanization = options.showRomanization ?? showTranslation
+  const romanization = typeof line.romanization === 'string' ? line.romanization.trim() : ''
+  const romanizationNode = showRomanization && romanization ? (
+    <span
+      key="romanization"
+      className="fnm-lyricview__romanization"
+      data-testid="lyric-romanization"
+    >
+      {romanization}
+    </span>
+  ) : null
+
   // ⚠️ **key 不放进这个对象**（F15-04）：它会被 `{...rest}` **展开**进 JSX，
   //    React 18.3 对「props 对象里带 key 再展开」会告警
   //    （"A props object containing a 'key' prop is being spread into JSX"），
@@ -712,6 +741,8 @@ function renderLine(options: RenderLineOptions): ReactElement {
     )
   }
   if (translationNode) body.push(translationNode)
+  // ⚠️ **T90-③**：罗马音排在**翻译之后**（副行顺序：原文 → 翻译 → 罗马音）。
+  if (romanizationNode) body.push(romanizationNode)
 
   if (!onSeek) {
     return (

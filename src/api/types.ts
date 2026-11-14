@@ -256,4 +256,13 @@ export interface LyricEntry {
   isLRC: boolean
   /** 时间偏移（毫秒）。 */
   offset: number
+  /**
+   * 这条歌词的**角色**（T90-③：原文 / 翻译 / 罗马音）。
+   *
+   * ⚠️ **可选字段、缺省按旧的位置约定**（第 1 条非空条目作原文、其余作翻译）
+   *    ⇒ **既有数据（NAS / 内嵌）没有这个键** ⇒ 行为**一条不变**。
+   * ⚠️ 必填会破坏「既有测试一条不许改」：既有代码与测试里**手写**的 `LyricEntry`
+   *    都不带这个键 ⇒ 编译不过。
+   */
+  role?: 'original' | 'translation' | 'romanization'
 }

@@ -23,6 +23,15 @@ export type LyricLine = {
   words: LyricWord[]
   translation: string
   /**
+   * 这一行的**罗马音**（T90-③：三行模型 —— 原文 / 翻译 / 罗马音）。
+   *
+   * ⚠️ **可选字段**：既有代码与既有测试里**手写**的 `LyricLine` 都不带这个键
+   *    ⇒ 必填会让它们**全部编译不过** ⇒ 违反「既有测试一条不许改」的硬约束。
+   * ⚠️ **空串 / 缺省 = 没有罗马音** ⇒ 渲染层**不渲染**第三行（不占位）。
+   * ⚠️ 罗马音**没有词级时间戳** ⇒ 与翻译同理，**不参与推进**。
+   */
+  romanization?: string
+  /**
    * 这一行的**词级时间戳是不是源给的**（**真逐字**）。
    *
    * - `true`：**有**显式逐字标签（`<mm:ss.xx>`）⇒ 词边界是**真的** ⇒ 走卡拉OK 填色；
@@ -450,6 +459,11 @@ function assemble(entries: RawEntry[]): LyricLine[] {
       text: current.text,
       words,
       translation: current.translation,
+      // ⚠️ **T90-③**：罗马音**显式写出来**（不靠「缺省即没有」）
+      //    ⇒ 解析器产出的行**自带**这个事实（与 `wordTimed` 同一套纪律）。
+      //    ⚠️ 这里恒为**空串**：罗马音来自**另一份** LRC（`role: 'romanization'`），
+      //    由 `parseLyricEntries` 事后挂上来（见 `attachRomanizations`）。
+      romanization: '',
       // ⚠️ **T81**：显式写出来（不靠「缺省即真逐字」）⇒ 解析器产出的行**自带**这个事实。
       wordTimed,
     })
@@ -562,34 +576,43 @@ export function applyOffset(lines: LyricLine[], ms: number): LyricLine[] {
 }
 
 /**
- * 把翻译行挂到原文行上（按时间戳对齐）。
+ * 把「副行」挂到原文行上（按时间戳对齐）—— 翻译与罗马音**同一套逻辑**（T90-③）。
  *
  * 规则：
  * - 时间戳**精确匹配** → 直接挂上；
  * - 精确匹配不上 → 取**时间差最小**的一行，容差 **0.5s（含边界）**；
- * - 仍然匹配不上 → `translation` 留空串。
- * - 原文行**已有**翻译（同文件内同时间戳的兄弟行）时**不覆盖**。
+ * - 仍然匹配不上 → 该副行留空串。
+ * - 原文行**已有**该副行（同文件内同时间戳的兄弟行）时**不覆盖**。
  *
  * 合并**不改变**原文行的 `time` / `text` / `words`。
  *
+ * ⚠️ **同时间戳只挂第一条**（`exact` 表里每个时间戳只留**最先出现**的那行）
+ *    ⇒ 两条内容不同、但时间戳相同的翻译，界面上**只显示第一条**。
+ *    （这是**既有行为**，T90-③ 一字未改。）
+ *
  * @returns 新的数组（不修改入参）。
  */
-export function attachTranslations(lines: LyricLine[], translationLines: LyricLine[]): LyricLine[] {
+function attachAuxiliary(
+  lines: LyricLine[],
+  auxiliaryLines: LyricLine[],
+  field: 'translation' | 'romanization',
+): LyricLine[] {
   if (!Array.isArray(lines) || !lines.length) return []
-  if (!Array.isArray(translationLines) || !translationLines.length) {
+  if (!Array.isArray(auxiliaryLines) || !auxiliaryLines.length) {
     return lines.map((line) => ({ ...line, words: [...line.words] }))
   }
   const exact = new Map<number, LyricLine>()
-  for (const candidate of translationLines) {
+  for (const candidate of auxiliaryLines) {
     if (!exact.has(candidate.time)) exact.set(candidate.time, candidate)
   }
   return lines.map((line) => {
-    if (line.translation) return { ...line, words: [...line.words] }
+    const current = field === 'translation' ? line.translation : line.romanization
+    if (current) return { ...line, words: [...line.words] }
     let matched = exact.get(line.time)
     if (!matched) {
       let best: LyricLine | undefined
       let bestDiff = Number.POSITIVE_INFINITY
-      for (const candidate of translationLines) {
+      for (const candidate of auxiliaryLines) {
         const diff = Math.abs(candidate.time - line.time)
         if (diff < bestDiff) {
           bestDiff = diff
@@ -598,11 +621,33 @@ export function attachTranslations(lines: LyricLine[], translationLines: LyricLi
       }
       if (best && bestDiff <= 0.5) matched = best
     }
-    // ⚠️ **内容实质相同的不当翻译**（NAS 对同一首歌会返回两条近乎相同的记录，
+    // ⚠️ **内容实质相同的不当副行**（NAS 对同一首歌会返回两条近乎相同的记录，
     //    直接挂上会让同一句歌词在界面上显示两遍——见 `isSameText`）。
-    const translation = matched && !isSameText(matched.text, line.text) ? matched.text : ''
-    return { ...line, words: [...line.words], translation }
+    const value = matched && !isSameText(matched.text, line.text) ? matched.text : ''
+    if (field === 'translation') return { ...line, words: [...line.words], translation: value }
+    return { ...line, words: [...line.words], romanization: value }
   })
+}
+
+/**
+ * 把翻译行挂到原文行上（按时间戳对齐）。
+ *
+ * ⚠️ **对外签名与行为一字未改**（T90-③ 只是把实现泛化成了 `attachAuxiliary`）。
+ */
+export function attachTranslations(lines: LyricLine[], translationLines: LyricLine[]): LyricLine[] {
+  return attachAuxiliary(lines, translationLines, 'translation')
+}
+
+/**
+ * 把**罗马音**行挂到原文行上（按时间戳对齐）—— 与翻译**同一套逻辑**（T90-③）。
+ *
+ * ⚠️ 罗马音**没有词级时间戳** ⇒ 与翻译同理，**不参与推进**（只当副行显示）。
+ */
+export function attachRomanizations(
+  lines: LyricLine[],
+  romanizationLines: LyricLine[],
+): LyricLine[] {
+  return attachAuxiliary(lines, romanizationLines, 'romanization')
 }
 
 /**
@@ -675,14 +720,20 @@ export function findActiveWord(line: LyricLine, t: number): number {
  * 内部流程：挑选原文 → 解析（增强 LRC，缺逐字时自动降级）→ 施加该条自己的 `offset`
  * → 其余条目同样解析并施加各自的 `offset` → 按时间戳对齐合并翻译 → 返回最终 `LyricLine[]`。
  *
- * **原文 / 翻译的挑选规则（定死）**：
- * - **第一条「内容非空」的条目作原文**，其余条目一律当翻译。
+ * **原文 / 翻译 / 罗马音的挑选规则（T90-③，定死）**：
+ * - **有 `role` 的按 `role` 归类**：`'original'` 原文、`'translation'` 翻译、
+ *   `'romanization'` 罗马音。
+ * - **没有 `role` 的按旧的位置约定**：**第一条「内容非空」的条目作原文**，其余条目
+ *   一律当翻译。
  *   依据：① 实测同一首歌会返回两条 `source` 不同、内容近乎相同的记录，
  *   但 `source` 的具体取值**未确认**，因此**不按 `source` 字符串硬猜**；
  *   ② 本仓库既有约定 `src/api/lyric.ts` 的 `lyricApi.raw` 就是「取第一条的 LRC 原文」，
  *   本函数与之保持一致，避免同一个 API 在两处给出不同答案。
+ * - **原文候选优先级**：`role:'original'` → 无 `role` → `role:'translation'`。
+ *   （都没有 ⇒ 返回空数组。）
  * - 条目**内容为空**时跳过（不占用「第一条」的名额）；全部为空 → 返回空数组。
- * - 翻译条目之间不做二次区分：它们按各自 `offset` 偏移后，按时间戳就近对齐挂到原文行上。
+ * - **多余的条目一律当翻译候选**（内容不丢）；翻译 / 罗马音条目之间不做二次区分：
+ *   它们按各自 `offset` 偏移后，按时间戳就近对齐挂到原文行上。
  *
  * @param entries `lyricApi.list()` 的返回值；`null` / `undefined` → 返回空数组。
  */
@@ -692,27 +743,70 @@ export function parseLyricEntries(entries: LyricEntry[]): LyricLine[] {
     (item) => item && typeof item.content === 'string' && item.content.trim() !== '',
   )
   if (!usable.length) return []
-  const [original, ...rest] = usable
+
+  // ---- 1. 选原文（T90-③）--------------------------------------------------
+  // ⚠️ **优先级**：显式 `role:'original'` → 无 `role`（旧的位置约定）→ `role:'translation'`。
+  const original =
+    usable.find((item) => item.role === 'original') ??
+    usable.find((item) => !item.role) ??
+    usable.find((item) => item.role === 'translation')
+  if (!original) return []
+
+  // ---- 2. 其余条目按「翻译 / 罗马音」归类 --------------------------------
+  // ⚠️ **多余的条目一律当翻译候选**（内容不丢）；只有显式 `role:'romanization'`
+  //    的条目才当罗马音 ⇒ **没有 role 的条目永远不会被当成罗马音**。
+  const translationCandidates: LyricEntry[] = []
+  const romanizationCandidates: LyricEntry[] = []
+  for (const item of usable) {
+    if (item === original) continue
+    if (item.role === 'romanization') {
+      romanizationCandidates.push(item)
+      continue
+    }
+    translationCandidates.push(item)
+  }
+
   // ⚠️ 文件自带的 `[offset:±N]` 与服务端 `offset` 在**同一次**偏移里叠加
   //    （`parseEnhancedLrc` 内部求和）⇒ 两者的正负语义天然一致（正 = 延后）。
-  const originalLines = parseEnhancedLrc(original!.content, { offsetMs: original!.offset ?? 0 })
+  const originalLines = parseEnhancedLrc(original.content, { offsetMs: original.offset ?? 0 })
+
   // ⚠️ **冗余副本要整条丢掉**（真机踩过的坑，2026-11-04）：
   //    实测 NAS 对**同一首歌**返回**两条 `source` 不同（1 / 2）但内容逐字相同**的记录
   //    ——它们是**同一份 LRC 的两份拷贝**，不是「原文 + 翻译」。
   //    若把第二条当翻译 → **每一句歌词都显示两遍**（一遍大字、一遍小字，字面完全一样）。
   //    ⇒ 内容（忽略空白）与偏移都相同的条目 → **直接丢弃**。
   //    ⚠️ 偏移不同的不算副本（偏移后时间线不同，仍是有效翻译）。
-  const translationEntries = rest.filter(
+  const translationEntries = translationCandidates.filter(
     (item) =>
-      (item.offset ?? 0) !== (original!.offset ?? 0) ||
-      !isSameText(item.content, original!.content),
+      (item.offset ?? 0) !== (original.offset ?? 0) ||
+      !isSameText(item.content, original.content),
   )
-  if (!translationEntries.length) return originalLines
-  const translationLines: LyricLine[] = []
-  for (const item of translationEntries) {
-    for (const line of parseEnhancedLrc(item.content, { offsetMs: item.offset ?? 0 })) {
-      translationLines.push(line)
+  // ⚠️ 罗马音**同样**适用这条规则 ⇒ **罗马音与原文实质相同就不显示**
+  //    （否则界面上会出现两遍一模一样的行）。
+  const romanizationEntries = romanizationCandidates.filter(
+    (item) =>
+      (item.offset ?? 0) !== (original.offset ?? 0) ||
+      !isSameText(item.content, original.content),
+  )
+
+  let result = originalLines
+  if (translationEntries.length) {
+    const translationLines: LyricLine[] = []
+    for (const item of translationEntries) {
+      for (const line of parseEnhancedLrc(item.content, { offsetMs: item.offset ?? 0 })) {
+        translationLines.push(line)
+      }
     }
+    result = attachTranslations(originalLines, translationLines)
   }
-  return attachTranslations(originalLines, translationLines)
+  if (romanizationEntries.length) {
+    const romanizationLines: LyricLine[] = []
+    for (const item of romanizationEntries) {
+      for (const line of parseEnhancedLrc(item.content, { offsetMs: item.offset ?? 0 })) {
+        romanizationLines.push(line)
+      }
+    }
+    result = attachRomanizations(result, romanizationLines)
+  }
+  return result
 }
