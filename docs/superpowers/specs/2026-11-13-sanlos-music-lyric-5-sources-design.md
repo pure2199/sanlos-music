@@ -727,6 +727,9 @@ T90-④-b 的 `splitWordsAtWhitespace` ⇒ 否则卡拉OK 填色**分段重置**
 - `shared/lyricProvider.ts`：`LyricSource` 加 `'kugou'`、`LYRIC_SOURCES` 白名单加；
 - `src/components/SettingsPanel.tsx`：下拉加一项（**必须与实现同时加**，
   否则就是规格 §9 说的「有选项但用不了」）；
+  ⚠️ **不动**「歌词来源」那段**提示文案**：它列的是**兜底顺序**
+  （「网易云 → lrclib → QQ → 自定义模板」）⇒ 酷狗**不在**兜底链里（见本节末条）
+  ⇒ 把酷狗列进去反而**不准确**；
 - `src/pages/FullPlayerPage.tsx`：`SOURCE_LABEL` 加 `kugou: '酷狗音乐'`；
 - ⚠️ **`ONLINE_SOURCE_ORDER` 本任务不动**（源链位置属于 T90-⑧「源链与设置面板」）
   ⇒ 既有 `buildSourceChain` 的**三条断言一条不改**
@@ -750,7 +753,7 @@ T90-④-b 的 `splitWordsAtWhitespace` ⇒ 否则卡拉OK 填色**分段重置**
 | `electron/lyricWordFormat.ts` | 加 `krcToEnhancedLrc`；角色词补 `作词` / `作曲` | 改 |
 | `electron/lyricProvider.ts` | 加 `fetchKugou()`；源级预算 6s | 改 |
 | `shared/lyricProvider.ts` | `LyricSource` + `'kugou'`、白名单 +1 | 改 |
-| `src/components/SettingsPanel.tsx` | 下拉 +1 项、提示文案 | 改 |
+| `src/components/SettingsPanel.tsx` | 下拉 +1 项（**不动**提示文案，见 §13.6） | 改 |
 | `src/pages/FullPlayerPage.tsx` | `SOURCE_LABEL` +1 | 改 |
 | `test/lyric-krc.test.ts` | **新增**：纯函数单测（**合成密文**） | 新 |
 | `test/lyric-provider.test.ts` | 加酷狗适配器用例 + `normalizeLyricSource('kugou')`（**只加不减**） | 改 |
