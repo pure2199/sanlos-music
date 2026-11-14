@@ -251,6 +251,30 @@ describe('qrcToEnhancedLrc（QRC → 增强 LRC）', () => {
     expect(qrcToEnhancedLrc(qrc, { title: '占位歌名' })).toBe('[00:10.00]<00:10.00>甲')
   })
 
+  it('⚠️ **词内含空白** ⇒ **拆成多个独立词**（否则填色会分段重置）', () => {
+    // ⚠️ 实测：QQ 会把**整段英文**塞进**一个**词元组 ⇒ 渲染层会把它拆成多个 DOM 元素
+    //    （共用同一个词号）⇒ 填色**每片段各自从 0 起算**。
+    // ⇒ 转换层就拆成**独立词**：时间按字符数比例分配。
+    //
+    // ⚠️ **跨度口径 = 渲染层给的词尾**（这里是「行时间 + 0.5s」= 10500ms）⇒
+    //    三个片段把 500ms **均匀**分成 3 份（4/4/4 个非空白字符）。
+    //    ⚠️ 10167ms / 10333ms **不是 10 的倍数** ⇒ 标签用**毫秒**精度（3 位小数）。
+    const qrc = '[10000,2000](10000,1000)Some text here'
+    expect(qrcToEnhancedLrc(qrc)).toBe('[00:10.00]<00:10.00>Some <00:10.167>text <00:10.333>here')
+  })
+
+  it('⚠️ **拆词后文字一个不丢**（拼回去 === 原文）', () => {
+    const qrc = '[10000,2000](10000,1000)Some text here'
+    const out = qrcToEnhancedLrc(qrc)
+    expect(out.replace(/<[^>]*>/g, '').replace(/\[[^\]]*\]/g, '')).toBe('Some text here')
+  })
+
+  it('⚠️ **词首/词尾多出来的空格**不拆（渲染层 trim 后它们本就不算词）', () => {
+    // 「 甲」这种**首尾**空白 ⇒ 渲染层 trim 掉 ⇒ 不会拆 ⇒ 转换层也不该拆。
+    const qrc = '[10000,2000](10000,1000) 甲'
+    expect(qrcToEnhancedLrc(qrc)).toBe('[00:10.00]<00:10.00> 甲')
+  })
+
   it('空串 / 非串 → 空串（**不抛异常**）', () => {
     expect(qrcToEnhancedLrc('')).toBe('')
     expect(qrcToEnhancedLrc('不是歌词')).toBe('')

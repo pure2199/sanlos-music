@@ -83,16 +83,152 @@ const YRC_WORD_PATTERN = /\((-?\d+),(-?\d+),(-?\d+)\)/g
  *
  * @returns 标准增强 LRC（多行，行间 `\n`）。
  */
+// ---------------------------------------------------------------------------
+// 词内空白 ⇒ 拆成多个独立词（T90-④-b）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么要在转换层拆**（而不是改渲染层）：
+//
+// QQ / 网易云都会把**整段英文**（含空格）塞进**一个**词元组
+// （实测《孤勇者》有 1 个词：18 字符、3 个普通空格）。
+// ⇒ 渲染层的 `LyricView.buildSegments` 会按空白把它**拆成多个 DOM 元素**
+//   （**共用同一个 `data-word`**）⇒ 卡拉OK 填色时**每个片段各自从 0 起算**
+//   ⇒ 视觉上就是「**填色分段重置**」。
+//
+// ⚠️ **不能改渲染层**：`test/lyric-view.test.tsx` **显式钉住**了
+// 「含空格的词被拆成多个片段、共享一个词号、一起染色」这个行为
+// ⇒ 改它等于**推翻既有断言**。
+//
+// ⇒ 正解：**转换层**就别产出「内部含空白的词」——
+//   把它按空白拆成**多个独立词**，并按字符数比例分配时间
+//   ⇒ 渲染层看到的是「每个词内部没有空白」⇒ **不会拆**
+//   ⇒ 填色**逐词连续推进**，不再分段重置。
+
+/**
+ * 把一个**词文本**按空白拆成多个片段。
+ *
+ * **规则（定死）**：
+ * 1. 没有空白 ⇒ 原样返回（**一个**片段）；
+ * 2. 按**空白串**切开 ⇒ 空白**跟着它前面的片段**走（`A B` ⇒ `['A ', 'B']`）
+ *    ⇒ 拼回去**逐字等于原文**（不丢空格）；
+ * 3. **纯空白**的片段（词首/词尾多出来的空格）**并进相邻的有字片段**
+ *    ⇒ 否则渲染层 trim 之后那个片段会「消失」（凭空少一个词）；
+ * 4. 整段都是空白 ⇒ **不拆**（返回原串）。
+ *
+ * @param text 词文本（**原样**，不 trim）。
+ * @returns 片段数组（拼起来 === 原文）。
+ */
+export function splitWordByWhitespace(text: string): string[] {
+  if (typeof text !== 'string' || text === '') return []
+  if (!/\s/.test(text)) return [text]
+  const parts = text.split(/(\s+)/)
+  const raw: string[] = []
+  for (let i = 0; i < parts.length; i += 2) {
+    const merged = `${parts[i] ?? ''}${parts[i + 1] ?? ''}`
+    if (merged !== '') raw.push(merged)
+  }
+  const out: string[] = []
+  let pending = ''
+  for (const piece of raw) {
+    if (piece.replace(/\s+/g, '') === '') {
+      // ⚠️ 纯空白片段 ⇒ 并进**下一个**有字的片段（否则渲染层 trim 后它会「消失」）。
+      pending += piece
+      continue
+    }
+    out.push(`${pending}${piece}`)
+    pending = ''
+  }
+  if (pending) {
+    // 结尾的纯空白 ⇒ 并进**上一个**。
+    if (out.length) out[out.length - 1] = `${out[out.length - 1]!}${pending}`
+    else return [text]
+  }
+  return out
+}
+
+/**
+ * 把一行里的词表里「**内部含空白**」的词**拆成多个独立词**（时间按字符数比例分配）。
+ *
+ * ⚠️ **时间口径必须与渲染层 `assemble` 一致**：
+ *   渲染层给每个词的**词尾** =「**下一个词的起点**」；行内最后一个词 ⇒「**下一行的行时间**」
+ *   （没有下一行 ⇒ 行时间 + 0.5s）。
+ *   ⇒ 拆出来的片段**正好铺满**这个词的时间区间 ⇒ 填色**连续**，不会分段重置。
+ *
+ * ⚠️ **跨度不够就不拆**：片段数 ≥ 跨度（毫秒）⇒ 必然出现「零长度的词」
+ *   （渲染层会算出 `end === start` ⇒ 比例除零）⇒ 那就**保持原样**（宁可不变形）。
+ *
+ * @param words 一行内的词（**绝对毫秒** + 文本），**按时间递增**。
+ * @param lineEnd 该行在渲染层的**行尾时间**（下一行行时间；无则行时间 + 0.5s）。
+ */
+export function splitWordsAtWhitespace(
+  words: { start: number; text: string }[],
+  lineEnd: number,
+): { start: number; text: string }[] {
+  if (!Array.isArray(words) || !words.length) return []
+  const out: { start: number; text: string }[] = []
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i]!
+    const next = words[i + 1]
+    // ⚠️ **词尾口径与渲染层 `assemble` 逐字一致**。
+    const end = next
+      ? Math.max(word.start, next.start)
+      : lineEnd > word.start
+        ? lineEnd
+        : word.start + 500
+    const fragments = splitWordByWhitespace(word.text)
+    if (fragments.length <= 1) {
+      out.push(word)
+      continue
+    }
+    const weights = fragments.map((fragment) => fragment.replace(/\s+/g, '').length)
+    const total = weights.reduce((sum, value) => sum + value, 0)
+    const span = end - word.start
+    // ⚠️ **全是空白**或**跨度不够** ⇒ 不拆（保持原样）。
+    if (total <= 0 || span < fragments.length) {
+      out.push(word)
+      continue
+    }
+    const starts: number[] = []
+    let acc = 0
+    fragments.forEach((_fragment, index) => {
+      let value = Math.round(word.start + (span * acc) / total)
+      // ⚠️ 片段起点必须**严格递增**（否则会出现零长度的词 ⇒ 比例除零）。
+      const previous = starts[starts.length - 1]
+      if (previous !== undefined && value <= previous) value = previous + 1
+      starts.push(value)
+      acc += weights[index]!
+    })
+    // ⚠️ 最后一个片段的起点必须**小于词尾**（否则它会盖住下一个词）。
+    if (starts[starts.length - 1]! >= end) {
+      out.push(word)
+      continue
+    }
+    fragments.forEach((fragment, index) => {
+      out.push({ start: starts[index]!, text: fragment })
+    })
+  }
+  return out
+}
+
 export function yrcToEnhancedLrc(yrc: string): string {
   if (typeof yrc !== 'string' || yrc === '') return ''
-  const out: string[] = []
+  // --- ① 解析出所有**带行头**的行（**两遍**：第二遍才知道「下一行行时间」）---
+  const candidates: { lineStart: number; rest: string }[] = []
   for (const rawLine of yrc.split(/\r\n|\r|\n/)) {
     const line = rawLine.trim()
     if (!line) continue
     const head = /^\[(\d+),(\d+)\]/.exec(line)
     if (!head) continue
     const lineStart = Number(head[1])
-    const rest = line.slice(head[0].length)
+    if (!Number.isFinite(lineStart)) continue
+    candidates.push({ lineStart, rest: line.slice(head[0].length) })
+  }
+  const out: string[] = []
+  for (let index = 0; index < candidates.length; index += 1) {
+    const { lineStart, rest } = candidates[index]!
+    // ⚠️ **行尾** = 下一行的行时间（与渲染层 `assemble` 同口径）。
+    const nextLineStart = candidates[index + 1]?.lineStart
+    const lineEnd = nextLineStart !== undefined ? nextLineStart : lineStart + 500
 
     // 行内按**顺序扫描**找词元组（只认数字形状 ⇒ 词文本里的括号不会错位）。
     const pattern = new RegExp(YRC_WORD_PATTERN.source, 'g')
@@ -126,7 +262,9 @@ export function yrcToEnhancedLrc(yrc: string): string {
     // 第一个词元组**之前**的文本（实测通常为空）→ 放在行标签之后
     //    ⇒ 渲染层的 `parseWordSegments` 会把它当成该行的首段。
     const leading = rest.slice(0, marks[0]!.to).trim()
-    const body = words.map((word) => `<${msToLrcTag(word.start)}>${word.text}`).join('')
+    // ⚠️ **词内含空白** ⇒ 拆成多个独立词（否则渲染层会把填色分段重置）。
+    const expanded = splitWordsAtWhitespace(words, lineEnd)
+    const body = expanded.map((word) => `<${msToLrcTag(word.start)}>${word.text}`).join('')
     out.push(`[${msToLrcTag(lineStart)}]${leading}${body}`)
   }
   return out.join('\n')
@@ -490,7 +628,10 @@ function resolveWordTime(wordMs: number, lineStartMs: number): number {
  * 7. **空文本的词**（实测：QRC **每行末尾**都有一个「没有文字的终止标记」）
  *    → **不产出标签**（没有文字的「词」不是词）；
  * 8. 一行里**没有有效词** → 只输出行级标签（行级 LRC）；
- * 9. 空串 / 非串 → 返回空串（**不抛异常**）。
+ * 9. **词内含空白**（实测：QQ 把**整段英文**塞进一个词元组）→ **拆成多个独立词**，
+ *    时间按字符数比例分配（见 {@link splitWordsAtWhitespace}）⇒ 渲染层不会拆它
+ *    ⇒ 卡拉OK 填色**不会分段重置**；
+ * 10. 空串 / 非串 → 返回空串（**不抛异常**）。
  *
  * @param qrc 解密后的 QRC 明文。
  * @param hint 标题识别提示（**可选**：QQ 的 QRC 标题行可以很长 ⇒ 靠**歌名**认更准）。
@@ -498,9 +639,9 @@ function resolveWordTime(wordMs: number, lineStartMs: number): number {
  */
 export function qrcToEnhancedLrc(qrc: string, hint?: QrcTitleHint): string {
   if (typeof qrc !== 'string' || qrc === '') return ''
-  const out: string[] = []
-  /** 带行头的候选行的序号（0 起）—— 标题行规则用。 */
-  let candidateIndex = 0
+  // --- ① 解析出所有**带行头**的候选行 -----------------------------------------
+  // ⚠️ **要两遍**：拆词需要「**下一行行时间**」（= 渲染层给的行尾）⇒ 得先知道全部行。
+  const candidates: { lineStart: number; rest: string; candidateIndex: number }[] = []
   for (const rawLine of qrc.split(/\r\n|\r|\n/)) {
     const line = rawLine.trim()
     if (!line) continue
@@ -508,9 +649,30 @@ export function qrcToEnhancedLrc(qrc: string, hint?: QrcTitleHint): string {
     if (!head) continue // 无行头（`[ti:]` 之类 / 不是歌词行）→ 丢掉
     const lineStart = Number(head[1])
     if (!Number.isFinite(lineStart)) continue
-    const rest = line.slice(head[0].length)
-    const currentIndex = candidateIndex
-    candidateIndex += 1
+    candidates.push({
+      lineStart,
+      rest: line.slice(head[0].length),
+      // 带行头的候选行的序号（0 起）—— 标题行规则用。
+      candidateIndex: candidates.length,
+    })
+  }
+
+  // --- ② 丢掉**元信息行**（制作信息 / 标题行）--------------------------------
+  // ⚠️ **被丢掉的行不参与「下一行行时间」的计算** ⇒ 与渲染层看到的一致。
+  const lyricLines: typeof candidates = []
+  for (const item of candidates) {
+    const plainText = item.rest.replace(QRC_WORD_TUPLE, '').trim()
+    if (isQrcMetaLine(plainText, item.candidateIndex, hint)) continue
+    lyricLines.push(item)
+  }
+
+  // --- ③ 转换 ----------------------------------------------------------------
+  const out: string[] = []
+  for (let index = 0; index < lyricLines.length; index += 1) {
+    const { lineStart, rest } = lyricLines[index]!
+    // ⚠️ **行尾** = 下一行的行时间（与渲染层 `assemble` 同口径）。
+    const nextLineStart = lyricLines[index + 1]?.lineStart
+    const lineEnd = nextLineStart !== undefined ? nextLineStart : lineStart + 500
 
     // 词元组（**按顺序扫描** ⇒ 词文本里的括号不会错位）。
     const pattern = new RegExp(QRC_WORD_TUPLE.source, 'g')
@@ -525,9 +687,7 @@ export function qrcToEnhancedLrc(qrc: string, hint?: QrcTitleHint): string {
       })
     }
 
-    // ⚠️ **元信息行**（制作信息 / 标题行）→ 丢掉（实测 QQ 的 QRC 里混着 14 行制作信息）。
-    const plainText = rest.replace(QRC_WORD_TUPLE, '').trim()
-    if (isQrcMetaLine(plainText, currentIndex, hint)) continue
+    // ⚠️ **元信息行**已在上面（②）丢掉（实测 QQ 的 QRC 里混着 14 行制作信息）。
 
     if (!marks.length) {
       // 没有词元组 ⇒ **行级**歌词行（翻译 / 罗马音就是这个形状）。
@@ -566,9 +726,9 @@ export function qrcToEnhancedLrc(qrc: string, hint?: QrcTitleHint): string {
       if (first) first.text = leading + first.text
     }
 
-    const body = words
-      .map((word) => `<${msToLrcTag(word.start)}>${word.text}`)
-      .join('')
+    // ⚠️ **词内含空白** ⇒ 拆成多个独立词（否则渲染层会把填色分段重置）。
+    const expanded = splitWordsAtWhitespace(words, lineEnd)
+    const body = expanded.map((word) => `<${msToLrcTag(word.start)}>${word.text}`).join('')
     out.push(`[${msToLrcTag(lineStart)}]${body}`)
   }
   return out.join('\n')
