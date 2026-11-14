@@ -572,5 +572,195 @@ QQ（网易云同形）会把**整段英文**（含空格）塞进**一个**词�
 ⚠️ **「不丢字」仍成立**：拆词前后，整行的**纯文字逐字相同**
 （既有单测「不丢字（I-3）」继续通过；yrc 的既有断言**一条未改**）。
 
+---
+
+## 13. T90-⑤ 的实现约定（2026-11-14）
+
+### 13.1 ⚠️ 端点必须走 **https**（T74a 记的 http 端点在生产路径**走不通**）
+
+T74a（2026-11-10）记的三个端点都是 **http 明文**。本机在**真实 Electron 主进程**
+（Chromium 分区栈，与生产 `electron/http.ts` 的 `http.fetch` 同形）实测：
+
+| T74a 的端点 | 实测结果 |
+| --- | --- |
+| `http://mobilecdn.kugou.com/api/v3/search/song` | ✗ `net::ERR_BLOCKED_BY_CLIENT` |
+| `http://krcs.kugou.com/search` | ✗ `net::ERR_BLOCKED_BY_CLIENT` |
+| `http://lyrics.kugou.com/download` | ✗ `net::ERR_BLOCKED_BY_CLIENT` |
+
+⇒ **不是酷狗的问题，是 Chromium 的策略**：同一个分区里连 `http://example.com`
+   也一样被拦 ⇒ **本应用的 Chromium 分区栈全局拦 http 明文**
+   ⇒ 与 `electron/http.ts` 的既有纪律一致（「外部歌词源必须用正规证书」）。
+
+⚠️ **教训（与 T90-② 的教训同型）**：Node 的 `fetch`（undici）**能**走 http
+   ⇒ **探针在 Node 里通 ≠ 生产能通** ⇒ 端点必须**在真实 Electron 主进程里**验。
+
+**可用的 https 端点**（本机真实 Electron 主进程实测，2026-11-14）：
+
+| 跳 | URL | 实测 |
+| --- | --- | --- |
+| 搜索 | `https://mobileservice.kugou.com/api/v3/search/song?format=json&keyword=…&page=1&pagesize=20&showtype=1` | 200 / 293ms，`data.info[]` |
+| accesskey | `https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=…&hash=…&timelength=…&lrctxt=1` | 200 / 81ms，`candidates[0]` |
+| 下载 | `https://lyrics.kugou.com/download?ver=1&client=pc&id=…&accesskey=…&fmt=krc&charset=utf8` | 200 / 46ms，`content`（base64，头 `krc1`） |
+
+⚠️ `https://mobilecdn.kugou.com` ⇒ `ERR_CERT_COMMON_NAME_INVALID`（证书主机名不匹配）。
+⚠️ `https://www.kugou.com/yy/search/song` ⇒ HTTP 200 但正文是 `Access Deny ! No Actions !`。
+⚠️ `https://mobileservice.kugou.com/api/v3/search/song` ⇒ **免签名可用**，
+   且字段与 `mobilecdn` **完全一致**（`hash` / `songname` / `singername` / `duration`（秒）…）。
+
+⚠️ **`timelength` / `duration` 传「秒」**（不是毫秒）：搜索结果的 `duration` 是**秒**
+   （实测《孤勇者》= 256），而 accesskey 候选返回的 `duration` 是**毫秒**（256146）
+   ⇒ 两者不是同一口径，别混。
+
+### 13.2 `fmt` 的选择：**有逐字就用逐字**，没有就回退行级
+
+洛雪的口径（`musicSdk/kg/lyric.js`）：`(krctype == 1 && contenttype != 1) ? 'krc' : 'lrc'`
+⇒ 实测《孤勇者》：`krctype = 1` / `contenttype = 0` ⇒ **真逐字**。
+
+⇒ 本实现：
+1. 先按 `krctype` / `contenttype` 决定 `fmt`；
+2. **`fmt=krc` 优先**（真逐字）；下载失败 / 解密失败 ⇒ **回退 `fmt=lrc`**（行级）
+   ⇒ 歌词**不会因为「没有逐字」而整首丢掉**（与 QQ 的「行级先 / 逐字后」同一套思路）。
+
+### 13.3 KRC 解密（`electron/lyricCodecs/krc.ts`）
+
+```
+body   = base64Decode(content).subarray(4)       // 跳过 "krc1"
+body[i] ^= KRC_XOR_KEY[i % 16]                   // 循环 XOR（16 字节固定密钥）
+plain  = zlib.inflateSync(body).toString('utf8') // 标准 zlib
+```
+
+- `KRC_XOR_KEY = [64,71,97,119,94,50,116,71,81,54,49,45,206,210,110,105]`；
+- ⚠️ 解密后**可能带 UTF-8 BOM**（实测《孤勇者》《Counting Stars》带，《一路向北》不带）⇒ 解析须容忍；
+- ⚠️ zlib 用 **Node 内置**（`node:zlib`）⇒ **不引新 npm 依赖**（与 `electron/lyricCodecs/qrc.ts` 同款）；
+- ⚠️ **头不是 `krc1` ⇒ 抛错**（如实报「源不可用」，不静默吞掉）；
+- ⚠️ **不移植洛雪的代码**：算法本身是公开算法（4 个独立公开实现交叉验证一致），
+   本仓库**按算法自行实现** ⇒ `THIRD_PARTY_NOTICES.md` **不需要新增条目**。
+
+### 13.4 KRC → 增强 LRC（`electron/lyricWordFormat.ts` 的 `krcToEnhancedLrc`）
+
+**与 QRC / yrc 的三处差异**（转换器必须区别对待）：
+
+| | 网易云 yrc | QQ qrc | **酷狗 KRC** |
+| --- | --- | --- | --- |
+| 词元组形状 | `(起ms,时长ms,0)` | `(起ms,时长ms)` | **`<起ms,时长ms,0>`**（尖括号） |
+| 词时间的基准 | 绝对 | 绝对（实测） | **相对行开始** ⇒ 绝对 = **行首 + 相对** |
+| 额外内容 | 无 | 制作信息 + 标题行 | 制作信息 + 标题行（**形态同 QRC**） |
+
+**规则（定死）**：
+
+1. 行头只认 `[起ms,时长ms]`；**无行头**的行（`[id:]` / `[ti:]` / `[ar:]` 之类）**丢掉**
+   （实测《孤勇者》81 行里 **11 行**是无行头的元信息）；
+2. **元信息行**（制作信息 / 标题行）**丢掉**（见 §13.5）；
+3. 行内按**顺序扫描**找词元组 `<(\d+),(\d+),(\d+)>`（只认数字形状）
+   ⇒ 词文本里的尖括号**不会错位**；
+4. 词文本 = 词元组之间的内容（**原样保留**，不 trim 词内空格）；
+5. 词时间 = **行首 + 相对毫秒**（用与 QRC 同一个 `resolveWordTime` 兜底：
+   「相对值 ≥ 行首 ⇒ 判绝对」⇒ 万一某首是绝对基准，也不会整首跑偏）；
+6. **零时长词**（实测《孤勇者》4 个）→ **并入前一个词**，不单独成词；
+7. **空文本的词** → **不产出标签**；
+8. **词内含空白** → **拆成多个独立词**（见下）；
+9. 空串 / 非串 → 返回空串（**不抛异常**）。
+
+#### ⚠️ 第 8 条是本任务的技术要点（**实测数据**）
+
+酷狗**也**把整段英文塞进**一个**词元组 ⇒ 与 QQ / 网易云同形 ⇒ 必须走
+T90-④-b 的 `splitWordsAtWhitespace` ⇒ 否则卡拉OK 填色**分段重置**。
+
+实测（2026-11-14，三首）：
+
+| 歌 | 歌词行 | 词元组 | **含空白的词元组** |
+| --- | --- | --- | --- |
+| 《孤勇者》/ 陈奕迅 | 69 | 591 | 24 |
+| 《一路向北》/ 周杰伦 | 35 | 358 | 21 |
+| 《Counting Stars》/ OneRepublic | 100 | 547 | **432** |
+
+⚠️ **英文歌最严重**（《Counting Stars》**79%** 的词元组含空白）⇒ 不拆必然错。
+
+#### 词尾口径（**与 T90-④-b 完全一致**）
+
+- 词尾 = **下一个词的起点**；行内最后一个词 = **下一行的行时间**（无下一行 ⇒ 行时间 + 500ms）；
+- ⚠️ **KRC 的行时长不能用**：实测《孤勇者》行 11 的行时长 7433ms，
+  而「下一行行首 − 行首」= 7499ms ⇒ 行时长是**源给的另一套口径**；
+- ⚠️ **KRC 的词时长也不采用**（同 QRC 的结论：源给的词时长与渲染层跨度对不上）
+  ⇒ 一律按「下一个词起点 / 下一行行时间」推。
+
+### 13.5 元信息行过滤：**复用 QRC 那套更严的规则**（不是 T74a 的宽松版）
+
+⚠️ T74a 规格 §3.3 用的是「**前缀白名单命中 ⇒ 无条件跳过**」——
+   本仓库在 T90-④ 已实测发现那条规则**既误杀歌词、又漏复合角色词**
+   ⇒ **不用它**，改用 `electron/lyricWordFormat.ts` 里现有的 `isQrcMetaLine`
+   （精确 / 后缀 / 前缀 / 英文多词 **四管齐下**）
+   —— **QQ 的 QRC 与酷狗的 KRC 在这一点上同形** ⇒ **同一套规则**。
+
+⚠️ **要补两个角色词**（本任务实测漏网的）：
+
+| 角色词 | 酷狗实测 | QQ 白名单 | 处置 |
+| --- | --- | --- | --- |
+| `作词` | ✅ 出现 | ❌ 没有 | **补进精确匹配表 + 后缀表** |
+| `作曲` | ✅ 出现 | ❌ 没有 | **补进精确匹配表 + 后缀表** |
+
+⚠️ 为什么单字 `词` / `曲` **不进**后缀表（既有注释已说明）：「词不达意：」这种**歌词行**
+   会被误杀 ⇒ 单字只走精确匹配；`作词` / `作曲` 是 **2 字** ⇒ 安全
+   （既有断言 `isQrcCreditLine('词不达意：占位') === false` **仍然成立**）。
+
+实测的酷狗角色词全集（3 首）：`作词` `作曲` `编曲` `吉他` `人声录音师` `人声录音棚`
+`混音/母带` `词版权管理方` `曲版权管理方` `出品监制` `联合出品方` `制作人` `词` `曲`。
+
+#### ⚠️ 标题行：**必须带歌名提示**（T74a 的「≤ 30 字」判据**不够**）
+
+实测《孤勇者》的标题行有 **32 字**（`孤勇者 (《英雄联盟：双城之战》动画剧集中文主题曲) - 陈奕迅`）
+⇒ T74a 的「≤ 30 字」**判不出** ⇒ 必须用 `isQrcTitleLine` 的**带提示判据**
+（「以歌名开头 + 含 ` - `」）⇒ **搜索命中的歌名要下传**（与 QQ 同一套做法）。
+
+### 13.6 源枚举、UI 与**源链**
+
+- `shared/lyricProvider.ts`：`LyricSource` 加 `'kugou'`、`LYRIC_SOURCES` 白名单加；
+- `src/components/SettingsPanel.tsx`：下拉加一项（**必须与实现同时加**，
+  否则就是规格 §9 说的「有选项但用不了」）；
+- `src/pages/FullPlayerPage.tsx`：`SOURCE_LABEL` 加 `kugou: '酷狗音乐'`；
+- ⚠️ **`ONLINE_SOURCE_ORDER` 本任务不动**（源链位置属于 T90-⑧「源链与设置面板」）
+  ⇒ 既有 `buildSourceChain` 的**三条断言一条不改**
+  ⇒ 用户选酷狗时它是**首选源**（`buildSourceChain` 先 `push(source)`），其余源照旧兜底。
+
+### 13.7 既有断言的影响（**只有一条**，且是「前提被显式推翻」）
+
+`test/settings-lyric-source.test.tsx` 断言下拉「**恰好五个**选项」：
+`expect(values).toEqual(['netease', 'lrclib', 'qq', 'custom', 'off'])`
+⇒ 规格 §9 明确要求「新源各自在实现时再加，否则设置面板会出现『有选项但用不了』的源」
+⇒ **这条断言的前提被显式推翻** ⇒ **改写为新行为断言**（六个选项的**精确相等**断言，
+强度不变、不弱化），并在台账里说明。
+
+⚠️ 其余既有测试**一条不改、断言一条不弱化**。
+
+### 13.8 影响文件清单
+
+| 文件 | 改动 | 性质 |
+| --- | --- | --- |
+| `electron/lyricCodecs/krc.ts` | **新增**：`decodeKrcPayload`（XOR + zlib） | 新 |
+| `electron/lyricWordFormat.ts` | 加 `krcToEnhancedLrc`；角色词补 `作词` / `作曲` | 改 |
+| `electron/lyricProvider.ts` | 加 `fetchKugou()`；源级预算 6s | 改 |
+| `shared/lyricProvider.ts` | `LyricSource` + `'kugou'`、白名单 +1 | 改 |
+| `src/components/SettingsPanel.tsx` | 下拉 +1 项、提示文案 | 改 |
+| `src/pages/FullPlayerPage.tsx` | `SOURCE_LABEL` +1 | 改 |
+| `test/lyric-krc.test.ts` | **新增**：纯函数单测（**合成密文**） | 新 |
+| `test/lyric-provider.test.ts` | 加酷狗适配器用例 + `normalizeLyricSource('kugou')`（**只加不减**） | 改 |
+| `test/settings-lyric-source.test.tsx` | **改写 1 条断言**（见 §13.7） | 改 |
+
+⚠️ **真实密文不入库**：KRC 的 XOR 密钥是**公开**的 ⇒ 真实密文入库 = 把歌词放进公开仓库
+   ⇒ 单测用**自己合成**的密文（`deflateSync` + 同样的 XOR）⇒ 链路完整可验、内容不泄露。
+
+### 13.9 验收点
+
+1. `tsc --noEmit` **0 错**；
+2. `vitest run` **全绿**（既有 2496 条**一条不删**，断言**一条不弱化** —— 除 §13.7 那条改写）；
+3. `npm run build` exit 0；
+4. 全量 `playwright test` **34 passed**；
+5. **真机回归**（脚本放 gitignored 的 `release/verify/`）：酷狗源真实取词
+   ⇒ 逐行对账**零差异** + 填色落点与媒体位置差 ≤ 0.1s
+   + 「**多元素共用一个词号**」的行数 **= 0**（证明拆词生效）；
+6. **变异自证**：不拆词 / 不加行首 / 不过滤元信息 / 不解 XOR ⇒ 对应断言**当场变红**；
+7. 台账回填（正本 + 副本 sha 一致、连跑三次不变）+ **2 个 commit**（规格先行 + 实现）。
+
+
 
 
