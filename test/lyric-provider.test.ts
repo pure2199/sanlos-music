@@ -904,6 +904,20 @@ const YRC_SAMPLE = [
 /** 带**零时长词**（标点占位）的 yrc 样本。 */
 const YRC_ZERO_DURATION = '[0,1000](0,600,0)甲(600,0,0),(600,400,0)乙'
 
+/**
+ * 一份「文本与 `LRC_SAMPLE` **对得上**」的 yrc 样本（T90-⑧）。
+ *
+ * ⚠️ **为什么需要它**：副行现在要「以原文行为锚」重新定时，
+ *    桥是「**原文行文本** → lrc 行 → 副行」
+ *    ⇒ yrc 的行文本必须与 lrc 的行文本**一致**（真实数据就是这样）。
+ *    ⇒ 行时间也**故意**与 lrc 不同轴（`0` / `6190` vs `10000` / `20000`）
+ *    ⇒ 翻译的标签必须被**改成原文行的时间**。
+ */
+const YRC_MATCHING_LRC = [
+  '[0,1000](0,1000,0)占位歌词第一行',
+  '[6190,4440](6190,2190,0)占位歌词第二行',
+].join('\n')
+
 /** 剥掉全部结构字符（行头 / 词元组 / 逐字标签 / 行标签 / 数字 / 空白）→ 只剩文字。 */
 function textOnly(text: string): string {
   return text
@@ -1001,7 +1015,35 @@ describe('网易云适配器 · 真逐字（T67）', () => {
     expect(calls[1]).toContain('yv=-1')
   })
 
-  it('响应带 yrc → 原文用**真逐字**（含 <mm:ss.xx>），翻译照旧', async () => {
+  it('响应带 yrc → 原文用**真逐字**（含 <mm:ss.xx>）；翻译**被重新定时到原文行**', async () => {
+    // ⚠️ **前提被显式推翻**（T90-⑧ / 规格 §16.5）：
+    //    副行（翻译 / 罗马音）现在要「以原文行为锚」重新定时 ——
+    //    桥是「**原文行文本** → lrc 行 → 副行」，因为网易云的副行与 `lrc` 同轴、
+    //    而逐字原文（yrc）是**另一条轴**（实测行间差最大 1899 ms）。
+    //    ⇒ 本 fixture 的 yrc 文本必须**与 lrc 文本对得上**（真实数据就是这样）
+    //    ⇒ 翻译**不再「照旧」**：它的标签被改成**原文行**的时间（`00:00.00`）。
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({
+          lrc: { lyric: LRC_SAMPLE },
+          tlyric: { lyric: '[00:10.00]占位翻译' },
+          yrc: { version: 1, lyric: YRC_MATCHING_LRC },
+        }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(result.original).toContain('<00:06.19>')
+    // ⚠️ **精确相等**断言（不是「包含」）⇒ 强度不减。
+    expect(result.translation).toBe('[00:00.00]占位翻译')
+  })
+
+  it('yrc 文本与 lrc 文本**对不上** → 翻译按「宁缺勿错」**为空**（原文照常给）', async () => {
+    // ⚠️ 桥接不成立 ⇒ 副行**直接丢弃**（不猜、不就近）。
     const { fetchImpl } = makeFetch([
       { match: 'music.163.com/api/search', body: searchBody },
       {
@@ -1018,7 +1060,7 @@ describe('网易云适配器 · 真逐字（T67）', () => {
     expect(result.status).toBe('ok')
     if (result.status !== 'ok') return
     expect(result.original).toContain('<00:06.19>')
-    expect(result.translation).toBe('[00:10.00]占位翻译')
+    expect(result.translation).toBe('')
   })
 
   it('**只有 yrc、没有 lrc** → 也能出歌词（此前会被判成 not-found）', async () => {
@@ -1085,6 +1127,133 @@ describe('网易云适配器 · 真逐字（T67）', () => {
     const lines = parseLyricEntries(toExternalEntries('song-1', result))
     expect(lines.length).toBeGreaterThan(0)
     expect(lines.some((line) => line.words.length > 1)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 网易云适配器 · 罗马音与副行重新定时（T90-⑧）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **钉住三件最容易回归的事**：
+// 1. **请求必须带 `rv=-1`**（不带 ⇒ 网易云**根本不会**回 romalrc 字段）；
+// 2. **没有罗马音时结果里不带 `romanization` 键**
+//    ⇒ 结果对象与 T90-⑧ 之前**一模一样**（既有行为一字不变）；
+// 3. 副行（翻译 / 罗马音）**必须被重新定时到原文行的时间标签**
+//    ⇒ 否则渲染层的「时间戳精确匹配」落空 ⇒ 退到「≤ 0.5 s 就近」⇒ 丢行 / 挂错行。
+//
+// ---------------------------------------------------------------------------
+
+describe('网易云适配器 · 罗马音与副行重新定时（T90-⑧）', () => {
+  const searchBody = JSON.stringify({
+    result: {
+      songCount: 1,
+      songs: [{ id: 111, name: '占位歌名', duration: 180_000, artists: [{ name: '占位歌手' }] }],
+    },
+  })
+
+  /** 罗马音与 lrc **精确同刻**（实测：网易云的 romalrc 走 lrc 那条轴）。 */
+  const ROMALRC = '[00:10.00]jia yi hang\n[00:20.00]di er ju'
+
+  it('请求**带 rv=-1**（罗马音参数；不带就永远拿不到 romalrc）', async () => {
+    const { fetchImpl, calls } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      { match: 'music.163.com/api/song/lyric', body: JSON.stringify({ lrc: { lyric: LRC_SAMPLE } }) },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(calls[1]).toContain('rv=-1')
+  })
+
+  it('响应带 romalrc → 结果里**有** `romanization`', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({
+          lrc: { lyric: LRC_SAMPLE },
+          romalrc: { lyric: ROMALRC },
+        }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect(typeof result.romanization).toBe('string')
+    expect(result.romanization).not.toBe('')
+  })
+
+  it('罗马音**被重新定时到原文行**（逐字原文的行时间 ≠ 罗马音自己的时间）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({
+          lrc: { lyric: LRC_SAMPLE },
+          yrc: { version: 1, lyric: YRC_MATCHING_LRC },
+          romalrc: { lyric: ROMALRC },
+        }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    // ⚠️ **精确相等**断言 ⇒ 标签必须是**原文行**的（`00:00.00` / `00:06.19`），
+    //    而不是副行自己的（`00:10.00` / `00:20.00`）。
+    expect(result.romanization).toBe('[00:00.00]jia yi hang\n[00:06.19]di er ju')
+  })
+
+  it('**没有** romalrc → 结果**不含** `romanization` 键（结果对象与从前一模一样）', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({ lrc: { lyric: LRC_SAMPLE }, tlyric: { lyric: '[00:10.00]占位翻译' } }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect('romanization' in result).toBe(false)
+  })
+
+  it('romalrc 是**空串** → 结果**不含** `romanization` 键', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({ lrc: { lyric: LRC_SAMPLE }, romalrc: { lyric: '' } }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    expect('romanization' in result).toBe(false)
+  })
+
+  it('端到端：罗马音**产出第三条**（`role: \'romanization\'`）并挂到**正确的行**上', async () => {
+    const { fetchImpl } = makeFetch([
+      { match: 'music.163.com/api/search', body: searchBody },
+      {
+        match: 'music.163.com/api/song/lyric',
+        body: JSON.stringify({
+          lrc: { lyric: LRC_SAMPLE },
+          yrc: { version: 1, lyric: YRC_MATCHING_LRC },
+          romalrc: { lyric: ROMALRC },
+        }),
+      },
+    ])
+    const provider = createLyricProvider({ fetchImpl })
+    const result = await provider.fetchExternalLyric('netease', '', QUERY)
+    expect(result.status).toBe('ok')
+    if (result.status !== 'ok') return
+    const entries = toExternalEntries('song-1', result)
+    expect(entries.map((entry) => entry.role)).toEqual(['original', 'romanization'])
+    const lines = parseLyricEntries(entries)
+    expect(lines.map((line) => line.romanization)).toEqual(['jia yi hang', 'di er ju'])
   })
 })
 

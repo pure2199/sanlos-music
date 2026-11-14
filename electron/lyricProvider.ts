@@ -62,6 +62,8 @@ import { decodeQrc } from './lyricCodecs/qrc'
 import { decodeKrcPayload, decodeKrcPlainPayload } from './lyricCodecs/krc'
 import { decodeKuwoLrcxPayload } from './lyricCodecs/kuwo'
 import { decryptMiguMrc } from './lyricCodecs/migu'
+// ⚠️ 网易云的副行（翻译 / 罗马音）要「以原文行为锚」重新定时（规格 §16.3）。
+import { alignNeteaseAuxiliary } from './lyricAuxiliary'
 // ⚠️ 只借 `md5` 这一个**纯函数**（本仓库既有的十六进制 MD5 助手）。
 //    ⇒ 咪咕搜索要签名（规格 §15.3）⇒ **不引新依赖**。
 import { md5 } from './sign'
@@ -491,6 +493,15 @@ interface NeteaseLyricPayload {
    * ⚠️ 形状实测 = `{ version, lyric }`。
    */
   yrc?: { lyric?: unknown }
+  /**
+   * **行级罗马音**（romalrc）。
+   *
+   * ⚠️ **必须请求 `rv=-1` 才有**（实测：不带 → 根本没有这个字段）。
+   * ⚠️ 实测形状 = `{ version, lyric }`；内容是**行级** LRC（`[mm:ss.xx]`）。
+   * ⚠️ ⚠️ **逐字罗马音是 `yromalrc`** —— 旧接口**恒无**（实测样本全空）
+   *    ⇒ 本源只有**行级**罗马音（第三行按副行显示，不参与推进）。
+   */
+  romalrc?: { lyric?: unknown }
 }
 
 /**
@@ -520,8 +531,9 @@ async function fetchNetease(
   if (!candidate) return { status: 'not-found' }
 
   // ⚠️ `yv=-1` = **要逐字**（yrc）。实测：不带这个参数，网易云**根本不会**回 yrc 字段。
+  // ⚠️ `rv=-1` = **要罗马音**（romalrc）。实测：不带这个参数，网易云**根本不会**回 romalrc 字段。
   const lyricRes = await fetchImpl(
-    `${NETEASE_LYRIC_URL}?id=${encodeURIComponent(candidate.id)}&lv=1&kv=1&tv=-1&yv=-1`,
+    `${NETEASE_LYRIC_URL}?id=${encodeURIComponent(candidate.id)}&lv=1&kv=1&tv=-1&yv=-1&rv=-1`,
     {
       headers: { accept: 'application/json', 'user-agent': USER_AGENT },
     },
@@ -536,7 +548,8 @@ async function fetchNetease(
   } catch {
     return { status: 'error', message: '网易云歌词返回的不是 JSON' }
   }
-  const translation = typeof lyricPayload.tlyric?.lyric === 'string' ? lyricPayload.tlyric.lyric : ''
+  const rawTranslation = typeof lyricPayload.tlyric?.lyric === 'string' ? lyricPayload.tlyric.lyric : ''
+  const rawRomanization = typeof lyricPayload.romalrc?.lyric === 'string' ? lyricPayload.romalrc.lyric : ''
   // ⚠️ **逐字优先**（T67）：有 yrc 就用它（真逐字 ⇒ 卡拉OK 填色真的跟嘴）；
   //    没有 yrc ⇒ 回退行级 lrc（**行为与本任务之前一字不变**）。
   //    ⚠️ yrc 畸形（转换出空串）⇒ **回退 lrc**，不因此丢掉整首歌。
@@ -544,6 +557,19 @@ async function fetchNetease(
   const lrc = typeof lyricPayload.lrc?.lyric === 'string' ? lyricPayload.lrc.lyric : ''
   const original = yrc ? yrcToEnhancedLrc(yrc) || lrc : lrc
   if (!looksLikeLrc(original)) return { status: 'not-found' }
+  // ⚠️ ⚠️ **副行必须「以原文行为锚」重新定时**（规格 §16.2 / §16.3）：
+  //    网易云的翻译（tlyric）与罗马音（romalrc）都在 **`lrc` 那条时间轴**上，
+  //    而逐字原文（yrc）是**另一条轴**（实测行间差最大 1899 ms）
+  //    ⇒ 原样直挂时渲染层的「时间戳精确匹配」**必然落空** ⇒ 退到「≤ 0.5 s 就近」
+  //    ⇒ 实测丢 14%–72% 的行，还可能挂错行。
+  //    ⇒ 这里把副行重定时到**原文行的时间标签**（逐字符一致）⇒ 精确匹配必然命中。
+  const translation = alignNeteaseAuxiliary(original, lrc, rawTranslation)
+  const romanization = alignNeteaseAuxiliary(original, lrc, rawRomanization)
+  // ⚠️ **没有罗马音时**结果里**不带** `romanization` 字段
+  //    ⇒ 结果对象与本任务之前**一模一样** ⇒ 既有行为与既有断言**一字不变**。
+  if (romanization) {
+    return { status: 'ok', source: 'netease', original, translation, romanization }
+  }
   return { status: 'ok', source: 'netease', original, translation }
 }
 
