@@ -804,6 +804,198 @@ T90-④-b 的 `splitWordsAtWhitespace` ⇒ 否则卡拉OK 填色**分段重置**
 ⇒ 命中酷狗就会显示「歌词来源：酷狗音乐」
 （**如实显示实际命中的那个源** —— T73 的既有口径，不是装作首选源）。
 
+## 14. T90-⑥ 的实现约定：酷我源（2026-11-14）
+
+⚠️ 本节所有结论都是**本机真实 Electron 主进程**实测（不是 Node 探针）——
+T90-⑤ 已证明「Node 的 fetch 能通 ≠ 生产能通」（Chromium 分区栈全局拦 http 明文）。
+
+### 14.1 ⚠️ 端点必须走 **https**（同因 §13.1，但**同端点换 https 就能通**）
+
+| 用途 | 端点 | 实测 |
+| --- | --- | --- |
+| 搜索 | `https://search.kuwo.cn/r.s?client=kt&all=<关键词>&pn=0&rn=10&uid=794762570&ver=kwplayer_ar_9.2.2.1&vipver=1&show_copyright_off=1&newver=1&ft=music&cluster=0&strategy=2012&encoding=utf8&rformat=json&vermerge=1&mobi=1&issubtitle=1` | **200 / 204ms / 10 候选** |
+| 歌词（逐字） | `https://mlyric.kuwo.cn/mobi.s?f=web&type=lyric&lrcx=1&rid=<rid>&encode=utf8` | **200 / 181ms** |
+
+- ⚠️ **http 明文一律被拦**（实测 `http://search.kuwo.cn/r.s` 与 `http://mlyric.kuwo.cn/mobi.s`
+  都是 `net::ERR_BLOCKED_BY_CLIENT`）
+  ⇒ **只要把协议换成 https，同一个端点就能用**
+  （与酷狗不同：酷狗的 `mobilecdn` 证书主机名不匹配 ⇒ 必须换域名；酷我**不用换域名**）；
+- 搜索响应：`{ abslist: [{ MUSICRID, SONGNAME, ARTIST, ALBUM, DURATION }] }`
+  ⇒ `rid` = `MUSICRID` **去掉 `MUSIC_` 前缀**；
+  ⇒ ⚠️ `DURATION` 是**秒**（实测《孤勇者》= 256）⇒ 与 `pickCandidate` 的口径一致，
+  **不用**除 1000；
+- 歌词响应：**二进制**（不是 JSON）⇒ 走 `res.arrayBuffer()`；
+- ⚠️ **已排除的端点**（本机实测）：
+  - `https://www.kuwo.cn/api/www/lyric?rid=` → `{"success":false,...}`（要 csrf + cookie）；
+  - `https://m.kuwo.cn/rest/search` / `https://m.kuwo.cn/rest/lyric` → **403**；
+  ⇒ 一律**不用**。
+
+### 14.2 酷我 **lrcx** 的形状（实测三首：孤勇者 / Counting Stars / 一路向北）
+
+    [mm:ss.xxx]<a,b>词文本<a,b>词文本…
+
+- **行头**是 `[mm:ss.xxx]`（**三位**毫秒）
+  ⇒ 与 QRC / KRC 的 `[起ms,时长ms]` **完全不同**，解析器要另写一条分支；
+- **词标签**是**尖括号** `<a,b>`（`a` / `b` **可负**）；
+- ⚠️ 词时间**相对行首** ⇒ **绝对 = 行首 + 相对**；
+- 头部标签行（`[kuwo:…]` / `[ver:…]` / `[ti:…]` / `[ar:…]` / `[al:…]` / `[by:…]` /
+  `[offset:…]` / `[ml:…]`）**没有行头** ⇒ 一律丢掉
+  （⚠️ `[ml:1.0]` 是 Counting Stars 独有的，不在洛雪的标签白名单里 ⇒ 也要能认出来「不是歌词行」）。
+
+### 14.3 ⚠️ `[kuwo:八进制]` 偏移参数（本任务的**技术要点**）
+
+`<a,b>` **不是**「开始毫秒 + 时长毫秒」，而是**经过缩放的**一对数：
+
+    offset  = trunc(v / 10)      // v = parseInt("[kuwo:NNN]" 的 NNN, 8)
+    offset2 = trunc(v % 10)
+    词相对开始 = trunc(|a + b| / (offset  × 2))
+    词相对时长 = trunc(|a - b| / (offset2 × 2))
+
+- 三首实测的 `[kuwo:…]` **各不相同** ⇒ **不能写死**：
+
+  | 歌 | `[kuwo:…]` | 八进制值 | `offset` | `offset2` |
+  | --- | --- | --- | --- | --- |
+  | 孤勇者 | `[kuwo:034]` | 28 | 2 | 8 |
+  | Counting Stars | `[kuwo:140]` | 96 | 9 | 6 |
+  | 一路向北 | `[kuwo:061]` | 49 | 4 | 9 |
+
+- ⚠️ **必须用对参数**，否则整首的时间轴全错。验算（Counting Stars，`offset=9` / `offset2=6`）：
+  `<168,-168>` → 相对开始 `|0|/18 = 0`、时长 `|336|/12 = 28`；
+  `<420,84>` → 开始 `|504|/18 = 28`、时长 `|336|/12 = 28` ⇒ **首尾相接**、每词 28ms ✓；
+- ⚠️ **缺省**：文件里**没有** `[kuwo:…]` ⇒ `offset = offset2 = 1`（洛雪的缺省口径）；
+- ⚠️ `offset` 或 `offset2` 为 **0** ⇒ 该文件**不可用**（除零）⇒ 抛错（洛雪的 `isOK=false` 同款口径）；
+- `[kuwo:…]` **可以出现在任何一行** ⇒ 必须**先全量扫一遍**再开始解析行。
+
+### 14.4 ⚠️ 翻译行 = 「**同一时间戳的前一行**，且词标签**全为 `<0,0>`**」
+
+实测（Counting Stars，同一首歌）：
+
+    [00:52.540]<0,0>坚<0,0>信<0,0>这<0,0>个<0,0>世<0,0>界<0,0>美<0,0>好<0,0>如<0,0>初      ← 翻译（零时长）
+    [00:52.540]<1008,-1008>On <2706,318>just <4257,2349>doing <6504,2964>what …       ← 原文（真实时长）
+
+- ⚠️ **翻译行排在原文行之前**，且**时间戳完全相同** ⇒ 天然对齐；
+- ⚠️ 翻译行的**词标签全是 `<0,0>`** ⇒ 翻译**只有行级**时间，**没有逐字**；
+- 实测规模：Counting Stars **100 行翻译 / 101 行原文**；
+  中文歌（孤勇者、一路向北）**没有**翻译行 ⇒ 翻译字段为空串；
+- ⇒ **判据（定死）**：同一时间戳的一组行里，
+  **词标签全为零时长的那行 = 翻译**，**有真实时长的那行 = 原文**；
+  一组里只有一行 ⇒ 它就是原文；
+  一组里两行都零时长 ⇒ 取**后一行**为原文（实测顺序：翻译在前）；
+- ⇒ 翻译产出**行级 LRC**（`[mm:ss.xxx]文本`），与 QQ 的 `translation` **同一形状**；
+- ⚠️ 翻译行也要过**制作信息过滤**（`isQrcCreditLine`），
+  但**不套**标题行规则（标题提示是给原文用的）。
+
+### 14.5 词内空白：**酷我已经按词拆开了** ⇒ 不需要拆词
+
+- 实测三首的词文本里**内部空白词 = 0**：
+  孤勇者 16 个、Counting Stars 185 个、一路向北 1 个，**全部是「尾随空格」**
+  （如 `吗 ` / `I've ` / `- `）；
+- 英文歌里的**空格是独立的词元组**（如 `<528,444> <753,345>Stars`）
+  ⇒ 酷我**不会**把整段英文塞进一个词元组
+  ⇒ **不存在** T90-④-b 那个「填色分段重置」的坑；
+- ⇒ 仍**调用** `splitWordsAtWhitespace` 作**防御**（当前实测是 no-op：
+  `splitWordByWhitespace('吗 ')` → `['吗 ']`，`splitWordByWhitespace(' ')` → `[' ']`）；
+- ⚠️ **纯空格的词元组必须保留**（不能丢）：
+  渲染层的 `parseWordSegments` 会把它 `.trim()` 成空串并丢掉，
+  但**行文本**（`stripWordTags`）仍保留那个空格
+  ⇒ 丢了它，英文歌词会显示成 `CountingStars`（**空格消失**）。
+
+### 14.6 元信息行过滤：**复用 QRC 那套更严的规则**（同 §13.5）
+
+实测《孤勇者》含 `词：唐恬` / `曲：钱雷` / `编曲：钱雷` 等**制作信息**，
+以及标题行 `孤勇者 (《英雄联盟：双城之战》动画剧集中文主题曲) - 陈奕迅`
+⇒ 与 QRC / KRC **同形** ⇒ 直接用 `isQrcMetaLine`（带**歌名提示**判标题行）。
+
+### 14.7 解密（`electron/lyricCodecs/kuwo.ts`）
+
+载荷形状（实测）：
+
+    "TP=content\r\nlrcx=1\r\n\r\n" + <密文>
+
+解密链：
+
+    buf[:10].toLowerCase() === 'tp=content'   // 不对 ⇒ 抛错
+    body = buf.subarray(buf.indexOf('\r\n\r\n') + 4)
+    inflated = zlib.inflateSync(body)        // 标准 zlib
+    inner = Buffer.from(inflated.toString('utf8'), 'base64')
+    out[i] = inner[i] ^ 'yeelion'[i % 8]     // 8 字节固定密钥，循环 XOR
+    plain = out.toString('utf8')
+
+⚠️ **出处**：本仓库**按算法自行实现**，**不移植**洛雪的源码
+（与 `electron/lyricCodecs/krc.ts` 同款处理）⇒ `THIRD_PARTY_NOTICES.md` **不需要新增条目**。
+⚠️ **真实密文不入库**（XOR 密钥是**公开**的 ⇒ 真实密文入库 = 把歌词放进公开仓库）
+⇒ 单测用**自己合成**的密文，且**独立手写**一份 XOR（生产密钥写错时用例**会红**）。
+
+### 14.8 转换口径（`electron/lyricWordFormat.ts`）
+
+- `kuwoToEnhancedLrc(plain, hint?)` → 增强 LRC（原文，逐字）；
+- `kuwoToPlainLrc(plain)` → 行级 LRC（翻译用）；
+- **规则（定死）**：
+  1. 先全量扫 `[kuwo:…]` 取出 `offset` / `offset2`（缺省 1 / 1；为 0 ⇒ 抛错）；
+  2. 行头只认 `[mm:ss.xxx]` / `[mm:ss.xx]`；**没有行头**的行（标签行）**丢掉**；
+  3. 同一时间戳的行**分组**：全零时长的那行 = **翻译**，有真实时长的那行 = **原文**
+     （见 §14.4）；
+  4. **元信息行**（制作信息 / 标题行）**丢掉**（`isQrcMetaLine` + 歌名提示）；
+  5. 词的**绝对时间** = **行首 + 相对毫秒**（§14.3 的公式算出来的相对值）；
+  6. **零时长词** → **并入前一个词**（与 QRC / KRC 同款）；
+  7. **空文本的词** → **不产出标签**；
+  8. **纯空格的词元组** → **保留**（§14.5：丢了行文本里的空格就没了）；
+  9. **词内含空白** → 走 `splitWordsAtWhitespace`（防御性，当前 no-op）；
+  10. 一行里**没有有效词** → **跳过该行**；
+  11. 空串 / 非串 → 返回空串（**不抛异常**）。
+
+### 14.9 源枚举、UI 与**源链**
+
+- `shared/lyricProvider.ts`：`LyricSource` 加 `'kuwo'`、`LYRIC_SOURCES` 白名单加；
+- `src/components/SettingsPanel.tsx`：下拉加一项（**必须与实现同时加**）
+  ⇒ 文案：`酷我音乐（lrcx 逐字 + 翻译）`；
+  ⚠️ 兜底顺序提示文案**要补「→ 酷我」**（酷我进了兜底链 ⇒ 不写就是不准确，同 §13.10）；
+- `src/pages/FullPlayerPage.tsx`：`SOURCE_LABEL` 加 `kuwo: '酷我音乐'`
+  （⚠️ `Record<LyricSource, string>` 是**穷尽映射** ⇒ 不加会**编译不过**）；
+- `electron/lyricProvider.ts`：`ONLINE_SOURCE_ORDER` 加 `'kuwo'`
+  ⇒ 兜底链 = **`netease → lrclib → qq → kugou → kuwo → custom`**
+  ⇒ 位置**不影响**「都能兜底」（not-found 不耗预算）⇒ 排在 `kugou` 之后是**最小改动**；
+- ⚠️ **超时预算**：酷我只走**两跳**（搜索 → 歌词），实测 204 + 181 ≈ 0.39s、
+  292 + 163 ≈ 0.46s、396 + 61 ≈ 0.46s、577 + 63 ≈ 0.64s ⇒ 源级预算 **5 秒**余量很足；
+- ⚠️ **链最坏预算**变成 3 + 3 + 8 + 6 + **5** + 3 = **28 秒** > 渲染层 12 秒
+  ⇒ 与 §13.10 同款说明：**既有**行为（QQ 的 8 秒加上其余源就已经超过 12 秒了）。
+
+### 14.10 既有断言的影响（**前提被显式推翻** ⇒ 改写为新行为断言）
+
+| 文件 | 断言 | 改法 |
+| --- | --- | --- |
+| `test/lyric-provider.test.ts` | `buildSourceChain` **三条**全等断言 | 加进 `'kuwo'`（仍是 `toEqual` 全等 ⇒ 强度不变） |
+| `test/settings-lyric-source.test.tsx` | 下拉「**恰好五个**」 | 改写为「**恰好六个**」的**精确相等**断言 |
+
+⚠️ 其余既有测试**一条不改、断言一条不弱化**。
+
+### 14.11 影响文件清单
+
+| 文件 | 改动 | 性质 |
+| --- | --- | --- |
+| `electron/lyricCodecs/kuwo.ts` | **新增**：`decodeKuwoLrcxPayload`（inflate + base64 + XOR） | 新 |
+| `electron/lyricWordFormat.ts` | 加 `kuwoToEnhancedLrc` / `kuwoToPlainLrc` | 改 |
+| `electron/lyricProvider.ts` | 加 `fetchKuwo()` + 两端点常量 + 源级预算 5s + 源链 +1 | 改 |
+| `shared/lyricProvider.ts` | `LyricSource` + `'kuwo'`、白名单 +1 | 改 |
+| `src/components/SettingsPanel.tsx` | 下拉 +1 项 + 提示文案补「→ 酷我」 | 改 |
+| `src/pages/FullPlayerPage.tsx` | `SOURCE_LABEL` +1 | 改 |
+| `test/lyric-kuwo.test.ts` | **新增**：纯函数单测（**合成密文**） | 新 |
+| `test/lyric-provider.test.ts` | 加酷我适配器用例 + 改写 3 条 `buildSourceChain` 断言 | 改 |
+| `test/settings-lyric-source.test.tsx` | **改写 1 条断言**（见 §14.10） | 改 |
+
+### 14.12 验收点
+
+1. `tsc --noEmit` **0 错**；
+2. `vitest run` **全绿**（既有断言**一条不删、一条不弱化** —— 除 §14.10 那四条改写）；
+3. `npm run build` exit 0；
+4. 全量 `playwright test` **34 passed**；
+5. **真机回归**（脚本放 gitignored 的 `release/verify/`，**不进 `e2e/`**）：
+   酷我源真实取词 ⇒ 逐行对账**零差异** + 填色落点与媒体位置差 ≤ 0.1s
+   + 「**多元素共用一个词号**」的行数 **= 0** + 制作信息与标题行**零残留**；
+6. **变异自证**（带「未变异必须绿」的基线自检）：不解 XOR / 不用 `[kuwo]` 偏移参数 /
+   不区分翻译行 / 端点改回 http ⇒ 对应断言**当场变红**；
+7. 台账回填（正本 + 副本 sha 一致、连跑三次不变）+ **2 个 commit**（规格先行 + 实现）。
+
 
 
 
