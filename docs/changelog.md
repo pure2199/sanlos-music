@@ -74,10 +74,24 @@
 - ⚠️ **不改**「线上优先」这条政策（T70 用户拍板）；**NAS 自带的占位文案保留**（有信息量）；
 - ⚠️ **不引**新 npm 依赖；既有测试**一条未删、断言一条未弱化**。
 
+### 技术变更（T95）
+
+- **修** `scripts/publish-manifest.mjs`：去掉一处 **TypeScript 返回类型注解**
+  （`.mjs` 是 Node 直接执行的 ⇒ **类型剥离只对 `.ts` / `.mts` / `.cts` 生效**
+  ⇒ 那一行在 **Node 22（CI 用的版本）与 Node 26（本机）上都是语法错误**）
+  ⇒ 它让 v0.3.0 的发版工作流（Release run #15）挂在「写更新清单」这一步；
+- **修** `tools/fn-electron-net-probe.mjs`：补回一个**缺失的换行**
+  （`})    try {` ⇒ 整个文件在**任何** Node 上都是语法错误 ⇒ 一直没法用）；
+- **新增** `test/t95-mjs-no-ts-syntax.test.ts`：**45 条**守护 ——
+  用 `node --check` 把仓库里所有 `.mjs` / `.cjs` 当**纯 JavaScript** 解析一遍
+  ⇒ 以后这类错在 **`npm test`** 那一步就红（带文件名与行号），**不会**再等到发版跑到一半才炸；
+- ⚠️ **零新依赖**（`node --check` 用的就是 CI 那个 node 二进制）；
+  既有测试**一条未删、断言一条未弱化**。
+
 ### 验证
 
 - `tsc --noEmit` ⇒ **0 error**；
-- `vitest` ⇒ **125 files / 2639 passed / 0 failed**；
+- `vitest` ⇒ **126 files / 2684 passed / 0 failed**；
 - `npm run build` ⇒ **成功**；
 - 全量 `playwright test`（CI 那套，不碰外网）⇒ **34 passed**；
 - **真机**（真实 Electron + 真实外网 + 真实 DOM）：
@@ -96,6 +110,11 @@
   界面上歌词舞台显示的是**内嵌对白**（「哎呀，行到我对脚都唔知几攰。」…），
   底部如实显示「**歌词来源：音频内嵌**」；
 - **T93 变异自证**：把两处判据**逐个改回旧行为** ⇒ 对应用例**当场变红**；还原后恢复全绿。
+
+- **T95 验证**：两个修过的脚本 `node --check` ⇒ **退出码 0**；
+  `scripts/publish-manifest.mjs` **本地真跑**一次 ⇒ 产出合法的 `latest.json`
+  （version 0.3.0 / name `SanlosMusic-Setup-0.3.0.exe` / sha512 128 位小写 hex / size 对得上）；
+- **T95 变异自证**：把 TS 注解与那个粘连的换行**各自改回去** ⇒ 守护测试**当场变红**；还原后恢复全绿。
 
 ### ⚠️ 已知影响
 

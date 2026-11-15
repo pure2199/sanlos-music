@@ -171,7 +171,8 @@ try {
     const partV1 = session.fromPartition('fn-nas-v1', { cache: false })
     partV1.setCertificateVerifyProc((request, callback) => {
       callback(request.hostname === serverHost ? 0 : -3)
-    })    try {
+    })
+    try {
       const res = await partV1.fetch(`${base}/music/api/v1/track/list?page=1&size=1`)
       out.push({ step: 'partition v1 (verify proc) GET', ok: true, detail: `HTTP ${res.status}` })
     } catch (err) {

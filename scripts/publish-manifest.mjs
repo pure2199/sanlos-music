@@ -62,8 +62,17 @@ const MANIFEST_NAME = 'latest.json'
  *    （"Sanlos Music" ⇒ "SanlosMusic"），
  *    与 `electron-builder.yml` 的 `artifactName: "SanlosMusic-Setup-${version}.${ext}"`
  *    **逐字对齐**（由 `test/t87-ci-release-workflow.test.ts` 锁住两边不许漂移）。
+ *
+ * ⚠️ **T95：这个文件是 `.mjs`（Node 直接执行）⇒ 只能是纯 JavaScript**
+ *    —— **不许写 TypeScript 类型注解**：Node 的类型剥离只对 `.ts` / `.mts` / `.cts` 生效，
+ *    `.mjs` 里的 `function f(): T {}` 在 **Node 22（CI）与 Node 26（本机）上都是语法错误**
+ *    ⇒ `SyntaxError: Unexpected token ':'`。
+ *    （2026-11-15 实测：Release run #15 = 43659919970 就死在这一行。）
+ *    ⇒ 类型信息写进 JSDoc（编辑器仍会提示），由 `test/t95-mjs-no-ts-syntax.test.ts` 守住。
+ *
+ * @returns {{version: string, productName: string, prefix: string}}
  */
-function readPackageMeta(): { version: string; productName: string; prefix: string } {
+function readPackageMeta() {
   const raw = readFileSync(join(APP_ROOT, 'package.json'), 'utf8')
   const parsed = JSON.parse(raw)
   const version = typeof parsed.version === 'string' ? parsed.version.trim() : ''
