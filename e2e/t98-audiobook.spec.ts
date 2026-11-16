@@ -86,12 +86,13 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     await expect(meta).toContainText('单集均长 25 分')
 
     // 依据逐条给出来（**不黑箱**）。
-    const reasons = items.first().locator('.fnm-audiobooks__reasons')
-    await expect(reasons).toContainText('单集均长 ≥ 8 分钟')
-    await expect(reasons).toContainText('单集均长 ≥ 20 分钟')
-    await expect(reasons).toContainText('标题形态一致（可解析集号）')
-    await expect(reasons).toContainText('集数 ≥ 8')
-    await expect(reasons).toContainText('曲目集中在同一作品目录')
+    //
+    // ⚠️ **T101（2026-11-17）把这条断言改写了**：结构信号那一整行**从列表卡片搬到了
+    //    详情页**（卡片要做成专辑页那样的**封面网格** ⇒ 不能再背这行长句）。
+    //    ⇒ 这里是**反向断言**（卡片上**不该**再有那行）—— 比原来更强；
+    //    「依据一条都不少」的正面断言**搬到下面第 ② 条**（进详情页后逐条验）。
+    await expect(items.first().locator('.fnm-audiobooks__reasons')).toHaveCount(0)
+    await expect(items.first()).not.toContainText('单集均长 ≥ 8 分钟')
   })
 
   test('点进有声专辑 ⇒ 曲目**按集序排**（输入是乱序）且显示「第 N 集」', async () => {
@@ -99,6 +100,15 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
 
     // 头部徽标：真的排成集序了（形态不一致时会如实说「没识别到集号」）。
     await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
+
+    // ⚠️ **T101**：结构信号（判定依据）在**详情页**里逐条给出来 —— 信息**一点没丢**，
+    //    只是从列表卡片换到了详情页。
+    const reasons = fixture.window.locator('.fnm-detail__audiobook-reasons')
+    await expect(reasons).toContainText('单集均长 ≥ 8 分钟')
+    await expect(reasons).toContainText('单集均长 ≥ 20 分钟')
+    await expect(reasons).toContainText('标题形态一致（可解析集号）')
+    await expect(reasons).toContainText('集数 ≥ 8')
+    await expect(reasons).toContainText('曲目集中在同一作品目录')
 
     const rows = fixture.window.locator('.fnm-songlist__row')
     await expect(rows).toHaveCount(12)

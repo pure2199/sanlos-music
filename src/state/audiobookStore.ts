@@ -95,6 +95,14 @@ export interface AudiobookHit {
   maxDurationSec: number
   /** 标题形态规则名（`null` = 形态不一致）。 */
   episodeRule: string | null
+  /**
+   * 封面 id（`null` = 没有封面）。
+   *
+   * ⚠️ **T101**：「有声」页要画**封面卡片**（同专辑页）⇒ 命中条目必须带封面。
+   *    扫描时**顺手**记下（曲目的 `coverId` 本来就在数据里 ⇒ 不要钱）；
+   *    旧落盘没有 ⇒ 进页时按需补拉 `/album/detail`（见 `setCover`）。
+   */
+  coverId: string | null
 }
 
 /** 落盘的候选专辑结构指标（断点续跑要用）。 */
@@ -116,6 +124,13 @@ interface CandidateSnapshot {
   episodeStats: EpisodeStats
   /** 作品目录集合（最多留几个）。 */
   dirs: string[]
+  /**
+   * 封面 id（`null` / 缺省 = 没有封面）。
+   *
+   * ⚠️ **T101**：这是**可选**字段 ⇒ **旧落盘照样能读** ⇒ `STATE_VERSION` **不升**
+   *    （升了 ⇒ 用户已扫过的结果全部作废 ⇒ 白扫一次 52 秒）。
+   */
+  coverId?: string | null
 }
 
 /** 落盘的整体状态。 */
@@ -163,6 +178,8 @@ const STORAGE_KEY = 'fnmusic-audiobook-state'
  *
  * ⚠️ **v3**：加了 `keyword`（目录关键字）⇒ 形状变了 ⇒ 版本 +1
  *    （v2 的落盘**自动作废**，用户重扫一次即可）。
+ * ⚠️ **T101 没有升版本**：只加了一个**可选**字段 `coverId` ⇒ **旧落盘照样能读**
+ *    （升了 ⇒ 用户已扫过的结果全部作废 ⇒ 白扫一次 52 秒）。
  */
 const STATE_VERSION = 3
 /** 每张专辑保留多少个作品目录。 */
@@ -276,6 +293,15 @@ export interface AudiobookStore {
   /** 取这张专辑的判定结果（`null` = 没有）。 */
   hitOf: (albumId: string) => AudiobookHit | null
   /**
+   * **补上封面 id**（T101）。
+   *
+   * ⚠️ **谁调它**：页面看到命中条目**没有封面**（旧落盘 / 手动指定的条目）
+   *    ⇒ 去拉一次 `/album/detail` ⇒ 拿到后调这个 ⇒ **改命中 + 回写落盘**
+   *    ⇒ 下次进来**不用**再拉。
+   * ⚠️ **不发请求**：这里只管状态与落盘；请求由页面编排（store 不碰网络）。
+   */
+  setCover: (albumId: string, coverId: string | null, port?: AudiobookPort) => void
+  /**
    * **临时组**（T100）：**秒搜路径**归并出来的组 —— `albumId` → 组内全部 id。
    *
    * ⚠️ **为什么不落盘**：这是**一次搜索的临时结果**（用户搜完就完了）
@@ -304,10 +330,16 @@ interface Aggregator {
   episodeStats: EpisodeStats
   /** 作品目录（≤ `DIR_SAMPLE` 个）。 */
   dirs: string[]
+  /**
+   * 封面 id（`null` = 没有封面）。
+   *
+   * ⚠️ **T101**：取这张专辑**第一首**曲目的封面（曲目的 `coverId` 就在数据里 ⇒ 免费）。
+   */
+  coverId: string | null
 }
 
 /** 新建一个聚合器。 */
-function newAggregator(albumId: string, albumTitle: string): Aggregator {
+function newAggregator(albumId: string, albumTitle: string, coverId: string | null): Aggregator {
   return {
     albumId,
     albumTitle,
@@ -316,6 +348,7 @@ function newAggregator(albumId: string, albumTitle: string): Aggregator {
     maxDurationSec: 0,
     episodeStats: { ruleCounts: {}, titleCount: 0 },
     dirs: [],
+    coverId,
   }
 }
 
@@ -336,7 +369,7 @@ function accumulate(
     if (!pathMatchesKeyword(t.path, keyword)) continue
     let agg = target.get(t.albumId)
     if (!agg) {
-      agg = newAggregator(t.albumId, t.albumTitle)
+      agg = newAggregator(t.albumId, t.albumTitle, t.coverId || null)
       target.set(t.albumId, agg)
     }
     agg.trackCount += 1
@@ -377,6 +410,8 @@ interface MergedGroup {
   episodeStats: EpisodeStats
   /** 作品目录集合（组内并集）。 */
   dirs: string[]
+  /** 封面 id（取**主专辑**的；`null` = 没有封面）。 */
+  coverId: string | null
 }
 
 /**
@@ -442,6 +477,8 @@ function mergeAggregators(list: readonly Aggregator[]): MergedGroup[] {
       maxDurationSec,
       episodeStats,
       dirs: [...dirs],
+      // ⚠️ **T101**：封面取**主专辑**的（组内其它成员封面不同时，主专辑那张最贴切）。
+      coverId: main.coverId,
     })
   }
   return out
@@ -471,7 +508,9 @@ function judgeAggregator(aggregator: Map<string, Aggregator>): AudiobookHit[] {
       workDirUnique: group.dirs.length === 1,
       episodeStats: group.episodeStats,
     })
-    hits.push(verdictToHit(verdict, group.albumId, group.albumTitle, group.albumIds))
+    hits.push(
+      verdictToHit(verdict, group.albumId, group.albumTitle, group.albumIds, group.coverId),
+    )
   }
   hits.sort(
     (a, b) => b.score - a.score || b.trackCount - a.trackCount || a.albumTitle.localeCompare(b.albumTitle),
@@ -485,6 +524,7 @@ function verdictToHit(
   albumId: string,
   albumTitle: string,
   albumIds?: readonly string[],
+  coverId: string | null = null,
 ): AudiobookHit {
   return {
     albumId,
@@ -496,6 +536,7 @@ function verdictToHit(
     avgDurationSec: verdict.avgDurationSec,
     maxDurationSec: verdict.maxDurationSec,
     episodeRule: verdict.episodeRule,
+    coverId,
   }
 }
 
@@ -557,6 +598,8 @@ function toSnapshot(agg: Aggregator): CandidateSnapshot {
       titleCount: agg.episodeStats.titleCount,
     },
     dirs: agg.dirs.slice(0, DIR_SAMPLE),
+    // ⚠️ **T101**：封面 id 也落盘 ⇒ 下次进来**不用**再补拉。
+    coverId: agg.coverId,
   }
 }
 
@@ -575,6 +618,8 @@ function fromSnapshot(snap: CandidateSnapshot): Aggregator {
       titleCount: typeof snap.episodeStats?.titleCount === 'number' ? snap.episodeStats.titleCount : 0,
     },
     dirs: Array.isArray(snap.dirs) ? snap.dirs.slice(0, DIR_SAMPLE) : [],
+    // ⚠️ **T101**：旧落盘**没有**这个字段 ⇒ 读成 `null`（没封面）⇒ 进页时按需补拉。
+    coverId: typeof snap.coverId === 'string' && snap.coverId.length > 0 ? snap.coverId : null,
   }
 }
 
@@ -795,9 +840,31 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         avgDurationSec: 0,
         maxDurationSec: 0,
         episodeRule: null,
+        // ⚠️ T101：手动判定的记录**没有扫描来的封面** ⇒ 先留空，后面由页面补拉。
+        coverId: null,
       }
     }
     return group
+  },
+
+  /**
+   * **补上封面 id**（T101）：改命中 + **回写落盘**。
+   *
+   * ⚠️ 为什么**回写落盘**：封面是**每个专辑一份** ⇒ 不落盘的话，
+   *    每次进页面都要重新拉一次 `/album/detail`（旧落盘的用户尤其明显）。
+   */
+  setCover: (albumId, coverId, port) => {
+    const p = port ?? localStorageAudiobookPort
+    const saved = p.load() ?? emptyPersisted()
+    const hits = get().hits.map((hit) =>
+      hit.albumId === albumId ? { ...hit, coverId } : hit,
+    )
+    const snap = saved.candidates[albumId]
+    const candidates = snap
+      ? { ...saved.candidates, [albumId]: { ...snap, coverId } }
+      : saved.candidates
+    p.save({ ...saved, candidates })
+    set({ hits })
   },
 
   registerGroup: (albumIds) => {

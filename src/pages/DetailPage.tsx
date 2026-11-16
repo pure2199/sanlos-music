@@ -43,6 +43,7 @@ import { SongList } from '../components/SongList'
 import { defaultPlaylistWritebackApi, type PlaylistWritebackApi } from '../api/playlist'
 import { libraryApi } from '../api/library'
 import {
+  REASON_LABELS,
   resolveAlbumEpisodes,
   sortTracksByEpisode,
   type AudiobookTrack,
@@ -139,6 +140,25 @@ export function DetailPage(props: DetailPageProps): ReactElement {
   // ⚠️ T100：**秒搜路径**归并出来的**临时组** —— 搜索结果**不在 `hits` 里**
   //    ⇒ 只查 `hits` 会退化成**单张专辑** ⇒ 《让青春继续第一季》的**第 02 集又丢**。
   const extraGroups = useStore(useAudiobookStore, (s) => s.extraGroups)
+  /**
+   * ⚠️ **T101**：这个专辑的**判定依据**（结构信号）—— 列表卡片不再背这行长句，
+   *    搬到这里来了（信息**不丢**，只是换了位置）。
+   *
+   * ⚠️ 用 `hits` + `useMemo` 算，**不**直接订阅 `hitOf(albumId)`：
+   *    `hitOf` 在「用户手动指定」那条上**每次调用都返回新对象**
+   *    ⇒ 直接订阅会让 `useSyncExternalStore` 认为快照一直在变 ⇒ 无限重渲染。
+   */
+  const audiobookHit = useMemo(
+    () => audiobookHits.find((h) => h.albumIds.includes(entityId)) ?? null,
+    [audiobookHits, entityId],
+  )
+  const audiobookReasons = useMemo(
+    () =>
+      (audiobookHit?.reasons ?? [])
+        .filter((reason) => reason !== 'user')
+        .map((reason) => REASON_LABELS[reason] ?? reason),
+    [audiobookHit],
+  )
   const groupIds = useMemo(() => {
     const hit = audiobookHits.find((h) => h.albumIds.includes(entityId))
     if (hit && hit.albumIds.length > 0) return hit.albumIds
@@ -292,16 +312,45 @@ export function DetailPage(props: DetailPageProps): ReactElement {
          *    - 「这不是有声」= 一键改判（用户拍板「宁可多标 + 一键改判」）。
          */}
         {kind === 'album' && isAudiobook && (
-          <p className="fnm-detail__audiobook">
-            <span className="fnm-detail__audiobook-note">{orderNote}</span>
-            <button
-              type="button"
-              className="fnm-detail__audiobook-btn"
-              onClick={() => setOverride(entityId, 'not-audiobook', undefined, heading)}
-            >
-              这不是有声
-            </button>
-          </p>
+          <>
+            <p className="fnm-detail__audiobook">
+              <span className="fnm-detail__audiobook-note">{orderNote}</span>
+              {/*
+               * ⚠️ **T101**：「**播放全书**」——
+               *    有声作品最需要的入口（整队入队 ⇒ 播完一集自动下一集 ⇒ 连播）。
+               * ⚠️ 只在**有声**专辑上出现 ⇒ 普通专辑详情页**行为一字不变**。
+               */}
+              {onPlay && orderedSongs && orderedSongs.length > 0 ? (
+                <button
+                  type="button"
+                  className="fnm-detail__audiobook-btn"
+                  onClick={() => {
+                    const first = orderedSongs[0]
+                    if (first) onPlay(first, 0, orderedSongs)
+                  }}
+                >
+                  播放全书
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="fnm-detail__audiobook-btn"
+                onClick={() => setOverride(entityId, 'not-audiobook', undefined, heading)}
+              >
+                这不是有声
+              </button>
+            </p>
+            {/*
+             * ⚠️ **T101**：**结构信号**（判定依据）搬到这里 ——
+             *    列表卡片不再背这行长句（那是用户说「UI 有问题」的原因之一），
+             *    但**信息一点没丢**（在这里照样看得见）。
+             */}
+            {audiobookReasons.length > 0 ? (
+              <p className="fnm-detail__audiobook-reasons">
+                {`为什么列在这里：${audiobookReasons.join(' · ')}`}
+              </p>
+            ) : null}
+          </>
         )}
 
         {kind === 'artist' && (

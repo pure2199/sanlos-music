@@ -27,6 +27,8 @@ function scanTrack(partial: {
   albumTitle?: string
   durationSec?: number
   path?: string | null
+  /** ⚠️ **T101**：曲目的封面 id（扫描时顺手记下来 ⇒ 卡片有封面）。 */
+  coverId?: string
 }): {
   id: string
   title: string
@@ -36,6 +38,7 @@ function scanTrack(partial: {
   trackNo: number | null
   path: string | null
   createdAt: number | null
+  coverId: string
 } {
   return {
     id: partial.id,
@@ -49,6 +52,7 @@ function scanTrack(partial: {
         ? '/vol02/1000-0-3d135437/有声小说/某某/作品名/Disc 01/01- 某集.mp3'
         : partial.path,
     createdAt: 1792563278,
+    coverId: partial.coverId ?? '',
   }
 }
 
@@ -593,5 +597,123 @@ describe('T99：同名专辑按作品目录归并', () => {
     // ⚠ **不落盘**（临时结果 ⇒ 落盘形状不变 ⇒ 旧落盘不作废）。
     const port = createMemoryAudiobookPort()
     expect(port.load()).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T101：封面（coverId）
+//
+// ⚠️ **为什么要有这一组**：T101 把「有声」页改成专辑页同款的**封面卡片网格**
+//    ⇒ 卡片必须有封面 ⇒ 封面从哪来？
+//    - **扫描路径**：曲目的 `coverId` 本来就**在返回的数据里** ⇒ **顺手**记下来（不要钱）；
+//    - **秒搜路径**：`/search/album` **自带** `coverId` ⇒ **零请求**；
+//    - **旧落盘**：没有封面 ⇒ 页面按需补拉一次 `/album/detail` ⇒ **回写落盘**（只补一次）。
+//
+// ⚠️ **不升 `STATE_VERSION`**（新增字段是**可选**的 ⇒ 旧落盘照样能读
+//    ⇒ 用户**不用**为了看封面重扫 52 秒）。
+// ---------------------------------------------------------------------------
+
+describe('audiobookStore（T101：封面）', () => {
+  beforeEach(() => {
+    scanLibraryTracks.mockReset()
+    useAudiobookStore.setState({
+      hits: [],
+      overrides: {},
+      scanning: false,
+      progress: null,
+      error: null,
+      scannedAt: null,
+    })
+  })
+
+  it('① 扫描时**顺手**记下曲目的封面（免费 ⇒ 卡片有封面）', async () => {
+    const port = createMemoryAudiobookPort()
+    mockScan(
+      [
+        {
+          page: 1,
+          tracks: [
+            scanTrack({
+              id: 'c1',
+              title: '01- 某集',
+              albumId: 'al-1',
+              coverId: 'track_0011223344556677',
+            }),
+          ],
+        },
+      ],
+      1,
+    )
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    expect(useAudiobookStore.getState().hits[0]?.coverId).toBe('track_0011223344556677')
+  })
+
+  it('② 封面**落盘**（下次进来直接有 ⇒ 不用重新拉）', async () => {
+    const port = createMemoryAudiobookPort()
+    mockScan(
+      [
+        {
+          page: 1,
+          tracks: [
+            scanTrack({
+              id: 'c2',
+              title: '01- 某集',
+              albumId: 'al-1',
+              coverId: 'track_0011223344556677',
+            }),
+          ],
+        },
+      ],
+      1,
+    )
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    expect(port.load()?.candidates['al-1']?.coverId).toBe('track_0011223344556677')
+  })
+
+  it('③ `setCover`：改命中 + **回写落盘**（旧落盘补过封面 ⇒ 不用再拉）', () => {
+    const saved: AudiobookPersisted = {
+      version: 3,
+      keyword: '有声小说',
+      nextPage: 0,
+      scannedCount: 89,
+      total: 89,
+      candidates: { 'al-1': persistedCandidate(89) },
+      overrides: {},
+      scannedAt: 1792563278000,
+    }
+    const port = createMemoryAudiobookPort(saved)
+    useAudiobookStore.getState().restore(port)
+
+    // 旧落盘没有封面 ⇒ 先是空的。
+    expect(useAudiobookStore.getState().hits[0]?.coverId).toBeNull()
+
+    useAudiobookStore.getState().setCover('al-1', 'album_0011223344556677', port)
+
+    expect(useAudiobookStore.getState().hits[0]?.coverId).toBe('album_0011223344556677')
+    // ⚠️ **回写落盘** ⇒ 下次进来不用再拉一次。
+    expect(port.load()?.candidates['al-1']?.coverId).toBe('album_0011223344556677')
+  })
+
+  it('④ **旧落盘**（没有 coverId 字段）照样能读 ⇒ 不用重扫', () => {
+    const saved: AudiobookPersisted = {
+      version: 3,
+      keyword: '有声小说',
+      nextPage: 0,
+      scannedCount: 89,
+      total: 89,
+      // ⚠️ 这个候选**没有** `coverId` 字段（T101 之前落盘的形状）。
+      candidates: { 'al-1': persistedCandidate(89) },
+      overrides: {},
+      scannedAt: 1792563278000,
+    }
+    const port = createMemoryAudiobookPort(saved)
+
+    expect(() => useAudiobookStore.getState().restore(port)).not.toThrow()
+    expect(useAudiobookStore.getState().hits).toHaveLength(1)
+    expect(useAudiobookStore.getState().hits[0]?.coverId).toBeNull()
   })
 })

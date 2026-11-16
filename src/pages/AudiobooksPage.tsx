@@ -21,18 +21,18 @@
 //    **不**拿它去推断「是不是有声」⇒ 不把因人而异的目录名写死成判据。
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Album } from '../../shared/types'
 import {
   DEFAULT_FOLDER_KEYWORD,
-  REASON_LABELS,
   workGroupKey,
 } from '../api/audiobook'
 import { libraryApi } from '../api/library'
 import { searchApi } from '../api/search'
 import { useAudiobookStore, type AudiobookHit } from '../state/audiobookStore'
+import { CoverImage } from '../components/Cards'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import './audiobooks-page.css'
 
@@ -57,6 +57,13 @@ interface SearchGroup {
   title: string
   /** 集数（**组合计**）。 */
   trackCount: number
+  /**
+   * 封面 id（`null` = 没有封面）。
+   *
+   * ⚠️ **T101**：`/search/album` 的返回**自带** `coverId` ⇒ 秒搜结果**立刻**有封面，
+   *    **不用**为每张专辑多发一个请求。
+   */
+  coverId: string | null
 }
 
 /** 把秒数写成「32 分」这种人类看得懂的形态。 */
@@ -76,7 +83,8 @@ function toAlbum(hit: AudiobookHit): Album {
     title: hit.albumTitle,
     artist: '',
     artistId: '',
-    coverId: null,
+    // ⚠️ **T101**：封面跟着走 ⇒ 下钻页的头部封面也对得上。
+    coverId: hit.coverId,
     year: null,
     trackCount: hit.trackCount,
   }
@@ -89,7 +97,7 @@ function groupToAlbum(group: SearchGroup): Album {
     title: group.title,
     artist: '',
     artistId: '',
-    coverId: null,
+    coverId: group.coverId,
     year: null,
     trackCount: group.trackCount,
   }
@@ -142,9 +150,75 @@ async function mergeSearchResults(list: readonly Album[]): Promise<SearchGroup[]
       albumIds: members.map((m) => m.album.id),
       title: main.album.title || '（未命名的专辑）',
       trackCount: members.reduce((sum, m) => sum + (m.album.trackCount || 0), 0),
+      // ⚠️ **T101**：封面取**主专辑**的（`/search/album` 自带 ⇒ 不要钱）。
+      coverId: main.album.coverId ?? null,
     })
   }
   return groups
+}
+
+/**
+ * 「有声」页的**作品卡片**（T101：与专辑页**同款**形态 —— 封面 + 标题 + 副标题）。
+ *
+ * ⚠️ **类名沿用旧版**（`.fnm-audiobooks__item` / `__title` / `__meta` / `__source`）
+ *    ⇒ 既有的 E2E / 单测断言**一条都不用改**（只有「结构信号」那行搬去了详情页）。
+ * ⚠️ **卡片只做下钻**：「不是有声」挪到详情页（那里已有「这不是有声」）⇒ 卡片更干净。
+ */
+interface AudiobookCardProps {
+  /** 作品名。 */
+  title: string
+  /** 封面 id（`null` = 没有封面 ⇒ 画占位块）。 */
+  coverId: string | null
+  /** 副标题（集数 · 均长 · 合并了几张专辑）。 */
+  subtitle: string
+  /** 来源（哪个文件夹 / 你指定的）。 */
+  source?: string
+  /** 卡片根上的**额外**类名（区分「目录命中」与「秒搜结果」）。 */
+  itemClassName?: string
+  /** 副标题上的**额外**类名。 */
+  metaClassName?: string
+  /** 点击卡片时回调。 */
+  onOpen: () => void
+}
+
+function AudiobookCard({
+  title,
+  coverId,
+  subtitle,
+  source,
+  itemClassName,
+  metaClassName,
+  onOpen,
+}: AudiobookCardProps): ReactElement {
+  const rootClass = itemClassName ? `fnm-card ${itemClassName}` : 'fnm-card'
+  const metaClass = metaClassName ? `fnm-card__subtitle ${metaClassName}` : 'fnm-card__subtitle'
+  return (
+    <article className={rootClass} data-testid="fnm-card">
+      <button type="button" className="fnm-card__button" onClick={onOpen}>
+        <CoverImage coverId={coverId} alt={title} />
+        <span className="fnm-card__title fnm-audiobooks__title">{title}</span>
+        <span className={metaClass}>{subtitle}</span>
+      </button>
+      {source ? <span className="fnm-audiobooks__source">{source}</span> : null}
+    </article>
+  )
+}
+
+/** 列表卡片的副标题（集数 · 均长 · 合并了几张专辑）。 */
+function listMeta(hit: AudiobookHit): string {
+  const parts: string[] = []
+  if (hit.trackCount > 0) parts.push(`${hit.trackCount} 集`)
+  if (hit.avgDurationSec > 0) parts.push(`单集均长 ${formatMinutes(hit.avgDurationSec)}`)
+  if (hit.albumIds.length > 1) parts.push(`合并了 ${hit.albumIds.length} 张专辑`)
+  return parts.join(' · ')
+}
+
+/** 秒搜结果卡片的副标题（**文字固定** ⇒ 既有 E2E 断言的是它）。 */
+function searchMeta(group: SearchGroup): string {
+  const parts: string[] = []
+  if (group.trackCount > 0) parts.push(`${group.trackCount} 集`)
+  if (group.albumIds.length > 1) parts.push(`合并了 ${group.albumIds.length} 张专辑`)
+  return parts.join(' · ')
 }
 
 /** 「有声读物」页。 */
@@ -162,6 +236,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
   const restore = useStore(useAudiobookStore, (s) => s.restore)
   const setOverride = useStore(useAudiobookStore, (s) => s.setOverride)
   const registerGroup = useStore(useAudiobookStore, (s) => s.registerGroup)
+  /** ⚠️ **T101**：补上封面（并回写落盘）。 */
+  const setCover = useStore(useAudiobookStore, (s) => s.setCover)
 
   // ⚠️ T100：进页面**只做两件事** —— ① 读回落盘的结果；② **没扫过就自动开扫**
   //    （用户**不用点**任何按钮）。
@@ -232,6 +308,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
         avgDurationSec: 0,
         maxDurationSec: 0,
         episodeRule: null,
+        // ⚠️ **T101**：手动指定的条目**没有**封面 ⇒ 画占位块（进页时会补拉一次）。
+        coverId: null,
       }))
     const merged = new Map<string, AudiobookHit>()
     for (const hit of hits) merged.set(hit.albumId, hit)
@@ -250,12 +328,38 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
     void scan({ full: true, keyword: effectiveKeyword })
   }, [effectiveKeyword, scan])
 
-  const handleMarkNotAudiobook = useCallback(
-    (albumId: string, albumTitle: string) => {
-      setOverride(albumId, 'not-audiobook', undefined, albumTitle)
-    },
-    [setOverride],
-  )
+  /**
+   * ⚠️ **T101**：**没有封面**的条目 ⇒ 去拉一次 `/album/detail` 补上（每张 **1** 个请求）。
+   *
+   * ⚠️ **为什么需要**：扫描路径现在会**顺手**记下曲目的封面 ⇒ 新扫的结果**直接有**；
+   *    但**旧落盘**（T101 之前扫的）没有 ⇒ 补一次。
+   * ⚠️ **补完会回写落盘**（`setCover`）⇒ 下次进来**不用**再拉。
+   * ⚠️ 拉不到**不影响**任何功能（卡片画占位块）⇒ 不打扰用户。
+   */
+  const requestedCovers = useRef(new Set<string>())
+  useEffect(() => {
+    const missing = items
+      .filter((hit) => !hit.coverId && !requestedCovers.current.has(hit.albumId))
+      .map((hit) => hit.albumId)
+    if (missing.length === 0) return
+    for (const albumId of missing) requestedCovers.current.add(albumId)
+    let cancelled = false
+    void (async () => {
+      for (const albumId of missing) {
+        if (cancelled) return
+        try {
+          const album = await libraryApi.album(albumId)
+          if (cancelled) return
+          setCover(albumId, album?.coverId ?? null)
+        } catch {
+          // ⚠️ 拿不到封面就算了（卡片画占位块）⇒ 不报错、不打扰用户。
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [items, setCover])
 
   const status = scanning
     ? `正在扫描…第 ${progress?.page ?? 0} 页 / 共 ${progress?.pages ?? 0} 页（已扫 ${progress?.scanned ?? 0} 首）`
@@ -291,47 +395,26 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
           {items.length === 0 ? (
             <p className="fnm-audiobooks__empty">{emptyText}</p>
           ) : (
-            <ul className="fnm-audiobooks__list">
+            /* ⚠️ **T101**：与专辑页**同款**的封面卡片网格（`.fnm-card` 结构）。
+               ⚠️ 用**普通 CSS 网格**（不是虚拟网格）⇒ 整个页面一起滚动
+                  ⇒ 不出现「网格里滚、页面里也滚」的嵌套滚动。 */
+            <div className="fnm-audiobooks__list">
               {items.map((hit) => {
                 const manual = hit.reasons.includes('user')
                 return (
-                  <li key={hit.albumId} className="fnm-audiobooks__item">
-                    <button
-                      type="button"
-                      className="fnm-audiobooks__title"
-                      onClick={() => onOpenAlbum(toAlbum(hit))}
-                    >
-                      {hit.albumTitle || '（未命名的专辑）'}
-                    </button>
-                    <p className="fnm-audiobooks__source">
-                      {manual ? '你指定的' : `在「${keyword}」目录下`}
-                    </p>
-                    <p className="fnm-audiobooks__meta">
-                      {/* ⚠️ T100：**不再显示「判定分」** —— 位置已定（那个文件夹里的都是有声），
-                          分数当主信息会与口径自相矛盾；只留对用户有用的量。 */}
-                      {hit.trackCount > 0 ? `${hit.trackCount} 集` : ''}
-                      {hit.avgDurationSec > 0 ? ` · 单集均长 ${formatMinutes(hit.avgDurationSec)}` : ''}
-                      {/* ⚠️ T99：服务端把一部作品拆成几张同名专辑时，这里如实说明合并了几张。 */}
-                      {hit.albumIds.length > 1 ? ` · 合并了 ${hit.albumIds.length} 张专辑` : ''}
-                    </p>
-                    {hit.reasons.length > 0 ? (
-                      <p className="fnm-audiobooks__reasons">
-                        {hit.reasons
-                          .map((reason) => REASON_LABELS[reason] ?? reason)
-                          .join(' · ')}
-                      </p>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="fnm-audiobooks__exclude"
-                      onClick={() => handleMarkNotAudiobook(hit.albumId, hit.albumTitle)}
-                    >
-                      不是有声
-                    </button>
-                  </li>
+                  <AudiobookCard
+                    key={hit.albumId}
+                    title={hit.albumTitle || '（未命名的专辑）'}
+                    coverId={hit.coverId}
+                    subtitle={listMeta(hit)}
+                    source={manual ? '你指定的' : `在「${keyword}」目录下`}
+                    itemClassName="fnm-audiobooks__item"
+                    metaClassName="fnm-audiobooks__meta"
+                    onOpen={() => onOpenAlbum(toAlbum(hit))}
+                  />
                 )
               })}
-            </ul>
+            </div>
           )}
         </section>
 
@@ -367,23 +450,20 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
             <p className="fnm-audiobooks__error">搜索失败：{searchError}</p>
           ) : null}
           {searchResults.length > 0 ? (
-            <ul className="fnm-audiobooks__results">
+            /* ⚠️ **T101**：与主列表**同一套**卡片（封面 + 标题 + 副标题）。 */
+            <div className="fnm-audiobooks__results">
               {searchResults.map((group) => (
-                <li key={group.albumId} className="fnm-audiobooks__result">
-                  <button
-                    type="button"
-                    className="fnm-audiobooks__title"
-                    onClick={() => handleOpenSearchResult(group)}
-                  >
-                    {group.title}
-                  </button>
-                  <span className="fnm-audiobooks__result-meta">
-                    {group.trackCount > 0 ? `${group.trackCount} 集` : ''}
-                    {group.albumIds.length > 1 ? ` · 合并了 ${group.albumIds.length} 张专辑` : ''}
-                  </span>
-                </li>
+                <AudiobookCard
+                  key={group.albumId}
+                  title={group.title}
+                  coverId={group.coverId}
+                  subtitle={searchMeta(group)}
+                  itemClassName="fnm-audiobooks__result"
+                  metaClassName="fnm-audiobooks__result-meta"
+                  onOpen={() => handleOpenSearchResult(group)}
+                />
               ))}
-            </ul>
+            </div>
           ) : null}
         </section>
 

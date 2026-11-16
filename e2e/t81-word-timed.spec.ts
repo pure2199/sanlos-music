@@ -70,10 +70,22 @@ async function seekTo(window: Page, seconds: number): Promise<void> {
 /**
  * 读一个歌词面板的「整行强调色」状态。
  *
- * ⚠️ **为什么用探针元素**去取 `--accent` 的**实际颜色**：
- *    `--accent` 在两套主题里是**不同的值** ⇒ 写死某个色值等于没有断言。
- *    ⇒ 造一个临时 `div`（`color: var(--accent)`）⇒ 读它的 `getComputedStyle().color`
+ * ⚠️ **为什么用探针元素**去取强调色的**实际颜色**：
+ *    强调色在两套主题里是**不同的值** ⇒ 写死某个色值等于没有断言。
+ *    ⇒ 造一个临时元素（`color: <强调色表达式>`）⇒ 读它的 `getComputedStyle().color`
  *    ⇒ 拿它跟当前行的实际颜色**逐字比**。
+ *
+ * ⚠️ **T101 修正（前提变了：mock 真的会发封面了）**：
+ *    ① 探针**必须与被测元素同作用域** ⇒ 挂在**面板里**（全屏页把「按封面取色校正过的
+ *       强调色」写在**自己的根元素**上 ⇒ 挂在 `body` 上读到的不是同一个值）；
+ *    ② 探针的颜色表达式**必须与 CSS 里那一行一字不差**：
+ *       `.fnm-lyricview__line--whole { color: var(--fnm-fullplayer__accent-text, var(--accent)); }`
+ *       （T89-⑪：全屏页里这行压在取色渐变背景上 ⇒ 用**校正过**的强调色；
+ *        **不在全屏页里时回退到 `--accent`**）。
+ *    ⚠️ **为什么以前也是绿的**：mock 以前**没有** `/static/cover` 端点 ⇒ 封面 404
+ *       ⇒ 取色失败 ⇒ `--fnm-fullplayer__accent-text` **从来不生效**
+ *       ⇒ 两边碰巧都等于 `--accent` ⇒ 断言**看起来**在验「整行强调色」，
+ *       实际上**没验到**「校正过的强调色」这一层。
  */
 async function snapshotWholeLine(panel: Locator): Promise<{
   wholeCount: number
@@ -89,9 +101,10 @@ async function snapshotWholeLine(panel: Locator): Promise<{
     const lines = Array.from(root.querySelectorAll('[data-index]'))
     const whole = lines.filter((line) => line.className.includes('fnm-lyricview__line--whole'))
     const others = lines.filter((line) => !line.className.includes('fnm-lyricview__line--whole'))
-    const probe = document.createElement('div')
-    probe.style.color = 'var(--accent)'
-    document.body.appendChild(probe)
+    const probe = document.createElement('span')
+    // ⚠️ **必须与 `lyric-view.css` 里那一行一字不差**（且**同作用域**）。
+    probe.style.color = 'var(--fnm-fullplayer__accent-text, var(--accent))'
+    root.appendChild(probe)
     const accentColor = getComputedStyle(probe).color
     probe.remove()
     return {
@@ -167,8 +180,10 @@ test.describe.serial('T81：真逐字才卡拉OK，否则整行显示（真实 E
     expect(snapshot.otherIndexes.length).toBeGreaterThan(0)
     expect(snapshot.otherIndexes).not.toContain('1')
 
-    // --- 鉴别力 3：当前行的**实际颜色** == `--accent` 的实际颜色 -------------
+    // --- 鉴别力 3：当前行的**实际颜色** == **它自己那个作用域里**的强调色 -------
     // ⚠️ 这一条 jsdom 验不了（`getComputedStyle` 恒为空）⇒ 必须真实 Chromium。
+    // ⚠️ **T101 修正**：比的是「**当前行用的那个**强调色」（`--fnm-fullplayer__accent-text`，
+    //    回退 `--accent`）⇒ 探针必须**同作用域 + 同表达式**（见 `snapshotWholeLine`）。
     expect(snapshot.lineColor).not.toBe('')
     expect(snapshot.lineColor).toBe(snapshot.accentColor)
   })

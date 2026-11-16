@@ -8,6 +8,22 @@
   flex-direction: column;
   gap: 16px;
   padding: 16px;
+  /*
+   * ⚠️ **T101**：这一层是**整页的滚动容器**（与「发现」页 `.fnm-discover` 同一套写法）。
+   *
+   * ⚠️ **为什么必须有**（E2E 实测踩到）：页面外壳 `.fnm-page` **没有** `overflow`
+   *    ⇒ 这一层的内容比窗口高时**直接溢出**，**画到播放条上面**
+   *    ⇒ 最下面那块「换一个文件夹」里的按钮**被播放条盖住、点不到**
+   *    （Playwright 报「`fnm-playerbar` 拦截了指针事件」）。
+   *    ⇒ T101 把列表改成**封面卡片网格**（比原来的文字行高约 170px）
+   *    ⇒ 内容更高 ⇒ 这个问题被**顶出来**了。
+   *
+   * ⚠️ **为什么是「整页一起滚」而不是「网格自己滚」**：规格定的就是「整页一起滚」
+   *    ⇒ 不出现「网格里滚、页面里也滚」的**嵌套滚动**（点子两种滚法会打架）。
+   */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .fnm-audiobooks__toolbar {
@@ -51,55 +67,50 @@
   opacity: 0.75;
 }
 
-.fnm-audiobooks__list {
-  list-style: none;
+/* ---- T101：作品卡片网格（与专辑页**同款**形态）-------------------------- */
+
+/*
+ * ⚠️ 卡片本身用 `components/cards.css` 的 `.fnm-card`（封面 + 标题 + 副标题）
+ *    ⇒ 这里**只**管网格排布与两行额外信息，**不**另起一套卡片样式
+ *    （否则两页会长得不一样 ⇒ 那就白改了）。
+ */
+
+/* 主列表 / 秒搜结果 = 同一个网格。 */
+.fnm-audiobooks__list,
+.fnm-audiobooks__results {
+  display: grid;
+  /* ⚠️ 列宽下限与专辑页的虚拟网格一致（`CARD_GRID_MIN_COLUMN_WIDTH` = 180）。 */
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  list-style: none;
 }
 
-.fnm-audiobooks__item {
+/* 卡片根：封面 + 标题 + 副标题 +（可选）来源那一行。 */
+.fnm-audiobooks__item,
+.fnm-audiobooks__result {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
+  min-width: 0;
 }
 
-.fnm-audiobooks__title {
-  align-self: flex-start;
-  background: none;
-  border: none;
-  padding: 0;
-  color: inherit;
-  font: inherit;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
+/* 标题 / 副标题：沿用专辑页的 `.fnm-card__title` / `.fnm-card__subtitle` 表现。 */
+.fnm-audiobooks__title,
 .fnm-audiobooks__meta,
-.fnm-audiobooks__reasons {
+.fnm-audiobooks__result-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「在哪个目录下面」/「你指定的」—— 告诉用户**它凭什么出现在这儿**。 */
+.fnm-audiobooks__source {
   margin: 0;
   font-size: 12px;
-  opacity: 0.75;
-}
-
-.fnm-audiobooks__exclude {
-  align-self: flex-start;
-  margin-top: 4px;
-  padding: 4px 10px;
-  border-radius: var(--radius-control);
-  border: 1px solid var(--border);
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
+  color: var(--text-secondary);
 }
 
 /* ---- v3：两个入口（作品名秒搜 / 目录关键字）------------------------------ */
@@ -140,33 +151,6 @@
   background: transparent;
   color: inherit;
   font: inherit;
-}
-
-.fnm-audiobooks__results {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.fnm-audiobooks__result {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.fnm-audiobooks__result-meta {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-/* 「在哪个目录下面」/「你指定的」—— 告诉用户**它凭什么出现在这儿**。 */
-.fnm-audiobooks__source {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-secondary);
 }
 
 .fnm-audiobooks__error {

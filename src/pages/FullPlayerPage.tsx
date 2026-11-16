@@ -42,6 +42,7 @@ import {
   type CSSProperties,
   type ReactElement,
 } from 'react'
+import { useStore } from 'zustand'
 
 import type { LyricEntry } from '../api/types'
 import { lyricApi } from '../api/lyric'
@@ -61,6 +62,7 @@ import { QUEUE_ONLY_ONE_HINT, removeSongFromQueue } from '../components/PlayerBa
 import type { LyricSource } from '../../shared/lyricProvider'
 import { usePlayerStore } from '../state/playerStore'
 import { useAppPrefsStore } from '../state/appPrefsStore'
+import { useAudiobookStore } from '../state/audiobookStore'
 import { liftToMinLuminance, toReadableAccent } from '../ui/accentColor'
 import {
   defaultEmbeddedLyricFetcher,
@@ -132,6 +134,16 @@ export interface FullPlayerPageProps {
 
 /** 歌词加载状态。 */
 type LyricStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+/**
+ * 歌词加载的**超时**（毫秒）。
+ *
+ * ⚠️ **T101**：外部歌词源要**依次试**（网易云 → lrclib → QQ → 酷狗…）
+ *    ⇒ 一轮失败可能要十几秒 ⇒ 期间界面一直卡「正在加载歌词…」
+ *    ⇒ 真机实测**有声**作品就是卡在这里（一大片空白）。
+ * ⇒ 超时后**如实说**「没取到歌词」，不装作还在加载。
+ */
+const LYRIC_LOAD_TIMEOUT_MS = 12_000
 
 /**
  * 线上源的**可读名字**（T73）—— 如实显示**实际命中的那个**。
@@ -211,6 +223,17 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
 
   const songId = current?.id ?? ''
   const coverId = current?.coverId ?? ''
+
+  /**
+   * ⚠️ **T101**：当前这首是不是**有声读物**。
+   *
+   * 有声作品**没有歌词** ⇒ ① 不查（查了也是白等一轮外部源）
+   * ⇒ ② 全屏页默认落在「**队列**」（队列 = 整本书的集，比歌词有用得多）。
+   */
+  const currentAlbumId = current?.albumId ?? ''
+  const isAudiobookTrack = useStore(useAudiobookStore, (s) =>
+    currentAlbumId ? s.isAudiobook(currentAlbumId) : false,
+  )
 
   /**
    * 歌词来源的**优先级**（T70）：线上优先（缺省）/ 本地优先。
@@ -293,11 +316,33 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
       return
     }
     let cancelled = false
+    /**
+     * ⚠️ **T101**：**超时兜底** —— 外部源要依次试，一轮失败可能十几秒
+     *    ⇒ 不能让「正在加载歌词…」一直挂着（真机实测有声作品就卡在这儿）。
+     */
+    const timeoutTimer = setTimeout(() => {
+      if (cancelled) return
+      setRawLines([])
+      setLyricReason('没取到歌词（等太久了）')
+      setLyricStatus('error')
+    }, LYRIC_LOAD_TIMEOUT_MS)
+    const stopTimer = (): void => {
+      if (timeoutTimer) clearTimeout(timeoutTimer)
+    }
     setLyricStatus('loading')
     setRawLines([])
     setLyricReason(null)
     setLyricSourceUsed(null)
     setLyricEmbedded(false)
+    // ⚠️ **T101**：**有声读物没有歌词** ⇒ 不查（查了也是白等一轮外部源）。
+    if (isAudiobookTrack) {
+      stopTimer()
+      setLyricStatus('ready')
+      return () => {
+        cancelled = true
+        stopTimer()
+      }
+    }
     // ⚠️ **优先级由 `lyricPriority` 决定**（T70：缺省「线上优先」，
     //    线上匹配不上 / 报错 / 超时就回落本地）；线上源只回 LRC 文本，
     //    这里包成条目后仍交给**现有**的 `parseLyricEntries`（解析逻辑一行不改）。
@@ -308,6 +353,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     )
       .then((result) => {
         if (cancelled) return
+        stopTimer()
         setRawLines(parseLyricEntries(result.entries))
         setLyricReason(result.reason)
         // ⚠️ T73：源链是「依次试」的 ⇒ 命中的**未必**是用户选的那个 ⇒ 如实显示。
@@ -320,12 +366,14 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
       })
       .catch(() => {
         if (cancelled) return
+        stopTimer()
         setRawLines([])
         setLyricReason(null)
         setLyricStatus('error')
       })
     return () => {
       cancelled = true
+      stopTimer()
     }
   }, [
     api,
@@ -340,7 +388,19 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     songArtist,
     songAlbum,
     songDuration,
+    isAudiobookTrack,
   ])
+
+  /**
+   * ⚠️ **T101**：**有声**作品 ⇒ 全屏页默认落在「**队列**」。
+   *
+   * 理由：队列 = 整本书的集（有声最有用的一块）⇒ 而「歌词」页对有声**永远是空的**
+   *    ⇒ 默认落歌词 ⇒ 用户看到的是一大片空白（真机实测）。
+   */
+  useEffect(() => {
+    if (!songId) return
+    if (isAudiobookTrack) setTab('queue')
+  }, [songId, isAudiobookTrack])
 
   // --- 封面取色：异步、不阻塞首屏、按 coverId 缓存 ----------------------------
   useEffect(() => {
@@ -485,7 +545,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
         lines={lines}
         currentTime={position}
         mode="all"
-        emptyLabel="暂无歌词"
+        /* ⚠️ **T101**：有声作品**没有歌词** ⇒ 如实说明（而不是让人对着空白猜）。 */
+        emptyLabel={isAudiobookTrack ? '有声读物没有歌词' : '暂无歌词'}
       />
     )
   })()

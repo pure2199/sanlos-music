@@ -267,7 +267,12 @@ function buildQuery(query: Record<string, string | number | undefined> | undefin
  */
 const COVER_ID_RE = /^[^_]+_[0-9a-fA-F]+$/
 
-function normalizeCoverId(value: unknown): string {
+/**
+ * 归一封面 id（**导出**：T101 起扫描路径也要用它取曲目的封面）。
+ *
+ * ⚠️ 只认 `xxx_<hex>` 形态（`track_` / `album_` / `artist_`）⇒ 其它一律当**没有封面**。
+ */
+export function normalizeCoverId(value: unknown): string {
   const text = str(value)
   if (!text) return ''
   return COVER_ID_RE.test(text) ? text : ''

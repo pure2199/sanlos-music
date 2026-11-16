@@ -16,6 +16,7 @@ import {
   mapGenre,
   mapSong,
   MAX_PAGE_SIZE,
+  normalizeCoverId,
   normalizePage,
   normalizePageNumber,
   normalizePageSize,
@@ -225,6 +226,13 @@ export interface ScanTrack {
   path: string | null
   /** 服务端入库时间（Unix 秒；可为 `null`）。 */
   createdAt: number | null
+  /**
+   * 曲目的**封面 id**（空串 = 没有封面）。
+   *
+   * ⚠️ **T101**：曲目的 `coverId` 本来就**在返回的数据里** ⇒ 顺手记下来**不要钱**
+   *    ⇒ 「有声」页的卡片能画封面（不用为每张专辑多发一个请求）。
+   */
+  coverId: string
 }
 
 /** 扫描进度。 */
@@ -294,6 +302,8 @@ function toScanTrack(raw: RawSong): ScanTrack {
     trackNo: typeof raw.trackNo === 'number' && Number.isFinite(raw.trackNo) ? raw.trackNo : null,
     path: typeof raw.audioSpec?.path === 'string' ? raw.audioSpec.path : null,
     createdAt: unixSeconds(raw.createdAt),
+    // ⚠️ **T101**：曲目的封面 id（免费 ⇒ 顺手带上 ⇒ 卡片有封面）。
+    coverId: normalizeCoverId(raw.coverId),
   }
 }
 

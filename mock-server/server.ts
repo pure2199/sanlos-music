@@ -64,6 +64,18 @@ import {
 /** 音乐接口基址：`<server>/music/api/v1`。 */
 const API_BASE = `${MUSIC_PATH}${API_PREFIX}`
 
+/**
+ * mock 的**封面图**（1×1 的 PNG，69 字节）。
+ *
+ * ⚠️ **T101**：封面端点返回的字节（真的图不重要 ⇒ 要的是「能加载成功」
+ *    ⇒ 客户端的 `CoverImage` 才不会切成占位块 ⇒ E2E 才测得出「卡片有没有封面」）。
+ * ⚠️ 这张 PNG 由 `zlib` + CRC32 **现算**（见提交说明）⇒ 不是随手抄的 base64。
+ */
+const COVER_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNQcGgAAAFkAOHHE8n2AAAAAElFTkSuQmCC',
+  'base64',
+)
+
 /** 列表端点默认每页条数。 */
 export const DEFAULT_PAGE_SIZE = 200
 
@@ -780,6 +792,29 @@ export function createMockServer(options?: MockServerOptions): MockServer {
       return
     }
     sendJson(res, ok(album))
+  })
+  // ⚠️ **T101（2026-11-17）**：**封面端点**（真实服务端有；mock 之前**没有**）。
+  //
+  // ⚠️ **为什么必须补**：客户端的封面走 `fnm://srv/static/cover`（`electron/proxy.ts`
+  //    的二进制白名单里）⇒ mock 之前 404 ⇒ `CoverImage` 切成**占位块** ⇒
+  //    E2E 根本**测不出**「卡片到底有没有封面」（有声页的封面网格就是靠这条测的）。
+  //
+  // ⚠️ **纯增量**：只**新增**一个端点 ⇒ 既有端点的行为**一个字没变**。
+  //    真的图不重要 ⇒ 回一张 **1×1 的 PNG**（能加载成功 ⇒ `<img>` 留着，不变占位块）。
+  getRoutes.set(`${API_BASE}/static/cover`, ({ res, query }) => {
+    const coverId = query.get('coverId') ?? ''
+    // 没有 coverId ⇒ 404（与真实服务端一致）。
+    if (!coverId) {
+      sendJson(res, err(100002, 'invalid arguments'))
+      return
+    }
+    res.writeHead(200, {
+      'content-type': 'image/png',
+      'content-length': String(COVER_PNG.length),
+      // ⚠️ 客户端要**读像素**取封面主色 ⇒ 必须允许跨域（真实服务端也带这个头）。
+      'access-control-allow-origin': '*',
+    })
+    res.end(COVER_PNG)
   })
 
   getRoutes.set(`${API_BASE}/album/artist-detail/list`, ({ res, query }) => {

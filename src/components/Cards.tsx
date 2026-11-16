@@ -134,16 +134,23 @@ export interface AlbumCardProps {
   album: Album
   /** 点击卡片时回调。 */
   onOpen?: (album: Album) => void
+  /**
+   * 副标题**覆盖**（缺省 = 专辑的歌手名）。
+   *
+   * ⚠️ **T101**：「有声」页要显示「32 集 · 合并了 2 张专辑」而不是歌手名
+   *    ⇒ 用这个 prop 覆盖。**不传时行为一字不变**（既有卡片测试全绿）。
+   */
+  subtitle?: string
 }
 
 /** 专辑卡片。 */
-export function AlbumCard({ album, onOpen }: AlbumCardProps): ReactElement {
+export function AlbumCard({ album, onOpen, subtitle }: AlbumCardProps): ReactElement {
   return (
     <article className="fnm-card" data-testid="fnm-card">
       <button type="button" className="fnm-card__button" onClick={() => onOpen?.(album)}>
         <CoverImage coverId={album.coverId} alt={album.title} />
         <span className="fnm-card__title">{album.title}</span>
-        <span className="fnm-card__subtitle">{album.artist}</span>
+        <span className="fnm-card__subtitle">{subtitle ?? album.artist}</span>
       </button>
     </article>
   )

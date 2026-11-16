@@ -90,6 +90,14 @@
   cursor: pointer;
 }
 
+/* T101：判定依据（结构信号）—— 从列表卡片搬到详情页（信息不丢）。 */
+.fnm-detail__audiobook-reasons {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 80ch;
+}
+
 .fnm-detail__episode {
   font-size: 12px;
   color: var(--text-secondary);
