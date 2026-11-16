@@ -42,6 +42,7 @@ import { useBatchSelection } from '../components/batchSelection'
 import { useLibraryRowActions } from '../components/rowActions'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import { PagingNotice } from '../components/PagingNotice'
+import { RandomPlaylistPanel } from '../components/RandomPlaylistPanel'
 import { SongList } from '../components/SongList'
 import { useResolvedLibraryStore, type LibraryApi, type LibraryStoreApi } from '../state/libraryStore'
 import './library-pages.css'
@@ -107,6 +108,59 @@ export function PlaylistsPage({
   const [message, setMessage] = useState<string | null>(null)
   /** 删除的**两步确认**：点一次变成「确认删除？」，再点才真删。 */
   const [confirmDelete, setConfirmDelete] = useState(false)
+
+  // --- 随机歌单（T97）-----------------------------------------------------
+  /** 右栏是否切到「随机歌单」视图。 */
+  const [randomOpen, setRandomOpen] = useState(false)
+
+  /** 切「随机歌单」视图（顺带清掉上一条操作提示，免得两套提示串在一起）。 */
+  const handleToggleRandom = useCallback((): void => {
+    setMessage(null)
+    setWritebackError(null)
+    setRandomOpen((current) => !current)
+  }, [])
+
+  /**
+   * 把随机歌单**存回 NAS**（建歌单 + 加歌）。
+   *
+   * ⚠️ **服务端实测（2026-11-16，真实 NAS）**：`playlist/create` **会回显 `guid`**
+   *    ⇒ 正常路径直接用它；**回显为空**时按**名字**在刷新后的列表里找回
+   *    （与既有 `handleCreate` 同一口径）⇒ 找不到就**如实报错**，不假装成功。
+   */
+  const handleSaveRandom = useCallback(
+    async (name: string, songIds: string[]): Promise<string> => {
+      const guid = await playlistApi.create(name)
+      let target = guid
+      if (target.length === 0) {
+        await refreshPlaylists()
+        const items = resolved.getState().playlists.items
+        target = items.find((item) => item.name === name)?.id ?? ''
+      }
+      if (target.length === 0) {
+        throw new Error('新建歌单后拿不到它的标识（服务端未回显 guid）')
+      }
+      await playlistApi.addTracks(target, songIds)
+      // ⚠️ **必须刷新**：新歌单要**当场出现在歌单列表里**（不重拉就只看得见提示）。
+      await refreshPlaylists()
+      return target
+    },
+    [playlistApi, refreshPlaylists, resolved],
+  )
+
+  /**
+   * 存回成功后：刷新列表、选中它。
+   *
+   * ⚠️ **不自动关掉随机面板**：面板里那条「已保存（N 首）」的提示会随面板一起消失
+   *    ⇒ 用户就**看不到「保存成功」**了（E2E 实测踩到）。
+   *    ⇒ 面板留着（提示可见），左栏里新歌单也已经在那儿 ⇒ 用户想看它就点它。
+   */
+  const handleRandomSaved = useCallback(
+    (playlistId: string): void => {
+      selectPlaylist(playlistId)
+      void loadPlaylistSongs(playlistId, 1)
+    },
+    [loadPlaylistSongs, selectPlaylist],
+  )
 
   /** 选中歌单 → 加载它的第一页歌曲。 */
   const handleOpen = useCallback(
@@ -215,6 +269,15 @@ export function PlaylistsPage({
     >
       <div className="fnm-playlists">
         <div className="fnm-playlists__side">
+          {/* 随机歌单（T97）：从**你的**曲库随机挑 20 首 ⇒ 能直接播，也能存回 NAS。 */}
+          <button
+            type="button"
+            className="fnm-playlists__random-button"
+            aria-pressed={randomOpen}
+            onClick={handleToggleRandom}
+          >
+            {randomOpen ? '关闭随机歌单' : '随机 20 首'}
+          </button>
           {/* 新建歌单（T26）：这是「一个歌单都没有」的账号**唯一的建单入口**。 */}
           <div className="fnm-playlists__create">
             <input
@@ -250,7 +313,13 @@ export function PlaylistsPage({
         </div>
 
         <div className="fnm-playlists__detail">
-          {playlistId ? (
+          {randomOpen ? (
+            <RandomPlaylistPanel
+              save={handleSaveRandom}
+              onPlay={onPlay}
+              onSaved={handleRandomSaved}
+            />
+          ) : playlistId ? (
             <>
               {/* 删除当前歌单（T26）：两步确认。 */}
               <div className="fnm-playlists__toolbar">

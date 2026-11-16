@@ -1,0 +1,118 @@
+/*
+ * 「随机 20 首」面板的样式（T97）。
+ *
+ * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
+ * ⚠️ **本文件与组件住在同一个目录**（仓库约定）：`RandomPlaylistPanel.tsx` 吐出的
+ *    `fnm-random*` 类名 ↔ 本文件的选择器**严格一一对应**
+ *    （由 `test/library-guard.test.tsx` 的 NEW-04 契约钉住）。
+ */
+
+/* 面板容器 */
+.fnm-random {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* 标题行（标题 + 按钮组） */
+.fnm-random__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.fnm-random__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fnm-random__hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fnm-random__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* 面板里的按钮 */
+.fnm-random__button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-random__button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-random__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-random__button:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.fnm-random__button--primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 存为歌单：名字输入 + 按钮 */
+.fnm-random__save {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.fnm-random__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.fnm-random__name:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 失败提示（不假装成功） */
+.fnm-random__error {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--danger);
+}
+
+/* 成功提示 */
+.fnm-random__message {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--success);
+}

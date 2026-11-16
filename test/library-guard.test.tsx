@@ -317,6 +317,8 @@ const STYLE_CONTRACTS: Array<{ source: string; style: string }> = [
   { source: 'components/Cards.tsx', style: 'components/cards.css' },
   { source: 'components/LibraryPageShell.tsx', style: 'components/library-page-shell.css' },
   { source: 'pages/PlaylistsPage.tsx', style: 'pages/library-pages.css' },
+  // T97：「随机 20 首」面板（**样式跟组件住在同一个目录** ⇒ 契约照样成立）。
+  { source: 'components/RandomPlaylistPanel.tsx', style: 'components/random-playlist-panel.css' },
 ]
 
 describe('NEW-04「类名 ↔ 选择器」契约', () => {

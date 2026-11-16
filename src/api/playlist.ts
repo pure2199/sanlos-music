@@ -27,6 +27,21 @@ const FULL_FETCH_PAGE_SIZE = 200
 const MAX_FULL_FETCH_PAGES = 50
 
 /** 歌单相关接口。 */
+/**
+ * 歌单名的**最大字符数**（实测 2026-11-16，真实 NAS）。
+ *
+ * ⚠️ `/playlist/create` 的 `name` **超过 32 个字符会被服务端拒**
+ *    （回 `code=100002` / `invalid arguments`）——
+ *    实测边界：**32 个字符 OK / 33 个字符被拒**；
+ *    而且是按**字符数**算、**不是字节数**
+ *    （32 个中文字符 = 96 字节，照样 OK）。
+ * ⇒ 客户端**自己先拦**，别让用户撞上那句英文报错。
+ *
+ * ⚠️ **既有缺陷（另开任务）**：歌单页那个「新建歌单」输入框**还没这道闸**，
+ *    用户手输超过 32 个字符 ⇒ 服务端拒 ⇒ 界面只显示英文的 `invalid arguments`。
+ */
+export const MAX_PLAYLIST_NAME_LENGTH = 32
+
 export const playlistApi = {
   /** 歌单列表（分页循环取全）。 */
   async list(): Promise<Playlist[]> {

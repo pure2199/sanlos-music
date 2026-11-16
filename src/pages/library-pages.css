@@ -161,3 +161,42 @@
   font-size: 13px;
   color: var(--accent);
 }
+
+/* --------------------------------------------------------------------------
+ * 随机歌单（T97）
+ * --------------------------------------------------------------------------
+ * ⚠️ **只放「页面自己」吐出的类名**：面板（`RandomPlaylistPanel`）的样式
+ *    跟组件住在一起（`src/components/random-playlist-panel.css`）⇒
+ *    「类名 ↔ 选择器严格 1:1」的契约（`test/library-guard.test.tsx` NEW-04）才成立。
+ * -------------------------------------------------------------------------- */
+
+/* 左栏的入口按钮 */
+.fnm-playlists__random-button {
+  width: 100%;
+  height: 30px;
+  margin-bottom: 10px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-playlists__random-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fnm-playlists__random-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fnm-playlists__random-button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
