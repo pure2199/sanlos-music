@@ -181,7 +181,11 @@ export const libraryApi = {
 // 实测（2026-11-16，本机 + 该账号）：
 // - `/track/list` 的 `size` 上限 **2000**、`page` 上限 **2000**；
 // - 曲库共 **173,671 首** ⇒ `size=2000` 只要 **87 页**；
-// - 默认排序实测就是 `createdAt,desc`（这里**显式**带上，不依赖默认值）。
+// - 默认排序实测就是 `createdAt,desc`（这里**显式**带上，不依赖默认值）；
+// - ⭐ **并发是实打实的收益**（v3 实测，同一台机、同一条中继链路）：
+//   顺序 6 页 = **7,323 ms**（1.22 s/页）⇒ 并发 8 路 6 页 = **4,944 ms**（**1.48×**）；
+//   全量 87 页并发 = **52,193 ms ≈ 52 s**（顺序按 1.22 s/页推算 ≈ 106 s）。
+//   ⇒ 瓶颈是**带宽**不是延迟 ⇒ 再加并发收益递减 ⇒ 取 **8 路**。
 // ---------------------------------------------------------------------------
 
 /** 扫描用的一条曲目（**只取识别 / 排序需要的字段**）。 */
@@ -235,6 +239,14 @@ export interface ScanOptions {
    *    会重复扫那一秒 ⇒ 调用方**必须按曲目 id 去重**。
    */
   sinceCreatedAt?: number | null
+  /**
+   * **并发**页数（默认 {@link DEFAULT_SCAN_CONCURRENCY} = 8）。
+   *
+   * ⚠️ 实测见本节顶部：并发 8 路 = **1.48×**（顺序 6 页 7,323 ms ⇒ 并发 4,944 ms）。
+   * ⚠️ **批内并发、批间有序**：同一批的页**并发**取回，但**按页序**回调
+   *    ⇒ 断点语义不变（断点 = 「下一个要扫的页」），中途断了最多重扫一批。
+   */
+  concurrency?: number
   /** 每页回调（**逐页**，页处理完这一页的数组即可释放）。 */
   onPage?: (tracks: ScanTrack[], progress: ScanProgress) => void
 }
@@ -267,6 +279,27 @@ function toScanTrack(raw: RawSong): ScanTrack {
 }
 
 /**
+ * 扫描的默认**并发**页数。
+ *
+ * ⚠️ 实测（2026-11-16，本机 + 该账号）：并发 8 路 = 顺序的 **1.48×**
+ *    （瓶颈是带宽 ⇒ 再加收益递减）。
+ */
+export const DEFAULT_SCAN_CONCURRENCY = 8
+
+/** 取一页扫描数据（**只发一个请求**，并发由调用方编排）。 */
+async function fetchScanPage(
+  page: number,
+  pageSize: number,
+): Promise<{ list: RawSong[]; total: number }> {
+  const raw = normalizePage<RawSong>(
+    await apiCall<RawPage<RawSong>>('/track/list', {
+      query: { page, size: pageSize, sort: 'createdAt,desc' },
+    }),
+  )
+  return { list: raw.list, total: raw.total }
+}
+
+/**
  * 流式扫描整个曲库（**逐页回调**，不把全库留在内存里）。
  *
  * ⚠️ 这是**唯一**被允许「接近全量」读曲库的路径（T98 的识别要用）；
@@ -277,32 +310,69 @@ export async function scanLibraryTracks(options?: ScanOptions): Promise<ScanResu
   const maxPages = Math.max(1, Math.floor(options?.maxPages ?? 2000))
   const startPage = Math.max(1, Math.floor(options?.startPage ?? 1))
   const since = typeof options?.sinceCreatedAt === 'number' ? options.sinceCreatedAt : null
+  const concurrency = Math.max(1, Math.floor(options?.concurrency ?? DEFAULT_SCAN_CONCURRENCY))
 
   let total = 0
   let scanned = 0
   let pages = 0
   let stoppedAtWatermark = false
 
-  for (let page = startPage; page <= maxPages; page += 1) {
-    const raw = normalizePage<RawSong>(
-      await apiCall<RawPage<RawSong>>('/track/list', {
-        query: { page, size: pageSize, sort: 'createdAt,desc' },
-      }),
-    )
+  /**
+   * 处理一页：回调 + 返回「**还要不要继续**」。
+   *
+   * ⚠️ 顺序与 v2 一致：空页 ⇒ 停；水位到底 ⇒ 停；已取满 ⇒ 停。
+   */
+  const handlePage = (page: number, raw: { list: RawSong[]; total: number }): boolean => {
     if (raw.total > total) total = raw.total
     const tracks = raw.list.map(toScanTrack)
     pages = page - startPage + 1
     scanned += tracks.length
-
-    options?.onPage?.(tracks, { page, pages: Math.max(1, Math.ceil(total / pageSize)), scanned, total })
-
-    if (tracks.length === 0) break
+    options?.onPage?.(tracks, {
+      page,
+      pages: Math.max(1, Math.ceil(total / pageSize)),
+      scanned,
+      total,
+    })
+    if (tracks.length === 0) return false
     // 增量：这一页里**全部**都不新 ⇒ 后面只会更旧 ⇒ 停。
     if (since !== null && tracks.every((t) => t.createdAt === null || t.createdAt <= since)) {
       stoppedAtWatermark = true
-      break
+      return false
     }
-    if (scanned >= total) break
+    if (scanned >= total) return false
+    return true
+  }
+
+  // ---- ① 先单独取第一页：拿到 total ⇒ 知道到底有几页（免得多取空页）--------
+  const first = await fetchScanPage(startPage, pageSize)
+  if (!handlePage(startPage, first)) {
+    return { scanned, total, pages, stoppedAtWatermark }
+  }
+  let next = startPage + 1
+
+  // ---- ② 其余页：**批内并发**，批内**按页序**处理 ---------------------------
+  while (next <= maxPages) {
+    const totalPages = total > 0 ? Math.ceil(total / pageSize) : maxPages
+    // ⚠ 剩余页数 = 曲库的总页数**减去**已经取过的那些（页码从 1 起算）。
+    const remaining = Math.max(0, totalPages - next + 1)
+    const batchCount = Math.min(concurrency, remaining, maxPages - next + 1)
+    if (batchCount <= 0) break
+    const batchPages: number[] = []
+    for (let i = 0; i < batchCount; i += 1) batchPages.push(next + i)
+
+    // ⚠ 批内**并发**取回（任一页失败 ⇒ 整批失败 ⇒ 抛给调用方如实报错）。
+    const batch = await Promise.all(batchPages.map((p) => fetchScanPage(p, pageSize)))
+
+    // ⚠ **按页序**处理 ⇒ `onPage` 的顺序与顺序扫描一致 ⇒ 断点语义不变。
+    let keepGoing = true
+    for (let i = 0; i < batch.length && keepGoing; i += 1) {
+      const page = batchPages[i] ?? next
+      const raw = batch[i]
+      if (!raw) continue
+      keepGoing = handlePage(page, raw)
+    }
+    next = (batchPages[batchPages.length - 1] ?? next) + 1
+    if (!keepGoing) break
   }
 
   return { scanned, total, pages, stoppedAtWatermark }

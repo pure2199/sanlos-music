@@ -74,4 +74,22 @@ export const searchApi = {
     )
     return { list: raw.list.map((artist) => mapArtist(artist)), total: raw.total }
   },
+
+  /**
+   * **只**搜专辑（`/search/album`）。
+   *
+   * ⚠️ **为什么单独开一个方法**（T98 v3）：「按**作品名**找有声作品」只需要专辑那一个端点
+   *    ⇒ 单独走能省掉 **2/3 的请求**；实测 `/search/album?q=牧神记` **106 ms** 返回 1 条。
+   *
+   * ⚠️ 服务端的搜索是 **top-N 截断 + 命中集不稳定** ⇒ 这条路径**只能当「发现」**：
+   *    「搜不到」**不能**证明「不存在」⇒ 调用方要如实告诉用户（可改用目录扫描兜底）。
+   */
+  async albums(q: string, opts: { page?: number; size?: number } = {}): Promise<Page<Album>> {
+    const page = normalizePageNumber(opts.page ?? 1)
+    const size = normalizePageSize(opts.size ?? DEFAULT_PAGE_SIZE)
+    const raw = normalizePage<RawAlbum>(
+      await apiCall<RawPage<RawAlbum>>('/search/album', { query: { q, page, size } }),
+    )
+    return { list: raw.list.map((album) => mapAlbum(album)), total: raw.total }
+  },
 }

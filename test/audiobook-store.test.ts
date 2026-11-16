@@ -97,7 +97,8 @@ describe('audiobookStore（扫描 / 续跑 / 落盘 / 改判）', () => {
 
   it('① restore() 只读落盘 ⇒ **一个请求都不发**', () => {
     const saved: AudiobookPersisted = {
-      version: 2,
+      version: 3,
+      keyword: '有声小说',
       nextPage: 0,
       scannedCount: 89,
       total: 89,
@@ -118,7 +119,8 @@ describe('audiobookStore（扫描 / 续跑 / 落盘 / 改判）', () => {
 
   it('② 续跑：从断点接着扫，**旧聚合不重复计数**', async () => {
     const saved: AudiobookPersisted = {
-      version: 2,
+      version: 3,
+      keyword: '有声小说',
       nextPage: 2,
       scannedCount: 10,
       total: 12,
@@ -149,7 +151,8 @@ describe('audiobookStore（扫描 / 续跑 / 落盘 / 改判）', () => {
 
   it('③ 没有断点（扫完了）⇒ 这一轮从头扫，**旧聚合必须丢掉**', async () => {
     const saved: AudiobookPersisted = {
-      version: 2,
+      version: 3,
+      keyword: '有声小说',
       nextPage: 0,
       scannedCount: 10,
       total: 10,
@@ -173,7 +176,8 @@ describe('audiobookStore（扫描 / 续跑 / 落盘 / 改判）', () => {
 
   it('④ 人工改判优先于自动判定，且**改判落盘**', async () => {
     const saved: AudiobookPersisted = {
-      version: 2,
+      version: 3,
+      keyword: '有声小说',
       nextPage: 0,
       scannedCount: 89,
       total: 89,
@@ -284,5 +288,104 @@ describe('audiobookStore（扫描 / 续跑 / 落盘 / 改判）', () => {
     expect(hit?.trackCount).toBe(40)
     expect(hit?.reasons).not.toContain('episode-pattern')
     expect(hit?.episodeRule).toBeNull()
+  })
+
+  // -------------------------------------------------------------------------
+  // v3 改版：「是不是有声」改由**用户指位置**决定（目录关键字 / 作品名秒搜）
+  // -------------------------------------------------------------------------
+
+  it('⑨ 扫描**只聚合目录关键字命中的曲目**（不在那个目录的作品不出现）', async () => {
+    const port = createMemoryAudiobookPort()
+    mockScan(
+      [
+        {
+          page: 1,
+          tracks: [
+            scanTrack({ id: 'a1', title: '01- 某集', albumId: 'al-novel' }),
+            scanTrack({
+              id: 'b1',
+              title: '某首歌',
+              albumId: 'al-music',
+              path: '/vol02/1000-0-音乐/sample/b1.mp3',
+            }),
+          ],
+        },
+      ],
+      2,
+    )
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    const hits = useAudiobookStore.getState().hits
+    expect(hits.map((h) => h.albumId)).toEqual(['al-novel'])
+  })
+
+  it('⑩ **打分不再是门槛**：目录里的作品即使分很低也列出（界面标「结构信号弱」）', async () => {
+    const port = createMemoryAudiobookPort()
+    // 3 集、每集 3 分钟 ⇒ 打分远低于 4 分门槛 ⇒ **v2 会被过滤掉**。
+    const tracks = [1, 2, 3].map((i) =>
+      scanTrack({ id: `w${i}`, title: `歌 ${i}`, albumId: 'al-weak', durationSec: 180 }),
+    )
+    mockScan([{ page: 1, tracks }], tracks.length)
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    const hits = useAudiobookStore.getState().hits
+    expect(hits).toHaveLength(1)
+    expect(hits[0]?.albumId).toBe('al-weak')
+    expect(hits[0]?.score).toBeLessThan(4)
+  })
+
+  it('⑪ 关键字**落盘**；**换关键字 ⇒ 断点作废**（从头扫，不接着旧聚合）', async () => {
+    const port = createMemoryAudiobookPort()
+    // 这条曲目在「别的目录」下面 ⇒ 用默认关键字「有声小说」扫它 ⇒ **不匹配**。
+    const otherDirTrack = scanTrack({
+      id: 'k1',
+      title: '01- 某集',
+      albumId: 'al-1',
+      path: '/vol02/1000-0-别的目录/某某/作品名/Disc 01/01- 某集.mp3',
+    })
+    mockScan([{ page: 1, tracks: [otherDirTrack] }], 1)
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+    expect(port.load()?.keyword).toBe('有声小说')
+    expect(useAudiobookStore.getState().hits).toHaveLength(0)
+
+    // 造一个「没扫完」的断点（关键字没变 ⇒ 正常情况下可以续跑）。
+    const current = port.load()
+    if (!current) throw new Error('没有落盘状态')
+    port.save({ ...current, nextPage: 2, scannedCount: 10 })
+
+    mockScan([{ page: 1, tracks: [otherDirTrack] }], 1)
+    await useAudiobookStore.getState().scan({ port, keyword: '别的目录' })
+
+    const options = scanLibraryTracks.mock.calls[
+      scanLibraryTracks.mock.calls.length - 1
+    ]?.[0] as { startPage: number }
+    // ⚠️ 换关键字 ⇒ 断点作废 ⇒ 必须**从头**扫（第 1 页），不能接着第 2 页。
+    expect(options.startPage).toBe(1)
+    // 旧的 10 集**不能**叠上来（过滤条件变了 ⇒ 旧聚合作废）。
+    expect(useAudiobookStore.getState().hits[0]?.trackCount).toBe(1)
+    expect(port.load()?.keyword).toBe('别的目录')
+  })
+
+  it('⑫ 关键字**可以改**：换了个目录名，扫出来的东西也跟着换', async () => {
+    const port = createMemoryAudiobookPort()
+    const tracks = [
+      scanTrack({ id: 'p1', title: '01- 某集', albumId: 'al-novel' }),
+      scanTrack({
+        id: 'p2',
+        title: '某首歌',
+        albumId: 'al-music',
+        path: '/vol02/1000-0-音乐/sample/p2.mp3',
+      }),
+    ]
+    mockScan([{ page: 1, tracks }], tracks.length)
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+    expect(useAudiobookStore.getState().hits.map((h) => h.albumId)).toEqual(['al-novel'])
+
+    await useAudiobookStore.getState().scan({ port, keyword: '音乐' })
+    expect(useAudiobookStore.getState().hits.map((h) => h.albumId)).toEqual(['al-music'])
   })
 })

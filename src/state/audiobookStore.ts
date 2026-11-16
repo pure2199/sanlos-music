@@ -22,13 +22,26 @@
 // - ⚠️ 扫描**很贵**（中继 0.5–4 Mbps ⇒ 6–47 分钟）⇒ 必须**可中断、可续跑**；
 // - ⇒ 落盘「**已扫到第几页**」+「**候选专辑**的结构指标」⇒ 续跑时接着来。
 // ---------------------------------------------------------------------------
+//
+// ---------------------------------------------------------------------------
+// v3 改版（2026-11-16，用户实机反馈「有声做得不行」之后）
+// ---------------------------------------------------------------------------
+// - 「**是不是有声**」**不再**由打分决定（打分**降级为参考信息**）
+//   ⇒ 改由**用户指位置**决定：① 作品名秒搜点开 ② **目录 `path` 关键字命中**
+//     ③ 手动改判；
+// - 「**那个文件夹**」= 用户给的**目录关键字**（默认 `有声小说`，**可改**）
+//   ⇒ 扫描时**只聚合命中的曲目** ⇒ 列表里只有那个文件夹下的作品；
+// - 打分**不再当门槛** ⇒ 该目录下的作品**全部列出**（分数低的标「结构信号弱」）；
+// - **换关键字 ⇒ 断点作废**（过滤条件变了 ⇒ 断点里的聚合是按旧关键字算的）。
+// ---------------------------------------------------------------------------
 
 import { create } from 'zustand'
 
 import {
-  AUDIOBOOK_SCORE_THRESHOLD,
+  DEFAULT_FOLDER_KEYWORD,
   judgeAlbum,
   parseEpisode,
+  pathMatchesKeyword,
   workDirOf,
   type AudiobookVerdict,
   type EpisodeStats,
@@ -105,6 +118,13 @@ export interface AudiobookPersisted {
   candidates: Record<string, CandidateSnapshot>
   /** 用户的改判。 */
   overrides: Record<string, AudiobookOverrideRecord>
+  /**
+   * 上次扫描用的**目录关键字**（「那个文件夹」）。
+   *
+   * ⚠ v3 新增：关键字**可改** ⇒ 要记住上次用的那个，页面进来看得见、
+   *   也能直接改。**空串 = 还没扫过**。
+   */
+  keyword: string
   /** 上次扫完的时间（Unix 毫秒）。 */
   scannedAt: number
 }
@@ -124,12 +144,23 @@ export interface AudiobookPort {
 
 /** 落盘状态的键名。 */
 const STORAGE_KEY = 'fnmusic-audiobook-state'
-/** 当前落盘结构版本（⚠️ 落盘形状变了要 +1 ⇒ 旧数据自动作废）。 */
-const STATE_VERSION = 2
+/**
+ * 当前落盘结构版本（落盘形状变了要 +1 ⇒ 旧数据自动作废）。
+ *
+ * ⚠️ **v3**：加了 `keyword`（目录关键字）⇒ 形状变了 ⇒ 版本 +1
+ *    （v2 的落盘**自动作废**，用户重扫一次即可）。
+ */
+const STATE_VERSION = 3
 /** 每张专辑保留多少个作品目录。 */
 const DIR_SAMPLE = 3
-/** 单集 ≥ 这么多秒 ⇒ 该专辑**进候选**（落盘用；判时长用 480）。 */
-const CANDIDATE_MIN_SEC = 480
+/**
+ * 最多保留多少部作品（**内存 + 落盘**都按这个上限）。
+ *
+ * ⚠ 为什么要上限：目录关键字**可以写得很宽**（比如 `vol02`）⇒ 可能命中**整库**
+ *   ⇒ 落盘会**超 `localStorage` 配额**（Chromium 约 5 MB）⇒ 扫描结果**静默丢失**。
+ *   ⇒ 超过上限就**如实告诉用户**（让他把目录名写得更具体），不装作存好了。
+ */
+export const MAX_AUDIOBOOK_ITEMS = 500
 
 /** 生产用的 `localStorage` 端口。 */
 export const localStorageAudiobookPort: AudiobookPort = {
@@ -154,6 +185,7 @@ export const localStorageAudiobookPort: AudiobookPort = {
           typeof record.overrides === 'object' && record.overrides !== null
             ? (record.overrides as Record<string, AudiobookOverrideRecord>)
             : {},
+        keyword: typeof record.keyword === 'string' ? record.keyword : '',
         scannedAt: typeof record.scannedAt === 'number' ? record.scannedAt : 0,
       }
     } catch {
@@ -190,6 +222,12 @@ export interface AudiobookStore {
   hits: AudiobookHit[]
   /** 用户的改判（**优先于**自动判定）。 */
   overrides: Record<string, AudiobookOverrideRecord>
+  /**
+   * 上次扫描用的**目录关键字**（「那个文件夹」）。
+   *
+   * ⚠ v3：这是**用户的位置**，不是判定依据 ⇒ 界面拿它显示「上次扫的是哪个目录」。
+   */
+  keyword: string
   /** 正在扫描？ */
   scanning: boolean
   /** 扫描进度。 */
@@ -201,9 +239,10 @@ export interface AudiobookStore {
   /**
    * 扫描曲库。
    *
-   * @param options `full` = 忽略断点从头扫；否则**续跑**（从上次断点接着来）。
+   * @param options `full` = 忽略断点从头扫；`keyword` = 目录关键字（**默认**取上次那个）；
+   *   否则**续跑**（从上次断点接着来）。
    */
-  scan: (options?: { full?: boolean; port?: AudiobookPort }) => Promise<void>
+  scan: (options?: { full?: boolean; port?: AudiobookPort; keyword?: string }) => Promise<void>
   /**
    * 把**上次扫描的结果**读回来显示（**不发任何请求**）。
    *
@@ -250,10 +289,21 @@ function newAggregator(albumId: string, albumTitle: string): Aggregator {
   }
 }
 
-/** 把一页曲目并进聚合器。 */
-function accumulate(target: Map<string, Aggregator>, tracks: readonly ScanTrack[]): void {
+/**
+ * 把一页曲目并进聚合器（**只并目录关键字命中的那些**）。
+ *
+ * ⚠️ **v3 的要害**：过滤发生在**这里**（扫描时）⇒ 列表里**只有**「那个文件夹」
+ *    下面的作品；⚠ 也因此**换关键字必须重扫**（旧的聚合是按旧关键字算的）。
+ */
+function accumulate(
+  target: Map<string, Aggregator>,
+  tracks: readonly ScanTrack[],
+  keyword: string,
+): void {
   for (const t of tracks) {
     if (!t.albumId) continue
+    // ⚠ 目录关键字**只用来定位**（「那个文件夹」），不用来判断「是不是有声」。
+    if (!pathMatchesKeyword(t.path, keyword)) continue
     let agg = target.get(t.albumId)
     if (!agg) {
       agg = newAggregator(t.albumId, t.albumTitle)
@@ -277,12 +327,16 @@ function accumulate(target: Map<string, Aggregator>, tracks: readonly ScanTrack[
 /**
  * 把聚合器判定成命中列表（**纯计算**，不发请求）。
  *
- * ⚠️ 三个覆盖项都来自聚合器（扫描路径**不能**用标题样本冒充）：
- *   集数 / 均长 / 最长单集 / 作品目录唯一性 / 形态命中率。
+ * ⚠️ **v3：打分不再是门槛** —— 「是不是有声」由**用户指位置**决定
+ *    （作品名秒搜 / 目录关键字 / 手动改判）⇒ 这里**只把命中的目录下的作品列出来**，
+ *    判定分与依据**降级为参考信息**（界面照旧显示，用户自己看得懂）。
+ *
+ * ⚠️ **上限**：命中太多（关键字写得太宽）⇒ 只保留**判定分最高**的前
+ *    {@link MAX_AUDIOBOOK_ITEMS} 部，并**如实告诉用户**（不能静默截断）。
  */
 function judgeAggregator(aggregator: Map<string, Aggregator>): AudiobookHit[] {
   const hits: AudiobookHit[] = []
-  for (const agg of aggregator.values()) {
+  for (const agg of selectCandidates(aggregator)) {
     const verdict = judgeAlbum([], {
       trackCount: agg.trackCount,
       avgDurationSec:
@@ -291,13 +345,12 @@ function judgeAggregator(aggregator: Map<string, Aggregator>): AudiobookHit[] {
       workDirUnique: agg.dirs.length === 1,
       episodeStats: agg.episodeStats,
     })
-    if (verdict.score < AUDIOBOOK_SCORE_THRESHOLD) continue
     hits.push(verdictToHit(verdict, agg.albumId, agg.albumTitle))
   }
   hits.sort(
     (a, b) => b.score - a.score || b.trackCount - a.trackCount || a.albumTitle.localeCompare(b.albumTitle),
   )
-  return hits
+  return hits.slice(0, MAX_AUDIOBOOK_ITEMS)
 }
 
 /** 判定结果 ⇒ 落盘/界面用的形状。 */
@@ -314,17 +367,24 @@ function verdictToHit(verdict: AudiobookVerdict, albumId: string, albumTitle: st
   }
 }
 
-/** 判定一张专辑是否**进候选**（要落盘的结构指标）。 */
-function isCandidate(agg: Aggregator): boolean {
-  if (agg.trackCount >= 8) return true
-  return agg.maxDurationSec >= CANDIDATE_MIN_SEC
+/**
+ * 选出要保留的聚合器（**有上限**）。
+ *
+ * ⚠ **内存与落盘必须用同一个选择** ⇒ 重进页面看到的列表 = 扫描完时看到的列表。
+ * ⚠ 排序用**集数降序**（集数多的更像「一整部作品」）⇒ 超上限时被截掉的是
+ *   **集数最少**的那些。
+ */
+function selectCandidates(aggregator: Map<string, Aggregator>): Aggregator[] {
+  return [...aggregator.values()]
+    .sort((a, b) => b.trackCount - a.trackCount || a.albumTitle.localeCompare(b.albumTitle))
+    .slice(0, MAX_AUDIOBOOK_ITEMS)
 }
 
-/** 把聚合器里**进候选**的压成落盘表。 */
+/** 把选中的聚合器压成落盘表。 */
 function snapshotCandidates(aggregator: Map<string, Aggregator>): Record<string, CandidateSnapshot> {
   const candidates: Record<string, CandidateSnapshot> = {}
-  for (const agg of aggregator.values()) {
-    if (isCandidate(agg)) candidates[agg.albumId] = toSnapshot(agg)
+  for (const agg of selectCandidates(aggregator)) {
+    candidates[agg.albumId] = toSnapshot(agg)
   }
   return candidates
 }
@@ -338,6 +398,7 @@ function emptyPersisted(): AudiobookPersisted {
     total: 0,
     candidates: {},
     overrides: {},
+    keyword: '',
     scannedAt: 0,
   }
 }
@@ -380,6 +441,7 @@ function fromSnapshot(snap: CandidateSnapshot): Aggregator {
 export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
   hits: [],
   overrides: {},
+  keyword: DEFAULT_FOLDER_KEYWORD,
   scanning: false,
   progress: null,
   error: null,
@@ -389,11 +451,16 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
     const port = options?.port ?? localStorageAudiobookPort
     const saved = port.load() ?? emptyPersisted()
     const full = options?.full === true
+    const savedKeyword = String(saved.keyword ?? '').trim()
+    const keyword = String(options?.keyword ?? savedKeyword).trim() || DEFAULT_FOLDER_KEYWORD
+    // ⚠ **换关键字 ⇒ 断点作废**：过滤条件变了 ⇒ 断点里的聚合是按**旧关键字**算的
+    //    ⇒ 接着扫会把两个口径混在一起 ⇒ 这一轮从头来。
+    const keywordChanged = savedKeyword !== '' && savedKeyword !== keyword
 
     // ⚠️ **只有真存在「未扫完的断点」才恢复旧聚合**：
     //    `nextPage === 0` ⇒ 没有断点（要么没扫过，要么上轮**扫完了**）
     //    ⇒ 这一轮从头扫 ⇒ 旧聚合**必须丢掉**，否则集数会**翻倍**。
-    const hasBreakpoint = !full && saved.nextPage > 0
+    const hasBreakpoint = !full && !keywordChanged && saved.nextPage > 0
     const startPage = hasBreakpoint ? saved.nextPage : 1
     const aggregator = new Map<string, Aggregator>()
     if (hasBreakpoint) {
@@ -407,6 +474,7 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
     set({
       scanning: true,
       error: null,
+      keyword,
       overrides: { ...saved.overrides },
       progress: { page: startPage - 1, pages: 0, scanned: baseScanned, total: saved.total },
     })
@@ -424,7 +492,7 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         maxPages: 2000,
         startPage,
         onPage: (tracks, progress) => {
-          accumulate(aggregator, tracks)
+          accumulate(aggregator, tracks, keyword)
           scannedCount = baseScanned + progress.scanned
           nextPage = progress.page
           set({ progress: { ...progress, scanned: scannedCount } })
@@ -437,6 +505,7 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
             total: progress.total,
             candidates: snapshotCandidates(aggregator),
             overrides: { ...saved.overrides },
+            keyword,
             scannedAt: saved.scannedAt,
           })
           if (!ok) persistFailed = true
@@ -456,18 +525,30 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         total: result.total,
         candidates,
         overrides: { ...saved.overrides },
+        keyword,
         scannedAt: Date.now(),
       }
       const savedOk = port.save(persisted)
       if (!savedOk) persistFailed = true
 
+      // ⚠ 命中太多（关键字写得太宽）⇒ **如实告诉用户**，不装作全都在。
+      const tooMany = aggregator.size > MAX_AUDIOBOOK_ITEMS
+      const problems: string[] = []
+      if (persistFailed) {
+        problems.push('扫描完成了，但**结果没存到本机**（本地存储可能已满）⇒ 下次进入不会自动恢复。')
+      }
+      if (tooMany) {
+        problems.push(
+          `这个目录下面命中了 ${aggregator.size} 部作品，超过 ${MAX_AUDIOBOOK_ITEMS} 部 ⇒ 只保留集数最多的 ${MAX_AUDIOBOOK_ITEMS} 部；把目录名写得更具体就能看全。`,
+        )
+      }
+
       set({
         hits,
+        keyword,
         overrides: persisted.overrides,
         scanning: false,
-        error: persistFailed
-          ? '扫描完成了，但**结果没存到本机**（本地存储可能已满）⇒ 下次进入不会自动恢复。'
-          : null,
+        error: problems.length > 0 ? problems.join(' ') : null,
         scannedAt: persisted.scannedAt,
         progress: { page: nextPage, pages: result.pages, scanned: scannedCount, total: result.total },
       })
@@ -489,7 +570,14 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
     const p = port ?? localStorageAudiobookPort
     const saved = p.load()
     if (!saved) {
-      set({ hits: [], overrides: {}, scannedAt: null, progress: null, error: null })
+      set({
+        hits: [],
+        overrides: {},
+        keyword: DEFAULT_FOLDER_KEYWORD,
+        scannedAt: null,
+        progress: null,
+        error: null,
+      })
       return
     }
     const aggregator = new Map<string, Aggregator>()
@@ -500,6 +588,7 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
     set({
       hits: judgeAggregator(aggregator),
       overrides: { ...saved.overrides },
+      keyword: String(saved.keyword ?? '').trim() || DEFAULT_FOLDER_KEYWORD,
       scannedAt: saved.scannedAt > 0 ? saved.scannedAt : null,
       progress: {
         page: saved.nextPage,

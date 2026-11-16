@@ -1,25 +1,34 @@
 // ---------------------------------------------------------------------------
-// 「有声读物」页（T98）
+// 「有声读物」页（T98 · v3 改版）
 //
 // ---------------------------------------------------------------------------
-// 这一页做什么
+// 这一页做什么（v3：**用户指位置**）
 // ---------------------------------------------------------------------------
-// - 列出**被判定为「有声读物」**的专辑（判定 = 结构信号打分，规则见
-//   `src/api/audiobook.ts`）；
-// - 每条都**显示判定依据**（可解释，不是黑箱）+ 判定分；
-// - 用户可以**一键改判**（「不是有声」）⇒ 本地记住，优先于自动判定；
-// - 「扫描曲库」：首次要扫全库（实测 17.3 万首 ⇒ 87 页，中继链路 6–47 分钟），
-//   **可中断、可续跑**（断点落在 `localStorage`）。
+// - 入口一：**按作品名秒搜**（`/search/album`，实测 ~100 ms，**完全不扫曲库**）
+//   ⇒ 搜到的专辑点开 ⇒ 按集序排 ⇒ 同时记成「有声」（随时可反悔）；
+// - 入口二：**按目录找**（「那个文件夹」）—— 服务端**没有**目录浏览能力
+//   （实测 20 个候选端点全 null）⇒ 只能扫一遍曲库，再按 `path` 的**目录段**挑；
+// - 入口三：**手动改判**（「这不是有声」/「这是有声读物」）⇒ 本地记住，优先于一切。
 //
-// ⚠️ 页面**不假设**曲库里有什么：判定只用**结构信号**（时长 / 集数 / 标题形态 /
-//    目录聚集），**不引用任何专辑名或目录名**（名字误报极高、目录名因人而异）。
+// ⚠️ **三个判定别混成一个分数**（v3 的要害）：
+// - 「是不是有声」= **用户指的位置**（搜索 / 目录 / 改判）；
+// - 「能不能按集序排」= **形态一致性 ≥ 60%**（见 `src/api/audiobook.ts`）；
+// - 「像不像有声」= 结构信号打分 ⇒ **只做参考信息**（照旧显示判定分与依据）。
+//
+// ⚠️ 页面**不假设**曲库里有什么：目录名是**用户输入的默认值**（可改），
+//    **不**拿它去推断「是不是有声」⇒ 不把因人而异的目录名写死成判据。
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useMemo, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Album } from '../../shared/types'
-import { REASON_LABELS } from '../api/audiobook'
+import {
+  AUDIOBOOK_SCORE_THRESHOLD,
+  DEFAULT_FOLDER_KEYWORD,
+  REASON_LABELS,
+} from '../api/audiobook'
+import { searchApi } from '../api/search'
 import { useAudiobookStore, type AudiobookHit } from '../state/audiobookStore'
 import { LibraryPageShell } from '../components/LibraryPageShell'
 import './audiobooks-page.css'
@@ -59,6 +68,7 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
 
   const hits = useStore(useAudiobookStore, (s) => s.hits)
   const overrides = useStore(useAudiobookStore, (s) => s.overrides)
+  const keyword = useStore(useAudiobookStore, (s) => s.keyword)
   const scanning = useStore(useAudiobookStore, (s) => s.scanning)
   const progress = useStore(useAudiobookStore, (s) => s.progress)
   const error = useStore(useAudiobookStore, (s) => s.error)
@@ -68,13 +78,52 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
   const setOverride = useStore(useAudiobookStore, (s) => s.setOverride)
 
   // ⚠️ 进页面时**只读回落盘的结果**（`restore`），**不自动扫描**：
-  //    扫描很贵（实测 17.3 万首 ⇒ 87 页，中继链路 6–47 分钟）
+  //    扫描很贵（实测 17.3 万首 ⇒ 87 页 ⇒ 并发约 1 分钟）
   //    ⇒ 不能因为「看了一眼页面」就自动扫全库 ⇒ 由用户点按钮。
   useEffect(() => {
     restore()
   }, [restore])
 
-  /** 列表 = 自动命中 + 用户手动判为有声的（去掉被用户排除的）。 */
+  // ---- 入口一：作品名秒搜 -------------------------------------------------
+  const [query, setQuery] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [searchResults, setSearchResults] = useState<Album[]>([])
+  const [searchError, setSearchError] = useState<string | null>(null)
+
+  const handleSearch = useCallback(async () => {
+    const q = query.trim()
+    if (!q) return
+    setSearching(true)
+    setSearchError(null)
+    try {
+      const res = await searchApi.albums(q)
+      setSearchResults(res.list)
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : String(err))
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
+  }, [query])
+
+  /** 点开搜到的作品 ⇒ **用户指认**了它 ⇒ 记成「有声」+ 下钻。 */
+  const handleOpenSearchResult = useCallback(
+    (album: Album) => {
+      setOverride(album.id, 'audiobook', undefined, album.title)
+      onOpenAlbum(album)
+    },
+    [onOpenAlbum, setOverride],
+  )
+
+  // ---- 入口二：目录关键字（「那个文件夹」）---------------------------------
+  const [keywordInput, setKeywordInput] = useState('')
+  /** 真正用来扫的目录关键字：输入框优先；空了就用上次的；再空用默认值。 */
+  const effectiveKeyword = useMemo(
+    () => keywordInput.trim() || keyword.trim() || DEFAULT_FOLDER_KEYWORD,
+    [keyword, keywordInput],
+  )
+
+  /** 列表 = 目录命中的 + 用户手动判为有声的（去掉被用户排除的）。 */
   const items = useMemo(() => {
     const manual = Object.entries(overrides)
       .filter(([, record]) => record.value === 'audiobook')
@@ -97,13 +146,13 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
   }, [hits, overrides])
 
   const handleScan = useCallback(() => {
-    void scan()
-  }, [scan])
+    void scan({ keyword: effectiveKeyword })
+  }, [effectiveKeyword, scan])
 
-  /** 「从头重扫」：清掉断点与旧聚合，整库重来（曲目被删过时要重扫）。 */
+  /** 「从头重扫」：清掉断点与旧聚合，整库重来（曲目被删过、或换了目录名时要重扫）。 */
   const handleFullScan = useCallback(() => {
-    void scan({ full: true })
-  }, [scan])
+    void scan({ full: true, keyword: effectiveKeyword })
+  }, [effectiveKeyword, scan])
 
   const handleMarkNotAudiobook = useCallback(
     (albumId: string, albumTitle: string) => {
@@ -115,7 +164,7 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
   const status = scanning
     ? `正在扫描…第 ${progress?.page ?? 0} 页 / 共 ${progress?.pages ?? 0} 页（已扫 ${progress?.scanned ?? 0} 首）`
     : scannedAt
-      ? `上次扫描：${new Date(scannedAt).toLocaleString()} · 命中 ${items.length} 部`
+      ? `上次扫描：${new Date(scannedAt).toLocaleString()} · 目录「${keyword}」· ${items.length} 部`
       : '还没扫描过'
 
   return (
@@ -127,65 +176,143 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
       loadingText=""
     >
       <div className="fnm-audiobooks">
-        <div className="fnm-audiobooks__toolbar">
-          <button
-            type="button"
-            className="fnm-audiobooks__scan"
-            onClick={handleScan}
-            disabled={scanning}
-          >
-            {scanning ? '正在扫描…' : '扫描曲库'}
-          </button>
-          <button
-            type="button"
-            className="fnm-audiobooks__scan fnm-audiobooks__scan--secondary"
-            onClick={handleFullScan}
-            disabled={scanning}
-          >
-            从头重扫
-          </button>
+        {/* ---- 入口一：按作品名找（**不扫曲库**）---------------------------- */}
+        <section className="fnm-audiobooks__panel">
+          <h2 className="fnm-audiobooks__panel-title">按作品名找</h2>
+          <div className="fnm-audiobooks__row">
+            <input
+              className="fnm-audiobooks__input"
+              type="text"
+              value={query}
+              placeholder="输入作品名，例如：牧神记"
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void handleSearch()
+              }}
+            />
+            <button
+              type="button"
+              className="fnm-audiobooks__scan"
+              onClick={() => void handleSearch()}
+              disabled={searching}
+            >
+              {searching ? '正在搜…' : '搜作品'}
+            </button>
+          </div>
           <p className="fnm-audiobooks__hint">
-            首次扫描要过一遍整个曲库（实测 17.3 万首 ⇒ 87 页；中继链路可能要几分钟到几十分钟）。
-            识别只看结构（单集时长 / 集数 / 标题形态 / 目录聚集），不靠名字猜。
+            这条路不用扫曲库，搜到就出（实测约 0.1 秒）。点开一部作品就会按集序排，
+            并记成「有声」（随时可以在详情页反悔）。
+            搜索只能当线索，同名作品可能搜不全；找不全就用下面按目录找。
           </p>
-        </div>
+          {searchError ? (
+            <p className="fnm-audiobooks__error">搜索失败：{searchError}</p>
+          ) : null}
+          {searchResults.length > 0 ? (
+            <ul className="fnm-audiobooks__results">
+              {searchResults.map((album) => (
+                <li key={album.id} className="fnm-audiobooks__result">
+                  <button
+                    type="button"
+                    className="fnm-audiobooks__title"
+                    onClick={() => handleOpenSearchResult(album)}
+                  >
+                    {album.title || '（未命名的专辑）'}
+                  </button>
+                  {album.trackCount > 0 ? (
+                    <span className="fnm-audiobooks__result-meta">{album.trackCount} 集</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
 
+        {/* ---- 入口二：按目录找（「那个文件夹」）----------------------------- */}
+        <section className="fnm-audiobooks__panel">
+          <h2 className="fnm-audiobooks__panel-title">按目录找</h2>
+          <div className="fnm-audiobooks__row">
+            <label className="fnm-audiobooks__label" htmlFor="fnm-audiobooks-keyword">
+              目录名
+            </label>
+            <input
+              id="fnm-audiobooks-keyword"
+              className="fnm-audiobooks__input"
+              type="text"
+              value={keywordInput}
+              placeholder={keyword || DEFAULT_FOLDER_KEYWORD}
+              onChange={(e) => setKeywordInput(e.target.value)}
+            />
+            <button
+              type="button"
+              className="fnm-audiobooks__scan"
+              onClick={handleScan}
+              disabled={scanning}
+            >
+              {scanning ? '正在扫描…' : '扫描这个目录'}
+            </button>
+            <button
+              type="button"
+              className="fnm-audiobooks__scan fnm-audiobooks__scan--secondary"
+              onClick={handleFullScan}
+              disabled={scanning}
+            >
+              从头重扫
+            </button>
+          </div>
+          <p className="fnm-audiobooks__hint">
+            服务端没有浏览目录的能力（实测 20 个候选端点都不通），
+            所以要先扫一遍曲库，再按目录名挑出这个文件夹里的作品。
+            实测 17.3 万首要扫 87 页，并发扫大约 1 分钟；扫一次记在本机，下次进来直接看。
+            换目录名要重新扫一次。
+          </p>
+        </section>
+
+        {/* ---- 列表 -------------------------------------------------------- */}
         {items.length === 0 ? (
           <p className="fnm-audiobooks__empty">
             {scannedAt
-              ? '当前曲库里没有识别到有声读物。若你刚在 NAS 上加了新文件，点「扫描曲库」重新判定一次。'
-              : '点「扫描曲库」开始识别。识别结果会显示判定依据，随时可以改判。'}
+              ? '当前曲库里没有识别到有声读物：这个目录下面没有找到作品（换个目录名再扫一次，或用上面的「搜作品」直接找）。'
+              : '点「扫描这个目录」开始，或者在上面直接搜作品名。'}
           </p>
         ) : (
           <ul className="fnm-audiobooks__list">
-            {items.map((hit) => (
-              <li key={hit.albumId} className="fnm-audiobooks__item">
-                <button
-                  type="button"
-                  className="fnm-audiobooks__title"
-                  onClick={() => onOpenAlbum(toAlbum(hit))}
-                >
-                  {hit.albumTitle || '（未命名的专辑）'}
-                </button>
-                <p className="fnm-audiobooks__meta">
-                  {hit.reasons.includes('user') ? '你手动标记为有声' : `判定分 ${hit.score}`}
-                  {hit.trackCount > 0 ? ` · ${hit.trackCount} 集` : ''}
-                  {hit.avgDurationSec > 0 ? ` · 单集均长 ${formatMinutes(hit.avgDurationSec)}` : ''}
-                </p>
-                <p className="fnm-audiobooks__reasons">
-                  {hit.reasons
-                    .map((reason) => REASON_LABELS[reason] ?? reason)
-                    .join(' · ')}
-                </p>
-                <button
-                  type="button"
-                  className="fnm-audiobooks__exclude"
-                  onClick={() => handleMarkNotAudiobook(hit.albumId, hit.albumTitle)}
-                >
-                  不是有声
-                </button>
-              </li>
-            ))}
+            {items.map((hit) => {
+              const manual = hit.reasons.includes('user')
+              return (
+                <li key={hit.albumId} className="fnm-audiobooks__item">
+                  <button
+                    type="button"
+                    className="fnm-audiobooks__title"
+                    onClick={() => onOpenAlbum(toAlbum(hit))}
+                  >
+                    {hit.albumTitle || '（未命名的专辑）'}
+                  </button>
+                  <p className="fnm-audiobooks__source">
+                    {manual ? '你指定的' : `在「${keyword}」目录下`}
+                  </p>
+                  <p className="fnm-audiobooks__meta">
+                    {manual ? '你手动标记为有声' : `判定分 ${hit.score}`}
+                    {hit.trackCount > 0 ? ` · ${hit.trackCount} 集` : ''}
+                    {hit.avgDurationSec > 0 ? ` · 单集均长 ${formatMinutes(hit.avgDurationSec)}` : ''}
+                    {!manual && hit.score > 0 && hit.score < AUDIOBOOK_SCORE_THRESHOLD
+                      ? ' · 结构信号弱（可能不是有声）'
+                      : ''}
+                  </p>
+                  <p className="fnm-audiobooks__reasons">
+                    {hit.reasons
+                      .map((reason) => REASON_LABELS[reason] ?? reason)
+                      .join(' · ')}
+                  </p>
+                  <button
+                    type="button"
+                    className="fnm-audiobooks__exclude"
+                    onClick={() => handleMarkNotAudiobook(hit.albumId, hit.albumTitle)}
+                  >
+                    不是有声
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>

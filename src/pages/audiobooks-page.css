@@ -101,3 +101,76 @@
   font-size: 12px;
   cursor: pointer;
 }
+
+/* ---- v3：两个入口（作品名秒搜 / 目录关键字）------------------------------ */
+
+.fnm-audiobooks__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.fnm-audiobooks__panel-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.fnm-audiobooks__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fnm-audiobooks__label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fnm-audiobooks__input {
+  flex: 1 1 220px;
+  min-width: 160px;
+  padding: 8px 10px;
+  border-radius: var(--radius-field);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.fnm-audiobooks__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fnm-audiobooks__result {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.fnm-audiobooks__result-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 「在哪个目录下面」/「你指定的」—— 告诉用户**它凭什么出现在这儿**。 */
+.fnm-audiobooks__source {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fnm-audiobooks__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}

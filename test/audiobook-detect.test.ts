@@ -12,6 +12,8 @@ import {
   isAudiobookVerdict,
   judgeAlbum,
   judgeAlbums,
+  pathMatchesKeyword,
+  pathSegments,
   resolveEpisodeStats,
   summarizeEpisodes,
   workDirOf,
@@ -254,5 +256,47 @@ describe('judgeAlbum 的覆盖项（扫描路径：均长 / 最长 / 集数 / �
     })
     expect(verdict.episodeRule).toBeNull()
     expect(verdict.reasons).not.toContain('episode-pattern')
+  })
+})
+
+describe('目录关键字匹配（v3）', () => {
+  /** 真机实测的路径形状（2026-11-16，本机 + 该账号）。 */
+  const NOVEL_PATH = '/vol02/1000-0-3d135437/有声小说/宅猪/牧神记/0001-0115/0010.mp3'
+
+  it('目录段里有关键字 ⇒ 命中', () => {
+    expect(pathMatchesKeyword(NOVEL_PATH, '有声小说')).toBe(true)
+    expect(pathMatchesKeyword(NOVEL_PATH, '牧神记')).toBe(true)
+    expect(pathMatchesKeyword(NOVEL_PATH, '宅猪')).toBe(true)
+  })
+
+  it('只在**文件名**里出现 ⇒ **不算命中**（那是文件，不是目录）', () => {
+    expect(pathMatchesKeyword('/vol02/1000-0-3d135437/音乐/有声小说.mp3', '有声小说')).toBe(false)
+  })
+
+  it('关键字是目录名的**一部分** ⇒ 命中（有声 命中 有声小说）', () => {
+    expect(pathMatchesKeyword(NOVEL_PATH, '有声')).toBe(true)
+  })
+
+  it('空关键字 / 空路径 ⇒ **不猜**（一律 false）', () => {
+    expect(pathMatchesKeyword(NOVEL_PATH, '')).toBe(false)
+    expect(pathMatchesKeyword(NOVEL_PATH, '   ')).toBe(false)
+    expect(pathMatchesKeyword(null, '有声小说')).toBe(false)
+    expect(pathMatchesKeyword('', '有声小说')).toBe(false)
+  })
+
+  it('大小写不敏感', () => {
+    expect(pathMatchesKeyword('/vol02/1000-0-Novel/x.mp3', 'novel')).toBe(true)
+  })
+
+  it('`pathSegments` 去掉最后一段文件名', () => {
+    expect(pathSegments(NOVEL_PATH)).toEqual([
+      'vol02',
+      '1000-0-3d135437',
+      '有声小说',
+      '宅猪',
+      '牧神记',
+      '0001-0115',
+    ])
+    expect(pathSegments(null)).toEqual([])
   })
 })

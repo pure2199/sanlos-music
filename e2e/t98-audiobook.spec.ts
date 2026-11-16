@@ -2,13 +2,15 @@
 // T98：「有声读物」页 —— E2E（真实 Electron + mock NAS）
 // ---------------------------------------------------------------------------
 //
-// 覆盖规格 §七 验收点 4：**mock 造一个 12 集有声专辑**
-//   ⇒ 详情页顺序 = 集号顺序 + 显示集号。
+// 覆盖规格 §七 验收点 4 与 **v3 追加的验收点 9**：
+//   - mock 造一个 12 集有声专辑 ⇒ 详情页顺序 = 集号顺序 + 显示集号；
+//   - **作品名秒搜** ⇒ 搜到 ⇒ 点开 ⇒ 按集序排 + 该作品出现在「有声」页；
+//   - **改目录关键字** ⇒ 重新扫描 ⇒ 扫出来的东西**跟着换**。
 //
 // 走通的链路（**只有真实 Electron 才跑得通**）：
 //   登录（主进程 IPC → HTTP → mock NAS）
 //     → 曲库导航「有声」⇒ **进页面不自动扫**（空态）
-//       → 点「扫描曲库」（`/track/list` 全量 ⇒ 客户端本地按专辑聚合 ⇒ 判定打分）
+//       → 点「扫描这个目录」（`/track/list` 全量 ⇒ 客户端按**目录关键字**过滤 ⇒ 按专辑聚合）
 //         ⇒ 命中列表（判定分 / 依据 / 集数 / 均长）⇒ 普通专辑**不出现**
 //           → 点专辑 ⇒ 详情页**一次性拉全量 + 按集序排** ⇒ 「第 N 集」
 //             → 「这不是有声」⇒ **不再按集序排**，也不再出现在「有声」页
@@ -20,6 +22,9 @@
 //
 // ⚠️ **共享 fixtures 一条不改**（T97 断言「随机挑了 8 首」）
 //    ⇒ 12 集**只在本实例**注入（`createMockServer({ songs, albums })`）。
+//
+// ⚠️ **v3 改版**：按钮「扫描曲库」⇒「扫描这个目录」（用户显式要求改的；
+//    断言**改写为新行为**，其余断言一条没删、也没弱化）。
 // ---------------------------------------------------------------------------
 
 import { expect, test } from '@playwright/test'
@@ -55,24 +60,27 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     await mock?.close()
   })
 
-  test('扫描曲库 ⇒ 识别出有声专辑（判定分 / 依据 / 集数 / 均长），普通专辑不出现', async () => {
+  test('扫描这个目录 ⇒ 命中该目录下的作品（判定分 / 依据 / 集数 / 均长），普通专辑不出现', async () => {
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
 
-    // ⚠️ **进页面不能自动扫**（实测全库扫描 87 页 / 6–47 分钟）
+    // ⚠️ **进页面不能自动扫**（实测全库扫描 87 页 ⇒ 并发约 1 分钟）
     //    ⇒ 进来是空态，**要用户点**才扫。
     await expect(fixture.window.locator('.fnm-page__status')).toHaveText('还没扫描过')
     await expect(fixture.window.locator('.fnm-audiobooks__empty')).toContainText(
-      '点「扫描曲库」开始识别',
+      '点「扫描这个目录」开始',
     )
 
-    await fixture.window.getByRole('button', { name: '扫描曲库' }).click()
+    await fixture.window.getByRole('button', { name: '扫描这个目录' }).click()
 
-    // 命中列表里**只有**那部有声专辑（普通专辑结构信号不够 ⇒ 不该出现）。
+    // 命中列表里**只有**那部有声专辑（普通专辑不在这个目录 ⇒ 不该出现）。
     const items = fixture.window.locator('.fnm-audiobooks__item')
     await expect(items).toHaveCount(1)
     await expect(items.first().locator('.fnm-audiobooks__title')).toHaveText('示例有声作品')
 
-    // 判定结果**可解释**：判定分 / 集数 / 均长。
+    // ⚠️ 还得说清楚它**凭什么**在这儿（用户指的位置）。
+    await expect(items.first().locator('.fnm-audiobooks__source')).toContainText('有声小说')
+
+    // 判定结果**可解释**：判定分 / 集数 / 均长（打分只是**参考**，不再决定进不进列表）。
     const meta = items.first().locator('.fnm-audiobooks__meta')
     await expect(meta).toContainText('判定分 7')
     await expect(meta).toContainText('12 集')
@@ -130,5 +138,50 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     await expect(fixture.window.locator('.fnm-audiobooks__empty')).toContainText(
       '当前曲库里没有识别到有声读物',
     )
+  })
+
+  test('v3① 作品名秒搜 ⇒ 搜到 ⇒ 点开 ⇒ 按集序排，并出现在「有声」页', async () => {
+    await fixture.window.getByPlaceholder('输入作品名，例如：牧神记').fill('示例有声作品')
+    await fixture.window.getByRole('button', { name: '搜作品' }).click()
+
+    // 搜到的作品列出来（**没扫曲库**也能搜到）。
+    const results = fixture.window.locator('.fnm-audiobooks__result')
+    await expect(results).toHaveCount(1)
+    await expect(results.first().locator('.fnm-audiobooks__title')).toHaveText('示例有声作品')
+
+    // 点开 ⇒ 用户**指认**了它 ⇒ 详情页按集序排。
+    await results.first().locator('.fnm-audiobooks__title').click()
+    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
+    const rows = fixture.window.locator('.fnm-songlist__row')
+    await expect(rows).toHaveCount(12)
+    await expect(rows.nth(0).locator('.fnm-songlist__title')).toHaveText('01- 第1集')
+    await expect(rows.nth(0).locator('.fnm-detail__episode')).toHaveText('第 1 集')
+
+    // 回「有声」页 ⇒ 它**也在**列表里（前面扫过就在这个目录 ⇒ 来源显示目录）。
+    await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
+    await expect(fixture.window.locator('.fnm-audiobooks__item')).toHaveCount(1)
+    await expect(fixture.window.locator('.fnm-audiobooks__source')).toContainText('有声小说')
+  })
+
+  test('v3② 改目录关键字 ⇒ 重新扫描 ⇒ 目录命中**跟着换**', async () => {
+    await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
+
+    // 换成 mock 里普通曲目所在的目录（路径段 `1000-0-music`）。
+    await fixture.window.getByLabel('目录名').fill('music')
+    await fixture.window.getByRole('button', { name: '扫描这个目录' }).click()
+
+    // 目录命中换成了那三张普通专辑（按集数降序）。
+    const items = fixture.window.locator('.fnm-audiobooks__item')
+    await expect(items).toHaveCount(4)
+    await expect(items.nth(0).locator('.fnm-audiobooks__title')).toHaveText('示例专辑一')
+    await expect(items.nth(2).locator('.fnm-audiobooks__title')).toHaveText('示例专辑三')
+    // ⚠ 目录命中里**不再有**「有声小说」那个目录 ⇒ 扫描确实跟着关键字换了。
+    await expect(
+      fixture.window.locator('.fnm-audiobooks__source', { hasText: '有声小说' }),
+    ).toHaveCount(0)
+    // ⚠ 那部作品因为**用户指认过**而留着，来源要说清楚是「你指定的」。
+    await expect(items.nth(3).locator('.fnm-audiobooks__source')).toHaveText('你指定的')
+    // 状态行记住扫的是哪个目录。
+    await expect(fixture.window.locator('.fnm-page__status')).toContainText('music')
   })
 })
