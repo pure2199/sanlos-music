@@ -63,21 +63,34 @@ export interface AudiobookOverrideRecord {
   albumTitle: string
 }
 
-/** 一张被判定为「有声读物」的专辑。 */
+/** 一张被判定为「有声读物」的专辑（**归并后的一组**，T99）。 */
 export interface AudiobookHit {
-  /** 专辑 id。 */
+  /**
+   * **主专辑** id（集数最多的那个）—— 下钻用它。
+   *
+   * ⚠️ T99：服务端可能把**一部作品拆成两张同名专辑**（实测《让青春继续第一季》
+   *    被拆成 31 集 + 1 集 ⇒ **第 02 集丢了**）⇒ 同名 + 同作品目录的专辑
+   *    在这里**归并成一组**，主专辑只是「下钻入口」。
+   */
   albumId: string
-  /** 专辑名（= 作品名）。 */
+  /**
+   * **组内全部专辑 id**（主专辑排第一）。
+   *
+   * ⚠️ 详情页要按**整组**拉全量（主专辑 + 成员）⇒ 合并后按集序排
+   *    ⇒ 跨专辑的集号才**连续**（第 02 集不再丢）。
+   */
+  albumIds: string[]
+  /** 专辑名（= 作品名；同名同目录的成员共用一个名字）。 */
   albumTitle: string
   /** 判定分。 */
   score: number
   /** 命中的依据（**可解释**）。 */
   reasons: string[]
-  /** 曲目数。 */
+  /** 曲目数（**组合计**）。 */
   trackCount: number
-  /** 单集均长（秒）。 */
+  /** 单集均长（秒；**组合计**）。 */
   avgDurationSec: number
-  /** 最长单集（秒）。 */
+  /** 最长单集（秒；**组内最长**）。 */
   maxDurationSec: number
   /** 标题形态规则名（`null` = 形态不一致）。 */
   episodeRule: string | null
@@ -325,27 +338,124 @@ function accumulate(
 }
 
 /**
+ * **归并组**（T99）：服务端把**一部作品**拆成**几张同名专辑**时，合起来算一部。
+ *
+ * ⚠️ 实测（2026-11-16，本机 + 该账号）：《让青春继续第一季》被拆成 **31 集 + 1 集**
+ *    （第 02 集单独一张）⇒ 不归并的话用户**少看到一集**，列表还出现**两条同名**。
+ */
+interface MergedGroup {
+  /** 主专辑 id（**集数最多**的那个）—— 下钻用它。 */
+  albumId: string
+  /** 组内全部专辑 id（主专辑第一）。 */
+  albumIds: string[]
+  /** 专辑名（组内同名）。 */
+  albumTitle: string
+  /** 曲目数（组合计）。 */
+  trackCount: number
+  /** 总时长（秒，组合计）。 */
+  totalDurationSec: number
+  /** 最长单集（秒，组内最长）。 */
+  maxDurationSec: number
+  /** 标题形态统计（**全量标题**，组合计）。 */
+  episodeStats: EpisodeStats
+  /** 作品目录集合（组内并集）。 */
+  dirs: string[]
+}
+
+/**
+ * 归并键：**专辑名 + 唯一作品目录**。
+ *
+ * ⚠️ **作品目录不唯一 ⇒ 不归并**（信息不足 ⇒ 宁可分开，也不要误合）：
+ *    一张专辑可能横跨**多个作品目录**（实测存在）⇒ 那时 `dirs.length !== 1`。
+ * ⚠️ **不同名不归并**（季 / 卷各算一部：《让青春继续》第一/二/三季**不该**并成一部）。
+ */
+function groupKeyOf(agg: Aggregator): string {
+  const dir = agg.dirs.length === 1 ? agg.dirs[0] : null
+  if (dir === null) return `album:${agg.albumId}`
+  return `work:${agg.albumTitle.length}:${agg.albumTitle}:${dir}`
+}
+
+/**
+ * 把**按专辑聚合**的结果归并成「一部作品一条」（T99）。
+ *
+ * ⚠️ **为什么归并放在「判定阶段」而不是「聚合阶段」**：
+ *    聚合必须**按 `albumId`** —— 实测存在「**同一张专辑横跨多个作品目录**」⇒
+ *    若拿归并键（名字 + 作品目录）当聚合键，**一张专辑会被拆成两条**（更糟）。
+ *    ⇒ 聚合按 `albumId`（不动），归并放在判定阶段（合并指标 + 合成一条）。
+ */
+function mergeAggregators(list: readonly Aggregator[]): MergedGroup[] {
+  const groups = new Map<string, Aggregator[]>()
+  for (const agg of list) {
+    const key = groupKeyOf(agg)
+    const bucket = groups.get(key)
+    if (bucket) bucket.push(agg)
+    else groups.set(key, [agg])
+  }
+
+  const out: MergedGroup[] = []
+  for (const bucket of groups.values()) {
+    // 主专辑 = 集数最多的那个（并列时按 id 定序 ⇒ 结果稳定）。
+    const members = [...bucket].sort(
+      (a, b) => b.trackCount - a.trackCount || a.albumId.localeCompare(b.albumId),
+    )
+    const main = members[0]
+    if (!main) continue
+
+    const episodeStats: EpisodeStats = { ruleCounts: {}, titleCount: 0 }
+    const dirs = new Set<string>()
+    let trackCount = 0
+    let totalDurationSec = 0
+    let maxDurationSec = 0
+    for (const agg of members) {
+      trackCount += agg.trackCount
+      totalDurationSec += agg.totalDurationSec
+      if (agg.maxDurationSec > maxDurationSec) maxDurationSec = agg.maxDurationSec
+      episodeStats.titleCount += agg.episodeStats.titleCount
+      for (const [rule, count] of Object.entries(agg.episodeStats.ruleCounts)) {
+        episodeStats.ruleCounts[rule] = (episodeStats.ruleCounts[rule] ?? 0) + count
+      }
+      for (const dir of agg.dirs) dirs.add(dir)
+    }
+
+    out.push({
+      albumId: main.albumId,
+      albumIds: members.map((m) => m.albumId),
+      albumTitle: main.albumTitle,
+      trackCount,
+      totalDurationSec,
+      maxDurationSec,
+      episodeStats,
+      dirs: [...dirs],
+    })
+  }
+  return out
+}
+
+/**
  * 把聚合器判定成命中列表（**纯计算**，不发请求）。
  *
  * ⚠️ **v3：打分不再是门槛** —— 「是不是有声」由**用户指位置**决定
  *    （作品名秒搜 / 目录关键字 / 手动改判）⇒ 这里**只把命中的目录下的作品列出来**，
  *    判定分与依据**降级为参考信息**（界面照旧显示，用户自己看得懂）。
  *
+ * ⚠️ **T99**：这里先按**作品目录**把同名专辑**归并**（一部作品一条），
+ *    再按**合并后**的指标打分 ⇒ 判定分也是合并后的。
+ *
  * ⚠️ **上限**：命中太多（关键字写得太宽）⇒ 只保留**判定分最高**的前
  *    {@link MAX_AUDIOBOOK_ITEMS} 部，并**如实告诉用户**（不能静默截断）。
  */
 function judgeAggregator(aggregator: Map<string, Aggregator>): AudiobookHit[] {
   const hits: AudiobookHit[] = []
-  for (const agg of selectCandidates(aggregator)) {
+  for (const group of mergeAggregators(selectCandidates(aggregator))) {
     const verdict = judgeAlbum([], {
-      trackCount: agg.trackCount,
+      trackCount: group.trackCount,
       avgDurationSec:
-        agg.trackCount > 0 ? Math.round(agg.totalDurationSec / agg.trackCount) : 0,
-      maxDurationSec: agg.maxDurationSec,
-      workDirUnique: agg.dirs.length === 1,
-      episodeStats: agg.episodeStats,
+        group.trackCount > 0 ? Math.round(group.totalDurationSec / group.trackCount) : 0,
+      maxDurationSec: group.maxDurationSec,
+      workDirUnique: group.dirs.length === 1,
+      episodeStats: group.episodeStats,
     })
-    hits.push(verdictToHit(verdict, agg.albumId, agg.albumTitle))
+    hits.push(verdictToHit(verdict, group.albumId, group.albumTitle, group.albumIds))
   }
   hits.sort(
     (a, b) => b.score - a.score || b.trackCount - a.trackCount || a.albumTitle.localeCompare(b.albumTitle),
@@ -354,9 +464,15 @@ function judgeAggregator(aggregator: Map<string, Aggregator>): AudiobookHit[] {
 }
 
 /** 判定结果 ⇒ 落盘/界面用的形状。 */
-function verdictToHit(verdict: AudiobookVerdict, albumId: string, albumTitle: string): AudiobookHit {
+function verdictToHit(
+  verdict: AudiobookVerdict,
+  albumId: string,
+  albumTitle: string,
+  albumIds?: readonly string[],
+): AudiobookHit {
   return {
     albumId,
+    albumIds: albumIds && albumIds.length > 0 ? [...albumIds] : [albumId],
     albumTitle,
     score: verdict.score,
     reasons: verdict.reasons,
@@ -365,6 +481,15 @@ function verdictToHit(verdict: AudiobookVerdict, albumId: string, albumTitle: st
     maxDurationSec: verdict.maxDurationSec,
     episodeRule: verdict.episodeRule,
   }
+}
+
+/**
+ * 某个专辑**所在的归并组**（`null` = 不在任何组里 —— 例如用户手动指定的）。
+ *
+ * ⚠️ 组里**任何一张**专辑都指向同一组 ⇒ 改判 / 下钻 / 拉全量都按组来。
+ */
+function groupOf(hits: readonly AudiobookHit[], albumId: string): AudiobookHit | null {
+  return hits.find((h) => h.albumIds.includes(albumId)) ?? null
 }
 
 /**
@@ -604,27 +729,48 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
     const p = port ?? localStorageAudiobookPort
     const saved = p.load() ?? emptyPersisted()
     const overrides = { ...saved.overrides }
-    if (value === null) delete overrides[albumId]
-    else overrides[albumId] = { value, albumTitle: albumTitle ?? overrides[albumId]?.albumTitle ?? '' }
+    // ⚠️ **T99：组级改判** —— 归并组里改**任何一张** ⇒ **整组**生效
+    //    （override 记在**主专辑**名下 ⇒ 组内任何一张查到的是同一个结论）。
+    const group = groupOf(get().hits, albumId)
+    const key = group?.albumId ?? albumId
+    // 先清掉组内其它成员留下的 override ⇒ 避免成员之间互相打架。
+    if (group) {
+      for (const member of group.albumIds) {
+        if (member !== key) delete overrides[member]
+      }
+    }
+    if (value === null) delete overrides[key]
+    else {
+      overrides[key] = {
+        value,
+        albumTitle: albumTitle ?? overrides[key]?.albumTitle ?? group?.albumTitle ?? '',
+      }
+    }
     p.save({ ...saved, overrides })
     set({ overrides })
   },
 
   isAudiobook: (albumId) => {
-    const override = get().overrides[albumId]
+    // ⚠️ T99：查的是**整组**（组里任何一张专辑的结论一致）。
+    const group = groupOf(get().hits, albumId)
+    const key = group?.albumId ?? albumId
+    const override = get().overrides[key] ?? get().overrides[albumId]
     if (override?.value === 'audiobook') return true
     if (override?.value === 'not-audiobook') return false
-    return get().hits.some((h) => h.albumId === albumId)
+    return group !== null
   },
 
   hitOf: (albumId) => {
-    const override = get().overrides[albumId]
+    // ⚠️ T99：命中的是**整组**（下钻 / 拉全量都按组来）。
+    const group = groupOf(get().hits, albumId)
+    const key = group?.albumId ?? albumId
+    const override = get().overrides[key] ?? get().overrides[albumId]
     if (override?.value === 'not-audiobook') return null
-    const hit = get().hits.find((h) => h.albumId === albumId) ?? null
-    if (override?.value === 'audiobook' && !hit) {
+    if (override?.value === 'audiobook' && !group) {
       // ⚠️ 用户**手动**判为有声，但自动判定没命中 ⇒ 造一条「用户判定」的记录。
       return {
         albumId,
+        albumIds: [albumId],
         albumTitle: override.albumTitle,
         score: 0,
         reasons: ['user'],
@@ -634,6 +780,6 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         episodeRule: null,
       }
     }
-    return hit
+    return group
   },
 }))

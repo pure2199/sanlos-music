@@ -24,6 +24,7 @@ function scanTrack(partial: {
   id: string
   title: string
   albumId: string
+  albumTitle?: string
   durationSec?: number
   path?: string | null
 }): {
@@ -40,7 +41,7 @@ function scanTrack(partial: {
     id: partial.id,
     title: partial.title,
     albumId: partial.albumId,
-    albumTitle: '作品名',
+    albumTitle: partial.albumTitle ?? '作品名',
     durationSec: partial.durationSec ?? 1907,
     trackNo: null,
     path:
@@ -387,5 +388,194 @@ describe('audiobookStore（扫描 / 续跑 / 落盘 / 改判）', () => {
 
     await useAudiobookStore.getState().scan({ port, keyword: '音乐' })
     expect(useAudiobookStore.getState().hits.map((h) => h.albumId)).toEqual(['al-music'])
+  })
+})
+
+// -------------------------------------------------------------------------
+// T99：服务端把**一部作品**拆成**几张同名专辑** ⇒ 按**作品目录**归并
+// -------------------------------------------------------------------------
+//
+// ⚠️ 实测形态（2026-11-16，本机 + 该账号）：
+//   《让青春继续第一季》被拆成 **31 集 + 1 集**（第 02 集单独一张专辑）
+//   ⇒ 两张专辑**同名**、**同作品目录**（`让青春继续`）、**同分段目录**。
+// -------------------------------------------------------------------------
+
+describe('T99：同名专辑按作品目录归并', () => {
+  /** 实测的作品目录路径（作品目录 = 倒数第 3 段）。 */
+  const WORK_DIR_PATH = '/vol02/1000-0-3d135437/有声小说/让青春继续/让青春继续第1季(全32集)'
+  /** 另一个作品目录（同名但**不同目录** ⇒ 真的是两部作品）。 */
+  const OTHER_WORK_DIR_PATH =
+    '/vol02/1000-0-3d135437/有声小说/别的人/另一部作品/让青春继续第1季(全32集)'
+
+  it('① 同名 + 同作品目录 ⇒ 合成**一条**，集数相加（31 + 1 = 32）', async () => {
+    const port = createMemoryAudiobookPort()
+    const tracks = [
+      ...Array.from({ length: 31 }, (_, i) =>
+        scanTrack({
+          id: `q${i}`,
+          title: `让青春继续第一季 ${String(i + 1).padStart(2, '0')}`,
+          albumId: 'al-q1',
+          albumTitle: '让青春继续第一季',
+          path: `${WORK_DIR_PATH}/让青春继续第一季${String(i + 1).padStart(2, '0')}.mp3`,
+        }),
+      ),
+      // ⚠️ 第 02 集**单独**一张专辑（服务端把它拆开了）⇒ 用户现在**少看到一集**。
+      scanTrack({
+        id: 'q-extra',
+        title: '让青春继续第一季 02',
+        albumId: 'al-q2',
+        albumTitle: '让青春继续第一季',
+        path: `${WORK_DIR_PATH}/让青春继续第一季02.mp3`,
+      }),
+    ]
+    mockScan([{ page: 1, tracks }], tracks.length)
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    const hits = useAudiobookStore.getState().hits
+    expect(hits).toHaveLength(1)
+    expect(hits[0]?.albumTitle).toBe('让青春继续第一季')
+    expect(hits[0]?.trackCount).toBe(32)
+    // 主专辑 = 集数多的那张；组内 id 都在。
+    expect(hits[0]?.albumId).toBe('al-q1')
+    expect(hits[0]?.albumIds).toEqual(['al-q1', 'al-q2'])
+    // 形态统计也是**合并后**的（32 个标题全命中同一条规则）。
+    expect(hits[0]?.episodeRule).toBe('season-episode')
+  })
+
+  it('② 同名 + **不同作品目录** ⇒ **两条**（那是真的两部作品，不合并）', async () => {
+    const port = createMemoryAudiobookPort()
+    const tracks = [
+      ...Array.from({ length: 10 }, (_, i) =>
+        scanTrack({
+          id: `r${i}`,
+          title: `让青春继续第一季 ${String(i + 1).padStart(2, '0')}`,
+          albumId: 'al-r1',
+          albumTitle: '让青春继续第一季',
+          path: `${WORK_DIR_PATH}/让青春继续第一季${String(i + 1).padStart(2, '0')}.mp3`,
+        }),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        scanTrack({
+          id: `s${i}`,
+          title: `让青春继续第一季 ${String(i + 1).padStart(2, '0')}`,
+          albumId: 'al-r2',
+          albumTitle: '让青春继续第一季',
+          path: `${OTHER_WORK_DIR_PATH}/让青春继续第一季${String(i + 1).padStart(2, '0')}.mp3`,
+        }),
+      ),
+    ]
+    mockScan([{ page: 1, tracks }], tracks.length)
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    const hits = useAudiobookStore.getState().hits
+    expect(hits).toHaveLength(2)
+    expect(hits.map((h) => h.albumId).sort()).toEqual(['al-r1', 'al-r2'])
+    // 每条都**只含自己**（没被合并）。
+    expect(hits.every((h) => h.albumIds.length === 1)).toBe(true)
+  })
+
+  it('③ **不同名** ⇒ **两条**（季 / 卷各算一部，不合并）', async () => {
+    const port = createMemoryAudiobookPort()
+    const tracks = [
+      ...Array.from({ length: 10 }, (_, i) =>
+        scanTrack({
+          id: `t${i}`,
+          title: `让青春继续第一季 ${String(i + 1).padStart(2, '0')}`,
+          albumId: 'al-s1',
+          albumTitle: '让青春继续第一季',
+          path: `${WORK_DIR_PATH}/让青春继续第一季${String(i + 1).padStart(2, '0')}.mp3`,
+        }),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        scanTrack({
+          id: `u${i}`,
+          title: `让青春继续第二季 ${String(i + 1).padStart(2, '0')}`,
+          albumId: 'al-s2',
+          albumTitle: '让青春继续第二季',
+          // ⚠️ 作品目录**也一样**（实测：第一/二/三季共用 `让青春继续` 目录）。
+          path: `${WORK_DIR_PATH}/让青春继续第二季${String(i + 1).padStart(2, '0')}.mp3`,
+        }),
+      ),
+    ]
+    mockScan([{ page: 1, tracks }], tracks.length)
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    const hits = useAudiobookStore.getState().hits
+    expect(hits).toHaveLength(2)
+    expect(hits.map((h) => h.albumTitle).sort()).toEqual(['让青春继续第一季', '让青春继续第二季'])
+  })
+
+  it('④ 组级改判：对组内**任一成员**「不是有声」⇒ **整组**不再是有声', async () => {
+    const port = createMemoryAudiobookPort()
+    const tracks = [
+      ...Array.from({ length: 10 }, (_, i) =>
+        scanTrack({
+          id: `v${i}`,
+          title: `让青春继续第一季 ${String(i + 1).padStart(2, '0')}`,
+          albumId: 'al-t1',
+          albumTitle: '让青春继续第一季',
+          path: `${WORK_DIR_PATH}/让青春继续第一季${String(i + 1).padStart(2, '0')}.mp3`,
+        }),
+      ),
+      scanTrack({
+        id: 'v-extra',
+        title: '让青春继续第一季 02',
+        albumId: 'al-t2',
+        albumTitle: '让青春继续第一季',
+        path: `${WORK_DIR_PATH}/让青春继续第一季02.mp3`,
+      }),
+    ]
+    mockScan([{ page: 1, tracks }], tracks.length)
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    const store = useAudiobookStore.getState()
+    expect(store.isAudiobook('al-t1')).toBe(true)
+    expect(store.isAudiobook('al-t2')).toBe(true)
+
+    // ⚠️ 改的是**成员**（al-t2），不是主专辑 ⇒ 整组都要生效。
+    store.setOverride('al-t2', 'not-audiobook', port, '让青春继续第一季')
+
+    expect(useAudiobookStore.getState().isAudiobook('al-t1')).toBe(false)
+    expect(useAudiobookStore.getState().isAudiobook('al-t2')).toBe(false)
+    expect(useAudiobookStore.getState().hitOf('al-t1')).toBeNull()
+    // override 记在**主专辑**名下（组里只有一个结论）。
+    expect(port.load()?.overrides['al-t1']?.value).toBe('not-audiobook')
+    expect(port.load()?.overrides['al-t2']).toBeUndefined()
+  })
+
+  it('⑤ 归并**不改变落盘形状** ⇒ 旧落盘可用（`STATE_VERSION` 不变）', async () => {
+    const port = createMemoryAudiobookPort()
+    const tracks = [
+      scanTrack({
+        id: 'w1',
+        title: '让青春继续第一季 01',
+        albumId: 'al-u1',
+        albumTitle: '让青春继续第一季',
+        path: `${WORK_DIR_PATH}/让青春继续第一季01.mp3`,
+      }),
+      scanTrack({
+        id: 'w2',
+        title: '让青春继续第一季 02',
+        albumId: 'al-u2',
+        albumTitle: '让青春继续第一季',
+        path: `${WORK_DIR_PATH}/让青春继续第一季02.mp3`,
+      }),
+    ]
+    mockScan([{ page: 1, tracks }], tracks.length)
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    // 落盘仍是**按专辑**的候选表（形状没变 ⇒ 旧落盘不会被作废）。
+    const saved = port.load()
+    expect(saved?.version).toBe(3)
+    expect(Object.keys(saved?.candidates ?? {})).toEqual(['al-u1', 'al-u2'])
+    // 但**读回来**时照样归并成一条。
+    useAudiobookStore.getState().restore(port)
+    expect(useAudiobookStore.getState().hits).toHaveLength(1)
+    expect(useAudiobookStore.getState().hits[0]?.trackCount).toBe(2)
   })
 })

@@ -12,9 +12,12 @@ import {
   isAudiobookVerdict,
   judgeAlbum,
   judgeAlbums,
+  parseEpisode,
   pathMatchesKeyword,
   pathSegments,
+  resolveAlbumEpisodes,
   resolveEpisodeStats,
+  sortTracksByEpisode,
   summarizeEpisodes,
   workDirOf,
   type AudiobookTrack,
@@ -298,5 +301,98 @@ describe('目录关键字匹配（v3）', () => {
       '0001-0115',
     ])
     expect(pathSegments(null)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T99：集号在**中段**（`mid-number`）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 实测形态（2026-11-16，本机 + 该账号，《极品家丁》1333 集）：
+//   `极品家丁 0000预告片` / `极品家丁 0001 公子，公子` / `极品家丁 1332 万千柔情（完结）`
+//   ⇒ 集号 = 「作品名 + 空格 + 4 位数字 [+ 标题]」，**数字后可无空格**接文字。
+//   ⇒ 现有 7 条规则都要求集号在开头或结尾纯数字 ⇒ 解析率只有 1.1% ⇒ 完全排不了序。
+// ---------------------------------------------------------------------------
+
+describe('parseEpisode：集号在中段（mid-number）', () => {
+  it('实测形态 ⇒ 能解析出集号', () => {
+    expect(parseEpisode('极品家丁 0001 公子，公子')).toEqual({ rule: 'mid-number', value: [1] })
+    // ⚠️ 数字后**可以没有空格**（实测 `0000预告片`）⇒ 规则必须兼容。
+    expect(parseEpisode('极品家丁 0000预告片')).toEqual({ rule: 'mid-number', value: [0] })
+    expect(parseEpisode('极品家丁 1332 万千柔情（完结）')).toEqual({
+      rule: 'mid-number',
+      value: [1332],
+    })
+  })
+
+  it('⛔ 不得抢走更具体的规则（规则表顺序即优先级）', () => {
+    // 「第一季 10」命中**最具体**的 `season-episode` ⇒ 拿 `[季, 集]`（不是 `mid-number`）。
+    expect(parseEpisode('让青春继续第一季 10')).toEqual({
+      rule: 'season-episode',
+      value: [1, 10],
+    })
+    // 纯数字仍是 `digits-only`（`mid-number` 要求前面有文字 ⇒ 天然不重叠）。
+    expect(parseEpisode('0001')).toEqual({ rule: 'digits-only', value: [1] })
+    // 数字开头仍是 `dash-prefix`。
+    expect(parseEpisode('01- 章节名')).toEqual({ rule: 'dash-prefix', value: [1] })
+    // 末尾纯数字仍是 `trailing`。
+    expect(parseEpisode('公子，公子 12')).toEqual({ rule: 'trailing', value: [12] })
+  })
+
+  it('⛔ 普通音乐标题解析不出来（不误命中）', () => {
+    expect(parseEpisode('思凡')).toBeNull()
+    expect(parseEpisode('Runaway Mama')).toBeNull()
+    expect(parseEpisode('Untitled')).toBeNull()
+  })
+
+  it('形态一致性：整本同形态 ⇒ 能排；混装 ⇒ **不排**（保持原序）', () => {
+    // ⚠️ 标题里**不能**出现「第N章 / 第N集」—— 那会命中更具体的 `episode-cn` 规则。
+    const jinpin = Array.from(
+      { length: 20 },
+      (_, i) => `极品家丁 ${String(i).padStart(4, '0')} 某集标题`,
+    )
+    const resolved = resolveAlbumEpisodes(jinpin)
+    expect(resolved.rule).toBe('mid-number')
+    expect(resolved.hitRatio).toBeCloseTo(1)
+
+    // 一半是真形态、一半是音乐标题 ⇒ 50% < 60% ⇒ 形态不一致 ⇒ **整层作废**。
+    const mixed = resolveAlbumEpisodes([
+      ...jinpin.slice(0, 10),
+      '思凡',
+      'Runaway Mama',
+      'Untitled',
+      '望星辰(Live)',
+      '成全',
+      '继续',
+      '灵感',
+      '绿洲',
+      '蒙娜丽莎',
+      '夜空中最亮的星',
+    ])
+    expect(mixed.rule).toBeNull()
+  })
+
+  it('排序：按集号排（标题里集号在**中段**也能排对）', () => {
+    const tracks = [
+      track({
+        id: 'b',
+        title: '极品家丁 0002 兄台高姓大名',
+        albumId: 'al-jp',
+        path: '/vol02/1000-0-3d135437/有声小说/禹言/极品家丁/0000-0200/极品家丁 0002.mp3',
+      }),
+      track({
+        id: 'a',
+        title: '极品家丁 0000预告片',
+        albumId: 'al-jp',
+        path: '/vol02/1000-0-3d135437/有声小说/禹言/极品家丁/0000-0200/极品家丁 0000.mp3',
+      }),
+      track({
+        id: 'c',
+        title: '极品家丁 0001 公子，公子',
+        albumId: 'al-jp',
+        path: '/vol02/1000-0-3d135437/有声小说/禹言/极品家丁/0000-0200/极品家丁 0001.mp3',
+      }),
+    ]
+    expect(sortTracksByEpisode(tracks).map((t) => t.id)).toEqual(['a', 'c', 'b'])
   })
 })

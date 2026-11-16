@@ -129,6 +129,7 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
       .filter(([, record]) => record.value === 'audiobook')
       .map(([albumId, record]) => ({
         albumId,
+        albumIds: [albumId],
         albumTitle: record.albumTitle,
         score: 0,
         reasons: ['user'],
@@ -294,6 +295,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
                     {manual ? '你手动标记为有声' : `判定分 ${hit.score}`}
                     {hit.trackCount > 0 ? ` · ${hit.trackCount} 集` : ''}
                     {hit.avgDurationSec > 0 ? ` · 单集均长 ${formatMinutes(hit.avgDurationSec)}` : ''}
+                    {/* ⚠️ T99：服务端把一部作品拆成几张同名专辑时，这里如实说明合并了几张。 */}
+                    {hit.albumIds.length > 1 ? ` · 合并了 ${hit.albumIds.length} 张专辑` : ''}
                     {!manual && hit.score > 0 && hit.score < AUDIOBOOK_SCORE_THRESHOLD
                       ? ' · 结构信号弱（可能不是有声）'
                       : ''}

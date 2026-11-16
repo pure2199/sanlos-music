@@ -132,22 +132,40 @@ export function DetailPage(props: DetailPageProps): ReactElement {
   //    实测有声专辑可达 **2762 集** ⇒ 分页拉完再排（`size=2000` ⇒ 2 页）。
   const isAudiobook = useStore(useAudiobookStore, (s) => s.isAudiobook(entityId))
   const setOverride = useStore(useAudiobookStore, (s) => s.setOverride)
+  // ⚠️ T99：**归并组**的专辑 id（服务端把一部作品拆成几张同名专辑时，逐张拉、合并排）。
+  //    ⚠️ 订阅 `hits`（**稳定引用**）再 `useMemo` 算 ⇒ 不能在 selector 里现算数组
+  //    （每次返回新数组 ⇒ 渲染循环）。
+  const audiobookHits = useStore(useAudiobookStore, (s) => s.hits)
+  const groupIds = useMemo(() => {
+    const hit = audiobookHits.find((h) => h.albumIds.includes(entityId))
+    return hit && hit.albumIds.length > 0 ? hit.albumIds : [entityId]
+  }, [audiobookHits, entityId])
   const [orderedSongs, setOrderedSongs] = useState<Song[] | null>(null)
   const [orderedLoading, setOrderedLoading] = useState(false)
+  /** 整组的曲目总数（**组合计**）—— 状态行要按它显示，别拿单张专辑的总数糊弄。 */
+  const [orderedTotal, setOrderedTotal] = useState<number | null>(null)
 
   useEffect(() => {
     if (kind !== 'album' || !isAudiobook) {
       setOrderedSongs(null)
+      setOrderedTotal(null)
       return
     }
     let cancelled = false
     setOrderedLoading(true)
     void (async () => {
       const all: Song[] = []
-      for (let page = 1; page <= 10; page += 1) {
-        const res = await libraryApi.albumSongs(entityId, page, 2000)
-        all.push(...res.list)
-        if (res.list.length === 0 || all.length >= res.total) break
+      let total = 0
+      // ⚠️ T99：**逐张**拉组内每张专辑（每张**独立**计数 ⇒ 别拿别的专辑的集数判满）。
+      for (const albumId of groupIds) {
+        let loaded = 0
+        for (let page = 1; page <= 10; page += 1) {
+          const res = await libraryApi.albumSongs(albumId, page, 2000)
+          all.push(...res.list)
+          loaded += res.list.length
+          total += res.total
+          if (res.list.length === 0 || loaded >= res.total) break
+        }
       }
       if (cancelled) return
       const tracks: AudiobookTrack[] = all.map((song) => ({
@@ -160,6 +178,7 @@ export function DetailPage(props: DetailPageProps): ReactElement {
       }))
       const order = new Map(sortTracksByEpisode(tracks).map((t, i) => [t.id, i]))
       setOrderedSongs([...all].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)))
+      setOrderedTotal(total)
       setOrderedLoading(false)
     })().catch(() => {
       if (!cancelled) setOrderedLoading(false)
@@ -167,7 +186,7 @@ export function DetailPage(props: DetailPageProps): ReactElement {
     return () => {
       cancelled = true
     }
-  }, [entityId, isAudiobook, kind])
+  }, [entityId, groupIds, isAudiobook, kind])
 
   /** 每首的集号（`null` = 解析不出来）。 */
   const episodeBySongId = useMemo(() => {
@@ -204,10 +223,18 @@ export function DetailPage(props: DetailPageProps): ReactElement {
    *
    * ⚠️ 分页追加的集合在有声专辑上会「跳序」⇒ 这里整体换掉（`hasMore` 关掉，
    *    因为全量已经拉完了，再点「继续加载」只会重复）。
+   * ⚠️ T99：总数要按**整组**（`orderedTotal`）算 —— 否则会出现「已加载 13 / 12」
+   *    这种骗人的数字（组内两张专辑合并后集数变多）。
    */
   const songs =
     orderedSongs && orderedSongs.length > 0
-      ? { ...baseSongs, items: orderedSongs, loading: orderedLoading, hasMore: false }
+      ? {
+          ...baseSongs,
+          items: orderedSongs,
+          total: Math.max(orderedTotal ?? 0, orderedSongs.length),
+          loading: orderedLoading,
+          hasMore: false,
+        }
       : baseSongs
   /** 曲目集合对应的分页键（给「继续加载」提示用）。 */
   const songsPagedKind: PagedKind =
