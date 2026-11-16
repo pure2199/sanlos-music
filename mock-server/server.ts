@@ -632,13 +632,35 @@ function parseByteRange(
 // ---------------------------------------------------------------------------
 
 /**
+ * `createMockServer()` 的可选参数（**按实例注入**）。
+ *
+ * ⚠️ **为什么是「按实例」而不是改共享 fixtures**：
+ *    mock 的曲库是**共享**的 ⇒ 往 `SONGS` 里加曲目会让**别的** E2E 用例变红
+ *    （T97 断言「从你的曲库随机挑了 **8** 首」⇒ 加了就不是 8 首了）。
+ *    ⇒ 需要特殊曲库的用例（T98 的「12 集有声专辑」）**在自己的实例里注入**，
+ *      **默认行为一字不变**。
+ */
+export interface MockServerOptions {
+  /** 覆盖曲库曲目（**不传** = 用默认的 `SONGS`）。 */
+  songs?: RawSong[]
+  /** 覆盖专辑列表（**不传** = 用默认的 `ALBUMS`）。 */
+  albums?: RawAlbum[]
+}
+
+/**
  * 启动一个 mock server（监听系统分配的空闲端口）。
  *
  * 端口用 0 让系统分配；`listen(0)` 不带 host 时 **socket 绑定是同步的**，
  * 因此 `server.address()` 立刻能拿到真实端口，`url` 可以同步返回。
  * （带 host 时 Node 会把绑定推迟到 nextTick，`address()` 当时还是 null。）
+ *
+ * @param options 按实例注入曲库 / 专辑（**默认一条都不改**）。
  */
-export function createMockServer(): MockServer {
+export function createMockServer(options?: MockServerOptions): MockServer {
+  // ---- 本实例的曲库 / 专辑（默认 = 共享 fixtures）------------------------
+  const songs = options?.songs ?? SONGS
+  const albums = options?.albums ?? ALBUMS
+
   // ---- 状态 ----
   const state: MockState = {
     favorites: new Set<string>(),
@@ -689,7 +711,7 @@ export function createMockServer(): MockServer {
   // ---- 工具（依赖上面的状态） ----
 
   const songByGuid = (guid: string): RawSong | undefined =>
-    SONGS.find((song) => song.guid === guid)
+    songs.find((song) => song.guid === guid)
 
   const playlistList = (): RawPlaylist[] =>
     [...state.playlists.values()].map((playlist) => {
@@ -743,7 +765,7 @@ export function createMockServer(): MockServer {
   })
 
   getRoutes.set(`${API_BASE}/album/list`, ({ res, query }) => {
-    sendJson(res, ok(paginate(ALBUMS, query)))
+    sendJson(res, ok(paginate(albums, query)))
   })
 
   // ⚠️ **与真实 NAS 对齐（T18-3 真机实测）**：
@@ -752,7 +774,7 @@ export function createMockServer(): MockServer {
   //    mock 必须与真实服务端同形，否则 E2E 测不出取法错误。
   getRoutes.set(`${API_BASE}/album/detail`, ({ res, query }) => {
     const guid = query.get('guid') ?? ''
-    const album = ALBUMS.find((a) => a.guid === guid)
+    const album = albums.find((a) => a.guid === guid)
     if (!album) {
       sendJson(res, err(100002, 'invalid arguments'))
       return
@@ -762,30 +784,30 @@ export function createMockServer(): MockServer {
 
   getRoutes.set(`${API_BASE}/album/artist-detail/list`, ({ res, query }) => {
     const guid = query.get('artistGUID') ?? ''
-    const albums = ALBUMS.filter((a) => a.artists.some((artist) => artist.guid === guid))
-    sendJson(res, ok(paginate(albums, query)))
+    const list = albums.filter((a) => a.artists.some((artist) => artist.guid === guid))
+    sendJson(res, ok(paginate(list, query)))
   })
 
   getRoutes.set(`${API_BASE}/track/list`, ({ res, query }) => {
-    sendJson(res, ok(paginate(SONGS, query)))
+    sendJson(res, ok(paginate(songs, query)))
   })
 
   getRoutes.set(`${API_BASE}/track/album-detail/list`, ({ res, query }) => {
     const guid = query.get('albumGUID') ?? ''
-    const songs = SONGS.filter((song) => song.album.guid === guid)
-    sendJson(res, ok(paginate(songs, query)))
+    const list = songs.filter((song) => song.album.guid === guid)
+    sendJson(res, ok(paginate(list, query)))
   })
 
   getRoutes.set(`${API_BASE}/track/artist-detail/list`, ({ res, query }) => {
     const guid = query.get('artistGUID') ?? ''
-    const songs = SONGS.filter((song) => song.artists.some((artist) => artist.guid === guid))
-    sendJson(res, ok(paginate(songs, query)))
+    const list = songs.filter((song) => song.artists.some((artist) => artist.guid === guid))
+    sendJson(res, ok(paginate(list, query)))
   })
 
   getRoutes.set(`${API_BASE}/track/genre-detail/list`, ({ res, query }) => {
     const guid = query.get('genreGUID') ?? ''
-    const songs = SONGS.filter((song) => (TRACK_GENRES[song.guid] ?? []).includes(guid))
-    sendJson(res, ok(paginate(songs, query)))
+    const list = songs.filter((song) => (TRACK_GENRES[song.guid] ?? []).includes(guid))
+    sendJson(res, ok(paginate(list, query)))
   })
 
   getRoutes.set(`${API_BASE}/track/playlist-detail/list`, ({ res, query }) => {
@@ -846,8 +868,8 @@ export function createMockServer(): MockServer {
   })
 
   getRoutes.set(`${API_BASE}/favorite-track/list`, ({ res, query }) => {
-    const songs = SONGS.filter((song) => state.favorites.has(song.guid))
-    sendJson(res, ok(paginate(songs, query)))
+    const list = songs.filter((song) => state.favorites.has(song.guid))
+    sendJson(res, ok(paginate(list, query)))
   })
 
   postRoutes.set(`${API_BASE}/favorite-track/create`, ({ res, body }) => {
@@ -992,7 +1014,7 @@ export function createMockServer(): MockServer {
       sendJson(res, ok(paginate<RawSong>([], query)))
       return
     }
-    const hits = SONGS.filter(
+    const hits = songs.filter(
       (song) =>
         song.title.toLowerCase().includes(keyword) ||
         song.album.name.toLowerCase().includes(keyword) ||
@@ -1007,7 +1029,7 @@ export function createMockServer(): MockServer {
       sendJson(res, ok(paginate<RawAlbum>([], query)))
       return
     }
-    const hits = ALBUMS.filter(
+    const hits = albums.filter(
       (album) =>
         album.name.toLowerCase().includes(keyword) ||
         album.artists.some((artist) => artist.name.toLowerCase().includes(keyword)),

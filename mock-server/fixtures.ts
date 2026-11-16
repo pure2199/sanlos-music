@@ -659,6 +659,105 @@ export const SONGS: RawSong[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// 「示例有声作品」（T98：12 集 · 真实形态）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么单独一组、不混进上面的 8 首**：
+//    mock 的曲库是**共享**的 ⇒ 往里加曲目会让**别的** E2E 用例变红
+//    （T97 断言「从你的曲库随机挑了 **8** 首」）。
+//    ⇒ 这 12 集**只在 T98 的用例里**通过 `createMockServer({ songs, albums })` 注入。
+//
+// ⚠️ **形态按真机实测（2026-11-16，本机 + 该账号）仿**：
+//    - 单集 **25 分钟**（真·有声实测 9–32 分钟）⇒ 均长信号成立；
+//    - 标题 `01- 第一集` … ⇒ **dash-prefix** 形态（真·《三体》同形）；
+//    - `path` = `…/有声小说/示例作者/示例有声作品/Disc 01/…`
+//      ⇒ 倒数第 3 段 = `示例有声作品` ⇒ **作品目录唯一**信号成立；
+//    - `trackNo` = **null**（真·有声实测**多为 null** ⇒ 别拿它当主排序键）。
+//
+// ⇒ 判定分：均长≥8 分钟(+2) + 均长≥20 分钟(+1) + 形态一致(+2) + 集数≥8(+1) + 目录唯一(+1) = **7 分**（≥ 4 判为有声）。
+
+/** 「示例有声作品」的专辑 guid。 */
+export const AUDIOBOOK_ALBUM_GUID = 'al-novel'
+
+/** 「示例有声作品」的专辑。 */
+export const AUDIOBOOK_ALBUM: RawAlbum = {
+  guid: AUDIOBOOK_ALBUM_GUID,
+  name: '示例有声作品',
+  coverId: null,
+  releaseDate: null,
+  barcode: null,
+  createdAt: T0,
+  updatedAt: T0,
+  artists: [
+    { guid: 'a-novel', name: '示例作者', coverId: null, createdAt: T0, updatedAt: T0 },
+  ],
+  trackCount: 12,
+}
+
+/** 12 集的集号（十进制补零 ⇒ `01`–`12`）。 */
+function episodeLabel(episode: number): string {
+  return String(episode).padStart(2, '0')
+}
+
+/** 造一条「示例有声作品」的曲目。 */
+function audiobookSong(episode: number): RawSong {
+  const label = episodeLabel(episode)
+  return {
+    guid: `n${episode}`,
+    title: `${label}- 第${episode}集`,
+    // 25 分钟（毫秒）⇒ 均长 1500 秒。
+    duration: 1500000,
+    coverId: null,
+    artists: [
+      { guid: 'a-novel', name: '示例作者', coverId: null, createdAt: T0, updatedAt: T0 },
+    ],
+    album: {
+      guid: AUDIOBOOK_ALBUM_GUID,
+      name: '示例有声作品',
+      coverId: null,
+      releaseDate: null,
+      barcode: null,
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    audioSpec: {
+      bitDepth: 16,
+      sampleRate: 44100,
+      channel: 2,
+      bitrate: 128000,
+      codec: 'mp3',
+      container: '',
+      duration: 1500000,
+      format: 'mp3',
+      // ⚠️ 路径要有 **≥ 3 段**，且**倒数第 3 段**是作品目录（真机实测的取法）。
+      path: `/vol02/1000-0-3d135437/有声小说/示例作者/示例有声作品/Disc 01/${label}- 第${episode}集.mp3`,
+      size: 24000000,
+    },
+    year: null,
+    // ⚠️ 真·有声实测：**多为 null** ⇒ 不能拿 `trackNo` 当主排序键。
+    trackNo: null,
+    discNo: 1,
+    isrc: null,
+    isCue: false,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: false,
+  }
+}
+
+/**
+ * 「示例有声作品」的 12 集 —— ⚠️ **顺序故意打乱**。
+ *
+ * ⭐ 为什么要打乱：客户端是**客户端自己**按集号排的（服务端没这能力）⇒
+ *    若 mock 按集号顺序返回，**排序失效也照样通过** ⇒ 这条 E2E 就是假阳性。
+ *    ⇒ 必须乱序返回 ⇒ 排对了才是真的排对了。
+ */
+export const AUDIOBOOK_SONGS: RawSong[] = [7, 3, 12, 1, 9, 5, 11, 2, 8, 4, 10, 6].map((episode) =>
+  audiobookSong(episode),
+)
+
+// ---------------------------------------------------------------------------
 // 风格（2 个，g1–g2）
 //
 // g1 = `Pop`、g2 = `POP`：**同名不同大小写**，用于覆盖客户端的风格名归一化场景。
