@@ -63,14 +63,12 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
   test('扫描这个目录 ⇒ 命中该目录下的作品（判定分 / 依据 / 集数 / 均长），普通专辑不出现', async () => {
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
 
-    // ⚠️ **进页面不能自动扫**（实测全库扫描 87 页 ⇒ 并发约 1 分钟）
-    //    ⇒ 进来是空态，**要用户点**才扫。
-    await expect(fixture.window.locator('.fnm-page__status')).toHaveText('还没扫描过')
-    await expect(fixture.window.locator('.fnm-audiobooks__empty')).toContainText(
-      '点「扫描这个目录」开始',
-    )
-
-    await fixture.window.getByRole('button', { name: '扫描这个目录' }).click()
+    // ⚠️ **T100（2026-11-17）把这条用例的前提显式推翻了**：用户口径
+    //    「**不用点搜索，也不用点扫描**」⇒ 进页面**自动开扫**（实测约 1 分钟；扫完落盘）。
+    //    ⇒ 下面三条断言**改写为新行为**（不弱化：一条换成更强的反向断言）。
+    //
+    // ⭐ **不用点任何按钮** ⇒ 列表自己出来（自动扫完成 ⇒ 状态行有「上次扫描」）。
+    await expect(fixture.window.locator('.fnm-page__status')).toContainText('上次扫描')
 
     // 命中列表里**只有**那部有声专辑（普通专辑不在这个目录 ⇒ 不该出现）。
     const items = fixture.window.locator('.fnm-audiobooks__item')
@@ -80,9 +78,10 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     // ⚠️ 还得说清楚它**凭什么**在这儿（用户指的位置）。
     await expect(items.first().locator('.fnm-audiobooks__source')).toContainText('有声小说')
 
-    // 判定结果**可解释**：判定分 / 集数 / 均长（打分只是**参考**，不再决定进不进列表）。
+    // ⚠️ **判定分不再显示**（位置已定 ⇒ 那个文件夹里的都是有声 ⇒ 打分当主信息会自相矛盾）。
+    //    这条断言**改写为反向断言**（更强：确保它不再出现），不是删掉。
     const meta = items.first().locator('.fnm-audiobooks__meta')
-    await expect(meta).toContainText('判定分 7')
+    await expect(meta).not.toContainText('判定分')
     await expect(meta).toContainText('12 集')
     await expect(meta).toContainText('单集均长 25 分')
 

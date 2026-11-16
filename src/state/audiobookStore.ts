@@ -43,6 +43,7 @@ import {
   parseEpisode,
   pathMatchesKeyword,
   workDirOf,
+  workGroupKey,
   type AudiobookVerdict,
   type EpisodeStats,
 } from '../api/audiobook'
@@ -274,6 +275,22 @@ export interface AudiobookStore {
   isAudiobook: (albumId: string) => boolean
   /** 取这张专辑的判定结果（`null` = 没有）。 */
   hitOf: (albumId: string) => AudiobookHit | null
+  /**
+   * **临时组**（T100）：**秒搜路径**归并出来的组 —— `albumId` → 组内全部 id。
+   *
+   * ⚠️ **为什么不落盘**：这是**一次搜索的临时结果**（用户搜完就完了）
+   *    ⇒ 落盘形状**不变** ⇒ `STATE_VERSION` **不升**（旧落盘不作废）。
+   * ⚠️ **为什么需要它**：搜索结果**不在 `hits` 里**（`hits` 是扫描出来的）
+   *    ⇒ 详情页按组拉全量时**认不到** ⇒ 会退化成单张专辑
+   *    ⇒ 《让青春继续第一季》的**第 02 集又会丢**。
+   */
+  extraGroups: Record<string, string[]>
+  /**
+   * 登记一个组（**秒搜路径**用）：组内**任何一张**专辑都能查到整组。
+   *
+   * @param albumIds 组内全部专辑 id（主专辑排第一）。
+   */
+  registerGroup: (albumIds: readonly string[]) => void
 }
 
 /** 聚合器：把逐页扫到的曲目**按专辑**累加。 */
@@ -370,9 +387,8 @@ interface MergedGroup {
  * ⚠️ **不同名不归并**（季 / 卷各算一部：《让青春继续》第一/二/三季**不该**并成一部）。
  */
 function groupKeyOf(agg: Aggregator): string {
-  const dir = agg.dirs.length === 1 ? agg.dirs[0] : null
-  if (dir === null) return `album:${agg.albumId}`
-  return `work:${agg.albumTitle.length}:${agg.albumTitle}:${dir}`
+  const dir = agg.dirs.length === 1 ? (agg.dirs[0] ?? null) : null
+  return workGroupKey(agg.albumTitle, dir, agg.albumId)
 }
 
 /**
@@ -571,6 +587,7 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
   progress: null,
   error: null,
   scannedAt: null,
+  extraGroups: {},
 
   scan: async (options) => {
     const port = options?.port ?? localStorageAudiobookPort
@@ -781,5 +798,14 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
       }
     }
     return group
+  },
+
+  registerGroup: (albumIds) => {
+    // ⚠️ T100：**临时组**（秒搜路径）⇒ 组内每张专辑都指向同一组。
+    const ids = [...new Set(albumIds)].filter((id) => id.length > 0)
+    if (ids.length === 0) return
+    const extra = { ...get().extraGroups }
+    for (const id of ids) extra[id] = ids
+    set({ extraGroups: extra })
   },
 }))

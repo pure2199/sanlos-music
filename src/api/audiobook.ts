@@ -395,6 +395,29 @@ export function workDirOf(path: string | null): string | null {
 }
 
 /**
+ * **归并键**（T100）：一部作品 = **专辑名 + 唯一作品目录**。
+ *
+ * ⚠️ **单一来源**：扫描路径（`src/state/audiobookStore.ts` 的 `groupKeyOf`）与
+ *    秒搜路径（`src/pages/AudiobooksPage.tsx`）**都调它** ⇒ 两条路径的口径**完全一致**
+ *    （否则会出现「扫出来是一条、搜出来是两条」）。
+ *
+ * ⚠️ **作品目录拿不到（`null`）⇒ 不归并**（信息不足 ⇒ 宁可分开，也不要误合）：
+ *    这时退化成「按专辑单独成组」。
+ *
+ * @param albumTitle 专辑名（= 作品名）。
+ * @param workDir 作品目录（`null` = 拿不到 / 不唯一）。
+ * @param albumId 专辑 id（拿不到目录时的兜底键）。
+ */
+export function workGroupKey(
+  albumTitle: string,
+  workDir: string | null,
+  albumId: string,
+): string {
+  if (workDir === null) return `album:${albumId}`
+  return `work:${albumTitle.length}:${albumTitle}:${workDir}`
+}
+
+/**
  * `judgeAlbum` 的可选覆盖项。
  *
  * ⚠️ **为什么要有**：扫描时我们**按专辑聚合**（内存里只留结构指标与**形态统计**，

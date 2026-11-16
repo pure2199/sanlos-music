@@ -136,10 +136,16 @@ export function DetailPage(props: DetailPageProps): ReactElement {
   //    ⚠️ 订阅 `hits`（**稳定引用**）再 `useMemo` 算 ⇒ 不能在 selector 里现算数组
   //    （每次返回新数组 ⇒ 渲染循环）。
   const audiobookHits = useStore(useAudiobookStore, (s) => s.hits)
+  // ⚠️ T100：**秒搜路径**归并出来的**临时组** —— 搜索结果**不在 `hits` 里**
+  //    ⇒ 只查 `hits` 会退化成**单张专辑** ⇒ 《让青春继续第一季》的**第 02 集又丢**。
+  const extraGroups = useStore(useAudiobookStore, (s) => s.extraGroups)
   const groupIds = useMemo(() => {
     const hit = audiobookHits.find((h) => h.albumIds.includes(entityId))
-    return hit && hit.albumIds.length > 0 ? hit.albumIds : [entityId]
-  }, [audiobookHits, entityId])
+    if (hit && hit.albumIds.length > 0) return hit.albumIds
+    const extra = extraGroups[entityId] ?? []
+    if (extra.length > 0) return extra
+    return [entityId]
+  }, [audiobookHits, extraGroups, entityId])
   const [orderedSongs, setOrderedSongs] = useState<Song[] | null>(null)
   const [orderedLoading, setOrderedLoading] = useState(false)
   /** 整组的曲目总数（**组合计**）—— 状态行要按它显示，别拿单张专辑的总数糊弄。 */

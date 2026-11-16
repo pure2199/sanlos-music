@@ -22,6 +22,7 @@ import {
   unixSeconds,
 } from './client'
 import type { Page, RawAlbum, RawArtist, RawGenre, RawPage, RawSong } from './types'
+import { workDirOf } from './audiobook'
 
 /** 是否是普通对象（数组与 null 都不算）。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -98,6 +99,24 @@ export const libraryApi = {
       }),
     )
     return { list: raw.list.map((song) => mapSong(song)), total: raw.total }
+  },
+
+  /**
+   * 某张专辑的**作品目录**（`null` = 拿不到）。
+   *
+   * ⚠️ **为什么只要 1 个请求**：实测 `/album/list` 与 `/album/detail` **都不返 path**
+   *    （2026-11-17，探针 `t100-01`）⇒ 目录信息**只挂在曲目**的 `audioSpec.path` 上
+   *    ⇒ 拉该专辑的**第一首**（`size=1`）就够定位作品目录（目录取 path 的倒数第 3 段）。
+   *    ⇒ 秒搜归并因此很便宜（每个候选 **1 个请求**，不拉全量曲目）。
+   */
+  async albumWorkDir(id: string): Promise<string | null> {
+    const raw = normalizePage<RawSong>(
+      await apiCall<RawPage<RawSong>>('/track/album-detail/list', {
+        query: { albumGUID: id, page: 1, size: 1 },
+      }),
+    )
+    const path = raw.list[0]?.audioSpec?.path ?? null
+    return workDirOf(path)
   },
 
   /** 某歌手的专辑（分页）。 */

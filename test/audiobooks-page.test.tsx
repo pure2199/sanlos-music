@@ -20,10 +20,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { scanLibraryTracks } = vi.hoisted(() => ({ scanLibraryTracks: vi.fn() }))
+const { scanLibraryTracks, albumWorkDir } = vi.hoisted(() => ({
+  scanLibraryTracks: vi.fn(),
+  albumWorkDir: vi.fn(),
+}))
 const { searchApi } = vi.hoisted(() => ({ searchApi: { albums: vi.fn() } }))
 
-vi.mock('../src/api/library', () => ({ scanLibraryTracks }))
+vi.mock('../src/api/library', () => ({ scanLibraryTracks, libraryApi: { albumWorkDir } }))
 vi.mock('../src/api/search', () => ({ searchApi }))
 
 import { AudiobooksPage } from '../src/pages/AudiobooksPage'
@@ -51,6 +54,9 @@ describe('AudiobooksPage（有声读物页）', () => {
     }))
     searchApi.albums.mockReset()
     searchApi.albums.mockResolvedValue({ list: [], total: 0 })
+    // ⚠️ T100：秒搜归并要**每个候选补拉 1 首**拿作品目录（拿不到 ⇒ 不归并）。
+    albumWorkDir.mockReset()
+    albumWorkDir.mockResolvedValue(null)
     useAudiobookStore.setState({
       hits: [],
       overrides: {},
@@ -59,34 +65,74 @@ describe('AudiobooksPage（有声读物页）', () => {
       progress: null,
       error: null,
       scannedAt: null,
+      extraGroups: {},
     })
     window.localStorage.clear()
   })
 
-  it('① 进页面**不自动扫描**（一个请求都不发）', async () => {
+  it('① 进页面**自动开扫**（用户不用点任何按钮；扫完落盘 ⇒ 之后秒开）', async () => {
+    // ⚠️ **T100（2026-11-17）把这条用例的前提显式推翻了**：
+    //    用户口径「不用点搜索、也不用点扫描」⇒ 进页面**自动开扫**
+    //    ⇒ 断言**改写为新行为**（不弱化：从「一个请求都不发」变成「必须自动开扫」）。
     render(<AudiobooksPage onOpenAlbum={() => {}} />)
-    await waitFor(() => {
-      expect(screen.getByText('还没扫描过')).toBeTruthy()
-    })
-    expect(scanLibraryTracks).not.toHaveBeenCalled()
-  })
-
-  it('② 点「扫描这个目录」⇒ 真的开始扫', async () => {
-    render(<AudiobooksPage onOpenAlbum={() => {}} />)
-    fireEvent.click(screen.getByText('扫描这个目录'))
     await waitFor(() => {
       expect(scanLibraryTracks).toHaveBeenCalledTimes(1)
+    })
+    // ⚠️ 自动扫用的是**当前目录关键字**（默认「有声小说」）。
+    const options = scanLibraryTracks.mock.calls[0]?.[0] as
+      | { startPage: number; keyword?: string }
+      | undefined
+    expect(options?.startPage).toBe(1)
+  })
+
+  it('② 点「扫描这个目录」⇒ 真的开始扫（**又**扫一次）', async () => {
+    render(<AudiobooksPage onOpenAlbum={() => {}} />)
+    // ⚠️ 进页面已经自动扫过一次 ⇒ 这里点按钮是**第二次**扫描。
+    await waitFor(() => {
+      expect(scanLibraryTracks).toHaveBeenCalledTimes(1)
+    })
+    // ⚠️ 自动扫描期间按钮是「正在扫描…」（禁用）⇒ 先等它结束再点。
+    await waitFor(() => {
+      expect(useAudiobookStore.getState().scanning).toBe(false)
+    })
+    fireEvent.click(screen.getByText('扫描这个目录'))
+    await waitFor(() => {
+      expect(scanLibraryTracks).toHaveBeenCalledTimes(2)
     })
   })
 
   it('③ 点「从头重扫」⇒ 明确从头来（`full: true`）', async () => {
+    // ⚠️ 先埋一个**断点**（上次扫到第 2 页）⇒ 「续跑」会从第 2 页开始，
+    //    而「从头重扫」必须从**第 1 页**开始 ⇒ 这样才真能区分两者。
+    window.localStorage.setItem(
+      'fnmusic-audiobook-state',
+      JSON.stringify({
+        version: 3,
+        nextPage: 2,
+        scannedCount: 100,
+        total: 1000,
+        candidates: {},
+        overrides: {},
+        keyword: '有声小说',
+        scannedAt: 0,
+      }),
+    )
     render(<AudiobooksPage onOpenAlbum={() => {}} />)
-    fireEvent.click(screen.getByText('从头重扫'))
+
+    // 进页面**自动续跑**（从断点第 2 页接着来）。
     await waitFor(() => {
       expect(scanLibraryTracks).toHaveBeenCalledTimes(1)
     })
-    const options = scanLibraryTracks.mock.calls[0]?.[0] as { startPage: number } | undefined
-    expect(options?.startPage).toBe(1)
+    const resumed = scanLibraryTracks.mock.calls[0]?.[0] as { startPage: number } | undefined
+    expect(resumed?.startPage).toBe(2)
+
+    fireEvent.click(screen.getByText('从头重扫'))
+    await waitFor(() => {
+      expect(scanLibraryTracks).toHaveBeenCalledTimes(2)
+    })
+    // ⭐ 「从头重扫」⇒ **从第 1 页**开始（忽略断点）。
+    const full = scanLibraryTracks.mock.calls[1]?.[0] as { startPage: number } | undefined
+    expect(full?.startPage).toBe(1)
   })
 
   it('④ 扫描中 ⇒ 两个按钮都禁用（别重复触发）', async () => {
@@ -106,9 +152,16 @@ describe('AudiobooksPage（有声读物页）', () => {
     }
   })
 
-  it('⑥ 「搜作品」⇒ 打专辑搜索并列出结果（**不扫曲库**）', async () => {
+  it('⑥ 「搜作品」⇒ 打专辑搜索并列出结果（**搜索本身**不触发扫描）', async () => {
     searchApi.albums.mockResolvedValue({ list: [FOUND_ALBUM], total: 1 })
     render(<AudiobooksPage onOpenAlbum={() => {}} />)
+
+    // ⚠️ 进页面**已经自动扫过一次**（T100）⇒ 这里记下当前的扫描次数，
+    //    再断言「点搜索**不会**再多扫一次」（搜索这条路**自己**不扫曲库）。
+    await waitFor(() => {
+      expect(scanLibraryTracks).toHaveBeenCalledTimes(1)
+    })
+    const before = scanLibraryTracks.mock.calls.length
 
     fireEvent.change(screen.getByPlaceholderText('输入作品名，例如：牧神记'), {
       target: { value: '牧神记' },
@@ -120,7 +173,7 @@ describe('AudiobooksPage（有声读物页）', () => {
     })
     expect(await screen.findByText('牧神记')).toBeTruthy()
     // ⚠️ 搜作品这条路径**不许**触发全库扫描。
-    expect(scanLibraryTracks).not.toHaveBeenCalled()
+    expect(scanLibraryTracks.mock.calls.length).toBe(before)
   })
 
   it('⑦ 点搜到的作品 ⇒ 记成「有声」+ 下钻详情页', async () => {
@@ -167,10 +220,15 @@ describe('AudiobooksPage（有声读物页）', () => {
     render(<AudiobooksPage onOpenAlbum={() => {}} />)
 
     fireEvent.change(screen.getByLabelText('目录名'), { target: { value: '我的有声书' } })
+    // ⚠️ 自动扫描期间按钮是「正在扫描…」（禁用）⇒ 先等它结束再点。
+    await waitFor(() => {
+      expect(useAudiobookStore.getState().scanning).toBe(false)
+    })
     fireEvent.click(screen.getByText('扫描这个目录'))
 
+    // ⚠️ 进页面已自动扫过一次 ⇒ 这里是**第二次**扫描（用用户输入的关键字）。
     await waitFor(() => {
-      expect(scanLibraryTracks).toHaveBeenCalledTimes(1)
+      expect(scanLibraryTracks).toHaveBeenCalledTimes(2)
     })
     // ⚠ 默认关键字是「有声小说」⇒ 若用户输入的没生效，这条曲目**不该**被选中。
     await waitFor(() => {

@@ -215,28 +215,32 @@ test.describe.serial('T99「同名专辑归并」+「集号在中段」', () => 
     )
   })
 
-  test('从**被拆出去的那张专辑**进去 ⇒ 仍按**整组**排；改判它 ⇒ 整组都消失', async () => {
-    // ⭐ 服务端把一部作品拆成**两张同名专辑** ⇒ 搜作品名会看到**两条**。
+  test('T100 改写：秒搜结果**按「一本小说」归并成一条** ⇒ 点进去是**整组**（第 02 集在）', async () => {
+    // ⚠️ **T100（2026-11-17）把这条用例的前提显式推翻了**：
+    //    以前秒搜给的是**两张同名专辑**（用户要点对那张）⇒ 现在按「**一本小说 = 一条**」
+    //    归并成**一条**（同名 + 同作品目录）⇒ 断言改写为**新行为**（不弱化：更严）。
+    //    ⚠️ 「从**非主成员**进去」这条路径现在**产品上不可达**（列表与秒搜都给归并后的一条）
+    //    ⇒ 该覆盖改由**单测**承担（`test/audiobook-store.test.ts` ④「组级改判：对组内任一成员」）。
     await fixture.window.getByPlaceholder('输入作品名，例如：牧神记').fill(WORK_NAME)
     await fixture.window.getByRole('button', { name: '搜作品' }).click()
 
     const results = fixture.window.locator('.fnm-audiobooks__result')
-    await expect(results).toHaveCount(2)
-    // 主专辑 12 集 + **被拆出去的那张只有 1 集**（就是丢了第 02 集的那张）。
-    const metas = fixture.window.locator('.fnm-audiobooks__result-meta')
-    await expect(metas.nth(0)).toHaveText('12 集')
-    await expect(metas.nth(1)).toHaveText('1 集')
+    // ⭐ 服务端是**两张**同名专辑 ⇒ 界面**只给一条**（= 一本小说）。
+    await expect(results).toHaveCount(1)
+    // 集数是**组合计**（12 + 1 = 13）⇒ 并如实说明合并了几张。
+    await expect(results.first().locator('.fnm-audiobooks__result-meta')).toHaveText(
+      '13 集 · 合并了 2 张专辑',
+    )
 
-    // 点**只有 1 集**的那张（= 组里的**非主成员**）。
-    await results.nth(1).locator('.fnm-audiobooks__title').click()
-
-    // ⚠️ 从**成员**专辑进去 ⇒ 看到的仍然是**整组**（13 集）⇒ 第 02 集在。
+    // 点它 ⇒ 进的是**整组**（13 集）⇒ **第 02 集在场**（从搜索进去以前会丢）。
+    await results.first().locator('.fnm-audiobooks__title').click()
     await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
     const rows = fixture.window.locator('.fnm-songlist__row')
     await expect(rows).toHaveCount(13)
     await expect(rows.nth(1).locator('.fnm-detail__episode')).toHaveText('第 2 集')
+    await expect(rows.nth(1).locator('.fnm-songlist__title')).toHaveText(`${WORK_NAME} 02 承上`)
 
-    // 改判**成员** ⇒ **整组**都不再出现在「有声」页（改判是**组级**的）。
+    // 改判 ⇒ **整组**都不再出现在「有声」页（改判是**组级**的）。
     await fixture.window.getByRole('button', { name: '这不是有声' }).click()
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
     await expect(fixture.window.locator('.fnm-audiobooks__item')).toHaveCount(0)

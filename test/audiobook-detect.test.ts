@@ -20,6 +20,7 @@ import {
   sortTracksByEpisode,
   summarizeEpisodes,
   workDirOf,
+  workGroupKey,
   type AudiobookTrack,
 } from '../src/api/audiobook'
 
@@ -394,5 +395,34 @@ describe('parseEpisode：集号在中段（mid-number）', () => {
       }),
     ]
     expect(sortTracksByEpisode(tracks).map((t) => t.id)).toEqual(['a', 'c', 'b'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T100：归并键（**单一来源**）—— 扫描路径与秒搜路径必须用**同一把钥匙**
+// ---------------------------------------------------------------------------
+describe('workGroupKey（T100：一本小说 = 一条）', () => {
+  it('同名 + **同作品目录** ⇒ 同一个键（⇒ 归并成一条）', () => {
+    // ⚠ 真机实测形态：服务端把《让青春继续第一季》拆成 31 集 + 1 集，作品目录都是 `让青春继续`。
+    expect(workGroupKey('让青春继续第一季', '让青春继续', 'al-a')).toBe(
+      workGroupKey('让青春继续第一季', '让青春继续', 'al-b'),
+    )
+  })
+
+  it('**作品目录不同** ⇒ 不同键（两部真的作品 ⇒ 不误合）', () => {
+    expect(workGroupKey('牧神记', '牧神记', 'al-a')).not.toBe(
+      workGroupKey('牧神记', '牧神记第二部', 'al-b'),
+    )
+  })
+
+  it('**拿不到作品目录**（`null`）⇒ 按专辑单独成组（信息不足 ⇒ 宁可分开）', () => {
+    // ⚠ 目录拿不到时**不能**把所有同名专辑并成一条（那会把两部作品混起来）。
+    expect(workGroupKey('某作品', null, 'al-a')).toBe('album:al-a')
+    expect(workGroupKey('某作品', null, 'al-a')).not.toBe(workGroupKey('某作品', null, 'al-b'))
+  })
+
+  it('**同名但名字里带分隔符**也不会撞键（键里带名字长度）', () => {
+    // ⚠ 键是 `work:<名长>:<名>:<目录>` ⇒ 名字里的 `:` 不会造成歧义。
+    expect(workGroupKey('甲:乙', '目录', 'al-a')).not.toBe(workGroupKey('甲', '乙:目录', 'al-b'))
   })
 })

@@ -578,4 +578,20 @@ describe('T99：同名专辑按作品目录归并', () => {
     expect(useAudiobookStore.getState().hits).toHaveLength(1)
     expect(useAudiobookStore.getState().hits[0]?.trackCount).toBe(2)
   })
+
+  // ---- T100：临时组（秒搜路径）----------------------------------------------
+  it('T100 registerGroup：组内**任一成员**都能查到**整组**（秒搜路径 ⇒ 第 02 集不丢）', () => {
+    const store = useAudiobookStore.getState()
+    store.registerGroup(['al-main', 'al-split'])
+
+    // 组内**任何一张**都能查到**整组**（详情页据此按组拉全量）。
+    expect(useAudiobookStore.getState().extraGroups['al-main']).toEqual(['al-main', 'al-split'])
+    expect(useAudiobookStore.getState().extraGroups['al-split']).toEqual(['al-main', 'al-split'])
+    // 重复登记不会把组弄脏（去重）。
+    useAudiobookStore.getState().registerGroup(['al-main', 'al-split', 'al-main'])
+    expect(useAudiobookStore.getState().extraGroups['al-main']).toEqual(['al-main', 'al-split'])
+    // ⚠ **不落盘**（临时结果 ⇒ 落盘形状不变 ⇒ 旧落盘不作废）。
+    const port = createMemoryAudiobookPort()
+    expect(port.load()).toBeNull()
+  })
 })
