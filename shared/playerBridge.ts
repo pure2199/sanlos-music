@@ -50,6 +50,7 @@
 
 import type { EqPrefsPayload } from './eqPrefs'
 import type { FfmpegFallbackResult, FfmpegStatus } from './ffmpeg'
+import type { ChartResult } from './chartTypes'
 import type { ExternalLyricQuery, ExternalLyricResult, LyricPrefs } from './lyricProvider'
 import type { PlayMode, StreamQuality, ThemeName } from './types'
 import type {
@@ -737,4 +738,17 @@ export interface PlayerBridge {
    * @returns LRC 文本；**没有内嵌歌词 ⇒ 空串**（**永不抛**）。
    */
   readEmbeddedLyric(id: string): Promise<string>
+  // -------------------------------------------------------------------------
+  // 音乐榜单（T96）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **渲染层只发请求、只收结果**：外部榜源的**抓取全在主进程**——
+  //    渲染层**不碰网络**，也**不能指定要抓哪个地址 / 哪个榜**。
+  //
+  // ⚠️ 这个方法**不返回任何凭证**（只回榜单条目：排名 / 歌名 / 歌手 / 专辑 / 时长）。
+  //
+  // ⚠️ **这里只回「原始榜单」**：条目**还没跟曲库对过**（曲库在**用户的 NAS** 里，
+  //    主进程这条链路不碰它）⇒ 匹配在渲染层做。
+  /** 拉音乐榜单（`discover:charts`）：QQ 音乐等公开榜单。 */
+  fetchCharts(): Promise<ChartResult>
 }

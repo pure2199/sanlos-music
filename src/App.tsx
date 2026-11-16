@@ -11,6 +11,7 @@ import { ThemeSwitcher } from './components/ThemeSwitcher'
 import { AlbumsPage } from './pages/AlbumsPage'
 import { ArtistsPage } from './pages/ArtistsPage'
 import { DetailPage } from './pages/DetailPage'
+import { DiscoverPage } from './pages/DiscoverPage'
 import { FavoritesPage } from './pages/FavoritesPage'
 import { FullPlayerPage } from './pages/FullPlayerPage'
 import { GenresPage } from './pages/GenresPage'
@@ -112,6 +113,7 @@ type MainView =
   | 'connect'
   | 'local'
   | 'search'
+  | 'discover'
   | 'songs'
   | 'favorites'
   | 'playlists'
@@ -395,6 +397,11 @@ export default function App() {
             onOpenArtist={handleOpenArtist}
           />
         )
+      case 'discover':
+        // ⚠️ T96：「发现」页（榜单 + 为你推荐）。
+        //    榜单来自**外部公开榜源**（主进程抓）；「在不在曲库」与「为你推荐」
+        //    都按**当前登录用户自己的** NAS 曲库实时算 ⇒ 命中项直接走既有播放路径。
+        return <DiscoverPage onPlay={handlePlay} />
       case 'songs':
         return <SongsPage onPlay={handlePlay} />
       case 'favorites':
@@ -468,6 +475,19 @@ export default function App() {
                 label="搜索"
                 active={view === 'search'}
                 onSelect={() => goTo('search')}
+              />
+            )}
+            {/*
+             * ⚠️ T96：「发现」**需要 NAS**（要跟**你的**曲库对上、才能给推荐）
+             *    → 未登录时**不渲染**（与「搜索」同一条纪律）。
+             *    榜单本身是公开榜源，但「在不在曲库里」没有 NAS 就答不了 ⇒
+             *    未登录时整个入口不出现，比进去看到一片灰更诚实。
+             */}
+            {connected && (
+              <NavButton
+                label="发现"
+                active={view === 'discover'}
+                onSelect={() => goTo('discover')}
               />
             )}
           </nav>

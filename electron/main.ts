@@ -12,7 +12,7 @@ import type {
 import type { ThemeName } from '../shared/types'
 import { API_PREFIX } from '../shared/constants'
 import { resolveThemeName, themeSpec } from '../shared/themes'
-import { registerAuthIpc, registerPlayerIpc, registerUpdateIpc, registerLyricIpc, PrefsStore } from './ipc'
+import { registerAuthIpc, registerPlayerIpc, registerUpdateIpc, registerLyricIpc, registerDiscoverIpc, PrefsStore } from './ipc'
 import { TrustedHosts } from './cert'
 import {
   DEFAULT_DOWNLOAD_SUBDIR,
@@ -24,6 +24,7 @@ import {
 import { createHttpStack } from './http'
 import { attachAppShortcuts } from './appShortcuts'
 import { createLyricProvider } from './lyricProvider'
+import { createChartProvider, createQqChartSource, resolveChartBaseUrl, DEFAULT_QQ_TOPLIST_URL, type ChartFetchLike } from './chartProvider'
 import { readAtMostBytes } from './embeddedLyric'
 import { registerLocalMedia } from './localMedia'
 import { LOCAL_LIBRARY_FILE_NAME, LocalLibrary, readFileBytes, registerLocalLibraryIpc } from './localLibrary'
@@ -1071,6 +1072,32 @@ if (!isPrimaryInstance) {
           },
           fetchStreamHead,
         },
+      })
+
+      // 14c. 「发现」页的榜单 IPC（T96）：外部公开榜源（QQ 音乐）。
+      //
+      //     ⚠️ **主进程只负责抓榜**：曲库在**用户自己的 NAS** 里，
+      //        匹配与推荐在渲染层做（那里才有当前账号的曲库访问权）。
+      //     ⚠️ **渲染层不碰网络、也不能指定地址**（与歌词源同一条纪律）。
+      //     ⚠️ **地址可覆盖**（`FNM_CHART_URL`）：E2E / 自建镜像用；
+      //        只接受 https 或回环地址（`resolveChartBaseUrl` 把关）。
+      const chartBaseUrl = resolveChartBaseUrl(process.env['FNM_CHART_URL'])
+      //
+      //     ⚠️ **两条通道**：
+      //     - **默认榜源（QQ，https）走 Chromium 分区栈**（`http.fetch`）：
+      //       与歌词源同款纪律（干净分区栈、不带 NAS 凭证），
+      //       而且**走系统代理**（本机外网只能经代理出去 ⇒ Node 的 undici 直连不通）。
+      //     - **覆盖地址走 Node 的 fetch**：实测本应用的 Chromium 分区栈
+      //       **全局拦 http 明文**（`net::ERR_BLOCKED_BY_CLIENT`，2026-11-16 E2E 实测）
+      //       ⇒ 自建镜像 / E2E 的 http mock 只能走 Node。
+      const chartFetch: ChartFetchLike = chartBaseUrl
+        ? (input, init) => globalThis.fetch(input, init)
+        : http.fetch
+      registerDiscoverIpc({
+        provider: createChartProvider({
+          fetchImpl: chartFetch,
+          sources: [createQqChartSource(chartBaseUrl ?? DEFAULT_QQ_TOPLIST_URL)],
+        }),
       })
 
       // 13b. 启动时按偏好恢复桌面歌词窗（上次是开着的就接着开）。

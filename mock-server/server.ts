@@ -419,6 +419,42 @@ export const MOCK_EXTERNAL_LRC_LONG = Array.from(
 ).join('\n')
 
 /** 造一份自动更新清单（哈希与假安装包一致 → 客户端的 SHA-512 校验能过）。 */
+/**
+ * 造一份**外部榜源**的响应（QQ 形状）。
+ *
+ * ⚠️ 前面的条目**取自 mock 的曲目**（`SONGS`）⇒ 都能在 mock 曲库里对上；
+ *    最后一条是**榜上有、库里没有**的歌 ⇒ 用来验「不在曲库」的灰显与标记。
+ * ⚠️ 时长单位是**秒**（真实榜源就是秒；mock 曲库的 `duration` 是毫秒 ⇒ 这里换算）。
+ */
+function buildMockChart(topid: string): unknown {
+  const entries = SONGS.map((song) => ({
+    data: {
+      songname: song.title,
+      singer: song.artists.map((artist) => ({
+        id: artist.guid,
+        mid: artist.guid,
+        name: artist.name,
+      })),
+      albumname: song.album.name,
+      interval: Math.round(song.duration / 1000),
+    },
+  }))
+  entries.push({
+    data: {
+      songname: '榜外之曲',
+      singer: [{ id: 'x1', mid: 'x1', name: '查无此歌手' }],
+      albumname: '示例专辑',
+      interval: 200,
+    },
+  })
+  return {
+    code: 0,
+    topinfo: { ListName: `示例榜 ${topid}` },
+    total_song_num: entries.length,
+    songlist: entries,
+  }
+}
+
 function buildUpdateManifest(): unknown {
   return {
     version: MOCK_UPDATE_VERSION,
@@ -1074,6 +1110,16 @@ export function createMockServer(): MockServer {
     // 免 token 端点：**长版**外部歌词（T34）——验「歌词舞台」的滚动跟随。
     if (method === 'GET' && path === '/mock-lyric-long') {
       sendText(res, MOCK_EXTERNAL_LRC_LONG)
+      return
+    }
+
+    // 免 token 端点：**外部音乐榜源**（T96）。
+    //
+    // ⚠️ 它**不是** NAS 接口：它扮演的是**外部公开榜源**（QQ 音乐）的形状
+    //    ⇒ E2E 用 `FNM_CHART_URL` 把它指到这里，主进程就能在**不联网**的
+    //    情况下走完「抓榜 → 匹配曲库 → 播放」整条链路。
+    if (method === 'GET' && path === '/mock-chart') {
+      sendRawJson(res, buildMockChart(query.get('topid') ?? ''))
       return
     }
 

@@ -154,6 +154,10 @@ function fakeBridge(): {
     readEmbeddedLyric() {
       return Promise.resolve('')
     },
+    // ⚠️ T96：桥多了 `fetchCharts`（抓榜单只能由主进程做）——这里给一个空榜单。
+    fetchCharts() {
+      return Promise.resolve({ status: 'ok' as const, boards: [] })
+    },
     pushState(snapshot) {
       pushed.push(snapshot)
     },

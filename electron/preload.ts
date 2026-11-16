@@ -245,6 +245,13 @@ const fnPlayer: PlayerBridge = {
   //    被判成「没有内嵌歌词」⇒ **静默失效**（实测踩过，见 `shared/embeddedLyric.ts`）。
   readEmbeddedLyric: async (id) =>
     toEmbeddedLyricText(await ipcRenderer.invoke('lyric:embedded', { id })),
+  // -------------------------------------------------------------------------
+  // 音乐榜单（T96）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ **渲染层只发请求**：外部榜源的抓取**全在主进程**——
+  //    渲染层**不碰网络**，也**不能指定地址**（只发一个「给我榜单」）。
+  fetchCharts: () => ipcRenderer.invoke('discover:charts'),
 }
 
 contextBridge.exposeInMainWorld('fnPlayer', fnPlayer)

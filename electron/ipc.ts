@@ -52,6 +52,12 @@
 // | `update:download`     | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `{ name }` → `UpdateDownloadResult` |
 // | `update:install`      | 渲染进程 → 主进程 | `ipcRenderer.invoke` | `{ name }` → `UpdateInstallResult`  |
 //
+// 「发现」页（T96）：
+//
+// | 通道                  | 方向              | 机制                 | 入参 → 出参                      |
+// |-----------------------|-------------------|----------------------|----------------------------------|
+// | `discover:charts`     | 渲染进程 → 主进程 | `ipcRenderer.invoke` | 无 → `ChartResult`              |
+//
 // ⚠️ **主进程是唯一的命令路由**：渲染进程发来的 `player:command`（媒体会话的
 //    action handler）会被**转发**回渲染进程执行——渲染进程**只执行**从主进程
 //    收到的命令，绝不本地直接执行自己发出的命令，所以不存在「发一次执行两遍」。
@@ -72,6 +78,7 @@ import { dirname, join } from 'node:path'
 
 import { API_PREFIX, CODE_OK, RELAY_DOMAIN_SUFFIX } from '../shared/constants'
 import type { AuthSessionInfo, CandidateInfo, ServerInfo } from '../shared/bridge'
+import type { ChartResult } from '../shared/chartTypes'
 import { sanitizeEqPrefsPayload } from '../shared/eqPrefs'
 import type { EmbeddedLyricPayload } from '../shared/embeddedLyric'
 import type { FfmpegFallbackResult, FfmpegStatus } from '../shared/ffmpeg'
@@ -109,6 +116,7 @@ import { authx } from './sign'
 import { SessionStateError, type SessionManager } from './session'
 import { createHttpStack, type HttpStack } from './http'
 import type { LyricProvider } from './lyricProvider'
+import type { ChartProvider } from './chartProvider'
 import { validateUpdateBaseUrl, type UpdateController } from './update'
 
 // ---------------------------------------------------------------------------
@@ -1591,6 +1599,51 @@ export function registerLyricIpc(opts: LyricIpcOptions): void {
       return await readEmbeddedLyric(id, embedded)
     } catch {
       return { content: '', layer: 'none' }
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 「发现」页 IPC（T96）
+// ---------------------------------------------------------------------------
+
+/** `registerDiscoverIpc` 的参数。 */
+export interface DiscoverIpcOptions {
+  /** `ipcMain` 替身；缺省时惰性取 Electron 的 `ipcMain`。 */
+  ipcMain?: IpcMainLike
+  /** 榜单提供器（真正的逻辑在 `electron/chartProvider.ts`）。 */
+  provider: ChartProvider
+}
+
+/**
+ * 注册「发现」页的榜单 IPC（T96）。
+ *
+ * 通道：
+ * - `discover:charts`（`handle`）：拉音乐榜单。
+ *
+ * ⚠️ **渲染进程是不可信输入**：这个通道**没有入参**
+ *    ⇒ 渲染层**既不能指定地址、也不能指定要抓哪个榜**
+ *    （与歌词源 `lyric:fetch` 同一条纪律）。
+ *
+ * ⚠️ **永不抛**：榜源挂了 / 提供器抽风 ⇒ 返回 `{ status: 'error', message }`
+ *    （渲染层拿到的是**可读的中文错误**，不是一坨异常）。
+ *
+ * ⚠️ 这里**只回原始榜单**：条目**还没跟曲库对过**
+ *    ——曲库在**用户自己的 NAS** 里，匹配是渲染层的事（见 `src/api/discover.ts`）。
+ */
+export function registerDiscoverIpc(opts: DiscoverIpcOptions): void {
+  const ipcMain = opts.ipcMain ?? resolveIpcMain()
+  if (!ipcMain || typeof ipcMain.handle !== 'function') {
+    throw new Error('无法注册发现页 IPC：当前进程没有可用的 ipcMain')
+  }
+  const provider = opts.provider
+
+  ipcMain.handle('discover:charts', async (): Promise<ChartResult> => {
+    try {
+      return await provider.fetchCharts()
+    } catch {
+      // ⚠️ 兜底：**异常绝不透到渲染进程**（那里会变成白屏）。
+      return { status: 'error', message: '榜单源暂时不可用', boards: [] }
     }
   })
 }

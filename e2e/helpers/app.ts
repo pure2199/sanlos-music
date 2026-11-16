@@ -151,7 +151,16 @@ export async function launchApp(opts?: LaunchAppOptions): Promise<AppFixture> {
       //    `%TEMP%\fnmusic-update` 写一个假安装包，
       //    而且应用启动时（清空更新目录）会**清掉用户待装的安装包**。
       //    ⇒ 指向 userData 临时目录下的一个子目录：随 userData 一起用完即删。
-      env: { ...stringEnv(process.env), FNM_UPDATE_DIR: join(userDataDir, 'update') },
+      //
+      // ⚠️ T96：**榜源也指到 mock** —— 「发现」页的榜单来自**外部公开榜源**
+      //    （默认是 QQ 音乐）。E2E **不许打真实外网**（不确定 + 会被限流）
+      //    ⇒ 用 `FNM_CHART_URL` 把榜源指到 mock 的 `/mock-chart`
+      //    （主进程只接受 https 或**回环** http ⇒ mock 的 127.0.0.1 合法）。
+      env: {
+        ...stringEnv(process.env),
+        FNM_UPDATE_DIR: join(userDataDir, 'update'),
+        FNM_CHART_URL: `${mock.url}/mock-chart`,
+      },
     })
   } catch (err) {
     // ⚠️ **只关自己创建的**（复用来的 mock 不能关）。

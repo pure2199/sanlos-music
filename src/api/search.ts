@@ -55,4 +55,23 @@ export const searchApi = {
       artists: { list: artists.list.map((artist) => mapArtist(artist)), total: artists.total },
     }
   },
+
+  /**
+   * **只**搜歌手（`/search/artist`）。
+   *
+   * ⚠️ **为什么单独开一个方法**：`query()` 会**并发打三个端点**（歌曲 / 专辑 / 歌手），
+   *    而「按歌手名找本地歌手」只需要歌手那一个 ⇒ 单独走能省掉 **2/3 的请求**。
+   *    （T96 的「发现」页要按榜单里的歌手**逐个**定向查，量很大 ⇒ 这点很值钱。）
+   *
+   * ⚠️ 服务端的搜索是**子串匹配**（实测：`includes`）⇒ 返回的可能是一堆**只沾边**的歌手；
+   *    调用方要**自己**按名字全等筛一遍（见 `src/api/discover.ts`）。
+   */
+  async artists(q: string, opts: { page?: number; size?: number } = {}): Promise<Page<Artist>> {
+    const page = normalizePageNumber(opts.page ?? 1)
+    const size = normalizePageSize(opts.size ?? DEFAULT_PAGE_SIZE)
+    const raw = normalizePage<RawArtist>(
+      await apiCall<RawPage<RawArtist>>('/search/artist', { query: { q, page, size } }),
+    )
+    return { list: raw.list.map((artist) => mapArtist(artist)), total: raw.total }
+  },
 }

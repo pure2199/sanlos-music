@@ -25,6 +25,9 @@ vi.mock('../src/pages/LocalMusicPage', () => ({
 vi.mock('../src/pages/SearchPage', () => ({
   SearchPage: () => <div data-testid="view-search">搜索页</div>,
 }))
+vi.mock('../src/pages/DiscoverPage', () => ({
+  DiscoverPage: () => <div data-testid="view-discover">发现页</div>,
+}))
 vi.mock('../src/pages/SongsPage', () => ({
   SongsPage: () => <div data-testid="view-songs">歌曲页</div>,
 }))
@@ -143,7 +146,7 @@ describe('应用外壳的曲库路由', () => {
     expect(screen.queryByTestId('view-search')).toBeNull()
   })
 
-  it('顶栏的「歌曲 / 收藏 / 歌单 / 专辑 / 歌手 / 风格 / 搜索」按钮切到对应页面，且旧页面被卸载', () => {
+  it('顶栏的「歌曲 / 收藏 / 歌单 / 专辑 / 歌手 / 风格 / 搜索 / 发现」按钮切到对应页面，且旧页面被卸载', () => {
     render(<App />)
 
     const cases = [
@@ -154,6 +157,7 @@ describe('应用外壳的曲库路由', () => {
       ['歌手', 'view-artists'],
       ['风格', 'view-genres'],
       ['搜索', 'view-search'],
+      ['发现', 'view-discover'],
     ] as const
 
     for (const [label, testId] of cases) {

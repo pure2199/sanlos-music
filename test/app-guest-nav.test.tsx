@@ -30,6 +30,9 @@ vi.mock('../src/pages/LocalMusicPage', () => ({
 vi.mock('../src/pages/SearchPage', () => ({
   SearchPage: () => <div data-testid="view-search">搜索页</div>,
 }))
+vi.mock('../src/pages/DiscoverPage', () => ({
+  DiscoverPage: () => <div data-testid="view-discover">发现页</div>,
+}))
 vi.mock('../src/pages/SongsPage', () => ({
   SongsPage: () => <div data-testid="view-songs">歌曲页</div>,
 }))
@@ -130,6 +133,8 @@ describe('T38 未登录时的界面', () => {
     expect(screen.queryByRole('navigation', { name: '曲库导航' })).toBeNull()
     expect(screen.queryByRole('button', { name: '搜索' })).toBeNull()
     expect(screen.queryByRole('button', { name: '歌曲' })).toBeNull()
+    // ⚠️ T96：「发现」也要跟**你的**曲库对上 ⇒ 没有 NAS 就答不了 ⇒ 未登录不渲染。
+    expect(screen.queryByRole('button', { name: '发现' })).toBeNull()
   })
 
   it('未登录：主区默认停在「本地音乐」页（打开软件就是个播放器）', () => {
