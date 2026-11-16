@@ -10,6 +10,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { ThemeSwitcher } from './components/ThemeSwitcher'
 import { AlbumsPage } from './pages/AlbumsPage'
 import { ArtistsPage } from './pages/ArtistsPage'
+import { AudiobooksPage } from './pages/AudiobooksPage'
 import { DetailPage } from './pages/DetailPage'
 import { DiscoverPage } from './pages/DiscoverPage'
 import { FavoritesPage } from './pages/FavoritesPage'
@@ -118,6 +119,7 @@ type MainView =
   | 'favorites'
   | 'playlists'
   | 'albums'
+  | 'audiobooks'
   | 'artists'
   | 'genres'
   | 'history'
@@ -410,6 +412,9 @@ export default function App() {
         return <PlaylistsPage onPlay={handlePlay} />
       case 'albums':
         return <AlbumsPage onOpenAlbum={handleOpenAlbum} />
+      case 'audiobooks':
+        // ⚠️ T98：「有声读物」页（识别 + 一键改判 + 重新扫描）。
+        return <AudiobooksPage onOpenAlbum={handleOpenAlbum} />
       case 'artists':
         return <ArtistsPage onOpenArtist={handleOpenArtist} />
       case 'genres':
@@ -516,6 +521,15 @@ export default function App() {
               label="专辑"
               active={view === 'albums'}
               onSelect={() => goTo('albums')}
+            />
+            {/*
+             * ⚠️ T98：「有声读物」页（识别 + 按集序排列）。
+             *    放在「专辑」**后面**——它本质是专辑的一个筛选视图。
+             */}
+            <NavButton
+              label="有声"
+              active={view === 'audiobooks'}
+              onSelect={() => goTo('audiobooks')}
             />
             <NavButton
               label="歌手"

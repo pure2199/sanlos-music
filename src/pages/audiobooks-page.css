@@ -1,0 +1,103 @@
+/* 「有声读物」页（T98）。
+ *
+ * ⚠️ 颜色**只用 CSS 语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
+ */
+
+.fnm-audiobooks {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+.fnm-audiobooks__toolbar {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fnm-audiobooks__scan {
+  padding: 8px 16px;
+  border-radius: var(--radius-field);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.fnm-audiobooks__scan:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 次要按钮（「从头重扫」）：弱一档，但**仍是**语义色。 */
+.fnm-audiobooks__scan--secondary {
+  border-color: var(--border);
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.fnm-audiobooks__hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+  max-width: 60ch;
+}
+
+.fnm-audiobooks__empty {
+  margin: 0;
+  opacity: 0.75;
+}
+
+.fnm-audiobooks__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fnm-audiobooks__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.fnm-audiobooks__title {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.fnm-audiobooks__meta,
+.fnm-audiobooks__reasons {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.fnm-audiobooks__exclude {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}

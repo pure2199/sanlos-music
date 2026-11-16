@@ -28,7 +28,7 @@
 //    样式住在同目录的 `detail-page.css`（页面级布局归页面自己）。
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import { useStore } from 'zustand'
 
 import type { Album, Song } from '../../shared/types'
@@ -41,6 +41,13 @@ import { LibraryPageShell } from '../components/LibraryPageShell'
 import { PagingNotice } from '../components/PagingNotice'
 import { SongList } from '../components/SongList'
 import { defaultPlaylistWritebackApi, type PlaylistWritebackApi } from '../api/playlist'
+import { libraryApi } from '../api/library'
+import {
+  resolveAlbumEpisodes,
+  sortTracksByEpisode,
+  type AudiobookTrack,
+} from '../api/audiobook'
+import { useAudiobookStore } from '../state/audiobookStore'
 import {
   useResolvedLibraryStore,
   type DetailKind,
@@ -118,12 +125,90 @@ export function DetailPage(props: DetailPageProps): ReactElement {
     else void openGenre(entityId)
   }, [entityId, kind, openAlbum, openArtist, openGenre])
 
+  // ---- T98：判定为「有声读物」⇒ **一次性拉全量 + 按集序排** ----------------
+  //
+  // ⚠️ 为什么必须「一次性拉全量」：客户端只能排**已加载的页** ⇒ 若第 2 页的集号
+  //    比第 1 页小，加载后会**跳序**（用户看到的「乱」）。
+  //    实测有声专辑可达 **2762 集** ⇒ 分页拉完再排（`size=2000` ⇒ 2 页）。
+  const isAudiobook = useStore(useAudiobookStore, (s) => s.isAudiobook(entityId))
+  const setOverride = useStore(useAudiobookStore, (s) => s.setOverride)
+  const [orderedSongs, setOrderedSongs] = useState<Song[] | null>(null)
+  const [orderedLoading, setOrderedLoading] = useState(false)
+
+  useEffect(() => {
+    if (kind !== 'album' || !isAudiobook) {
+      setOrderedSongs(null)
+      return
+    }
+    let cancelled = false
+    setOrderedLoading(true)
+    void (async () => {
+      const all: Song[] = []
+      for (let page = 1; page <= 10; page += 1) {
+        const res = await libraryApi.albumSongs(entityId, page, 2000)
+        all.push(...res.list)
+        if (res.list.length === 0 || all.length >= res.total) break
+      }
+      if (cancelled) return
+      const tracks: AudiobookTrack[] = all.map((song) => ({
+        id: song.id,
+        title: song.title,
+        durationSec: song.duration,
+        trackNo: song.trackNo,
+        path: song.audioSpec?.path ?? null,
+        albumId: song.albumId || entityId,
+      }))
+      const order = new Map(sortTracksByEpisode(tracks).map((t, i) => [t.id, i]))
+      setOrderedSongs([...all].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)))
+      setOrderedLoading(false)
+    })().catch(() => {
+      if (!cancelled) setOrderedLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [entityId, isAudiobook, kind])
+
+  /** 每首的集号（`null` = 解析不出来）。 */
+  const episodeBySongId = useMemo(() => {
+    const map = new Map<string, number[] | null>()
+    if (!orderedSongs || orderedSongs.length === 0) return map
+    const episodes = resolveAlbumEpisodes(orderedSongs.map((s) => s.title))
+    orderedSongs.forEach((song, i) => map.set(song.id, episodes.values[i] ?? null))
+    return map
+  }, [orderedSongs])
+
+  /**
+   * 这张专辑**真的**排成集序了吗？
+   *
+   * ⚠️ 形态不一致（命中率 < 60%）⇒ 集号层**整层作废** ⇒ 顺序**原样保留**
+   *    ⇒ 那就不能说「已按集序排列」（那是在骗用户）。
+   */
+  const orderNote = useMemo(() => {
+    if (!orderedSongs) return '正在按集序整理…'
+    if (orderedSongs.length === 0) return ''
+    for (const value of episodeBySongId.values()) {
+      if (value) return '已按集序排列'
+    }
+    return '没识别到集号，保持原有顺序'
+  }, [episodeBySongId, orderedSongs])
+
   // ---- 头部（标题 / 封面双来源）------------------------------------------
   const heading = kind === 'album' ? albumDetail?.title ?? title : title
   const cover = kind === 'album' ? albumDetail?.coverId ?? coverId : coverId
 
   // ---- 状态行 / 错误 / 加载中 ---------------------------------------------
-  const songs = kind === 'album' ? albumSongs : kind === 'artist' ? artistSongs : genreSongs
+  const baseSongs = kind === 'album' ? albumSongs : kind === 'artist' ? artistSongs : genreSongs
+  /**
+   * 曲目集合：判定为有声的专辑 ⇒ 用**一次性拉全量并按集序排好**的那一份。
+   *
+   * ⚠️ 分页追加的集合在有声专辑上会「跳序」⇒ 这里整体换掉（`hasMore` 关掉，
+   *    因为全量已经拉完了，再点「继续加载」只会重复）。
+   */
+  const songs =
+    orderedSongs && orderedSongs.length > 0
+      ? { ...baseSongs, items: orderedSongs, loading: orderedLoading, hasMore: false }
+      : baseSongs
   /** 曲目集合对应的分页键（给「继续加载」提示用）。 */
   const songsPagedKind: PagedKind =
     kind === 'album' ? 'albumSongs' : kind === 'artist' ? 'artistSongs' : 'genreSongs'
@@ -167,6 +252,24 @@ export function DetailPage(props: DetailPageProps): ReactElement {
           <CoverImage coverId={cover} alt="" boxSize={DETAIL_COVER_SIZE} />
           <p className="fnm-detail__subtitle">{subtitle}</p>
         </div>
+
+        {/*
+         * ⚠️ T98：只有**判定为有声**的专辑才显示这一块（普通专辑**完全不受影响**）。
+         *    - 「已按集序排列」= 给用户一个**明确的信号**（顺序不是随机的）；
+         *    - 「这不是有声」= 一键改判（用户拍板「宁可多标 + 一键改判」）。
+         */}
+        {kind === 'album' && isAudiobook && (
+          <p className="fnm-detail__audiobook">
+            <span className="fnm-detail__audiobook-note">{orderNote}</span>
+            <button
+              type="button"
+              className="fnm-detail__audiobook-btn"
+              onClick={() => setOverride(entityId, 'not-audiobook', undefined, heading)}
+            >
+              这不是有声
+            </button>
+          </p>
+        )}
 
         {kind === 'artist' && (
           <section className="fnm-detail__section">
@@ -212,10 +315,35 @@ export function DetailPage(props: DetailPageProps): ReactElement {
             emptyLabel="暂无曲目"
             ariaLabel="详情曲目列表"
             renderRowActions={rowActions.render}
+            renderIndex={
+              orderedSongs && orderedSongs.length > 0
+                ? (song) => {
+                    const episode = episodeBySongId.get(song.id)
+                    if (!episode) return null
+                    return <span className="fnm-detail__episode">第 {episode.join('.')} 集</span>
+                  }
+                : undefined
+            }
           />
           {/* 分页被护栏拦下时的「继续加载」入口（T9）。 */}
           <PagingNotice kind={songsPagedKind} store={resolved} />
         </section>
+
+        {/*
+         * ⚠️ T98：**任何**专辑都可以被用户手动标成有声（自动判定可能漏）。
+         *    判为有声后：这一页会改成「一次性拉全量 + 按集序排」。
+         */}
+        {kind === 'album' && !isAudiobook && (
+          <p className="fnm-detail__audiobook">
+            <button
+              type="button"
+              className="fnm-detail__audiobook-btn"
+              onClick={() => setOverride(entityId, 'audiobook', undefined, heading)}
+            >
+              这是有声读物
+            </button>
+          </p>
+        )}
       </div>
     </LibraryPageShell>
   )

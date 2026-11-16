@@ -15,9 +15,11 @@ import {
   mapArtist,
   mapGenre,
   mapSong,
+  MAX_PAGE_SIZE,
   normalizePage,
   normalizePageNumber,
   normalizePageSize,
+  unixSeconds,
 } from './client'
 import type { Page, RawAlbum, RawArtist, RawGenre, RawPage, RawSong } from './types'
 
@@ -164,4 +166,144 @@ export const libraryApi = {
     )
     return { list: raw.list.map((genre) => mapGenre(genre)), total: raw.total }
   },
+}
+
+// ---------------------------------------------------------------------------
+// 曲库流式扫描（T98「有声读物」识别用）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么单开一个函数**（而不是给 `libraryApi` 加方法）：
+//   ① 它**逐页回调**（不累积 17 万首到内存）⇒ 形状与常规分页接口完全不同；
+//   ② 它**带增量水位**（按 `createdAt` 停）⇒ 是 T98 专用语义；
+//   ③ 常规接口那句「**不提供任何一次性全量拉取的路径**」针对的是**界面消费**，
+//      而这里是**后台扫描**：逐页、逐页释放，不占界面内存。
+//
+// 实测（2026-11-16，本机 + 该账号）：
+// - `/track/list` 的 `size` 上限 **2000**、`page` 上限 **2000**；
+// - 曲库共 **173,671 首** ⇒ `size=2000` 只要 **87 页**；
+// - 默认排序实测就是 `createdAt,desc`（这里**显式**带上，不依赖默认值）。
+// ---------------------------------------------------------------------------
+
+/** 扫描用的一条曲目（**只取识别 / 排序需要的字段**）。 */
+export interface ScanTrack {
+  /** 曲目 id。 */
+  id: string
+  /** 曲目标题。 */
+  title: string
+  /** 所属专辑 id。 */
+  albumId: string
+  /** 所属专辑名。 */
+  albumTitle: string
+  /** 时长（**秒**）。 */
+  durationSec: number
+  /** 曲目号（可为 `null`）。 */
+  trackNo: number | null
+  /** NAS 上的文件路径（可为 `null`）。 */
+  path: string | null
+  /** 服务端入库时间（Unix 秒；可为 `null`）。 */
+  createdAt: number | null
+}
+
+/** 扫描进度。 */
+export interface ScanProgress {
+  /** 已扫到第几页（1 起）。 */
+  page: number
+  /** 总页数（按 `total` 与 `pageSize` 估算）。 */
+  pages: number
+  /** 已扫曲目数。 */
+  scanned: number
+  /** 曲库总曲目数。 */
+  total: number
+}
+
+/** 扫描选项。 */
+export interface ScanOptions {
+  /** 每页条数（服务端上限 2000；默认取 2000 ⇒ 87 页扫完 17 万首）。 */
+  pageSize?: number
+  /** 最多扫多少页（护栏；默认 2000 = 服务端上限）。 */
+  maxPages?: number
+  /**
+   * 从第几页开始扫（**断点续跑**用；默认 1）。
+   *
+   * ⚠️ 服务端**没有**「跳过前 N 页」的参数，但 `page` 本身就是偏移 ⇒ 直接从断点页开始即可。
+   */
+  startPage?: number
+  /**
+   * 增量水位：**只取** `createdAt` 严格大于它的曲目；`null` / 缺省 = 全量。
+   *
+   * ⚠️ 服务端对**同一秒**的曲目没有二级排序键 ⇒ 水位取「最小 `createdAt` − 1」
+   *    会重复扫那一秒 ⇒ 调用方**必须按曲目 id 去重**。
+   */
+  sinceCreatedAt?: number | null
+  /** 每页回调（**逐页**，页处理完这一页的数组即可释放）。 */
+  onPage?: (tracks: ScanTrack[], progress: ScanProgress) => void
+}
+
+/** 扫描结果。 */
+export interface ScanResult {
+  /** 实际扫到的曲目数（**含**水位重复的那部分）。 */
+  scanned: number
+  /** 曲库总曲目数。 */
+  total: number
+  /** 实际扫的页数。 */
+  pages: number
+  /** 是否因为「到达增量水位」而提前停止。 */
+  stoppedAtWatermark: boolean
+}
+
+/** 把一条原始歌曲压成扫描用的形状。 */
+function toScanTrack(raw: RawSong): ScanTrack {
+  const album = raw.album
+  return {
+    id: typeof raw.guid === 'string' ? raw.guid : '',
+    title: typeof raw.title === 'string' ? raw.title : '',
+    albumId: album && typeof album.guid === 'string' ? album.guid : '',
+    albumTitle: album && typeof album.name === 'string' ? album.name : '',
+    durationSec: Math.round(Number(raw.duration ?? 0) / 1000),
+    trackNo: typeof raw.trackNo === 'number' && Number.isFinite(raw.trackNo) ? raw.trackNo : null,
+    path: typeof raw.audioSpec?.path === 'string' ? raw.audioSpec.path : null,
+    createdAt: unixSeconds(raw.createdAt),
+  }
+}
+
+/**
+ * 流式扫描整个曲库（**逐页回调**，不把全库留在内存里）。
+ *
+ * ⚠️ 这是**唯一**被允许「接近全量」读曲库的路径（T98 的识别要用）；
+ *    界面上的曲库浏览仍走 `libraryApi.songs` 的分页。
+ */
+export async function scanLibraryTracks(options?: ScanOptions): Promise<ScanResult> {
+  const pageSize = normalizePageSize(options?.pageSize ?? MAX_PAGE_SIZE)
+  const maxPages = Math.max(1, Math.floor(options?.maxPages ?? 2000))
+  const startPage = Math.max(1, Math.floor(options?.startPage ?? 1))
+  const since = typeof options?.sinceCreatedAt === 'number' ? options.sinceCreatedAt : null
+
+  let total = 0
+  let scanned = 0
+  let pages = 0
+  let stoppedAtWatermark = false
+
+  for (let page = startPage; page <= maxPages; page += 1) {
+    const raw = normalizePage<RawSong>(
+      await apiCall<RawPage<RawSong>>('/track/list', {
+        query: { page, size: pageSize, sort: 'createdAt,desc' },
+      }),
+    )
+    if (raw.total > total) total = raw.total
+    const tracks = raw.list.map(toScanTrack)
+    pages = page - startPage + 1
+    scanned += tracks.length
+
+    options?.onPage?.(tracks, { page, pages: Math.max(1, Math.ceil(total / pageSize)), scanned, total })
+
+    if (tracks.length === 0) break
+    // 增量：这一页里**全部**都不新 ⇒ 后面只会更旧 ⇒ 停。
+    if (since !== null && tracks.every((t) => t.createdAt === null || t.createdAt <= since)) {
+      stoppedAtWatermark = true
+      break
+    }
+    if (scanned >= total) break
+  }
+
+  return { scanned, total, pages, stoppedAtWatermark }
 }

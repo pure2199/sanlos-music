@@ -65,3 +65,33 @@
   font-weight: 600;
   color: var(--text-primary);
 }
+
+/* T98: 有声读物（按集序排列 + 集号徽标 + 改判按钮）。 */
+.fnm-detail__audiobook {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.fnm-detail__audiobook-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fnm-detail__audiobook-btn {
+  padding: 3px 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fnm-detail__episode {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}

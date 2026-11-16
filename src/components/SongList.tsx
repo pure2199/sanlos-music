@@ -125,6 +125,13 @@ export interface SongListProps {
    *    既有调用方（曲库 / 收藏 / 歌单页）的渲染结果与之前**完全一致**。
    */
   renderRowActions?: (song: Song, index: number) => ReactNode
+  /**
+   * 可选的**行首序号**（T98「有声读物」用它显示集号）。
+   *
+   * ⚠️ **纯增量**：不传时行内**不渲染任何附加节点**——
+   *    既有调用方（曲库 / 收藏 / 歌单页）的渲染结果与之前**完全一致**。
+   */
+  renderIndex?: (song: Song, index: number) => ReactNode
 }
 
 /**
@@ -149,6 +156,7 @@ export function SongList(props: SongListProps): ReactElement {
     emptyLabel = '暂无歌曲',
     ariaLabel = '歌曲列表',
     renderRowActions,
+    renderIndex,
   } = props
 
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -416,6 +424,8 @@ export function SongList(props: SongListProps): ReactElement {
                   <CoverImage coverId={song.coverId} alt="" boxSize={SONG_COVER_SIZE} />
                 </span>
                 <span className="fnm-songlist__title">{song.title}</span>
+                {/* ⚠️ 可选的行首序号（T98「有声读物」用它显示**集号**）。 */}
+                {renderIndex ? renderIndex(song, index) : null}
                 <span className="fnm-songlist__artist">{song.artist}</span>
                 <span className="fnm-songlist__album">{song.album}</span>
                 {/*

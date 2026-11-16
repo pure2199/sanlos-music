@@ -121,6 +121,13 @@ export interface Song {
   discNo: number | null
   /** 发行日期（实测可能为 null）。 */
   releaseDate?: string | null
+  /**
+   * 服务端入库时间（**Unix 秒**；实测曲库歌曲对象带 `createdAt`）。
+   *
+   * ⚠️ **为什么要有它**：T98「有声读物」扫描要按入库时间做**增量**（水位），
+   *    没有它就只能每次全量重扫 17 万首。
+   */
+  createdAt?: number | null
   /** 风格列表（实测歌曲对象内恒为空数组，风格需单独查询）。 */
   genres?: Genre[]
   /** 音频规格明细。 */

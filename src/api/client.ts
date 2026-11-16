@@ -193,6 +193,22 @@ function nullableStr(value: unknown): string | null {
 }
 
 /**
+ * 归一「服务端时间」成 **Unix 秒**。
+ *
+ * ⚠️ 服务端给的是 **Unix 秒**（实测 `1792563278`）；也有地方给 ISO 串 ⇒ 一起兜住。
+ * ⚠️ 解析不出来 ⇒ `null`（**不猜**）：T98 的增量水位宁可「当成没有水位」，
+ *    也不要用一个错的时间戳把新曲目漏掉。
+ */
+export function unixSeconds(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Date.parse(value)
+    if (Number.isFinite(parsed)) return Math.floor(parsed / 1000)
+  }
+  return null
+}
+
+/**
  * 时间字段归一：Unix 秒 → ISO 8601 字符串；已经是字符串就原样保留；缺失 → `null`。
  *
  * 实测服务端给的是 **Unix 秒**（如 `1792563278`），而领域模型的时间字段约定是
@@ -475,6 +491,7 @@ export function mapSong(json: RawSong): Song {
     trackNo: nullableNum(json.trackNo),
     discNo: nullableNum(json.discNo),
     releaseDate: nullableStr(json.releaseDate),
+    createdAt: unixSeconds(json.createdAt),
     genres: mapGenres(json.genres),
     audioSpec: mapAudioSpec(spec),
   }
