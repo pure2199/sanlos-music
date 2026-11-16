@@ -62,6 +62,9 @@ interface SearchGroup {
    *
    * ⚠️ **T101**：`/search/album` 的返回**自带** `coverId` ⇒ 秒搜结果**立刻**有封面，
    *    **不用**为每张专辑多发一个请求。
+   *
+   * ⚠️ **T102**：这个 `coverId` **本来就是「专辑自己的」那个 id**
+   *    ⇒ 与扫描路径统一后的 `albumCoverId` **逐字一致**（真机实测：`track_66f7a2fc…`）。
    */
   coverId: string | null
 }
@@ -83,8 +86,8 @@ function toAlbum(hit: AudiobookHit): Album {
     title: hit.albumTitle,
     artist: '',
     artistId: '',
-    // ⚠️ **T101**：封面跟着走 ⇒ 下钻页的头部封面也对得上。
-    coverId: hit.coverId,
+    // ⚠️ **T102**：封面跟着走 ⇒ 下钻页的头部封面也对得上（用**专辑**的封面 ⇒ 与专辑页一致）。
+    coverId: hit.albumCoverId ?? null,
     year: null,
     trackCount: hit.trackCount,
   }
@@ -236,8 +239,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
   const restore = useStore(useAudiobookStore, (s) => s.restore)
   const setOverride = useStore(useAudiobookStore, (s) => s.setOverride)
   const registerGroup = useStore(useAudiobookStore, (s) => s.registerGroup)
-  /** ⚠️ **T101**：补上封面（并回写落盘）。 */
-  const setCover = useStore(useAudiobookStore, (s) => s.setCover)
+  /** ⚠️ **T102**：补上**专辑自己的**封面（并回写落盘）—— 卡片显示的就是它。 */
+  const setAlbumCover = useStore(useAudiobookStore, (s) => s.setAlbumCover)
 
   // ⚠️ T100：进页面**只做两件事** —— ① 读回落盘的结果；② **没扫过就自动开扫**
   //    （用户**不用点**任何按钮）。
@@ -310,6 +313,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
         episodeRule: null,
         // ⚠️ **T101**：手动指定的条目**没有**封面 ⇒ 画占位块（进页时会补拉一次）。
         coverId: null,
+        // ⚠️ **T102**：专辑封面**未知** ⇒ 进页时补拉一次 `/album/detail` ⇒ 写进 `albumCoverId`。
+        albumCoverId: undefined,
       }))
     const merged = new Map<string, AudiobookHit>()
     for (const hit of hits) merged.set(hit.albumId, hit)
@@ -329,17 +334,22 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
   }, [effectiveKeyword, scan])
 
   /**
-   * ⚠️ **T101**：**没有封面**的条目 ⇒ 去拉一次 `/album/detail` 补上（每张 **1** 个请求）。
+   * ⚠️ **T102**：**专辑封面未知**的条目 ⇒ 去拉一次 `/album/detail` 补上（每张 **1** 个请求）。
    *
-   * ⚠️ **为什么需要**：扫描路径现在会**顺手**记下曲目的封面 ⇒ 新扫的结果**直接有**；
-   *    但**旧落盘**（T101 之前扫的）没有 ⇒ 补一次。
-   * ⚠️ **补完会回写落盘**（`setCover`）⇒ 下次进来**不用**再拉。
+   * ⚠️ **为什么判据是「未知」而不是「没有」**：`albumCoverId` 是**三态** ——
+   *    `undefined` = **未知**（T101 的旧落盘只存了**曲目**封面）⇒ 要拉；
+   *    `null` = **确认没有封面**（专辑确实没封面）⇒ **不用**再拉；
+   *    字符串 = 有封面。
+   * ⚠️ **为什么统一到「专辑封面」**：曲目的封面与专辑的封面是**两个不同的 id**
+   *    （真机实测：`track_591e8c99…` vs `album_1988d5f2…`）⇒ 用曲目封面**永远统一不了**
+   *    ⇒ 统一到专辑封面 ⇒ 与**专辑页**、与**秒搜结果**都**逐字一致**。
+   * ⚠️ **补完会回写落盘**（`setAlbumCover`）⇒ 下次进来**不用**再拉。
    * ⚠️ 拉不到**不影响**任何功能（卡片画占位块）⇒ 不打扰用户。
    */
   const requestedCovers = useRef(new Set<string>())
   useEffect(() => {
     const missing = items
-      .filter((hit) => !hit.coverId && !requestedCovers.current.has(hit.albumId))
+      .filter((hit) => hit.albumCoverId === undefined && !requestedCovers.current.has(hit.albumId))
       .map((hit) => hit.albumId)
     if (missing.length === 0) return
     for (const albumId of missing) requestedCovers.current.add(albumId)
@@ -350,16 +360,19 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
         try {
           const album = await libraryApi.album(albumId)
           if (cancelled) return
-          setCover(albumId, album?.coverId ?? null)
+          // ⚠️ **T102**：写进 `albumCoverId`（**专辑**封面）⇒ 显示统一 ⇒ 与秒搜一致。
+          // ⚠️ 拉到了但专辑**没有**封面 ⇒ 写 `null` ⇒ 落盘记住「确实没有」⇒ 不再拉第二次。
+          setAlbumCover(albumId, album?.coverId ?? null)
         } catch {
           // ⚠️ 拿不到封面就算了（卡片画占位块）⇒ 不报错、不打扰用户。
+          // ⚠️ **不写落盘**（这次是**失败**，不是「确实没有」）⇒ 下次进页面还会再试。
         }
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [items, setCover])
+  }, [items, setAlbumCover])
 
   const status = scanning
     ? `正在扫描…第 ${progress?.page ?? 0} 页 / 共 ${progress?.pages ?? 0} 页（已扫 ${progress?.scanned ?? 0} 首）`
@@ -405,7 +418,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
                   <AudiobookCard
                     key={hit.albumId}
                     title={hit.albumTitle || '（未命名的专辑）'}
-                    coverId={hit.coverId}
+                    // ⚠️ **T102**：显示**专辑自己的**封面 ⇒ 与秒搜结果、与专辑页**逐字一致**。
+                    coverId={hit.albumCoverId ?? null}
                     subtitle={listMeta(hit)}
                     source={manual ? '你指定的' : `在「${keyword}」目录下`}
                     itemClassName="fnm-audiobooks__item"
@@ -456,6 +470,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
                 <AudiobookCard
                   key={group.albumId}
                   title={group.title}
+                  // ⚠️ **T102**：秒搜路径的封面**本来就是专辑自己的**（`/search/album` 自带）
+                  //    ⇒ 与主列表（扫描路径）**逐字一致**。
                   coverId={group.coverId}
                   subtitle={searchMeta(group)}
                   itemClassName="fnm-audiobooks__result"

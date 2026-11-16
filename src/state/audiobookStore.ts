@@ -101,8 +101,27 @@ export interface AudiobookHit {
    * ⚠️ **T101**：「有声」页要画**封面卡片**（同专辑页）⇒ 命中条目必须带封面。
    *    扫描时**顺手**记下（曲目的 `coverId` 本来就在数据里 ⇒ 不要钱）；
    *    旧落盘没有 ⇒ 进页时按需补拉 `/album/detail`（见 `setCover`）。
+   *
+   * ⚠️ **T102**：这是「**曲目**封面」⇒ **不再用于显示**（显示一律用 `albumCoverId`），
+   *    但**保留**（落盘形状不变 ⇒ T101 的旧落盘照样能读、既有测试一条不改）。
    */
   coverId: string | null
+  /**
+   * **专辑自己的**封面 id —— **卡片显示的就是它**。
+   *
+   * ⚠️ **T102**（三态，**别**用真假值判断）：
+   * - `undefined` = **未知**（旧落盘没有这个字段）⇒ 要补拉一次 `/album/detail`；
+   * - `null` = **确认没有封面**（专辑确实没封面）⇒ **不用**再拉；
+   * - 字符串 = 有封面。
+   *
+   * ⚠️ **为什么必须是「专辑的」**：曲目的封面与专辑的封面是**两个不同的 id**
+   *    （真机实测：「庙堂之外」曲目 `track_591e8c99…` / 专辑 `album_1988d5f2…`）
+   *    ⇒ 用曲目封面**永远统一不了** ⇒ 统一到专辑封面 ⇒ 与专辑页 / 秒搜**逐字一致**。
+   *
+   * ⚠️ **可选**（`?`）：**缺省 = 未知** ⇒ 造一条命中记录时**不必**带这个字段
+   *    ⇒ 既有测试与既有代码**一个字都不用改**。
+   */
+  albumCoverId?: string | null
 }
 
 /** 落盘的候选专辑结构指标（断点续跑要用）。 */
@@ -131,6 +150,18 @@ interface CandidateSnapshot {
    *    （升了 ⇒ 用户已扫过的结果全部作废 ⇒ 白扫一次 52 秒）。
    */
   coverId?: string | null
+  /**
+   * **专辑自己的**封面 id（T102，**可选** ⇒ `STATE_VERSION` 仍为 3）。
+   *
+   * ⚠️ **三态**（**靠「字段在不在」区分**，别用真假值）：
+   * - **字段缺省** = **未知** ⇒ 要补拉一次 `/album/detail`（T101 的旧落盘就是这个形状）；
+   * - `null` = **确认没有封面** ⇒ 不用再拉；
+   * - 字符串 = 有封面。
+   *
+   * ⚠️ **为什么不能复用 `coverId`**：`coverId` 装的是**曲目**封面（T101 的语义）
+   *    ⇒ 两者混在一起就**分不清**「旧的曲目封面」与「新的专辑封面」⇒ 旧落盘永远统一不了。
+   */
+  albumCoverId?: string | null
 }
 
 /** 落盘的整体状态。 */
@@ -302,6 +333,16 @@ export interface AudiobookStore {
    */
   setCover: (albumId: string, coverId: string | null, port?: AudiobookPort) => void
   /**
+   * **补上「专辑自己的」封面 id**（T102）—— 卡片**显示**的就是它。
+   *
+   * ⚠️ **谁调它**：页面看到命中的专辑封面**未知**（`albumCoverId === undefined`
+   *    ⇒ T101 的旧落盘 / 手动指定的条目）⇒ 去拉一次 `/album/detail`
+   *    ⇒ 拿到后调这个 ⇒ **改命中 + 回写落盘** ⇒ 下次进来**不用**再拉。
+   * ⚠️ **传 `null`** = 「这张专辑**确实没有**封面」⇒ 也会回写落盘 ⇒ **不再**拉第二次。
+   * ⚠️ **不发请求**：这里只管状态与落盘；请求由页面编排（store 不碰网络）。
+   */
+  setAlbumCover: (albumId: string, coverId: string | null, port?: AudiobookPort) => void
+  /**
    * **临时组**（T100）：**秒搜路径**归并出来的组 —— `albumId` → 组内全部 id。
    *
    * ⚠️ **为什么不落盘**：这是**一次搜索的临时结果**（用户搜完就完了）
@@ -331,15 +372,28 @@ interface Aggregator {
   /** 作品目录（≤ `DIR_SAMPLE` 个）。 */
   dirs: string[]
   /**
-   * 封面 id（`null` = 没有封面）。
-   *
-   * ⚠️ **T101**：取这张专辑**第一首**曲目的封面（曲目的 `coverId` 就在数据里 ⇒ 免费）。
-   */
+ * 封面 id（`null` = 没有封面）。
+ *
+ * ⚠️ **T101**：取这张专辑**第一首**曲目的封面（曲目的 `coverId` 就在数据里 ⇒ 免费）。
+ *
+ * ⚠️ **T102**：这个是「**曲目**封面」⇒ **不用于显示**（保留只为落盘形状不变）。
+ */
   coverId: string | null
+  /**
+   * **专辑自己的**封面 id（T102）。
+   *
+   * ⚠️ **三态**：`undefined` = 未知（要补拉）/ `null` = 确认没有 / 字符串 = 有。
+   */
+  albumCoverId: string | null | undefined
 }
 
 /** 新建一个聚合器。 */
-function newAggregator(albumId: string, albumTitle: string, coverId: string | null): Aggregator {
+function newAggregator(
+  albumId: string,
+  albumTitle: string,
+  coverId: string | null,
+  albumCoverId: string | null | undefined = null,
+): Aggregator {
   return {
     albumId,
     albumTitle,
@@ -349,6 +403,7 @@ function newAggregator(albumId: string, albumTitle: string, coverId: string | nu
     episodeStats: { ruleCounts: {}, titleCount: 0 },
     dirs: [],
     coverId,
+    albumCoverId,
   }
 }
 
@@ -369,7 +424,11 @@ function accumulate(
     if (!pathMatchesKeyword(t.path, keyword)) continue
     let agg = target.get(t.albumId)
     if (!agg) {
-      agg = newAggregator(t.albumId, t.albumTitle, t.coverId || null)
+      // ⚠️ **T102**：专辑封面（**专辑自己的**那个 id）⇒ 与专辑页 / 秒搜**逐字一致**。
+      // ⚠️ **来源唯一**：同一张专辑的**所有**曲目内嵌的是**同一个专辑对象**
+      //    ⇒ 专辑封面**每张专辑只有一个值** ⇒ 建聚合器时取**第一条**就够了
+      //    （写成「每条曲目再补一次」会多出一条**等价**的路径 ⇒ 变异自证会分不清）。
+      agg = newAggregator(t.albumId, t.albumTitle, t.coverId || null, t.albumCoverId || null)
       target.set(t.albumId, agg)
     }
     agg.trackCount += 1
@@ -412,6 +471,13 @@ interface MergedGroup {
   dirs: string[]
   /** 封面 id（取**主专辑**的；`null` = 没有封面）。 */
   coverId: string | null
+  /**
+   * **专辑自己的**封面 id（T102）：取**主专辑**的（三态：`undefined` = 未知）。
+   *
+   * ⚠️ **为什么取主专辑**：归并组代表「一部作品」⇒ 它的封面就是**主专辑**那张
+   *    ⇒ 与秒搜路径（同样取主专辑）**一致**。
+   */
+  albumCoverId: string | null | undefined
 }
 
 /**
@@ -479,6 +545,8 @@ function mergeAggregators(list: readonly Aggregator[]): MergedGroup[] {
       dirs: [...dirs],
       // ⚠️ **T101**：封面取**主专辑**的（组内其它成员封面不同时，主专辑那张最贴切）。
       coverId: main.coverId,
+      // ⚠️ **T102**：**专辑自己的**封面（也取主专辑）⇒ 与秒搜路径**逐字一致**。
+      albumCoverId: main.albumCoverId,
     })
   }
   return out
@@ -509,7 +577,14 @@ function judgeAggregator(aggregator: Map<string, Aggregator>): AudiobookHit[] {
       episodeStats: group.episodeStats,
     })
     hits.push(
-      verdictToHit(verdict, group.albumId, group.albumTitle, group.albumIds, group.coverId),
+      verdictToHit(
+        verdict,
+        group.albumId,
+        group.albumTitle,
+        group.albumIds,
+        group.coverId,
+        group.albumCoverId,
+      ),
     )
   }
   hits.sort(
@@ -525,6 +600,7 @@ function verdictToHit(
   albumTitle: string,
   albumIds?: readonly string[],
   coverId: string | null = null,
+  albumCoverId: string | null | undefined = undefined,
 ): AudiobookHit {
   return {
     albumId,
@@ -537,6 +613,8 @@ function verdictToHit(
     maxDurationSec: verdict.maxDurationSec,
     episodeRule: verdict.episodeRule,
     coverId,
+    // ⚠️ **T102**：专辑自己的封面（**显示就靠它**；`undefined` = 未知 ⇒ 要补拉）。
+    albumCoverId,
   }
 }
 
@@ -600,12 +678,21 @@ function toSnapshot(agg: Aggregator): CandidateSnapshot {
     dirs: agg.dirs.slice(0, DIR_SAMPLE),
     // ⚠️ **T101**：封面 id 也落盘 ⇒ 下次进来**不用**再补拉。
     coverId: agg.coverId,
+    // ⚠️ **T102**：**专辑自己的**封面也落盘 ⇒ 下次进来**不用**再补拉。
+    // ⚠️ `undefined` ⇒ `JSON.stringify` 会**丢掉这个 key** ⇒ 读回来还是「未知」⇒ 会再补拉
+    //    （这正是我们要的：**没拿到过**就得再试一次）。
+    albumCoverId: agg.albumCoverId,
   }
 }
 
 /** 把落盘的候选还原成聚合器。 */
 function fromSnapshot(snap: CandidateSnapshot): Aggregator {
   const ruleCounts = snap.episodeStats?.ruleCounts
+  // ⚠️ **T102**：**专辑封面是三态** ⇒ 靠「字段在不在」区分「未知」与「确认没有」：
+  //   - 字段**缺省** ⇒ **未知**（T101 的旧落盘）⇒ 进页时要补拉一次 `/album/detail`；
+  //   - 字段是 `null` ⇒ **确认没有封面** ⇒ 不用再拉；
+  //   - 字段是字符串 ⇒ 有封面。
+  const hasAlbumCover = Object.prototype.hasOwnProperty.call(snap, 'albumCoverId')
   return {
     albumId: snap.albumId,
     albumTitle: snap.albumTitle,
@@ -620,6 +707,11 @@ function fromSnapshot(snap: CandidateSnapshot): Aggregator {
     dirs: Array.isArray(snap.dirs) ? snap.dirs.slice(0, DIR_SAMPLE) : [],
     // ⚠️ **T101**：旧落盘**没有**这个字段 ⇒ 读成 `null`（没封面）⇒ 进页时按需补拉。
     coverId: typeof snap.coverId === 'string' && snap.coverId.length > 0 ? snap.coverId : null,
+    albumCoverId: hasAlbumCover
+      ? typeof snap.albumCoverId === 'string' && snap.albumCoverId.length > 0
+        ? snap.albumCoverId
+        : null
+      : undefined,
   }
 }
 
@@ -842,6 +934,8 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         episodeRule: null,
         // ⚠️ T101：手动判定的记录**没有扫描来的封面** ⇒ 先留空，后面由页面补拉。
         coverId: null,
+        // ⚠️ **T102**：专辑封面**未知** ⇒ 页面会补拉一次 `/album/detail`。
+        albumCoverId: undefined,
       }
     }
     return group
@@ -862,6 +956,27 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
     const snap = saved.candidates[albumId]
     const candidates = snap
       ? { ...saved.candidates, [albumId]: { ...snap, coverId } }
+      : saved.candidates
+    p.save({ ...saved, candidates })
+    set({ hits })
+  },
+
+  /**
+   * **补上「专辑自己的」封面 id**（T102）：改命中 + **回写落盘**。
+   *
+   * ⚠️ **为什么单独一个动作**：T101 的 `setCover` 写的是 `coverId`（**曲目**封面）
+   *    ⇒ 那个字段**不用于显示** ⇒ 显示统一走 `albumCoverId`。
+   * ⚠️ **回写落盘**：专辑封面是**每张专辑一份** ⇒ 不落盘的话每次进页面都要重拉一次。
+   */
+  setAlbumCover: (albumId, coverId, port) => {
+    const p = port ?? localStorageAudiobookPort
+    const saved = p.load() ?? emptyPersisted()
+    const hits = get().hits.map((hit) =>
+      hit.albumId === albumId ? { ...hit, albumCoverId: coverId } : hit,
+    )
+    const snap = saved.candidates[albumId]
+    const candidates = snap
+      ? { ...saved.candidates, [albumId]: { ...snap, albumCoverId: coverId } }
       : saved.candidates
     p.save({ ...saved, candidates })
     set({ hits })

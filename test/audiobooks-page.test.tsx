@@ -253,7 +253,7 @@ describe('AudiobooksPage（有声读物页）', () => {
   //    - **旧落盘**：没有封面 ⇒ 补拉**一次** `/album/detail` ⇒ **回写落盘**。
   // -------------------------------------------------------------------------
 
-  it('⑨ 列表是**封面卡片网格**（专辑页同款 `.fnm-card`）+ 卡片**有封面**', async () => {
+  it('⑨ 列表是**封面卡片网格**（专辑页同款 `.fnm-card`）+ 卡片**有封面**（**T102：专辑封面**）', async () => {
     scanLibraryTracks.mockImplementation(async (options: unknown) => {
       const opts = options as { onPage?: (tracks: unknown[], progress: unknown) => void }
       opts.onPage?.(
@@ -269,6 +269,9 @@ describe('AudiobooksPage（有声读物页）', () => {
             createdAt: null,
             // ⚠️ **T101**：曲目的封面（扫描时**顺手**记下来 ⇒ 不要钱）。
             coverId: 'track_0011223344556677',
+            // ⚠️ **T102**：**专辑自己的**封面（内嵌 `album` 对象里就有 ⇒ 零请求）
+            //    ⇒ 卡片显示的是它 ⇒ 与秒搜结果、与专辑页**逐字一致**。
+            albumCoverId: 'album_0011223344556677',
           },
         ],
         { page: 1, pages: 1, scanned: 1, total: 1 },
@@ -287,7 +290,10 @@ describe('AudiobooksPage（有声读物页）', () => {
     expect(item.querySelector('.fnm-card__title')).not.toBeNull()
     // ⭐ 卡片**有封面**（不是占位块）。
     const img = item.querySelector('img.fnm-cover__image')
-    expect(img?.getAttribute('src')).toContain('track_0011223344556677')
+    // ⚠️ **T102**：显示的是**专辑自己的**封面（**不是**曲目的那个）⇒
+    //    「主列表」与「秒搜结果」才能显示**同一张图**。
+    expect(img?.getAttribute('src')).toContain('album_0011223344556677')
+    expect(img?.getAttribute('src')).not.toContain('track_0011223344556677')
   })
 
   it('⑩ 旧落盘没有封面 ⇒ **补拉一次** `/album/detail` ⇒ 卡片出现封面（且**不重扫**）', async () => {
@@ -399,5 +405,140 @@ describe('AudiobooksPage（有声读物页）', () => {
     })
     const img = container.querySelector('.fnm-audiobooks__result img.fnm-cover__image')
     expect(img?.getAttribute('src')).toContain('album_0011223344556677')
+  })
+
+  // -------------------------------------------------------------------------
+  // T102：**统一封面 id** —— 卡片显示的必须是「专辑自己的」那个 id
+  //
+  // ⚠️ **为什么重要**：T101 真机复验发现 **同一张卡片在「主列表」与「秒搜结果」里
+  //    封面 id 不同** ⇒ 用户看到的是**两张不同的图**。
+  // ⚠️ **统一到专辑封面**（真机实测：曲目的内嵌 `album.coverId` == `/album/detail` 的
+  //    `coverId` ⇒ 扫描路径零请求就能拿到与秒搜**逐字一致**的那个 id）。
+  // -------------------------------------------------------------------------
+
+  it('⑬ **T101 的旧落盘**（只有曲目封面）⇒ 补拉一次 ⇒ 卡片换成**专辑封面**', async () => {
+    window.localStorage.setItem(
+      'fnmusic-audiobook-state',
+      JSON.stringify({
+        version: 3,
+        nextPage: 0,
+        scannedCount: 12,
+        total: 12,
+        candidates: {
+          'al-old': {
+            albumId: 'al-old',
+            albumTitle: '旧作品',
+            trackCount: 12,
+            totalDurationSec: 12 * 1900,
+            maxDurationSec: 1900,
+            episodeStats: { ruleCounts: { 'dash-prefix': 12 }, titleCount: 12 },
+            dirs: ['有声小说'],
+            // ⚠️ **T101 的形状**：有**曲目**封面 ⇒ 但**没有** `albumCoverId`
+            //    ⇒ 专辑封面**未知** ⇒ 进页要补拉一次。
+            coverId: 'track_0011223344556677',
+          },
+        },
+        overrides: {},
+        keyword: '有声小说',
+        scannedAt: 1792563278000,
+      }),
+    )
+    album.mockResolvedValue({
+      id: 'al-old',
+      title: '旧作品',
+      artist: '',
+      artistId: '',
+      coverId: 'album_0011223344556677',
+      year: null,
+      trackCount: 12,
+    })
+
+    const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
+
+    await waitFor(() => {
+      expect(album).toHaveBeenCalledWith('al-old')
+    })
+    await waitFor(() => {
+      const img = container.querySelector('.fnm-audiobooks__item img.fnm-cover__image')
+      // ⭐ 换成了**专辑封面**……
+      expect(img?.getAttribute('src')).toContain('album_0011223344556677')
+      // ……**不是**曲目封面（那才是「两张不同的图」的根源）。
+      expect(img?.getAttribute('src')).not.toContain('track_0011223344556677')
+    })
+  })
+
+  it('⑭ 落盘里**已有**专辑封面 ⇒ **不**补拉（零额外请求）', async () => {
+    window.localStorage.setItem(
+      'fnmusic-audiobook-state',
+      JSON.stringify({
+        version: 3,
+        nextPage: 0,
+        scannedCount: 12,
+        total: 12,
+        candidates: {
+          'al-old': {
+            albumId: 'al-old',
+            albumTitle: '旧作品',
+            trackCount: 12,
+            totalDurationSec: 12 * 1900,
+            maxDurationSec: 1900,
+            episodeStats: { ruleCounts: { 'dash-prefix': 12 }, titleCount: 12 },
+            dirs: ['有声小说'],
+            // ⚠️ **T102 之后的落盘**：专辑封面**已经知道** ⇒ 不用再拉。
+            albumCoverId: 'album_0011223344556677',
+          },
+        },
+        overrides: {},
+        keyword: '有声小说',
+        scannedAt: 1792563278000,
+      }),
+    )
+
+    const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
+
+    await waitFor(() => {
+      const img = container.querySelector('.fnm-audiobooks__item img.fnm-cover__image')
+      expect(img?.getAttribute('src')).toContain('album_0011223344556677')
+    })
+    // ⭐ **零请求**（封面已知 ⇒ 不用补拉）。
+    expect(album).not.toHaveBeenCalled()
+  })
+
+  it('⑮ 落盘里专辑封面 = `null`（**确认没有封面**）⇒ **不**补拉 ⇒ 卡片是占位块', async () => {
+    window.localStorage.setItem(
+      'fnmusic-audiobook-state',
+      JSON.stringify({
+        version: 3,
+        nextPage: 0,
+        scannedCount: 12,
+        total: 12,
+        candidates: {
+          'al-old': {
+            albumId: 'al-old',
+            albumTitle: '旧作品',
+            trackCount: 12,
+            totalDurationSec: 12 * 1900,
+            maxDurationSec: 1900,
+            episodeStats: { ruleCounts: { 'dash-prefix': 12 }, titleCount: 12 },
+            dirs: ['有声小说'],
+            // ⚠️ `null` = **确认没有封面**（不是「未知」）⇒ 不用再拉。
+            albumCoverId: null,
+          },
+        },
+        overrides: {},
+        keyword: '有声小说',
+        scannedAt: 1792563278000,
+      }),
+    )
+
+    const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.fnm-audiobooks__item').length).toBe(1)
+    })
+    // ⭐ **不补拉**。
+    expect(album).not.toHaveBeenCalled()
+    // ⭐ 没有封面 ⇒ 画占位块（不是破图）。
+    expect(container.querySelector('.fnm-audiobooks__item img.fnm-cover__image')).toBeNull()
   })
 })

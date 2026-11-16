@@ -69,10 +69,15 @@ test.describe.serial('T101「有声页 = 专辑页同款封面网格 + 播放模
       .evaluate((el) => getComputedStyle(el).display)
     expect(display).toBe('grid')
 
-    // ⭐ 卡片**有封面**（`<img>`，不是占位块）⇒ 地址里带的是**曲目的**封面 id。
+    // ⭐ 卡片**有封面**（`<img>`，不是占位块）⇒ 地址里带的是**专辑**的封面 id。
+    // ⚠️ **T102**：显示统一为「**专辑自己的**封面」⇒ 这里从「曲目的封面」改成了「专辑的封面」
+    //    （**前提被 T102 推翻**：曲目的封面与专辑的封面是**两个不同的 id** ⇒ 用曲目的封面
+    //    ⇒ 同一张卡片在「主列表」与「秒搜结果」里会显示**两张不同的图**）。
     const img = cards.first().locator('img.fnm-cover__image')
     await expect(img).toHaveCount(1)
-    await expect(img).toHaveAttribute('src', new RegExp(`coverId=${TRACK_COVER}`))
+    await expect(img).toHaveAttribute('src', new RegExp(`coverId=${ALBUM_COVER}`))
+    // ⚠️ **不是**曲目的那个封面 id（这正是 T102 要消灭的分歧）。
+    await expect(img).not.toHaveAttribute('src', new RegExp(`coverId=${TRACK_COVER}`))
     // 图片**真的加载成功**（不是 404 之后的占位块）。
     const naturalWidth = await img.evaluate((el) => (el as HTMLImageElement).naturalWidth)
     expect(naturalWidth).toBeGreaterThan(0)
@@ -97,6 +102,30 @@ test.describe.serial('T101「有声页 = 专辑页同款封面网格 + 播放模
     const img = results.first().locator('img.fnm-cover__image')
     await expect(img).toHaveCount(1)
     await expect(img).toHaveAttribute('src', new RegExp(`coverId=${ALBUM_COVER}`))
+  })
+
+  test('⑤ **T102**：主列表与秒搜结果的封面 **id 逐字相同**（统一到专辑封面）', async () => {
+    // ⚠️ **为什么这条重要**：T101 真机复验发现 —— **同一张卡片在「主列表」与「秒搜结果」
+    //    里封面 id 不同** ⇒ 用户看到的是**两张不同的图**。
+    //    ⇒ T102 统一到「专辑自己的」封面 ⇒ 两条路必须**逐字相同**。
+
+    // ① 主列表（**扫描**路径）的封面。
+    await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
+    const listCard = fixture.window.locator('.fnm-audiobooks__list .fnm-card').first()
+    await expect(listCard).toHaveCount(1)
+    const listSrc = await listCard.locator('img.fnm-cover__image').getAttribute('src')
+
+    // ② 秒搜（**搜索**路径）的封面。
+    await fixture.window.getByPlaceholder('输入作品名，例如：牧神记').fill('示例有声作品')
+    await fixture.window.getByRole('button', { name: '搜作品' }).click()
+    const resultCard = fixture.window.locator('.fnm-audiobooks__result').first()
+    await expect(resultCard).toHaveCount(1)
+    const resultSrc = await resultCard.locator('img.fnm-cover__image').getAttribute('src')
+
+    // ⭐ **逐字相同**（不是「看起来像同一张」⇒ 是同一个 id）。
+    expect(listSrc).toBe(resultSrc)
+    // ⭐ 而且就是**专辑自己的**那个封面 id。
+    expect(listSrc).toContain(ALBUM_COVER)
   })
 
   test('④ 详情页有「**播放全书**」⇒ 一键整队入队；全屏页默认落在「**队列**」', async () => {
@@ -164,7 +193,9 @@ const OLD_PERSISTED_STATE = {
       maxDurationSec: 1500,
       episodeStats: { ruleCounts: { 'dash-prefix': 12 }, titleCount: 12 },
       dirs: [AUDIOBOOK_ALBUM.name],
-      // ⚠️ **没有** `coverId`（T101 之前落盘的形状 ⇒ 旧用户不用重扫）。
+      // ⚠️ **T101 的形状**：有**曲目**封面 ⇒ 但**没有** `albumCoverId`
+      //    ⇒ 专辑封面**未知** ⇒ 进页要补拉一次 `/album/detail`。
+      coverId: TRACK_COVER,
     },
   },
   overrides: {},
@@ -206,6 +237,8 @@ test.describe.serial('T101「旧落盘补拉封面」', () => {
     const img = card.locator('img.fnm-cover__image')
     await expect(img).toHaveCount(1)
     await expect(img).toHaveAttribute('src', new RegExp(`coverId=${ALBUM_COVER}`))
+    // ⚠️ **T102**：旧落盘里那个**曲目**封面**不该**被用上（否则两处显示不同的图）。
+    await expect(img).not.toHaveAttribute('src', new RegExp(`coverId=${TRACK_COVER}`))
     // ⚠️ **不重扫**（旧落盘还在 ⇒ 不用再花 52 秒）。
     await expect(fixture.window.locator('.fnm-page__status')).toContainText('上次扫描')
   })

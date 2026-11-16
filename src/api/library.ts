@@ -231,8 +231,23 @@ export interface ScanTrack {
    *
    * ⚠️ **T101**：曲目的 `coverId` 本来就**在返回的数据里** ⇒ 顺手记下来**不要钱**
    *    ⇒ 「有声」页的卡片能画封面（不用为每张专辑多发一个请求）。
+   *
+   * ⚠️ **T102**：这个是「**曲目**封面」⇒ **不用于显示**（显示一律用 `albumCoverId`），
+   *    但**保留**（落盘形状不变 ⇒ T101 的旧落盘照样能读）。
    */
   coverId: string
+  /**
+   * **所属专辑自己的**封面 id（空串 = 专辑没有封面）。
+   *
+   * ⚠️ **T102**：为什么必须单独一个字段 —— 曲目的封面与专辑的封面是**两个不同的 id**
+   *    （真机实测 2026-11-17：「庙堂之外」曲目封面 `track_591e8c99…`，
+   *    专辑封面 `album_1988d5f2…`）⇒ 「有声」页要跟**专辑页**显示同一张图
+   *    ⇒ **只能**用专辑的封面。
+   * ⚠️ **零请求**：曲目的 `audioSpec` 旁边的内嵌 `album` 对象**自带 `coverId`**
+   *    ⇒ 实测它**等于** `/album/detail` 的 `coverId`（真机：`track_66f7a2fc…` 三处一致）
+   *    ⇒ 扫描路径**不要钱**就能拿到与专辑页 / 秒搜**完全相同**的封面 id。
+   */
+  albumCoverId: string
 }
 
 /** 扫描进度。 */
@@ -304,6 +319,9 @@ function toScanTrack(raw: RawSong): ScanTrack {
     createdAt: unixSeconds(raw.createdAt),
     // ⚠️ **T101**：曲目的封面 id（免费 ⇒ 顺手带上 ⇒ 卡片有封面）。
     coverId: normalizeCoverId(raw.coverId),
+    // ⚠️ **T102**：**专辑自己的**封面 id（内嵌 `album` 对象里就有 ⇒ **零请求**）
+    //    ⇒ 实测它等于 `/album/detail` 的 `coverId` ⇒ 与专辑页 / 秒搜**逐字一致**。
+    albumCoverId: normalizeCoverId(album?.coverId),
   }
 }
 

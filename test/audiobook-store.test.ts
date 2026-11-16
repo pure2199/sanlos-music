@@ -29,6 +29,8 @@ function scanTrack(partial: {
   path?: string | null
   /** ⚠️ **T101**：曲目的封面 id（扫描时顺手记下来 ⇒ 卡片有封面）。 */
   coverId?: string
+  /** ⚠️ **T102**：**专辑自己的**封面 id（内嵌 `album` 对象里就有 ⇒ 零请求）。 */
+  albumCoverId?: string
 }): {
   id: string
   title: string
@@ -39,6 +41,7 @@ function scanTrack(partial: {
   path: string | null
   createdAt: number | null
   coverId: string
+  albumCoverId: string
 } {
   return {
     id: partial.id,
@@ -53,6 +56,8 @@ function scanTrack(partial: {
         : partial.path,
     createdAt: 1792563278,
     coverId: partial.coverId ?? '',
+    // ⚠️ **T102**：专辑自己的封面（缺省 = 没有 ⇒ 落盘时记成「确认没有」）。
+    albumCoverId: partial.albumCoverId ?? '',
   }
 }
 
@@ -715,5 +720,156 @@ describe('audiobookStore（T101：封面）', () => {
     expect(() => useAudiobookStore.getState().restore(port)).not.toThrow()
     expect(useAudiobookStore.getState().hits).toHaveLength(1)
     expect(useAudiobookStore.getState().hits[0]?.coverId).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T102：**统一封面 id**（卡片显示的必须是「专辑自己的」那个 id）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么要有这一组**：T101 真机复验发现 **同一张卡片，在「主列表」与「秒搜结果」里
+//    封面 id 不同**（扫描 `track_118fe863…` vs 秒搜 `track_66f7a2fc…`）⇒ 用户看到的是
+//    **两张不同的图**。
+// ⚠️ **为什么只能统一到「专辑封面」**（真机实测，探针 `t102-01`）：
+//    - 曲目的内嵌 `album.coverId` **==** `/album/detail` 的 `coverId`（`track_66f7a2fc…`
+//      三处一致）⇒ 扫描路径**零请求**就能拿到与专辑页 / 秒搜**逐字一致**的那个 id；
+//    - 曲目**自己**的 `coverId` 与专辑封面**不同**（`track_591e8c99…` vs `album_1988d5f2…`）
+//      ⇒ 用曲目封面**永远统一不了**。
+// ⚠️ **三态**：`albumCoverId` = `undefined`（**未知** ⇒ 要补拉）/ `null`（**确认没有**）
+//    / 字符串（有）⇒ 靠「**字段在不在**」区分「未知」与「确认没有」。
+// ⚠️ **不升 `STATE_VERSION`**（新增字段是**可选**的 ⇒ 旧落盘照样能读
+//    ⇒ 用户**不用**为了统一封面重扫 52 秒）。
+// ---------------------------------------------------------------------------
+
+describe('audiobookStore（T102：统一封面 id）', () => {
+  beforeEach(() => {
+    scanLibraryTracks.mockReset()
+    useAudiobookStore.setState({
+      hits: [],
+      overrides: {},
+      scanning: false,
+      progress: null,
+      error: null,
+      scannedAt: null,
+    })
+  })
+
+  it('① 扫描时**顺手**记下**专辑自己的**封面（内嵌 `album` 里就有 ⇒ 零请求）', async () => {
+    const port = createMemoryAudiobookPort()
+    mockScan(
+      [
+        {
+          page: 1,
+          tracks: [
+            scanTrack({
+              id: 'c1',
+              title: '01- 某集',
+              albumId: 'al-1',
+              coverId: 'track_0011223344556677',
+              albumCoverId: 'album_0011223344556677',
+            }),
+          ],
+        },
+      ],
+      1,
+    )
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    // ⚠️ **专辑**封面（T102）—— 曲目的那个**不用于显示**。
+    expect(useAudiobookStore.getState().hits[0]?.albumCoverId).toBe('album_0011223344556677')
+  })
+
+  it('② 专辑封面**落盘**（下次进来直接有 ⇒ 不用再补拉）', async () => {
+    const port = createMemoryAudiobookPort()
+    mockScan(
+      [
+        {
+          page: 1,
+          tracks: [
+            scanTrack({
+              id: 'c2',
+              title: '01- 某集',
+              albumId: 'al-1',
+              coverId: 'track_0011223344556677',
+              albumCoverId: 'album_0011223344556677',
+            }),
+          ],
+        },
+      ],
+      1,
+    )
+
+    await useAudiobookStore.getState().scan({ port, keyword: '有声小说' })
+
+    expect(port.load()?.candidates['al-1']?.albumCoverId).toBe('album_0011223344556677')
+  })
+
+  it('③ `setAlbumCover`：改命中 + **回写落盘**（补过一次 ⇒ 不用再拉）', () => {
+    const saved: AudiobookPersisted = {
+      version: 3,
+      keyword: '有声小说',
+      nextPage: 0,
+      scannedCount: 89,
+      total: 89,
+      candidates: { 'al-1': persistedCandidate(89) },
+      overrides: {},
+      scannedAt: 1792563278000,
+    }
+    const port = createMemoryAudiobookPort(saved)
+    useAudiobookStore.getState().restore(port)
+
+    // 旧落盘没有 `albumCoverId` ⇒ **未知**（⇒ 要补拉）。
+    expect(useAudiobookStore.getState().hits[0]?.albumCoverId).toBeUndefined()
+
+    useAudiobookStore.getState().setAlbumCover('al-1', 'album_0011223344556677', port)
+
+    expect(useAudiobookStore.getState().hits[0]?.albumCoverId).toBe('album_0011223344556677')
+    // ⚠️ **回写落盘** ⇒ 下次进来不用再拉一次。
+    expect(port.load()?.candidates['al-1']?.albumCoverId).toBe('album_0011223344556677')
+  })
+
+  it('④ **T101 的旧落盘**（只有曲目封面）⇒ 专辑封面读成「**未知**」⇒ 要补拉', () => {
+    const saved: AudiobookPersisted = {
+      version: 3,
+      keyword: '有声小说',
+      nextPage: 0,
+      scannedCount: 89,
+      total: 89,
+      // ⚠️ T101 的形状：有 `coverId`（**曲目**封面）⇒ **没有** `albumCoverId`。
+      candidates: { 'al-1': { ...persistedCandidate(89), coverId: 'track_0011223344556677' } },
+      overrides: {},
+      scannedAt: 1792563278000,
+    }
+    const port = createMemoryAudiobookPort(saved)
+
+    useAudiobookStore.getState().restore(port)
+
+    const hit = useAudiobookStore.getState().hits[0]
+    // 曲目封面还在（T101 的字段没动）……
+    expect(hit?.coverId).toBe('track_0011223344556677')
+    // ……但**专辑封面是未知**（`undefined`，**不是** `null`）⇒ 页面会去补拉一次。
+    expect(hit?.albumCoverId).toBeUndefined()
+  })
+
+  it('⑤ 落盘里 `albumCoverId: null`（**确认没有封面**）⇒ 读成 `null` ⇒ **不用**再拉', () => {
+    const saved: AudiobookPersisted = {
+      version: 3,
+      keyword: '有声小说',
+      nextPage: 0,
+      scannedCount: 89,
+      total: 89,
+      candidates: {
+        'al-1': { ...persistedCandidate(89), albumCoverId: null },
+      },
+      overrides: {},
+      scannedAt: 1792563278000,
+    }
+    const port = createMemoryAudiobookPort(saved)
+
+    useAudiobookStore.getState().restore(port)
+
+    // ⚠️ `null` ≠ `undefined`：`null` = **确认没有** ⇒ 页面**不会**再去拉。
+    expect(useAudiobookStore.getState().hits[0]?.albumCoverId).toBeNull()
   })
 })
