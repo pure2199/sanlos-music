@@ -299,3 +299,65 @@
   background: var(--accent-hover);
   color: var(--accent-text);
 }
+
+/* --------------------------------------------------------------------------
+ * 「按歌指定歌词源」的控件（T107）
+ * -------------------------------------------------------------------------- */
+
+.fnm-lyric-source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.fnm-lyric-source__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fnm-lyric-source__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fnm-lyric-source__btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.fnm-lyric-source__btn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.fnm-lyric-source__btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ⚠️ 选中的那个源：**高亮**（用户一眼看得出「现在用的是哪个」）。 */
+.fnm-lyric-source__btn--active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* 「恢复自动」：不是源 ⇒ 用**次要**样式，别跟源按钮混为一谈。 */
+.fnm-lyric-source__btn--reset {
+  border-style: dashed;
+}
+
+.fnm-lyric-source__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}

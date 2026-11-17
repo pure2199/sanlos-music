@@ -33,7 +33,12 @@
 //
 // ---------------------------------------------------------------------------
 
-import type { ExternalLyricResult, LyricPriority, LyricSource } from '../../shared/lyricProvider'
+import type {
+  ExternalLyricQuery,
+  ExternalLyricResult,
+  LyricPriority,
+  LyricSource,
+} from '../../shared/lyricProvider'
 // ⚠️ T93：占位歌词的判定（与主进程**同一个**判定 ⇒ 两层不漂移）。
 import { isPlaceholderLyric } from '../../shared/lyricPlaceholder'
 import type { LyricEntry } from '../api/types'
@@ -69,7 +74,10 @@ export interface NasLyricApi {
  *
  * ⚠️ 实现方**必须**走 IPC 到主进程（渲染层**不碰网络**）。
  */
-export type ExternalLyricFetcher = (target: LyricMatchTarget) => Promise<ExternalLyricResult>
+export type ExternalLyricFetcher = (
+  target: LyricMatchTarget,
+  source?: LyricSource,
+) => Promise<ExternalLyricResult>
 
 /** 取歌词的结果。 */
 export interface LyricLoadResult {
@@ -127,6 +135,13 @@ export interface LyricLoadDeps {
    *    但也不能太短（用户拍板：**5 秒太短**，慢一点的词源会被误判成「没有」）。
    */
   timeoutMs?: number
+  /**
+   * **指定源**（T107）：用户对**这一首歌**手动指定的源。
+   *
+   * ⚠️ **缺省 = `null`** ⇒ 不指定 ⇒ 走全局源链（**既有行为一字不变**）。
+   * ⚠️ 指定了 ⇒ 该源**排到链首**，其余源仍兜底（T73 既有链规则）。
+   */
+  sourceOverride?: LyricSource | null
 }
 
 /** 外部歌词包成 `LyricEntry` 用的前缀（保证 guid 不与 NAS 的撞）。 */
@@ -298,13 +313,14 @@ async function fetchOnline(
   external: ExternalLyricFetcher,
   target: LyricMatchTarget,
   timeoutMs: number,
+  source?: LyricSource,
 ): Promise<OnlineOutcome> {
   let timer: ReturnType<typeof setTimeout> | null = null
   const timeoutPromise = new Promise<OnlineOutcome>((resolve) => {
     timer = setTimeout(() => resolve({ kind: 'timeout' }), timeoutMs)
   })
   try {
-    const resultPromise: Promise<OnlineOutcome> = external(target).then(
+    const resultPromise: Promise<OnlineOutcome> = external(target, source).then(
       (result): OnlineOutcome => ({ kind: 'result', result }),
       (cause): OnlineOutcome => ({
         kind: 'result',
@@ -350,7 +366,7 @@ async function loadLocalFirst(
   }
   let result: ExternalLyricResult
   try {
-    result = await external(target)
+    result = await external(target, deps.sourceOverride ?? undefined)
   } catch (cause) {
     return {
       entries: [],
@@ -395,7 +411,12 @@ async function loadOnlineFirst(
     return { entries: [], origin: 'none', reason: nas.failed ? '歌词加载失败' : null }
   }
 
-  const outcome = await fetchOnline(external, target, deps.timeoutMs ?? ONLINE_LYRIC_TIMEOUT_MS)
+  const outcome = await fetchOnline(
+    external,
+    target,
+    deps.timeoutMs ?? ONLINE_LYRIC_TIMEOUT_MS,
+    deps.sourceOverride ?? undefined,
+  )
 
   if (outcome.kind === 'result' && outcome.result.status === 'ok') {
     const entries = toExternalEntries(songId, outcome.result)
@@ -468,12 +489,12 @@ export async function loadLyricEntries(
  * 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。
  */
 function playerBridge(): {
-  fetchExternalLyric?: ExternalLyricFetcher
+  fetchExternalLyric?: (query: ExternalLyricQuery) => Promise<ExternalLyricResult>
   readEmbeddedLyric?: (id: string) => Promise<string>
 } | null {
   const scope = globalThis as unknown as {
     fnPlayer?: {
-      fetchExternalLyric?: ExternalLyricFetcher
+      fetchExternalLyric?: (query: ExternalLyricQuery) => Promise<ExternalLyricResult>
       readEmbeddedLyric?: (id: string) => Promise<string>
     }
   }
@@ -490,7 +511,13 @@ export function defaultExternalLyricFetcher(): ExternalLyricFetcher | null {
   const bridge = playerBridge()
   const fn = bridge?.fetchExternalLyric
   if (!fn) return null
-  return async (target: LyricMatchTarget): Promise<ExternalLyricResult> => await fn(target)
+  return async (target: LyricMatchTarget, source?: LyricSource): Promise<ExternalLyricResult> => {
+    // ⚠️ **T107**：指定源**只是源名**（不是地址）⇒ 拼进查询里交给主进程过白名单。
+    //    ⚠️ 桥的方法**只收一个参数**（查询对象）⇒ 源必须**并进查询**，
+    //    直接当第二个实参传会被**静默丢掉**（实测踩过：参数对不上就失效）。
+    const query: ExternalLyricQuery = source ? { ...target, source } : { ...target }
+    return await fn(query)
+  }
 }
 
 /**

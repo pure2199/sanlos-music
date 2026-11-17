@@ -115,6 +115,18 @@ export interface ExternalLyricQuery {
   album: string
   /** 歌曲时长（**秒**）。用于排除同名不同版本的错配。 */
   duration: number
+  /**
+   * **指定源**（T107）：用户对**这一首歌**手动指定的源。
+   *
+   * ⚠️ **可选字段**（T90-③ 同款纪律）：既有代码与既有测试**手写**的是
+   *    `{ title, artist, album, duration }` ⇒ 必填会让它们**全部编译不过**
+   *    ⇒ 违反「既有测试一条不许改」的硬约束。
+   * ⚠️ **只是源名、不是地址** —— 主进程会过白名单（`normalizeLyricSource`），
+   *    陌生值**丢弃** ⇒ 退回全局源。
+   *    ⚠️ 渲染层**仍然不能**指定要抓哪个**地址**（模板永远取主进程偏好）——
+   *    这条安全边界**不放宽**（T107 只放宽了「用哪个源」）。
+   */
+  source?: LyricSource
 }
 
 /**
@@ -164,6 +176,19 @@ export const LYRIC_SOURCES: readonly LyricSource[] = [
   'migu',
   'custom',
 ]
+
+/**
+ * 可以**按歌指定**的源（T107）。
+ *
+ * ⚠️ **不含 `off`**（不用外部）—— 那是**全局**档位（设置里），
+ *    而「按歌指定」的语义是「**换一个更准的源**」。
+ * ⚠️ 这条边界让**既有断言原样保留**：渲染层传 `source: 'off'` 依旧被**忽略**
+ *    ⇒ 落回全局源（见 `test/lyric-provider.test.ts` 的
+ *    「渲染层传的**地址被忽略**」那条）。
+ */
+export const PER_SONG_LYRIC_SOURCES: readonly LyricSource[] = LYRIC_SOURCES.filter(
+  (source) => source !== 'off',
+)
 
 /**
  * 默认的歌词源。

@@ -37,7 +37,8 @@ import {
   type ExternalLyricFetcher,
 } from './lyricSource'
 import { useAppPrefsStore } from '../state/appPrefsStore'
-import type { LyricPriority } from '../../shared/lyricProvider'
+import { useLyricOverrideStore } from '../state/lyricOverrideStore'
+import type { LyricPriority, LyricSource } from '../../shared/lyricProvider'
 
 /** 歌词接口的最小子集（便于单测注入假实现）。 */
 export interface LyricOverlayApi {
@@ -125,6 +126,14 @@ export interface LyricOverlayOptions {
    *    用户在设置里改了优先级，下一首歌就生效）。
    */
   priority?: () => LyricPriority
+  /**
+   * 这首歌的**指定源**（T107）。
+   *
+   * ⚠️ **可缺省** → 不指定（既有单测的行为完全不变）。
+   * ⚠️ 缺省时走**默认取法**（读 `useLyricOverrideStore` 的当前值——
+   *    **每次取词时读一次**，用户在全屏页改了指定，下一首歌就生效）。
+   */
+  overrideSource?: (songId: string) => LyricSource | null
 }
 
 /** 装配结果（供单测断言）。 */
@@ -172,6 +181,16 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
    */
   const priority: () => LyricPriority =
     options.priority ?? ((): LyricPriority => useAppPrefsStore.getState().lyricPriority)
+  /**
+   * 这首歌的**指定源**（T107）。
+   *
+   * ⚠️ **每次取词时读一次**（不是只在装配时读一次）—— 用户在**全屏页**
+   *    给这首歌指定了源，桌面歌词要**立刻**用新源重取。
+   */
+  const overrideSource: (songId: string) => LyricSource | null =
+    options.overrideSource ??
+    ((songId: string): LyricSource | null =>
+      useLyricOverrideStore.getState().overrides[songId]?.source ?? null)
 
   /** 悬浮窗是否可见（关着就不拉歌词、不推进度）。 */
   let enabled = false
@@ -249,7 +268,7 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
           album: song.album,
           duration: song.duration,
         },
-        { api, external: external, embedded: embedded, priority: priority() },
+        { api, external: external, embedded: embedded, priority: priority(), sourceOverride: overrideSource(song.id) },
       )
       // 期间又切了歌 → 这份歌词已经过时，丢弃。
       if (token !== fetchToken) return
@@ -305,6 +324,20 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
     void publishTrack(true)
   })
 
+  // --- 订阅「按歌指定」变化（T107）：指定源变了 ⇒ **重新取词并重推** ----
+  //
+  // ⚠️ **为什么必须订阅**：桌面歌词（经典窗 + 词岛）**自己**取词，
+  //    而取词只在「切歌 / 从关变开 / 输出延迟变化」时发生 ⇒ 用户在
+  //    **全屏页**给这首歌指定了源，桌面歌词**一直停在旧内容**
+  //    （与 T73「设置里改源、桌面歌词不更新」是同一个坑）。
+  const unsubscribeOverride = useLyricOverrideStore.subscribe((state, previous) => {
+    // ⚠️ 关着桌面歌词时**不多打外部源**（与既有口径一致）。
+    if (!enabled) return
+    if (state.overrides === previous.overrides) return
+    // ⚠️ `force = true` ⇒ 强制重新取词（缓存里的旧结果不算数）。
+    void publishTrack(true)
+  })
+
   // 订阅悬浮窗可见性：开 → 立刻把当前曲目与进度推过去；关 → 停止推送。
   const unsubscribeVisibility = bridge.onLyricVisibility((visible) => {
     visibilityKnown = true
@@ -340,6 +373,7 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
       unsubscribeStore()
       unsubscribeVisibility()
       unsubscribePrefs()
+      unsubscribeOverride()
     },
   }
 }

@@ -63,6 +63,8 @@ import type { LyricSource } from '../../shared/lyricProvider'
 import { usePlayerStore } from '../state/playerStore'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import { useAudiobookStore } from '../state/audiobookStore'
+import { useLyricOverrideStore } from '../state/lyricOverrideStore'
+import { LYRIC_SOURCE_LABEL, LyricSourcePicker } from '../components/LyricSourcePicker'
 import { liftToMinLuminance, toReadableAccent } from '../ui/accentColor'
 import {
   defaultEmbeddedLyricFetcher,
@@ -144,20 +146,6 @@ type LyricStatus = 'idle' | 'loading' | 'ready' | 'error'
  * ⇒ 超时后**如实说**「没取到歌词」，不装作还在加载。
  */
 const LYRIC_LOAD_TIMEOUT_MS = 12_000
-
-/**
- * 线上源的**可读名字**（T73）—— 如实显示**实际命中的那个**。
- */
-const SOURCE_LABEL: Record<LyricSource, string> = {
-  netease: '网易云音乐',
-  lrclib: 'lrclib.net',
-  qq: 'QQ 音乐',
-  kugou: '酷狗音乐',
-  kuwo: '酷我音乐',
-  migu: '咪咕音乐',
-  custom: '自定义 API',
-  off: '不用外部',
-}
 
 /** 允许写 CSS 自定义属性的 style 对象。 */
 type CssVars = CSSProperties & Record<`--${string}`, string | number | undefined>
@@ -250,6 +238,17 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
    */
   const lyricSource = useAppPrefsStore((state) => state.lyricSource)
   const lyricTemplate = useAppPrefsStore((state) => state.lyricTemplate)
+
+  // --- 按歌指定歌词源（T107）------------------------------------------------
+  //
+  // ⚠️ **只对当前这首歌生效**（按曲库 guid 索引）⇒ 换歌就失效。
+  // ⚠️ 这是**运行状态**（住 `localStorage`），不是全局偏好（那个在设置里）。
+  const lyricOverride = useLyricOverrideStore((state) =>
+    songId ? (state.overrides[songId]?.source ?? null) : null,
+  )
+  const lyricOverrideError = useLyricOverrideStore((state) => state.error)
+  const setLyricOverride = useLyricOverrideStore((state) => state.setOverride)
+  const clearLyricOverride = useLyricOverrideStore((state) => state.clearOverride)
 
   /**
    * **可听延迟**（秒）：媒体渲染完成 → 用户真正听到之间的延迟（T66）。
@@ -349,7 +348,14 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     loadLyricEntries(
       songId,
       { title: songTitle, artist: songArtist, album: songAlbum, duration: songDuration },
-      { api, external: externalFetcher, embedded: embeddedFetcher, priority: lyricPriority },
+      {
+        api,
+        external: externalFetcher,
+        embedded: embeddedFetcher,
+        priority: lyricPriority,
+        // ⚠️ T107：这首歌**指定**了源 ⇒ 该源排到链首（其余源仍兜底）。
+        sourceOverride: lyricOverride,
+      },
     )
       .then((result) => {
         if (cancelled) return
@@ -384,6 +390,8 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
     // ⚠️ T73：源 / 模板变了 ⇒ **重新取词**（页面开着也要变）。
     lyricSource,
     lyricTemplate,
+    // ⚠️ T107：这首歌的**指定源**变了 ⇒ 重新取词（否则界面还是旧源的词）。
+    lyricOverride,
     songTitle,
     songArtist,
     songAlbum,
@@ -600,7 +608,18 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
               {lyricEmbedded ? (
                 <p className="fnm-fullplayer__status">歌词来源：音频内嵌</p>
               ) : lyricSourceUsed ? (
-                <p className="fnm-fullplayer__status">歌词来源：{SOURCE_LABEL[lyricSourceUsed]}</p>
+                <p className="fnm-fullplayer__status">歌词来源：{LYRIC_SOURCE_LABEL[lyricSourceUsed]}</p>
+              ) : null}
+              {/* T107：**按歌指定源**的控件。
+                  有声读物（有声小说）本来就没歌词 ⇒ **不给这个控件**（不给无用控件）。 */}
+              {!isAudiobookTrack && songId ? (
+                <LyricSourcePicker
+                  value={lyricOverride}
+                  onPick={(source) => setLyricOverride(songId, source)}
+                  onRestore={() => clearLyricOverride(songId)}
+                  error={lyricOverrideError}
+                  customAvailable={lyricTemplate.trim() !== ''}
+                />
               ) : null}
             </>
           ) : (

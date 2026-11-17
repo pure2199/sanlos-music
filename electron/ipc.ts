@@ -85,6 +85,7 @@ import type { FfmpegFallbackResult, FfmpegStatus } from '../shared/ffmpeg'
 import {
   LYRIC_PRIORITIES,
   LYRIC_SOURCES,
+  PER_SONG_LYRIC_SOURCES,
   normalizeLyricSource,
   type ExternalLyricQuery,
   type LyricPriority,
@@ -1572,14 +1573,25 @@ export function registerLyricIpc(opts: LyricIpcOptions): void {
     const album = readString(record?.['album']) ?? ''
     const duration = readNumberOrUndefined(record?.['duration']) ?? 0
 
-    // ⚠️ 源与模板**一律取主进程读到的偏好**，不用渲染层传来的。
+    // ⚠️ **模板**一律取主进程读到的偏好，不用渲染层传来的。
     const lyric = prefs.read().lyric ?? {}
-    const source = normalizeLyricSource(lyric.source)
+    const globalSource = normalizeLyricSource(lyric.source)
+    // ⚠️ **T107**：用户可以给**这一首歌**指定**源名**（不是地址）
+    //    ⇒ 过白名单（**只认线上源**：`off` 是全局档位，不接受）；
+    //    陌生值 / `off` **丢弃** ⇒ 退回全局源。
+    //    ⚠️ 安全边界**没有放宽**：渲染层**仍然不能**指定要抓哪个地址
+    //    （模板永远取主进程偏好）⇒ 主进程不会变成任意出网代理。
+    const requested = record?.['source']
+    const pickedSource =
+      typeof requested === 'string' &&
+      (PER_SONG_LYRIC_SOURCES as readonly string[]).includes(requested)
+        ? (requested as LyricSource)
+        : globalSource
     // ⚠️ `off` = 用户明确不用外部 → **一次请求都不发**。
-    if (source === 'off') return { status: 'not-found' }
+    if (pickedSource === 'off') return { status: 'not-found' }
 
     const query: ExternalLyricQuery = { title, artist, album, duration }
-    return await provider.fetchExternalLyric(source, lyric.template ?? '', query)
+    return await provider.fetchExternalLyric(pickedSource, lyric.template ?? '', query)
   })
 
   // -------------------------------------------------------------------------
