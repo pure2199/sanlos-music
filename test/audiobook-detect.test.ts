@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   AUDIOBOOK_SCORE_THRESHOLD,
+  EPISODE_RULES,
   isAudiobookVerdict,
   judgeAlbum,
   judgeAlbums,
@@ -424,5 +425,103 @@ describe('workGroupKey（T100：一本小说 = 一条）', () => {
   it('**同名但名字里带分隔符**也不会撞键（键里带名字长度）', () => {
     // ⚠ 键是 `work:<名长>:<名>:<目录>` ⇒ 名字里的 `:` 不会造成歧义。
     expect(workGroupKey('甲:乙', '目录', 'al-a')).not.toBe(workGroupKey('甲', '乙:目录', 'al-b'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T103：规则优先级重排 —— `bracket` 垫底 ⇒《极品家丁》14 集不再掉队
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 实测形态（2026-11-16，本机 + 该账号，《极品家丁》1333 集）：
+//   `极品家丁 0219 夫人的阴谋（1）` ⇒ **同时**命中 `bracket`（=1）与 `mid-number`（=219）。
+//   旧顺序（`bracket` 在 `mid-number` 之前）⇒ 这 14 集被判成 `bracket`
+//   ⇒ 而专辑级**只用胜出的那一条规则**（此专辑 `mid-number` 1319 : `bracket` 14）
+//   ⇒ 这 14 集集号为空 ⇒ **排到末尾**（掉队）。
+//   ⇒ T103 把 `bracket` 降到**最末**（兜底）⇒ `mid-number` 赢 ⇒ 不再掉队。
+// ---------------------------------------------------------------------------
+
+/** 《极品家丁》1333 集里**缺**的那 14 个编号（真机实测，探针 `t99-10`）。 */
+const JINPIN_MISSING = [
+  219, 220, 268, 269, 298, 299, 311, 312, 330, 331, 404, 405, 447, 448,
+]
+
+/** 造出《极品家丁》1333 集的真实标题形态（其中 14 集带「（1）/（2）」分集后缀）。 */
+function jinpinTitles(): string[] {
+  const missing = new Set(JINPIN_MISSING)
+  const titles: string[] = []
+  for (let n = 0; n <= 1332; n += 1) {
+    const num = String(n).padStart(4, '0')
+    titles.push(
+      missing.has(n)
+        ? `极品家丁 ${num} 夫人的阴谋（${n % 2 === 1 ? 1 : 2}）`
+        : `极品家丁 ${num} 某集标题`,
+    )
+  }
+  return titles
+}
+
+describe('parseEpisode：T103 —— `bracket` 垫底', () => {
+  it('⭐ `bracket` 让位给 `mid-number`（14 集掉队的根因）', () => {
+    // ⚠️ 「（1）/（2）」是**分集后缀**、不是集号 ⇒ 集号必须是**中段**的 219 / 220。
+    expect(parseEpisode('极品家丁 0219 夫人的阴谋（1）')).toEqual({
+      rule: 'mid-number',
+      value: [219],
+    })
+    expect(parseEpisode('极品家丁 0220 夫人的阴谋（2）')).toEqual({
+      rule: 'mid-number',
+      value: [220],
+    })
+  })
+
+  it('`bracket` 仍是**兜底**（别的规则都命中不了时才用）', () => {
+    expect(parseEpisode('【01】开篇')).toEqual({ rule: 'bracket', value: [1] })
+    expect(parseEpisode('（12）')).toEqual({ rule: 'bracket', value: [12] })
+  })
+
+  it('⚠️ 副作用：`bracket` 让位给 `trailing`（末尾纯数字更具体）', () => {
+    expect(parseEpisode('剧名（3） 12')).toEqual({ rule: 'trailing', value: [12] })
+  })
+
+  it('规则表顺序：`trailing` > `mid-number` > `bracket`（T103）', () => {
+    expect(EPISODE_RULES[EPISODE_RULES.length - 1]).toBe('bracket')
+    expect(EPISODE_RULES.indexOf('trailing')).toBeLessThan(EPISODE_RULES.indexOf('mid-number'))
+    expect(EPISODE_RULES.indexOf('mid-number')).toBeLessThan(EPISODE_RULES.indexOf('bracket'))
+  })
+})
+
+describe('resolveAlbumEpisodes：T103 —— 1333 集集号连续、14 集不再掉队', () => {
+  it('⭐ 全部 1333 集都有集号、0…1332 连续、无重复', () => {
+    const titles = jinpinTitles()
+    expect(titles).toHaveLength(1333)
+    const resolved = resolveAlbumEpisodes(titles)
+    expect(resolved.rule).toBe('mid-number')
+    expect(resolved.hitRatio).toBe(1)
+    // 每一条都有集号（**没有 null** ⇒ 没有掉队的）
+    expect(resolved.values.every((v) => v !== null)).toBe(true)
+    const nums = resolved.values.map((v) => v?.[0] ?? -1)
+    expect(new Set(nums).size).toBe(1333)
+    expect(Math.min(...nums)).toBe(0)
+    expect(Math.max(...nums)).toBe(1332)
+  })
+
+  it('⭐ 14 集带「（1）/（2）」的 ⇒ 集号是**中段数字**（不是括号里的 1/2）', () => {
+    const titles = jinpinTitles()
+    const resolved = resolveAlbumEpisodes(titles)
+    const idx = titles
+      .map((t, i) => ({ t, i }))
+      .filter((x) => x.t.includes('夫人的阴谋'))
+      .map((x) => x.i)
+    expect(idx).toHaveLength(14)
+    expect(idx.map((i) => resolved.values[i]?.[0] ?? null)).toEqual(JINPIN_MISSING)
+  })
+
+  it('排序：14 集**不再排到末尾**（旧行为下它们会被丢到最后）', () => {
+    const tracks = jinpinTitles().map((title, i) =>
+      track({ id: `t${i}`, title, albumId: 'al-jp' }),
+    )
+    const sorted = sortTracksByEpisode(tracks)
+    const nums = sorted.map((t) => parseEpisode(t.title)?.value[0] ?? -1)
+    // 严格递增 0…1332（**没有** null 排末尾 ⇒ 不再有掉队的）
+    expect(nums).toEqual(Array.from({ length: 1333 }, (_, i) => i))
   })
 })
