@@ -157,6 +157,23 @@ describe('AudiobooksPage（有声读物页）', () => {
     }
   })
 
+  it('⑤-b 说明里**写明了文件要放在哪**（这条说明不许被悄悄删掉）', async () => {
+    const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
+    const hints = Array.from(container.querySelectorAll('.fnm-audiobooks__hint'))
+      .map((h) => h.textContent ?? '')
+      .join('\n')
+    // ⚠️ **位置要求**（用户 2026-11-17 的原话：「有声小说，要放在主目录下的有声小说文件夹，
+    //    这个写下说明。不然别人用读不到」）：
+    //    服务端**不能浏览目录** ⇒ 客户端只能扫曲库后**按目录名**挑 ⇒ 文件必须放进那个文件夹。
+    expect(hints).toContain('主目录')
+    expect(hints).toContain('有声小说')
+    // ⚠️ **空态也要说这句** —— 用户**正是**在列表空的时候最需要知道「文件该放哪」。
+    await waitFor(() => {
+      const empty = container.querySelector('.fnm-audiobooks__empty')?.textContent ?? ''
+      expect(empty).toContain('主目录')
+    })
+  })
+
   it('⑥ 「搜作品」⇒ 打专辑搜索并列出结果（**搜索本身**不触发扫描）', async () => {
     searchApi.albums.mockResolvedValue({ list: [FOUND_ALBUM], total: 1 })
     render(<AudiobooksPage onOpenAlbum={() => {}} />)

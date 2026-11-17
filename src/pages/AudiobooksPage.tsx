@@ -387,7 +387,7 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
    */
   const emptyText = scanning
     ? `正在扫描「${keyword}」文件夹里的作品…实测约 1 分钟；扫完会记在本机，下次进来直接看。`
-    : '当前曲库里没有识别到有声读物：这个目录下面没有找到作品（换个目录名再扫一次，或用上面的「搜作品」直接找）。'
+    : `当前曲库里没有识别到有声读物：这个目录下面没有找到作品（换个目录名再扫一次，或用上面的「搜作品」直接找）。⚠️ 有声小说要放在曲库主目录下的「${effectiveKeyword}」文件夹里才会被扫到。`
 
   return (
     <LibraryPageShell
@@ -404,6 +404,9 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
           <p className="fnm-audiobooks__hint">
             「{keyword}」文件夹里的全都是有声小说，这里一本小说一条。
             点开就是全书（按集序排；服务端把一部作品拆成几张专辑时会自动合并）。
+            ⚠️ <strong>文件要放在曲库主目录下的「{keyword}」文件夹里</strong>
+            （服务端不能浏览目录，客户端只能扫一遍曲库、再按目录名挑出这个文件夹里的作品）——
+            放在别处的，列表里不会出现。
           </p>
           {items.length === 0 ? (
             <p className="fnm-audiobooks__empty">{emptyText}</p>
