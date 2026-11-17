@@ -104,9 +104,53 @@ describe('T69 主进程接线契约', () => {
     expect(body).not.toContain('island?.show()')
   })
 
-  it('经典悬浮窗的分支**一字未改**（仍是 createLyricWindow()?.show()）', () => {
+  it('T106：经典悬浮窗的分支改走 applyClassicLyricVisibility（不再无条件 show）', () => {
     const body = bodyAfter(MAIN_SRC, 'const setLyricVisible = (visible: boolean): void => {')
-    expect(body).toContain('createLyricWindow()?.show()')
+    expect(body).toContain('applyClassicLyricVisibility()')
+    // ⚠️ **前提被用户的新要求推翻**（2026-11-17：「匹配不到歌词也没有内嵌歌词的
+    //    情况下，不要显示桌面歌词和灵动歌词」）⇒ 经典窗**不能**再无条件 show。
+    expect(body).not.toContain('createLyricWindow()?.show()')
+  })
+
+  it('T106：applyClassicLyricVisibility 存在，且**只管经典形态**', () => {
+    const body = bodyAfter(MAIN_SRC, 'const applyClassicLyricVisibility = (): void => {')
+    expect(body).toContain('shouldShowClassicLyric(')
+    expect(body).toContain("if (lyricMode !== 'classic') return")
+  })
+
+  it('T106：applyClassicLyricVisibility **不**调用 setLyricVisible（否则渲染层停推 ⇒ 死锁）', () => {
+    const body = bodyAfter(MAIN_SRC, 'const applyClassicLyricVisibility = (): void => {')
+    expect(body).not.toContain('setLyricVisible')
+  })
+
+  it('T106：applyClassicLyricVisibility **不**发 lyric:visibility（那会让渲染层停推）', () => {
+    const body = bodyAfter(MAIN_SRC, 'const applyClassicLyricVisibility = (): void => {')
+    expect(body).not.toContain('lyric:visibility')
+  })
+
+  it('T106：lyricHasLyrics 是临时态：初值 false，且**不落盘**', () => {
+    expect(MAIN_SRC).toContain('let lyricHasLyrics = false')
+    for (const call of prefsWriteCalls(MAIN_SRC)) {
+      expect(call).not.toContain('lyricHasLyrics')
+    }
+  })
+
+  it('T106：onLyricState 先更新 lyricHasLyrics、再更新可见性、最后才转发', () => {
+    const body = bodyAfter(MAIN_SRC, 'onLyricState: (message) => {')
+    const updateAt = body.indexOf(
+      'lyricHasLyrics = message.track !== null && message.lines.length > 0',
+    )
+    const applyAt = body.indexOf('applyClassicLyricVisibility()')
+    const forwardAt = body.indexOf("target.webContents.send('lyric:state'")
+    expect(updateAt).toBeGreaterThanOrEqual(0)
+    expect(applyAt).toBeGreaterThan(updateAt)
+    expect(forwardAt).toBeGreaterThan(applyAt)
+  })
+
+  it('T106：关掉桌面歌词 ⇒ **作废**缓存的曲目状态（下次打开先不显示，不闪上一首的歌词）', () => {
+    const body = bodyAfter(MAIN_SRC, 'const setLyricVisible = (visible: boolean): void => {')
+    expect(body).toContain('lastTrackMessage = null')
+    expect(body).toContain('lyricHasLyrics = false')
   })
 
   it('lyric:visibility 的发送时机不变（仍在 setLyricVisible 末尾）', () => {

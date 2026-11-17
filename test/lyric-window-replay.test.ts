@@ -54,7 +54,12 @@ describe('T71 真机补丁：新建的歌词窗口要补发**两条**消息', ()
 
   it('onLyricState **按 kind** 分别落缓存', () => {
     const body = bodyAfter(MAIN_SRC, 'onLyricState: (message) => {')
-    expect(body).toContain("if (message.kind === 'track') lastTrackMessage = message")
+    // ⚠️ **T106**：track 分支从「一行」变成了「一块」（顺带更新 `lyricHasLyrics`）
+    //    ⇒ 断言改成「**赋值在 track 分支里面**」—— 比原来的整行字面量**更强**
+    //    （原来只能证明「有这么一行」，现在能证明「赋值就在这个分支里」）。
+    const trackBranch = /if \(message\.kind === 'track'\) \{([^}]*)\}/.exec(body)
+    expect(trackBranch).not.toBeNull()
+    expect(trackBranch?.[1] ?? '').toContain('lastTrackMessage = message')
     expect(body).toContain("else if (message.kind === 'progress') lastProgressMessage = message")
   })
 

@@ -39,6 +39,7 @@ import { createBoundsSaver, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, resolveWindowBo
 import { islandBounds, isPointInsideRect, ISLAND_WINDOW_HEIGHT, ISLAND_WINDOW_WIDTH } from './islandAnchor'
 import { lyricFloatBounds, type LyricFloatDisplayLike } from '../shared/lyricFloatAnchor'
 import { playingFromLyricMessage, shouldShowIsland } from './islandVisibility'
+import { lyricTrackState, shouldShowClassicLyric } from './lyricVisibility'
 import { createUpdateController } from './update'
 import { migrateLegacyUserData } from './userDataDir'
 import { cleanupUpdateDir } from './updateCleanup'
@@ -148,6 +149,18 @@ let lyricPlaying = false
  *    页面加载完成后把缓存补给它（否则它要等到下一次切歌才有内容）。
  */
 let lastTrackMessage: LyricOverlayMessage | null = null
+
+/**
+ * 当前这首**有没有歌词**（T106 的临时态，**不落盘**）。
+ *
+ * ⚠️ 由渲染层推来的 `kind: 'track'` 消息决定（`lines.length > 0`）：
+ *    线上没匹配上 ＋ 内嵌也没有 ⇒ `false` ⇒ **桌面歌词与灵动岛都不显示**
+ *    （用户 2026-11-17：「匹配不到歌词也没有内嵌歌词的情况下，不要显示桌面歌词和灵动歌词」）。
+ * ⚠️ **它不是用户偏好**，也**绝不能**靠 `setLyricVisible(false)` 来「实现」：
+ *    那会发 `lyric:visibility(false)` ⇒ 渲染层**停止推送** ⇒ 主进程再也收不到
+ *    「下一首有歌词了」⇒ **窗口永远回不来（死锁）**（T69 踩过同款坑）。
+ */
+let lyricHasLyrics = false
 
 /**
  * 主进程缓存的**最后一条「播放进度」**消息（`kind: 'progress'`）。
@@ -863,13 +876,15 @@ if (!isPrimaryInstance) {
        *    我们才知道什么时候该把词岛收回来（否则就是死锁）。
        */
       const applyIslandVisibility = (): void => {
-        // 经典形态：本函数**只管词岛** ⇒ 一字不动经典窗的行为。
+        // 经典形态：本函数**只管词岛** ⇒ 经典窗走 `applyClassicLyricVisibility`。
         if (lyricMode !== 'island') return
 
         const shouldShow = shouldShowIsland({
           visible: lyricVisible,
           mode: lyricMode,
           playing: lyricPlaying,
+          // ⚠️ T106：**没歌词就不显示**（否则是一个空胶囊 + 「暂无歌词」）。
+          hasLyrics: lyricHasLyrics,
         })
         const win = islandWindow && !islandWindow.isDestroyed() ? islandWindow : null
 
@@ -878,6 +893,33 @@ if (!isPrimaryInstance) {
           const created = createIslandWindow()
           reanchorIsland()
           created?.show()
+          return
+        }
+        if (win && win.isVisible()) win.hide()
+      }
+
+      /**
+       * 按「应显示」更新**经典悬浮窗**的显隐（T106）。
+       *
+       * ⚠️ **与词岛同一条纪律**（T69 的死锁教训）：
+       *    **不落盘、不发 `lyric:visibility`** ⇒ 渲染层继续推送
+       *    ⇒ 我们才知道「下一首有歌词了」⇒ 窗口能自己回来。
+       * ⚠️ **窗口没歌时仍显示**（「未在播放」＝既有行为，一字不改）；
+       *    只有「**有歌但没歌词**」才收起（T106 的核心）。
+       */
+      const applyClassicLyricVisibility = (): void => {
+        // 词岛形态：本函数**只管经典窗** ⇒ 两种形态**互斥**（不会同时出现）。
+        if (lyricMode !== 'classic') return
+        const shouldShow = shouldShowClassicLyric({
+          visible: lyricVisible,
+          trackState: lyricTrackState(lastTrackMessage),
+          hasLyrics: lyricHasLyrics,
+        })
+        const win = lyricWindow && !lyricWindow.isDestroyed() ? lyricWindow : null
+
+        if (shouldShow) {
+          if (win && win.isVisible()) return
+          createLyricWindow()?.show()
           return
         }
         if (win && win.isVisible()) win.hide()
@@ -914,7 +956,8 @@ if (!isPrimaryInstance) {
           //    （「用户开着」+「正在播放」两个条件都归它管）。
           applyIslandVisibility()
         } else {
-          createLyricWindow()?.show()
+          // ⚠️ T106：经典窗也走**统一**的可见性判定 ⇒「有歌但没歌词」时**不显示**。
+          applyClassicLyricVisibility()
         }
       }
 
@@ -927,12 +970,19 @@ if (!isPrimaryInstance) {
             // ⚠️ T69：走**统一**的可见性判定 ⇒ 当前没在播，词岛**不显示**。
             applyIslandVisibility()
           } else {
-            createLyricWindow()?.show()
+            // ⚠️ T106：经典窗也走**统一**的可见性判定 ⇒
+            //    「有歌但没歌词」时**不显示**（刚打开时先等渲染层把歌词状态推过来）。
+            applyClassicLyricVisibility()
           }
         } else {
           // 两种形态都收起（用户只该看到「桌面歌词关了」）。
           lyricWindow?.hide()
           islandWindow?.hide()
+          // ⚠️ T106：关掉时**作废**缓存的曲目状态 ⇒ 下次打开时「不知道当前这首
+          //    有没有歌词」⇒ 先**不显示**，等渲染层推新的消息
+          //    ⇒ 避免闪一下**上一首**的歌词。
+          lastTrackMessage = null
+          lyricHasLyrics = false
         }
         // 落盘（下次启动恢复）：可见性 + 形态 + 当前（或上次记住的）位置尺寸。
         const live = lyricWindow && !lyricWindow.isDestroyed() ? lyricWindow.getBounds() : null
@@ -971,13 +1021,19 @@ if (!isPrimaryInstance) {
         onLyricState: (message) => {
           // ⚠️ T71 真机补丁：**按 `kind` 分别缓存** ——「曲目 + 歌词」与「播放位置」
           //    是**两条不同的消息**，新建的歌词窗口**两条都要**（见 `replayLyricState`）。
-          if (message.kind === 'track') lastTrackMessage = message
-          else if (message.kind === 'progress') lastProgressMessage = message
+          if (message.kind === 'track') {
+            lastTrackMessage = message
+            // ⚠️ T106：这首歌**有没有歌词**（临时态，不落盘）⇒
+            //    线上没匹配上 ＋ 内嵌也没有 ⇒ `false` ⇒ 桌面歌词与灵动岛都不显示。
+            lyricHasLyrics = message.track !== null && message.lines.length > 0
+          } else if (message.kind === 'progress') lastProgressMessage = message
           // ⚠️ T69：更新**播放状态**（临时态，不落盘）⇒ 顺带更新词岛可见性。
           //    ⚠️ 必须在转发**之前**做：转发用的是「当前形态的那个窗口」，
           //    而判定可能刚刚把词岛窗口**建出来**（先建、先转发）。
           lyricPlaying = playingFromLyricMessage(message, lyricPlaying)
           applyIslandVisibility()
+          // ⚠️ T106：经典窗**同样**走可见性判定（两形态互斥 ⇒ 只有一个会动手）。
+          applyClassicLyricVisibility()
           // ⚠️ T45：**发给当前形态的那个窗口**（两种形态互斥 → 不会重复消费）。
           const target = activeLyricWindow()
           if (!target) return

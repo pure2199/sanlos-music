@@ -35,37 +35,64 @@ const progressMessage = (isPlaying: boolean): LyricOverlayMessage => ({
 })
 
 describe('T69 词岛可见性判定 shouldShowIsland', () => {
-  it('开着 + 词岛形态 + 正在播放 ⇒ 显示', () => {
-    expect(shouldShowIsland({ visible: true, mode: 'island', playing: true })).toBe(true)
+  it('开着 + 词岛形态 + 正在播放 + **有歌词** ⇒ 显示', () => {
+    expect(
+      shouldShowIsland({ visible: true, mode: 'island', playing: true, hasLyrics: true }),
+    ).toBe(true)
   })
 
   it('用户关了桌面歌词 ⇒ 不显示', () => {
-    expect(shouldShowIsland({ visible: false, mode: 'island', playing: true })).toBe(false)
+    expect(
+      shouldShowIsland({ visible: false, mode: 'island', playing: true, hasLyrics: true }),
+    ).toBe(false)
   })
 
-  it('经典悬浮窗形态 ⇒ 不显示（经典窗的行为一字不变）', () => {
-    expect(shouldShowIsland({ visible: true, mode: 'classic', playing: true })).toBe(false)
+  it('经典悬浮窗形态 ⇒ 不显示（经典窗由 `electron/lyricVisibility.ts` 管）', () => {
+    expect(
+      shouldShowIsland({ visible: true, mode: 'classic', playing: true, hasLyrics: true }),
+    ).toBe(false)
   })
 
   it('没在播放 ⇒ 不显示', () => {
-    expect(shouldShowIsland({ visible: true, mode: 'island', playing: false })).toBe(false)
+    expect(
+      shouldShowIsland({ visible: true, mode: 'island', playing: false, hasLyrics: true }),
+    ).toBe(false)
   })
 
   it('三个条件全不满足 ⇒ 不显示', () => {
-    expect(shouldShowIsland({ visible: false, mode: 'classic', playing: false })).toBe(false)
+    expect(
+      shouldShowIsland({ visible: false, mode: 'classic', playing: false, hasLyrics: true }),
+    ).toBe(false)
   })
 
-  it('真值表完整：只有 (true, island, true) 一种组合为真', () => {
-    const combos: Array<[boolean, 'classic' | 'island', boolean]> = []
+  // -------------------------------------------------------------------------
+  // T106：**没歌词就不显示**（用户 2026-11-17 的原话）
+  // -------------------------------------------------------------------------
+  it('T106：有歌但**没有歌词** ⇒ 不显示（不挂一个空胶囊 + 「暂无歌词」）', () => {
+    expect(
+      shouldShowIsland({ visible: true, mode: 'island', playing: true, hasLyrics: false }),
+    ).toBe(false)
+  })
+
+  it('T106：其余条件都满足，只差「有歌词」⇒ 仍然不显示', () => {
+    expect(
+      shouldShowIsland({ visible: true, mode: 'island', playing: true, hasLyrics: false }),
+    ).toBe(false)
+  })
+
+  it('真值表完整：只有 (true, island, true, true) 一种组合为真', () => {
+    const combos: Array<[boolean, 'classic' | 'island', boolean, boolean]> = []
     for (const visible of [false, true]) {
       for (const mode of ['classic', 'island'] as const) {
-        for (const playing of [false, true]) combos.push([visible, mode, playing])
+        for (const playing of [false, true]) {
+          for (const hasLyrics of [false, true]) combos.push([visible, mode, playing, hasLyrics])
+        }
       }
     }
-    const truthy = combos.filter(([visible, mode, playing]) =>
-      shouldShowIsland({ visible, mode, playing }),
+    const truthy = combos.filter(([visible, mode, playing, hasLyrics]) =>
+      shouldShowIsland({ visible, mode, playing, hasLyrics }),
     )
-    expect(truthy).toEqual([[true, 'island', true]])
+    expect(truthy).toEqual([[true, 'island', true, true]])
   })
 })
 
@@ -99,7 +126,13 @@ describe('T69 主进程状态机（纯函数模拟）', () => {
    *    而且**绝不能**因为暂停就把渲染层一起关掉（那就永远收不回来了）。
    */
   const step = (
-    state: { playing: boolean; visible: boolean; mode: 'classic' | 'island' },
+    state: {
+      playing: boolean
+      visible: boolean
+      mode: 'classic' | 'island'
+      /** T106：这首有没有歌词（**缺省 = 有** ⇒ 既有用例的结论一条不变）。 */
+      hasLyrics?: boolean
+    },
     message: LyricOverlayMessage,
   ): { playing: boolean; islandShown: boolean } => {
     const playing = playingFromLyricMessage(message, state.playing)
@@ -109,6 +142,7 @@ describe('T69 主进程状态机（纯函数模拟）', () => {
         visible: state.visible,
         mode: state.mode,
         playing,
+        hasLyrics: state.hasLyrics ?? true,
       }),
     }
   }
@@ -145,5 +179,13 @@ describe('T69 主进程状态机（纯函数模拟）', () => {
     const s = step({ playing: false, visible: true, mode: 'classic' }, progressMessage(true))
     expect(s.playing).toBe(true)
     expect(s.islandShown).toBe(false)
+  })
+
+  it('T106：这首没有歌词 ⇒ 词岛不显示；换到有歌词的歌 ⇒ 词岛**自己回来**（无死锁）', () => {
+    const base = { playing: true, visible: true, mode: 'island' as const, hasLyrics: false }
+    // 这首没有歌词 ⇒ 词岛不出现。
+    expect(step(base, progressMessage(true)).islandShown).toBe(false)
+    // 换到有歌词的那首 ⇒ 词岛回来（**不依赖**用户再点一次开关）。
+    expect(step({ ...base, hasLyrics: true }, progressMessage(true)).islandShown).toBe(true)
   })
 })

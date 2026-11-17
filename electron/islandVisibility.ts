@@ -22,22 +22,32 @@ export interface IslandVisibilityInput {
   mode: LyricOverlayMode
   /** 当前是否正在播放（**临时态**，不落盘）。 */
   playing: boolean
+  /**
+   * 当前这首**有没有歌词**（**临时态**，不落盘）。
+   *
+   * ⚠️ **T106**：线上没匹配上 ＋ 内嵌也没有 ⇒ `false`
+   *    ⇒ 词岛**不出现**（否则就是一个空胶囊 + 「暂无歌词」）。
+   */
+  hasLyrics: boolean
 }
 
 /**
  * 词岛窗口**实际**该不该可见。
  *
  * ```
- * shouldShow = 用户开着桌面歌词 && 当前形态是词岛 && 正在播放
+ * shouldShow = 用户开着桌面歌词 && 当前形态是词岛 && 正在播放 && 这首有歌词
  * ```
  *
- * ⚠️ 三个条件缺一不可：
+ * ⚠️ 四个条件缺一不可：
  * - `visible` 缺了 ⇒ 用户关了桌面歌词却被弹窗；
- * - `mode` 缺了 ⇒ **经典悬浮窗会被误伤**（它的显隐行为一字不变）；
- * - `playing` 缺了 ⇒ 没歌 / 暂停时词岛仍常驻屏幕顶部（T69 要修的正是这个）。
+ * - `mode` 缺了 ⇒ **经典悬浮窗会被误伤**（它的显隐行为由 `electron/lyricVisibility.ts` 管）；
+ * - `playing` 缺了 ⇒ 没歌 / 暂停时词岛仍常驻屏幕顶部（T69 要修的正是这个）；
+ * - `hasLyrics` 缺了 ⇒ **有歌但没歌词**时挂一个空胶囊（T106 要修的正是这个）。
  */
 export function shouldShowIsland(input: IslandVisibilityInput): boolean {
-  return input.visible && input.mode === 'island' && input.playing
+  return (
+    input.visible && input.mode === 'island' && input.playing && input.hasLyrics
+  )
 }
 
 /**
