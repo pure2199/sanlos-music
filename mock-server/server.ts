@@ -657,6 +657,14 @@ export interface MockServerOptions {
   songs?: RawSong[]
   /** 覆盖专辑列表（**不传** = 用默认的 `ALBUMS`）。 */
   albums?: RawAlbum[]
+  /**
+   * 覆盖歌手列表（**不传** = 用默认的 `ARTISTS`）。
+   *
+   * ⚠️ **T104 新增**：歌手详情页有**两个**区块（「专辑网格」+「曲目」）
+   *    ⇒ 要验「两个区块各占一半」就得有一个**自己的歌手**
+   *    （共享歌手会连带影响别的用例的断言）⇒ 按实例注入。
+   */
+  artists?: RawArtist[]
 }
 
 /**
@@ -669,9 +677,10 @@ export interface MockServerOptions {
  * @param options 按实例注入曲库 / 专辑（**默认一条都不改**）。
  */
 export function createMockServer(options?: MockServerOptions): MockServer {
-  // ---- 本实例的曲库 / 专辑（默认 = 共享 fixtures）------------------------
+  // ---- 本实例的曲库 / 专辑 / 歌手（默认 = 共享 fixtures）-------------------
   const songs = options?.songs ?? SONGS
   const albums = options?.albums ?? ALBUMS
+  const artists = options?.artists ?? ARTISTS
 
   // ---- 状态 ----
   const state: MockState = {
@@ -928,7 +937,7 @@ export function createMockServer(options?: MockServerOptions): MockServer {
   })
 
   getRoutes.set(`${API_BASE}/artist/list`, ({ res, query }) => {
-    sendJson(res, ok(paginate(ARTISTS, query)))
+    sendJson(res, ok(paginate(artists, query)))
   })
 
   getRoutes.set(`${API_BASE}/genre/list`, ({ res, query }) => {
@@ -1078,7 +1087,7 @@ export function createMockServer(options?: MockServerOptions): MockServer {
       sendJson(res, ok(paginate<RawArtist>([], query)))
       return
     }
-    const hits = ARTISTS.filter((artist) => artist.name.toLowerCase().includes(keyword))
+    const hits = artists.filter((artist) => artist.name.toLowerCase().includes(keyword))
     sendJson(res, ok(paginate(hits, query)))
   })
 

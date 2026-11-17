@@ -37,6 +37,7 @@ import {
 } from '../mock-server/fixtures'
 import { createMockServer, type MockServer } from '../mock-server/server'
 import { launchApp, login, type AppFixture } from './helpers/app'
+import { collectSongListRows } from './helpers/song-list'
 
 test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
   let fixture: AppFixture
@@ -111,17 +112,24 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     await expect(reasons).toContainText('曲目集中在同一作品目录')
 
     const rows = fixture.window.locator('.fnm-songlist__row')
-    await expect(rows).toHaveCount(12)
+    // ⚠️ **T104（2026-11-17）把「验 DOM 行数」换成「滚着收齐」**：
+    //    列表**真的能滚**了 ⇒ 虚拟裁剪生效 ⇒ DOM 里只有「可视区那一屏」，
+    //    「DOM 里有 12 行」只在**滚不动**（旧缺陷）时成立 ⇒ 那是**缺陷的副产品**。
+    //    ⇒ 改成把整张列表**滚一遍收齐**（按 `data-index` 去重）：
+    //      **收齐 12 行本身就是「能滚到底」的证明**（收不齐 = 滚不到）。
+    const all = await collectSongListRows(fixture.window)
+    expect(all).toHaveLength(12)
 
     // ⭐ mock 给的是**乱序**（第 1 首是「07- 第7集」）⇒ 排对了才是真的排对了。
     await expect(rows.nth(0).locator('.fnm-songlist__title')).toHaveText('01- 第1集')
-    await expect(rows.nth(11).locator('.fnm-songlist__title')).toHaveText('12- 第12集')
+    expect(all[11]?.title).toBe('12- 第12集')
 
     // 集号标签逐行递增（1…12）。
     await expect(rows.nth(0).locator('.fnm-detail__episode')).toHaveText('第 1 集')
-    await expect(rows.nth(11).locator('.fnm-detail__episode')).toHaveText('第 12 集')
-    const episodes = await rows.locator('.fnm-detail__episode').allTextContents()
-    expect(episodes).toEqual(Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 集`))
+    expect(all[11]?.episode).toBe('第 12 集')
+    expect(all.map((row) => row.episode)).toEqual(
+      Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 集`),
+    )
 
     // 全量都拉下来了（不是只显示第一页）。
     await expect(fixture.window.locator('.fnm-songlist__status')).toHaveText('已加载 12 / 12')
@@ -161,8 +169,11 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     // 点开 ⇒ 用户**指认**了它 ⇒ 详情页按集序排。
     await results.first().locator('.fnm-audiobooks__title').click()
     await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
+    // ⚠️ **T104（2026-11-17）**：同上 —— 「DOM 行数」换成「滚着收齐」
+    //    （收齐 12 行 = **能滚到底**；而「DOM 里有 12 行」只在**滚不动**时成立）。
     const rows = fixture.window.locator('.fnm-songlist__row')
-    await expect(rows).toHaveCount(12)
+    const all = await collectSongListRows(fixture.window)
+    expect(all).toHaveLength(12)
     await expect(rows.nth(0).locator('.fnm-songlist__title')).toHaveText('01- 第1集')
     await expect(rows.nth(0).locator('.fnm-detail__episode')).toHaveText('第 1 集')
 

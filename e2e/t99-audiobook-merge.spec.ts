@@ -28,6 +28,7 @@ import { expect, test } from '@playwright/test'
 import { ALBUMS, SONGS, type RawAlbum, type RawSong } from '../mock-server/fixtures'
 import { createMockServer, type MockServer } from '../mock-server/server'
 import { launchApp, login, type AppFixture } from './helpers/app'
+import { collectSongListRows } from './helpers/song-list'
 
 /** 合并后的作品名（两张专辑**同名**）。 */
 const WORK_NAME = '示例合并作品'
@@ -182,19 +183,23 @@ test.describe.serial('T99「同名专辑归并」+「集号在中段」', () => 
     await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
 
     const rows = fixture.window.locator('.fnm-songlist__row')
+    // ⚠️ **T104（2026-11-17）**：「DOM 里有 13 行」只在**滚不动**（旧缺陷）时成立
+    //    ⇒ 改成**滚着收齐**（按 `data-index` 去重）：**收齐 13 行 = 能滚到底**。
+    const all = await collectSongListRows(fixture.window)
     // 13 集（12 + 1）⇒ 整部作品一集不少。
-    await expect(rows).toHaveCount(13)
+    expect(all).toHaveLength(13)
 
     // ⭐ **第 02 集来自另一张专辑**（服务端把它拆开了）⇒ 合并后它**必须出现**。
     await expect(rows.nth(0).locator('.fnm-detail__episode')).toHaveText('第 1 集')
     await expect(rows.nth(1).locator('.fnm-detail__episode')).toHaveText('第 2 集')
     // ⭐ 这一行的标题**只可能**来自被拆出去的那张专辑（主专辑里**没有**第 02 集）。
     await expect(rows.nth(1).locator('.fnm-songlist__title')).toHaveText(`${WORK_NAME} 02 承上`)
-    await expect(rows.nth(12).locator('.fnm-detail__episode')).toHaveText('第 13 集')
+    expect(all[12]?.episode).toBe('第 13 集')
 
     // 集号**连续**（1…13，中间没有洞）。
-    const episodes = await rows.locator('.fnm-detail__episode').allTextContents()
-    expect(episodes).toEqual(Array.from({ length: 13 }, (_, i) => `第 ${i + 1} 集`))
+    expect(all.map((row) => row.episode)).toEqual(
+      Array.from({ length: 13 }, (_, i) => `第 ${i + 1} 集`),
+    )
 
     // 总数按**整组**算（不是主专辑那 12 集）⇒ 不能出现「已加载 13 / 12」。
     await expect(fixture.window.locator('.fnm-songlist__status')).toHaveText('已加载 13 / 13')
@@ -236,7 +241,9 @@ test.describe.serial('T99「同名专辑归并」+「集号在中段」', () => 
     await results.first().locator('.fnm-audiobooks__title').click()
     await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
     const rows = fixture.window.locator('.fnm-songlist__row')
-    await expect(rows).toHaveCount(13)
+    // ⚠️ T104：同上（「DOM 行数」→「滚着收齐」；收齐 13 行 = 能滚到底）。
+    const all = await collectSongListRows(fixture.window)
+    expect(all).toHaveLength(13)
     await expect(rows.nth(1).locator('.fnm-detail__episode')).toHaveText('第 2 集')
     await expect(rows.nth(1).locator('.fnm-songlist__title')).toHaveText(`${WORK_NAME} 02 承上`)
 

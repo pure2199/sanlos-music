@@ -758,6 +758,113 @@ export const AUDIOBOOK_SONGS: RawSong[] = [7, 3, 12, 1, 9, 5, 11, 2, 8, 4, 10, 6
 )
 
 // ---------------------------------------------------------------------------
+// 「多集专辑」（T104：验**详情页的曲目列表能滚到底**）
+// ---------------------------------------------------------------------------
+//
+// ⚠ **为什么要单独一组**：要验「列表能滚到底 ⇒ 最后一行在场」，
+//    就得有一个**超过一屏**的列表（行高 48px ⇒ 一屏约 13 行 ⇒ 至少 30 集）。
+// ⚠ **共享 fixtures 一条不改**（T97 断言「随机挑了 8 首」）
+//    ⇒ 这 40 集**只在本实例**注入（`createMockServer({ songs, albums })`）。
+// ⚠ 目录放在「音乐多文件」下 ⇒ **不会**被「有声小说」扫描捞到 ⇒ 不影响有声页用例。
+
+/** 「多集专辑」的专辑 guid。 */
+export const LONG_ALBUM_GUID = 'al-long'
+
+/** 「多集专辑」的集数（**够撑破一屏**；≤ 单页 50 ⇒ **不分页** ⇒ 末行确定）。 */
+export const LONG_ALBUM_TRACK_COUNT = 40
+
+/**
+ * 「多集专辑」的歌手（T104：验**歌手详情页**的两个区块各占一半）。
+ *
+ * ⚠️ **单独造一个歌手**（不借用共享的 `ARTISTS`）：
+ *    歌手详情页的专辑网格会列出**该歌手的全部专辑** ⇒ 借用共享歌手会连带影响别的用例。
+ */
+export const LONG_ALBUM_ARTIST: RawArtist = {
+  guid: 'a-long',
+  name: '示例长作者',
+  coverId: null,
+  albumCount: 1,
+  trackCount: LONG_ALBUM_TRACK_COUNT,
+  createdAt: T0,
+  updatedAt: T0,
+}
+
+/** 「多集专辑」的专辑。 */
+export const LONG_ALBUM: RawAlbum = {
+  guid: LONG_ALBUM_GUID,
+  name: '多集专辑示例',
+  coverId: null,
+  releaseDate: null,
+  barcode: null,
+  createdAt: T0,
+  updatedAt: T0,
+  artists: [LONG_ALBUM_ARTIST],
+  trackCount: LONG_ALBUM_TRACK_COUNT,
+}
+
+/** 造一条「多集专辑」的曲目。 */
+function longAlbumSong(index: number): RawSong {
+  const label = String(index).padStart(2, '0')
+  return {
+    guid: `l${index}`,
+    title: `多集专辑 第${label}首`,
+    duration: 200000,
+    coverId: null,
+    artists: [LONG_ALBUM_ARTIST],
+    album: {
+      guid: LONG_ALBUM_GUID,
+      name: '多集专辑示例',
+      coverId: null,
+      releaseDate: null,
+      barcode: null,
+      createdAt: T0,
+      updatedAt: T0,
+    },
+    audioSpec: {
+      bitDepth: 16,
+      sampleRate: 44100,
+      channel: 2,
+      bitrate: 128000,
+      codec: 'mp3',
+      container: '',
+      duration: 200000,
+      format: 'mp3',
+      // ⚠ 路径要有 **≥ 3 段**，且**倒数第 3 段**是作品目录（真机实测的取法）。
+      path: `/vol02/1000-0-3d135437/音乐多文件/示例长作者/多集专辑示例/Disc 01/第${label}首.mp3`,
+      size: 4000000,
+    },
+    year: null,
+    trackNo: null,
+    discNo: 1,
+    isrc: null,
+    isCue: false,
+    createdAt: T0,
+    updatedAt: T0,
+    genres: [],
+    isFavorite: false,
+  }
+}
+
+/**
+ * 「多集专辑」的 40 首（**注入顺序 = 展示顺序** ⇒ 滚到底看到的最后一行 = 第 40 首）。
+ *
+ * ⚠ 这张专辑**不是**有声 ⇒ 详情页**不**按集序排 ⇒ 行顺序 = 服务端给的顺序
+ *   ⇒ 「最后一行是第 40 首」这条断言只依赖注入顺序，不依赖排序。
+ */
+export const LONG_ALBUM_SONGS: RawSong[] = Array.from({ length: LONG_ALBUM_TRACK_COUNT }, (_, i) =>
+  longAlbumSong(i + 1),
+)
+
+/**
+ * 「多集专辑」所属的**歌手页**用的专辑数组（= 就这一张）。
+ *
+ * ⚠️ 歌手详情页有两个区块（「专辑网格」+「曲目」）⇒ 专辑网格里只有 1 张卡时，
+ *    「网格内容高度」很小 ⇒ 若区块按**内容高度**分配空间，网格区块会被挤成 0
+ *    ⇒ 这正是 `flex: 1 1 0` 要防的塌法。
+ */
+export const LONG_ALBUM_ARTIST_ALBUMS: RawAlbum[] = [LONG_ALBUM]
+
+// ---------------------------------------------------------------------------
 // 风格（2 个，g1–g2）
 //
 // g1 = `Pop`、g2 = `POP`：**同名不同大小写**，用于覆盖客户端的风格名归一化场景。
