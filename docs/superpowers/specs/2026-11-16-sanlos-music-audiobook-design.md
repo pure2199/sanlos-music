@@ -414,7 +414,8 @@ v1 设想「扫 `/album/list` 拿 `trackCount` → 对候选逐个拉 `/track/al
 | `dash-prefix` | 数字 + 连字符 | `21- 序章`、`23- 防御` | `[21]` / `[23]` |
 | `dotted-prefix` | 点分数字前缀 | `17.0315丨坚持这三步…` | `[17, 315]` |
 | `digits-only` | **纯数字标题** | `0010`（牧神记） | `[10]` |
-| `bracket` | 括号数字 | `【01】开篇` | `[1]` |
+| `mid-number` | 集号在**中段**（T99 新增） | `极品家丁 0001 公子，公子` | `[1]` |
+| `bracket` | 括号数字（**兜底**：位置最松 ⇒ 优先级最低，**T103 降到最后**） | `【01】开篇` | `[1]` |
 | `trailing` | 末尾集号（**宽松**） | `让青春继续第一季 10`（已被上一条覆盖） | `[10]` |
 
 - **年份保护**：4 位数且落在 1900–2100 ⇒ **不当集号**（`2024年…` ⇒ null）；
@@ -431,8 +432,11 @@ v1 设想「扫 `/album/list` 拿 `trackCount` → 对候选逐个拉 `/track/al
    - 统计每条规则的命中数；
    - **只有当某一个规则命中 ≥ 60%** 时，才用该规则解析**全部**标题
      （同一专辑内形态应当一致）；命中数相同时**按规则优先级**取更具体的
-     （`season-episode` > `episode-cn` > `dash-prefix` > `dotted-prefix` >
-     `bracket` > `digits-only` > `trailing`）；
+     （⚠ **T103 已更正**：现为 `season-episode` > `episode-cn` > `dash-prefix` >
+     `dotted-prefix` > `digits-only` > `trailing` > `mid-number` > `bracket`
+     —— `bracket` 降到**最末**兜底（数字位置最松 ⇒ 真实数据里常是「分集后缀」）；
+     旧口径 `bracket` > `digits-only` > `trailing` **作废**，理由见
+     `docs/superpowers/specs/2026-11-17-sanlos-music-audiobook-episode-order-design.md`）；
    - **否则整张专辑不按标题排序**（保持原序）⇒ **宁可不动也不乱**。
 
 实测：

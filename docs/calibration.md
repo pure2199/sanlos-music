@@ -5520,7 +5520,9 @@ v0.2.7 的发布说明与 changelog，并承诺「**修法已定方向，待安�
 ### 五、集号解析（`parseEpisode`）与排序
 
 - 规则优先级（命中数相同时取更具体的）：`season-episode` > `episode-cn` > `dash-prefix` >
-  `dotted-prefix` > `bracket` > `digits-only` > `trailing`；
+  `dotted-prefix` > `digits-only` > `trailing` > `mid-number` > `bracket`；
+  ⭐ **T103 已更正**：`bracket` 降到**最末**兜底（数字位置最松 ⇒ 真实数据里常是「分集后缀」）；
+  旧口径 `bracket` > `digits-only` > `trailing` **作废**。
 - **专辑级形态一致性** ≥ 60% 才用该规则排序，否则**整张专辑保持原序**（宁可不动也不乱）；
 - 四层稳定排序键：集号 → `trackNo`（**仅当质量合格**：有值率 ≥ 90% 且去重率 ≥ 90%）→
   `createdAt` → 原下标；

@@ -69,7 +69,8 @@
 
 ### 技术变更（T98）
 
-- **新增** `src/api/audiobook.ts`：**纯函数**（识别 + 排序都可单测）——集号解析 7 条规则（`season-episode` > `episode-cn` > `dash-prefix` > `dotted-prefix` > `bracket` > `digits-only` > `trailing`）、专辑级**形态一致性**门槛 60%、判定打分（6 条依据：均长 ≥ 8 分钟 +2 / ≥ 20 分钟 +1 / **最长单集** ≥ 30 分钟 +1 / 标题形态一致 **且与时长联动** +2 / 集数 ≥ 8 +1 / 作品目录唯一 +1 ⇒ **≥ 4 分**判为有声）、按集序**稳定**排序（不丢不重）；
+- **新增** `src/api/audiobook.ts`：**纯函数**（识别 + 排序都可单测）——集号解析 8 条规则（`season-episode` > `episode-cn` > `dash-prefix` > `dotted-prefix` > `digits-only` > `trailing` > `mid-number` > `bracket`；
+⚠ **T103 已更正**：`bracket` 降到**最末**兜底，`mid-number` 补上）、专辑级**形态一致性**门槛 60%、判定打分（6 条依据：均长 ≥ 8 分钟 +2 / ≥ 20 分钟 +1 / **最长单集** ≥ 30 分钟 +1 / 标题形态一致 **且与时长联动** +2 / 集数 ≥ 8 +1 / 作品目录唯一 +1 ⇒ **≥ 4 分**判为有声）、按集序**稳定**排序（不丢不重）；
 - **新增** `src/state/audiobookStore.ts`：扫描（逐页 + **每页落断点** + **可续跑**）+ 判定 + 人工改判；落盘走 **`localStorage`**（**不是** `prefs.json` —— 那是凭证白名单的**安全边界**；同族先例 `src/player/resume.ts`）；
 - **新增** `src/pages/AudiobooksPage.tsx` + `src/pages/audiobooks-page.css`：扫描按钮 +「从头重扫」+ 进度 + 命中列表（判定分 / 依据 / 集数 / 均长）+「不是有声」改判 + 空态；
 - **改** `src/api/library.ts`：新增**流式**扫描 `scanLibraryTracks()`（`size=2000` ⇒ 本机 17.3 万首只要 **87 页**；支持 `startPage` 断点、`sinceCreatedAt` 增量水位、逐页回调 ⇒ **逐页释放**，不把 17 万首留在内存里）；
