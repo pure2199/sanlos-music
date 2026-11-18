@@ -23,7 +23,7 @@ import {
 } from './downloadManager'
 import { createHttpStack } from './http'
 import { attachAppShortcuts } from './appShortcuts'
-import { createLyricProvider } from './lyricProvider'
+import { createLyricProvider, resolveAllowedLyricSources } from './lyricProvider'
 import { createChartProvider, createQqChartSource, resolveChartBaseUrl, DEFAULT_QQ_TOPLIST_URL, type ChartFetchLike } from './chartProvider'
 import { readAtMostBytes } from './embeddedLyric'
 import { registerLocalMedia } from './localMedia'
@@ -1111,7 +1111,14 @@ if (!isPrimaryInstance) {
       //     地址一律取主进程自己读到的偏好。
       registerLyricIpc({
         prefs,
-        provider: createLyricProvider({ fetchImpl: http.fetch }),
+        provider: createLyricProvider({
+          fetchImpl: http.fetch,
+          // ⚠️ **T108**：并发轮询**全部**源 ⇒ 连 `custom` 也会去问公网源
+          //    ⇒ E2E 必须能把链限制到 mock 指的源，否则会打真实外网。
+          //    ⚠️ 只由**主进程**从**环境变量**读（渲染层碰不到 ⇒ 不是提权）；
+          //    没设这个环境变量 ⇒ `undefined` ⇒ **行为一字不变**。
+          allowedSources: resolveAllowedLyricSources(process.env.FNM_LYRIC_SOURCES),
+        }),
         // ⚠️ **T83：音频内嵌歌词**。
         //    查找链与 `fnml://` 一致（下载索引 → 本地登记表）——
         //    下载过的曲目拿到的是**原文件**（标签最完整）。

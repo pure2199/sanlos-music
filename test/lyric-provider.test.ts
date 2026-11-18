@@ -226,7 +226,10 @@ describe('网易云适配器', () => {
     expect(result.original).toBe(LRC_SAMPLE)
     expect(result.translation).toBe('[00:10.00]占位翻译')
     // ⚠️ 选中的必须是**时长对得上且歌手对得上**的那条（id=222）。
-    expect(calls[1]).toContain('id=222')
+    // ⚠️ T108：并发轮询 ⇒ `calls` 里**别的源**的请求也在 ⇒ 断言只看**网易云自己**的请求
+    //    （「该源自己的第 N 个请求」比「全局第 N 个请求」更精确，**不是更弱**）。
+    const neteaseCalls = calls.filter((url) => url.includes('music.163.com'))
+    expect(neteaseCalls[1]).toContain('id=222')
   })
 
   it('搜索结果里没有对得上的 → `not-found`（不是错误）', async () => {
@@ -271,7 +274,9 @@ describe('lrclib 适配器', () => {
     //    当成翻译会让同一句歌词显示两遍（T31 的坑）。
     expect(result.translation).toBe('')
     // ⚠️ 精确匹配命中就**不该**再打搜索接口。
-    expect(calls.some((url) => url.includes('/api/search'))).toBe(false)
+    // ⚠️ T108：并发轮询 ⇒ 别的源也在打请求（**网易云的搜索地址里也含 `/api/search`**）
+    //    ⇒ 这里断言的是「**lrclib 自己**没打搜索接口」。
+    expect(calls.some((url) => url.includes('lrclib.net') && url.includes('/api/search'))).toBe(false)
   })
 
   it('精确匹配 404 → 回落搜索；搜到的结果按时长挑', async () => {
@@ -287,7 +292,8 @@ describe('lrclib 适配器', () => {
     const provider = createLyricProvider({ fetchImpl })
     const result = await provider.fetchExternalLyric('lrclib', '', QUERY)
     expect(result.status).toBe('ok')
-    expect(calls.some((url) => url.includes('/api/search'))).toBe(true)
+    // ⚠️ T108：并发轮询 ⇒ 别的源也会打搜索接口（**这条断言现在只认 lrclib 自己**）。
+    expect(calls.some((url) => url.includes('lrclib.net') && url.includes('/api/search'))).toBe(true)
   })
 
   it('精确匹配到但**只有纯文本**（无时间戳）→ `not-found`（不给用户一个空界面）', async () => {
@@ -367,7 +373,9 @@ describe('QQ 音乐适配器', () => {
     expect(result.original).toBe(LRC_SAMPLE)
     expect(result.translation).toBe('[00:10.00]占位翻译')
     // ⚠️ 选中的必须是**时长对得上且歌手对得上**的那条（songmid=002）。
-    expect(calls[1]).toContain('songmid=002')
+    // ⚠️ T108：并发轮询 ⇒ 只看**QQ 自己**的请求。
+    const qqCalls = calls.filter((url) => url.includes('c.y.qq.com'))
+    expect(qqCalls[1]).toContain('songmid=002')
   })
 
   it('歌名带 `<em>` 高亮标签 → **剥掉后**才匹配得上', async () => {
@@ -389,7 +397,9 @@ describe('QQ 音乐适配器', () => {
     const provider = createLyricProvider({ fetchImpl })
     const result = await provider.fetchExternalLyric('qq', '', QUERY)
     expect(result.status).toBe('ok')
-    expect(calls[1]).toContain('songmid=003')
+    // ⚠️ T108：并发轮询 ⇒ 只看**QQ 自己**的请求。
+    const qqCalls = calls.filter((url) => url.includes('c.y.qq.com'))
+    expect(qqCalls[1]).toContain('songmid=003')
   })
 
   it('QQ 的 `interval` 是**秒** → 按秒挑中时长对得上的那条', async () => {
@@ -410,7 +420,9 @@ describe('QQ 音乐适配器', () => {
     const result = await provider.fetchExternalLyric('qq', '', QUERY)
     expect(result.status).toBe('ok')
     // ⚠️ 若把 `interval` 当**毫秒**（除以 1000）→ 两个候选时长都对不上 → 会退回第一条（001）。
-    expect(calls[1]).toContain('songmid=002')
+    // ⚠️ T108：并发轮询 ⇒ 只看**QQ 自己**的请求。
+    const qqCalls = calls.filter((url) => url.includes('c.y.qq.com'))
+    expect(qqCalls[1]).toContain('songmid=002')
   })
 
   it('翻译字段为空 → 仍是 `ok`，翻译就是空串（**不报错**）', async () => {
@@ -538,7 +550,9 @@ describe('自定义模板适配器', () => {
     expect(result.status).toBe('ok')
     if (result.status !== 'ok') return
     expect(result.original).toBe(LRC_SAMPLE)
-    expect(calls[0]).toContain('title=%E5%8D%A0%E4%BD%8D%E6%AD%8C%E5%90%8D')
+    // ⚠️ T108：并发轮询 ⇒ 只看**自定义源自己**的请求。
+    const customCalls = calls.filter((url) => url.includes('example.com'))
+    expect(customCalls[0]).toContain('title=%E5%8D%A0%E4%BD%8D%E6%AD%8C%E5%90%8D')
   })
 
   it('响应**不是 LRC** → `error` + 如实说明（不许把纯文本硬塞进去）', async () => {
@@ -644,7 +658,8 @@ describe('缓存与开关', () => {
     )
 
     // ⚠️ **两次都要真的发请求**（改模板 = 换一个接口，不能拿旧的）。
-    expect(calls).toHaveLength(2)
+    // ⚠️ T108：并发轮询 ⇒ 别的源也在打请求 ⇒ 这里数的是「**自定义源自己**的请求」。
+    expect(calls.filter((url) => url.includes('example.com'))).toHaveLength(2)
     expect(first.status).toBe('ok')
     expect(second.status).toBe('ok')
     if (first.status !== 'ok' || second.status !== 'ok') return
@@ -687,7 +702,11 @@ describe('源链（T73）', () => {
     expect(calls.some((url) => url.includes('lrclib.net'))).toBe(true)
   })
 
-  it('命中即停：后面的源**一个请求都不发**', async () => {
+  it('⚠️ T108：**轮询**（不再是「命中即停」）⇒ 后面的源**也会被问**', async () => {
+    // ⚠️ **前提被显式推翻**（T108，2026-11-18）：
+    //    用户要求「**轮询所有歌词API**，匹配有行字时间戳的歌词优先」
+    //    ⇒ 「命中即停、后面的源一个请求都不发」这条**不再成立**
+    //    ⇒ 改写为**新行为**断言（**不是**删掉、也不是弱化）。
     const { fetchImpl, calls } = makeFetch([
       {
         match: 'lrclib.net/api/get',
@@ -696,7 +715,8 @@ describe('源链（T73）', () => {
     ])
     const provider = createLyricProvider({ fetchImpl })
     await provider.fetchExternalLyric('lrclib', '', QUERY)
-    expect(calls.some((url) => url.includes('music.163.com'))).toBe(false)
+    // ⚠️ 新行为：并发轮询 ⇒ **后面的源也会被问**（首选源命中了也一样）。
+    expect(calls.some((url) => url.includes('music.163.com'))).toBe(true)
   })
 
   it('每个源**各自**限时：某个源卡住 → 换下一个源', async () => {
@@ -1012,7 +1032,9 @@ describe('网易云适配器 · 真逐字（T67）', () => {
     ])
     const provider = createLyricProvider({ fetchImpl })
     await provider.fetchExternalLyric('netease', '', QUERY)
-    expect(calls[1]).toContain('yv=-1')
+    // ⚠️ T108：并发轮询 ⇒ 只看**网易云自己**的请求。
+    const neteaseCalls = calls.filter((url) => url.includes('music.163.com'))
+    expect(neteaseCalls[1]).toContain('yv=-1')
   })
 
   it('响应带 yrc → 原文用**真逐字**（含 <mm:ss.xx>）；翻译**被重新定时到原文行**', async () => {
@@ -1161,7 +1183,9 @@ describe('网易云适配器 · 罗马音与副行重新定时（T90-⑧）', ()
     ])
     const provider = createLyricProvider({ fetchImpl })
     await provider.fetchExternalLyric('netease', '', QUERY)
-    expect(calls[1]).toContain('rv=-1')
+    // ⚠️ T108：并发轮询 ⇒ 只看**网易云自己**的请求。
+    const neteaseCalls = calls.filter((url) => url.includes('music.163.com'))
+    expect(neteaseCalls[1]).toContain('rv=-1')
   })
 
   it('响应带 romalrc → 结果里**有** `romanization`', async () => {

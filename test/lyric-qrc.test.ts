@@ -447,8 +447,10 @@ describe('fetchQq 的逐字链路', () => {
     expect(result.original).toBe(WORD_ENHANCED_LRC)
     expect(result.translation).toBe('[00:10.00]占位翻译')
     // ⚠️ **行级仍然是第 2 个请求**（既有生产路径与既有断言都不变）。
-    expect(calls[1]).toContain('fcg_query_lyric_new.fcg')
-    expect(calls[1]).toContain('songmid=002')
+    // ⚠️ T108：并发轮询 ⇒ 只看**QQ 自己**的请求。
+    const qqCalls = calls.filter((url) => url.includes('c.y.qq.com'))
+    expect(qqCalls[1]).toContain('fcg_query_lyric_new.fcg')
+    expect(qqCalls[1]).toContain('songmid=002')
   })
 
   it('逐字失败（接口 404）⇒ **回落行级**（能力只增不减）', async () => {

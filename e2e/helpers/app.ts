@@ -160,6 +160,14 @@ export async function launchApp(opts?: LaunchAppOptions): Promise<AppFixture> {
         ...stringEnv(process.env),
         FNM_UPDATE_DIR: join(userDataDir, 'update'),
         FNM_CHART_URL: `${mock.url}/mock-chart`,
+        // ⚠️ **T108：E2E 不许打真实外网**（同 `FNM_CHART_URL` 的既有纪律）。
+        //    T108 改成「**并发轮询全部源**」之后，连 `custom` 源也会去问
+        //    网易云 / lrclib / QQ / 酷狗 / 酷我 / 咪咕 ⇒ E2E 会真的访问公网
+        //    （慢 + 不确定 + 可能被真实歌词顶掉）。
+        //    ⇒ 把**兜底源**限制到 mock 指的 `custom` ⇒ 链 = `[custom]`
+        //    ⇒ **既有 E2E 行为一字不变**，且一个真实外网请求都不发。
+        //    ⚠️ 只由**主进程**从**环境变量**读（渲染层碰不到）。
+        FNM_LYRIC_SOURCES: 'custom',
       },
     })
   } catch (err) {

@@ -42,13 +42,18 @@
 //
 // ---------------------------------------------------------------------------
 
-import type {
-  ExternalLyricQuery,
-  ExternalLyricResult,
-  LyricSource,
+import {
+  PER_SONG_LYRIC_SOURCES,
+  type ExternalLyricQuery,
+  type ExternalLyricResult,
+  type LyricSource,
 } from '../shared/lyricProvider'
 // ⚠️ T93：占位歌词（「此歌曲为纯音乐，请欣赏」这种）**不算命中** ⇒ 链子继续试下一个源。
 import { isPlaceholderLyric } from '../shared/lyricPlaceholder'
+// ⚠️ T108：判断一份歌词**带不带逐字时间戳**（`<mm:ss.xx>` 词级标签）——
+//    与渲染层 `src/ui/lyrics/parse.ts` 的 `WORD_TAG` 同口径
+//    （口径一致性由 `test/lyric-word-timed.test.ts` 钉住 ⇒ 漂移会被当场抓住）。
+import { hasWordTimedTags } from '../shared/lyricWordTimed'
 
 import {
   qrcToEnhancedLrc,
@@ -1575,6 +1580,15 @@ export interface LyricProviderOptions {
    * ⚠️ 单测可注入一个很小的值来验「超时就换下一个源」。
    */
   perSourceTimeoutMs?: number
+  /**
+   * **允许进链的兜底源**（T108；**不传 = 不限制**）。
+   *
+   * ⚠️ 只由**主进程**从**环境变量** `FNM_LYRIC_SOURCES` 读
+   *    （见 {@link resolveAllowedLyricSources}）⇒ 用来让 **E2E 不打真实外网**；
+   *    **渲染层碰不到它**（渲染层只发 IPC、只说「用哪个源名」）。
+   * ⚠️ **首选源永远在链里**（用户的显式选择不被静默丢掉）。
+   */
+  allowedSources?: readonly LyricSource[]
 }
 
 /** 歌词源提供器。 */
@@ -1645,13 +1659,22 @@ export const PER_SOURCE_TIMEOUT_MS = 3000
  * @param template 自定义模板（`custom` 没有模板 ⇒ 不进链）。
  * @returns 要依次尝试的源（**首选源一定在第一个**）。
  */
-export function buildSourceChain(source: LyricSource, template: string): LyricSource[] {
+export function buildSourceChain(
+  source: LyricSource,
+  template: string,
+  allowedSources?: readonly LyricSource[],
+): LyricSource[] {
   if (source === 'off') return []
   const chain: LyricSource[] = []
   const push = (candidate: LyricSource): void => {
     if (chain.includes(candidate)) return
     // ⚠️ `custom` 没有模板 = 没法用 ⇒ 不进链（别去请求一个空地址）。
     if (candidate === 'custom' && template.trim() === '') return
+    // ⚠️ T108：白名单（`FNM_LYRIC_SOURCES`）只限制**兜底源**；
+    //    **首选源永远在链里**（用户的显式选择不被静默丢掉）。
+    if (allowedSources !== undefined && candidate !== source && !allowedSources.includes(candidate)) {
+      return
+    }
     chain.push(candidate)
   }
   push(source)
@@ -1659,10 +1682,120 @@ export function buildSourceChain(source: LyricSource, template: string): LyricSo
   return chain
 }
 
+/**
+ * 解析**允许进链的兜底源**白名单（T108；从环境变量 `FNM_LYRIC_SOURCES` 读）。
+ *
+ * ⚠️ **为什么要有这个口子**：T108 改成「并发轮询**全部**源」之后，
+ *    连 `custom` 源也会去问网易云 / lrclib / QQ / 酷狗 / 酷我 / 咪咕
+ *    ⇒ **E2E 会真的打真实外网**（慢 + 不确定 + 可能被真实歌词顶掉）
+ *    ⇒ 既有 E2E 的前提「**E2E 不许打真实外网**」就被破坏了。
+ *    ⇒ 主进程读一个**环境变量**，把链限制到 mock 指的源
+ *    （沿用 `FNM_CHART_URL` 的既有范式：**只由主进程从环境变量读**，
+ *    渲染层碰不到 ⇒ 不构成提权）。
+ *
+ * ⚠️ **只认合法的源名**（`PER_SONG_LYRIC_SOURCES` 白名单，不含 `off`）
+ *    ⇒ 陌生值**丢弃**（不是「配错了就全部拦掉」，而是「配错的那几个忽略掉」）。
+ * ⚠️ **没给 / 全是陌生值 ⇒ 视为「不限制」**（`undefined`）
+ *    ⇒ 生产环境（没有这个环境变量）行为**一字不变**。
+ *
+ * @param raw 原始值（通常是环境变量）。
+ * @returns 合法源名列表；不限制时返回 `undefined`。
+ */
+export function resolveAllowedLyricSources(
+  raw: string | undefined | null,
+): LyricSource[] | undefined {
+  if (typeof raw !== 'string') return undefined
+  const text = raw.trim()
+  if (text === '') return undefined
+  const allowed: LyricSource[] = []
+  for (const part of text.split(',')) {
+    const name = part.trim()
+    if (name === '') continue
+    if (!(PER_SONG_LYRIC_SOURCES as readonly string[]).includes(name)) continue
+    const source = name as LyricSource
+    if (allowed.includes(source)) continue
+    allowed.push(source)
+  }
+  // ⚠️ 全是陌生值 ⇒ 视为「没配」⇒ 不限制（别把用户的歌词功能整个锁死）。
+  if (allowed.length === 0) return undefined
+  return allowed
+}
+
 /** 缓存里的一条。 */
 interface CacheEntry {
   at: number
   result: ExternalLyricResult
+}
+
+/**
+ * 这份结果**算不算「用得上」**（T108）。
+ *
+ * ⚠️ 口径 = T73 既有口径，**一个字没改**：
+ * - `status === 'ok'`；
+ * - 原文**非空**（纯文本歌词没有时间戳 ⇒ 解析出来是空的 ⇒ 不能算命中）；
+ * - **不是占位提示**（T93：「此歌曲为纯音乐，请欣赏」这种**视同没匹配上**）。
+ */
+export function isUsableLyric(result: ExternalLyricResult): boolean {
+  if (result.status !== 'ok') return false
+  if (result.original.trim() === '') return false
+  if (isPlaceholderLyric(result.original)) return false
+  return true
+}
+
+/**
+ * 这份结果**带不带逐字时间戳**（T108）。
+ *
+ * ⚠️ = 「用得上」**且**原文里有 `<mm:ss.xx>` 词级标签
+ *    （与渲染层 `src/ui/lyrics/parse.ts` 同口径 ⇒ 判定落在 `shared/lyricWordTimed.ts`）。
+ */
+export function isWordTimedLyric(result: ExternalLyricResult): boolean {
+  if (!isUsableLyric(result)) return false
+  if (result.status !== 'ok') return false
+  return hasWordTimedTags(result.original)
+}
+
+/** 源链上的一个候选结果（T108）。 */
+export interface LyricCandidate {
+  /** 这个源在**源链**里的位置（越小越靠前）。 */
+  index: number
+  /** 实际用的源。 */
+  source: LyricSource
+  /** 这个源的结果。 */
+  result: ExternalLyricResult
+}
+
+/**
+ * 在**一轮轮询**的结果里挑**最好的那一份**（T108）。
+ *
+ * ⚠️ **按链序，不按「谁先回」** —— 这是本轮最关键的一条：
+ * - T107 的「按歌选源」把用户钦定的源**排在链首**；
+ * - 若按「谁先回」挑，用户钦定的源会被网络抖动顶掉 ⇒ **指定就白指定了**；
+ * ⇒ 多个源都带逐字时，取**链序最靠前**的那份 ⇒ 结果**可复现**。
+ *
+ * 规则（按优先级）：
+ * 1. **带逐字**的可用结果里，链序最靠前的那份；
+ * 2. 都没有带逐字 ⇒ **首选源**那份（若可用）；
+ * 3. 首选源不可用 ⇒ 链序第一个可用的；
+ * 4. 全都没有 ⇒ 首选源报错了就**报它的错**，否则返回 `null`
+ *    （由调用方补成 `not-found` —— T73 既有语义）。
+ *
+ * @param candidates 这一轮各源的结果（**顺序不重要**，内部按 `index` 排）。
+ * @param preferredSource 首选源（用户选的那个 / 按歌指定的那个）。
+ * @returns 最好的那一份；全都不可用且首选源也没报错时返回 `null`。
+ */
+export function pickBestLyric(
+  candidates: readonly LyricCandidate[],
+  preferredSource: LyricSource,
+): ExternalLyricResult | null {
+  const ordered = [...candidates].sort((a, b) => a.index - b.index)
+  const wordTimed = ordered.find((candidate) => isWordTimedLyric(candidate.result))
+  if (wordTimed) return wordTimed.result
+  const preferred = ordered.find((candidate) => candidate.source === preferredSource)
+  if (preferred && isUsableLyric(preferred.result)) return preferred.result
+  const usable = ordered.find((candidate) => isUsableLyric(candidate.result))
+  if (usable) return usable.result
+  if (preferred && preferred.result.status === 'error') return preferred.result
+  return null
 }
 
 /**
@@ -1785,41 +1918,75 @@ export function createLyricProvider(opts: LyricProviderOptions): LyricProvider {
       query: ExternalLyricQuery,
     ): Promise<ExternalLyricResult> {
       // ⚠️ `off`（或链为空）= 明确不用外部 → **一次网络请求都不发**。
-      const chain = buildSourceChain(source, template)
+      const chain = buildSourceChain(source, template, opts.allowedSources)
       if (chain.length === 0) return { status: 'not-found' }
 
       const key = cacheKey(source, query, template)
       const cached = readCache(key)
       if (cached) return cached
 
-      // ⚠️ **链走完**才返回：命中即停；一个源坏了也**继续试下一个**。
-      let preferredResult: ExternalLyricResult | null = null
-      for (const candidate of chain) {
-        const result = await fetchOne(candidate, template, query)
-        // ⚠️ 记下**首选源**的结果（它才是这次查询的「口径」）。
-        if (candidate === source) preferredResult = result
-        // ⚠️ 命中（`ok` 且原文非空）⇒ **立刻返回**，不再问后面的源。
-        // ⚠️ **T93**：原文是**占位提示**（如咪咕的「此歌曲为纯音乐，请欣赏」）⇒
-        //    **视同没匹配上** ⇒ 链子**继续试下一个源** ⇒ 别让一句占位把整条链卡住
-        //    （实测后果：链子提前返回 ⇒ 渲染层那条「回落内嵌」的分支**根本没被触发**）。
-        if (
-          result.status === 'ok' &&
-          result.original.trim() !== '' &&
-          !isPlaceholderLyric(result.original)
-        ) {
-          writeCache(key, result)
-          return result
+      // ⚠️ **T108：并发轮询链上的全部源**（不再是「命中即停」）。
+      //    每个源**各自**限时（`fetchOne` 里早就实现了）⇒
+      //    **最坏耗时 = 各源限时的最大值 = 8 秒**（QQ），
+      //    落在渲染层的 12 秒超时之内
+      //    （串行口径的最坏是 3+3+8+6+5+5+3 = 33 秒，**早就超了**）。
+      const settled = new Map<number, LyricCandidate>()
+      const pending = new Set<number>()
+      for (let index = 0; index < chain.length; index += 1) pending.add(index)
+
+      let finished = false
+      let resolveFinished!: (result: ExternalLyricResult) => void
+      const finishedPromise = new Promise<ExternalLyricResult>((resolve) => {
+        resolveFinished = resolve
+      })
+
+      /** 结算：够条件就**立刻返回**，否则继续等剩下的源。 */
+      const tryFinish = (): void => {
+        if (finished) return
+        const candidates = [...settled.values()].sort((a, b) => a.index - b.index)
+        // ⚠️ 链序最靠前的「带逐字」候选（**按链序**，不是「谁先回」）。
+        const wordTimed = candidates.find((candidate) => isWordTimedLyric(candidate.result))
+        if (wordTimed) {
+          // ⚠️ 链序**更靠前**的源还没出结果 ⇒ 它也可能有逐字（按链序该它赢）
+          //    ⇒ **再等等**（早停只丢链序更靠后的在途请求 ⇒ 结果照样可复现）。
+          const earlierPending = [...pending].some((index) => index < wordTimed.index)
+          if (!earlierPending) {
+            finished = true
+            resolveFinished(wordTimed.result)
+          }
+          return
         }
+        if (pending.size > 0) return
+        // ⚠️ 全部出完、**没有**带逐字的 ⇒ 沿用 T73 口径（首选源说了算）。
+        const best = pickBestLyric(candidates, source)
+        finished = true
+        resolveFinished(best ?? { status: 'not-found' })
       }
-      // ⚠️ **首选源说了算**（T73）：
-      //    首选源说「没有」⇒ 最终就是「没有」（后面那些源**也没匹配上**）；
-      //    首选源**坏了** ⇒ 报它的错（源不可用 ≠ 没歌词，用户要看到原因）。
-      const finalResult: ExternalLyricResult =
-        preferredResult !== null && preferredResult.status === 'error'
-          ? preferredResult
-          : { status: 'not-found' }
-      writeCache(key, finalResult)
-      return finalResult
+
+      chain.forEach((candidate, index) => {
+        void fetchOne(candidate, template, query)
+          .then((result) => {
+            settled.set(index, { index, source: candidate, result })
+            pending.delete(index)
+            tryFinish()
+          })
+          .catch(() => {
+            // ⚠️ 理论上**不会**发生（`fetchOne` 永不抛）⇒ 兜底：
+            //    万一它真的抛了 ⇒ 把这个源当成「失败」⇒ 不能让整轮轮询卡死。
+            settled.set(index, {
+              index,
+              source: candidate,
+              result: { status: 'error', message: `歌词源 ${candidate} 请求失败` },
+            })
+            pending.delete(index)
+            tryFinish()
+          })
+      })
+
+      const result = await finishedPromise
+      // ⚠️ 缓存里存的是「**这一轮轮询后的最佳结果**」（键不变 ⇒ 仍含首选源与模板）。
+      writeCache(key, result)
+      return result
     },
   }
 }
