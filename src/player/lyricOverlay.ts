@@ -38,6 +38,7 @@ import {
 } from './lyricSource'
 import { useAppPrefsStore } from '../state/appPrefsStore'
 import { useLyricOverrideStore } from '../state/lyricOverrideStore'
+import { useAudiobookStore } from '../state/audiobookStore'
 import type { LyricPriority, LyricSource } from '../../shared/lyricProvider'
 
 /** 歌词接口的最小子集（便于单测注入假实现）。 */
@@ -134,6 +135,15 @@ export interface LyricOverlayOptions {
    *    **每次取词时读一次**，用户在全屏页改了指定，下一首歌就生效）。
    */
   overrideSource?: (songId: string) => LyricSource | null
+  /**
+   * 这张专辑**是不是有声读物**（T112）。
+   *
+   * ⚠️ **可缺省** → 用**默认判据**（读 `useAudiobookStore` 的当前值——
+   *    **每次取词时读一次**，用户在「有声」页改判，下一首歌就生效）。
+   * ⚠️ 判为有声 ⇒ **一次取词请求都不发**（推一份空行）⇒
+   *    桌面歌词窗与灵动歌词岛**都不出现**（T106 的规则）。
+   */
+  isAudiobook?: (albumId: string) => boolean
 }
 
 /** 装配结果（供单测断言）。 */
@@ -191,6 +201,17 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
     options.overrideSource ??
     ((songId: string): LyricSource | null =>
       useLyricOverrideStore.getState().overrides[songId]?.source ?? null)
+  /**
+   * 这张专辑**是不是有声读物**（T112）。
+   *
+   * ⚠️ **每次取词时读一次**（不是只在装配时读一次）—— 用户在「有声」页
+   *    人工改判（改判**优先**于自动判定），桌面歌词要**立刻**跟着变。
+   * ⚠️ 判据 = **与全屏页同一份真相**（`useAudiobookStore.isAudiobook`），
+   *    不另起一套判定（不然两处会漂）。
+   */
+  const isAudiobook: (albumId: string) => boolean =
+    options.isAudiobook ??
+    ((albumId: string): boolean => useAudiobookStore.getState().isAudiobook(albumId))
 
   /** 悬浮窗是否可见（关着就不拉歌词、不推进度）。 */
   let enabled = false
@@ -254,6 +275,19 @@ export function installLyricOverlay(options: LyricOverlayOptions = {}): LyricOve
     // ⚠️ `force` = 悬浮窗**刚打开**（可能刚创建，缓存里什么都没有）→ 必须重推。
     if (!force && song.id === loadedSongId) return
     loadedSongId = song.id
+
+    // ⚠️ **T112：有声读物不查词**（真机实测到的缺陷，见规格 §一）。
+    //    有声读物的集标题是 `0001` 这种**纯数字** ⇒ 歌词源拿它去匹配会
+    //    **随便命中某首别的歌** ⇒ 桌面歌词窗 / 灵动歌词岛会显示**不相干的词**。
+    //    ⇒ 与全屏页（T101）**同一份真相**：判为有声 ⇒ **一次请求都不发**，
+    //      推一份**空行** ⇒ 主进程按 T106 的规则把窗口收起来
+    //      （经典窗与词岛**一处**改动全覆盖）。
+    if (song.albumId.length > 0 && isAudiobook(song.albumId)) {
+      cachedLines = []
+      cachedTrack = { id: song.id, title: song.title, artist: song.artist, coverId: song.coverId }
+      pushTrack()
+      return
+    }
 
     const token = (fetchToken += 1)
     try {

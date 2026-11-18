@@ -7,6 +7,7 @@ import { installLyricOverlay } from './player/lyricOverlay'
 import { installSpectrum } from './player/spectrum'
 import { installDownloadStore } from './state/downloadStore'
 import { installLocalLibraryStore } from './state/localLibraryStore'
+import { useAudiobookStore } from './state/audiobookStore'
 
 const container = document.getElementById('root')
 if (!container) {
@@ -23,6 +24,14 @@ installMediaSession()
 // ⚠️ 服务端**不会**随 stream 自动写播放历史，也没有可用的上报端点（实测），
 //    所以本机记录只能留在本地——见 `src/state/historyStore.ts`。
 installLocalHistory()
+
+// 有声读物的**落盘状态**（T112）：启动时读回来。
+// ⚠️ **为什么**：桌面歌词要判断「这首是不是有声读物」⇒ 需要知道哪些专辑是有声读物；
+//    而那个状态**只在进「有声」页时**才会 `restore()` ⇒ 没进过那一页的会话**不知道**
+//    ⇒ 有声读物的桌面歌词会**显示不相干的词**（T111 真机实测）。
+// ⚠️ `restore()` 是**同步**的、**只读 localStorage、不发任何请求**、**幂等**
+//    （与「有声」页里的那次同源）⇒ 放在 `installLyricOverlay()` **之前**。
+useAudiobookStore.getState().restore()
 
 // 桌面悬浮歌词（Task 10）：把「曲目 + 歌词」与「播放进度」推给主进程，
 // 由主进程转发给**悬浮窗**的渲染进程。
