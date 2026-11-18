@@ -199,6 +199,20 @@ export function SongList(props: SongListProps): ReactElement {
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null)
 
   // 量可视区高度（浏览器里用 ResizeObserver；jsdom 里量不到 → 用兜底常量）。
+  //
+  // ⚠ **依赖里必须有「视口是否已渲染」**（T109）：
+  //    列表**初始为空**时组件走**空态分支**（**根本不渲染视口节点**）
+  //    ⇒ 挂载那一刻 `viewportRef.current` 是 `null` ⇒ 这个 effect 第一行就 return
+  //    ⇒ 既没量、也没挂上 `ResizeObserver`。
+  //    若依赖写死 `[]`，**数据到达后不会重跑** ⇒ `measuredHeight` 永远停在 0
+  //    ⇒ 一路用兜底常量 `SONG_LIST_FALLBACK_VIEWPORT_HEIGHT = 600`
+  //    ⇒ 虚拟窗口按 600 算（可见 13 行），而真实视口可能只有 240px（可见 5 行）
+  //    ⇒ **DOM 行数随导航路径摇摆**（「初始就有数据」量得到；「初始为空」用兜底）
+  //    —— 这就是 T104 规格 §五「`toHaveCount` 随导航路径变红」的**根因**。
+  //
+  // ⚠ 与 `LyricView`（T46 补丁②）**同一个坑、同一个修法**：
+  //    `src/ui/lyrics/LyricView.tsx` 的量高 effect 依赖 `safeLines.length`。
+  //    （`CardGrid` 不用管：它的视口**始终渲染** ⇒ 挂载即有节点 ⇒ `[]` 依赖成立。）
   useEffect(() => {
     const element = viewportRef.current
     if (!element) return
@@ -212,7 +226,7 @@ export function SongList(props: SongListProps): ReactElement {
     const observer = new ResizeObserver(() => measure())
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [songs.length])
 
   /*
    * 可视区高度：**量到的值要钳到窗口高度**（T22 兜底）。
