@@ -116,8 +116,8 @@
 | 起因 | 用户在 GitHub Actions 页看到「Release #18 · **feature/fnmusic-desktop**」⇒ 问「为什么不改成现在的软件名」 |
 | 事实基线 | 默认分支 = 旧分支名；`master` 已并入、落后 0；CI 无硬编码；tag 与分支无关 |
 | 决定 | 用户拍板：新名 `sanlos-music`／删 `master`／整套做 |
-| 执行 | ⏳ 待做 |
-| 复验 | ⏳ 待跑 |
+| 执行 | ✅ 远端**只剩 `sanlos-music`** 一条分支（旧的 `feature/fnmusic-desktop` 与 `master` **都删了**）；API `default_branch` = **`sanlos-music`**；tip sha **1d5484f**、提交数 **365** 与改名前**完全一致**；tag `v0.4.1` **未动** |
+| 复验 | ✅ 探针 `release/verify/t114-01-verify.mjs` ⇒ **BRANCH_RENAME_OK**（**14 条**断言全过）；改名动作**自动**触发了新分支上的 CI（run **44482556919**）⇒ **success** |
 
 ---
 
@@ -126,7 +126,7 @@
 | 项 | 状态 |
 |---|---|
 | 规格 | ✅ 本文件 |
-| 改名操作（推分支 / 切默认 / 删旧分支） | ⏳ 待做 |
-| 文档改动（build-verification ＋ calibration 第九十二节） | ⏳ 待做 |
-| 复验（远端分支 / 默认分支 / tag / CI / dispatch 下拉） | ⏳ 待跑 |
-| 复验文档 commit | ⏳ 待做 |
+| 改名操作（推分支 / 切默认 / 删旧分支） | ✅ 远端**只剩 `sanlos-music`** 一条分支（旧的 `feature/fnmusic-desktop` 与 `master` **都删了**）；API `default_branch` = **`sanlos-music`**；tip sha **1d5484f** 与提交数（**365**）与改名前**完全一致**；tag `v0.4.1` **未动**（仍 → `11822c6a14de061f391613f3e032a4273b00b993`） |
+| 文档改动（build-verification ＋ calibration 第九十二节） | ✅ calibration **第九十二节**（起因 / 事实 / 拍板 / 执行过程 / 复验表 / 6 个坑 / 没做什么）＋ `docs/build-verification.md` 顶部**一条说明**（⚠ **历史那行分支名不动**） |
+| 复验（远端分支 / 默认分支 / tag / CI / dispatch 下拉） | ✅ 探针 `release/verify/t114-01-verify.mjs` ⇒ **BRANCH_RENAME_OK**；改名动作**自动**触发了新分支上的 CI（run **44482556919**，分支 `sanlos-music`）⇒ **success** |
+| 复验文档 commit | ✅ **本 commit**（规格 §九 回填 ＋ 复验记录；台账见仓库外的 `progress-ledger.md`） |
