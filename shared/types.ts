@@ -207,6 +207,39 @@ export interface Playlist {
   updatedAt?: string | null
 }
 
+/**
+ * 共享库（T122）。
+ *
+ * **实测（2026-11-20，真实 NAS，只读 GET）**：`GET /shared-library/list` 的每项为
+ * `{ guid, name, path, autoDownloadLyric, metadataPreference, contentLastChangedAt, accessStatus }`。
+ *
+ * ⚠️ **实测到的三件事**：
+ * 1. `name` **实测是空串** ⇒ 展示名要靠 `path` 末段兜底（见 `displayName`）；
+ * 2. 本机这 2 个共享库的 `path` **正好就是** `/app-center/authed-dir/list` 那 2 个授权目录
+ *    ⇒ **共享库不是另一份曲库，是同一个曲库的「共享视角」**；
+ * 3. `accessStatus`：**0 = 正常**、**非 0 = 访问异常**（2026-11-20 扒飞牛音乐 Web 前端包确认：
+ *    前端只判 `!==0`）⇒ ⚠️ **具体数值的含义前端包里没有枚举** ⇒ 客户端也**不解释**
+ *    （免得把猜测写进契约）。
+ */
+export interface SharedLibrary {
+  /** 共享库 guid（服务端字段为 `guid`）。 */
+  id: string
+  /** 服务端给的共享库名（**实测常为空串**）。 */
+  name: string
+  /** 共享库对应的**曲库根路径**（实测与授权目录一致）。 */
+  path: string
+  /** 展示名：`name` 为空时用 `path` 末段兜底。 */
+  displayName: string
+  /** 是否自动下载歌词（服务端开关）。 */
+  autoDownloadLyric: boolean
+  /** 元数据偏好（实测 `cloud_preferred`；枚举共 3 值：`local_preferred` / `cloud_preferred` / `local_only`）⇒ 原样透传。 */
+  metadataPreference: string
+  /** 内容最后变更时间（**Unix 秒**；缺失为 `null`）。 */
+  contentLastChangedAt: number | null
+  /** 访问状态（**0 = 正常**，非 0 = 访问异常；⚠️ **具体数值的含义未确证** ⇒ 客户端不解释）。 */
+  accessStatus: number
+}
+
 /** 当前生效的连接链路信息。 */
 export interface ConnectionInfo {
   /** 链路类型。 */

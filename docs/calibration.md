@@ -8248,3 +8248,101 @@ appId `com.sanlos.music` 没变 ⇒ 卸载项 GUID 不变 ⇒ **直接覆盖安�
   ⇒ 写入前在**页内核对了 sha256**（与目标稿一致）才点保存；
 - ⚠ **正文里那 9 KB 不内联进工具调用**：用「脚本文件 + `run_script` 的 `path`」把正文带进页面
   ⇒ 顺带发现 **`https` 页面 fetch 本机 `http://127.0.0.1` 会被混合内容策略挡掉**。
+## 第一百零一节、T122：接共享库 `/shared-library/*`（2026-11-20）
+
+> 起因：T119 反解出服务端有 `sharedLibrary` 这组端点（`/shared-library/{list,detail,create,edit,delete,scan,scan-all,reconnect,reconnect-check}`），
+> 但**一直没人接** ⇒ 台账里长期挂着「⏳ 共享库未接 ⇒ 另立」。
+> 用户 2026-11-20 拍板：「ABCD 全做」（共享库 / 修既有缺陷 / 接未用端点 / 卫生项）⇒ 本节是第一组。
+
+### 一、真机实测（2026-11-20，FN 中继 `https://pure2199.fnos.net/music`，**只打 GET**）
+
+⚠️ **只读探针**：`release/verify/t122-01-probe-shared-library.mjs`（用**隔离 userData** ＋ 只带 `session.bin`
+⇒ 真实账号 ＋ 真 NAS，**不碰**用户真实偏好 / 落盘状态；走**客户端自己的通道** `sanlos://srv/...`
+⇒ **不碰任何凭证**，token 只在主进程内存里）。
+
+| 端点 | 实测 |
+|---|---|
+| `GET /shared-library/list` | `code=0`；`data.list[]` = `{ guid, name, path, autoDownloadLyric, metadataPreference, contentLastChangedAt, accessStatus }`；本机 **2** 项 |
+| `GET /shared-library/list?page=1&size=50` | 与不带参**同形**（该端点**不分页**） |
+| `GET /shared-library/detail?guid=<guid>` | `code=0`，返回**同一个对象**（**无额外字段**）⇒ **不接**（拿不到新信息，多一个端点就多一个会坏的面） |
+| `GET /shared-library/scan-all` | HTTP 200，body = **`null`** ⇒ 端点不存在或方法不对 |
+| `GET /shared-library/reconnect-check` | 同上（body = `null`）⇒ ⚠️ **真实路径是 `/shared-library/reconnect/check`**（前端反解确认，**T119 那张表写错了**） |
+| `GET /shared-library/track/list` | body = `null` ⇒ **不存在**「按共享库取曲目」的端点 |
+| **对照**：`GET /app-center/authed-dir/list` | `code=0` ⇒ **2 个授权目录** |
+| **对照**：`GET /track/list?page=1&size=3&guid=<共享库 guid>` | **不生效**（返回的还是普通全库第一页）⇒ 服务端**不接受**按共享库 guid 过滤 |
+
+### 二、⭐ 两个决定设计的关键事实
+
+1. **共享库不是另一份曲库**：本机这 2 个共享库的 `path` **正好就是**那 2 个授权目录
+   （`/vol02/1000-0-3d135437`、`/vol1/1000/music/music`）
+   ⇒ 共享库 = **同一个曲库的「共享视角」** ⇒ 浏览它**不需要新的取数路径**；
+2. **`name` 是空串**（两个都是）⇒ 展示名必须**兜底**，否则界面上是空白项。
+
+### 三、扒飞牛音乐 Web 前端包（2026-11-20，46 个 chunk）后的结论
+
+| 事实 | 依据 |
+|---|---|
+| **方法只有 2 个 GET**（`list` / `detail`），其余 7 个**全是 POST** | 方法表 `yb`（chunk `5e884898…BwvE3acT.js`） |
+| 真实路径 `/shared-library/reconnect/check`（**不是** `reconnect-check`） | 端点表 `q.sharedLibrary` ⇒ **T119 的端点表在此处是错的** |
+| `accessStatus`：**0 = 正常**、非 0 = **访问异常**（前端渲染「访问异常，前往处理 >>」） | `8a84e406…DMwNLWNT.js` 三态徽标；⚠️ **库级数值含义前端包里没有枚举** ⇒ 客户端**只标异常、不解释** |
+| `metadataPreference` 枚举：`local_preferred` / `cloud_preferred` / `local_only` | `7dfb4cf…D2EFmKVC.js` 的枚举 `T` |
+| `name` 为空时的兜底顺序：`name` → 语义路径末段 → 物理路径末段 → `guid`（**前端不额外调接口补名**） | `qj`（`1bc04b52…BzHXPaBs.js`） |
+| 共享库列表**每 15 秒轮询**；扫描进度从任务 `ext.libraryGUID`（**大写 GUID**）反推 | `7dfb4cf…` / `8a84e406…` |
+
+⭐ **「共享库的曲目从哪来」——最关键的一条**：
+**前端包里根本不存在「按共享库 guid 取曲目」的接口**
+（全包检索 `sharedLibraryGuid` / `library_guid` **0 命中**；`libraryGuid` 仅 3 处且都是**本地 state key**，不是请求参数）：
+
+- `/track/list` 全站**只被调用一次**，且**不带任何库筛选**（`getLibraryPageData` 连 `path` 都不转发）；
+- 物理目录浏览是另一条线：`GET /folder-view/list?parentPath=&sort=`。
+
+⇒ **共享库对象只提供「目录 ＋ 扫描策略 ＋ 访问状态」，不提供曲目清单。**
+⇒ 本客户端**选目录浏览那条**（只读、当场见效、不扫全库）⇒ 与 T120「有声」页**同一套口径**。
+
+### 四、改动清单
+
+| 文件 | 动作 |
+|---|---|
+| `shared/types.ts` | ＋`SharedLibrary` 类型（含实测依据与「不解释」的边界） |
+| `src/api/sharedLibrary.ts` | **新建**：`listSharedLibraries()` / `mapSharedLibrary()` / `isUnsupportedError()` / `sharedLibraryApi` |
+| `src/api/folder.ts` | ＋导出 `folderTrackToSong()`（**复用 `client.ts` 的 `mapSong`** ⇒ 毫秒→秒、封面归一、多歌手连接，与曲库同一套字段） |
+| `src/pages/SharedLibrariesPage.tsx` / `shared-libraries-page.css` | **新建**：列表态 ＋ 浏览态（面包屑 / 子目录下钻 / 曲目可播） |
+| `src/App.tsx` | ＋「共享」导航（曲库导航组，**需要 NAS**）＋ 视图分支 |
+| `mock-server/server.ts` | ＋`GET /shared-library/list`（**共享库的 `path` 从 `authedRoots` 推导** ⇒ 与 mock 曲库永远对得上） |
+| `test/t122-shared-library.test.tsx` | **新建**：8 条钉子 |
+| `e2e/t122-shared-library.spec.ts` | **新建**：接线 E2E |
+| `docs/superpowers/specs/2026-11-20-sanlos-music-t122-shared-library.md` | **新建**：规格 |
+| `README.md` / `docs/changelog.md` / 本节 | 能力清单 ＋ 变更说明 ＋ 本节 |
+
+### 五、钉子（**8 条**）
+
+| # | 钉子 | 钉住什么 |
+|---|---|---|
+| ① | 列表渲染；`name` 空 ⇒ 展示名兜底（路径末段 ⇒ `guid`） | 不许出现空白项 |
+| ② | 老服务端（抛「响应不是预期信封」）⇒ 显示「不支持共享库」，不崩 | 不许白屏 / 不许假装有数据 |
+| ③ | 点共享库 ⇒ 子目录可下钻、曲目列出来 | 浏览链路通 |
+| ④ | 双击曲目 ⇒ `onPlay(song, index, list)`；**时长是秒不是毫秒**；`list` = 整队 | 播放口径与曲库一致 |
+| ⑤ | 浏览失败 ⇒ 如实显示错误 | 不许吞异常 |
+| ⑥ | 映射：`displayName` 兜底链、`accessStatus` 原样、`contentLastChangedAt` 是 **Unix 秒**、`metadataPreference` 透传 | 映射规则不回退 |
+| ⑦ | 页面源码**不含**「服务端不能浏览目录」那类过时结论 | T119 纪律延伸到新页面 |
+| ⑧ | E2E：顶栏「共享」→ 列表 → 浏览 → 双击播放条出歌名 | 接线 ＋ 真链路 |
+
+### 六、复验结果
+
+| 项 | 实测 |
+|---|---|
+| `tsc` | **0 错** |
+| Vitest | **151 文件 / 3 061 条全绿**（原 150 / 3 054 ＋ 新增 1 文件 7 条；**既有测试一条没删、断言一条没弱化**） |
+| Playwright | 见 §七 验收记录（新增 1 条 T122 用例） |
+| `build` | exit **0** |
+| 字节体检 ＋ 控制字符 | `bad=0` |
+
+### 七、遗留 / 待办
+
+- ⏳ **共享库的管理操作**（添加文件夹 / 扫描 / 重建搜索索引 / 重连）**一律不接**（**写操作**）⇒ 需要管理请用飞牛音乐 Web 端；
+- ⏳ **库级 `accessStatus` 的数值含义**未确证（前端只判 `!==0`）⇒ 客户端只标「访问异常」，**不解释**；
+- ⏳ `reconnect/check` / `reconnect` 的响应字段（`requiresConfirmation` / `matchAccepted` / `reconnected` / `scanStarted`）**未实测**（不接 ⇒ 不需要）；
+- ⚠️ **T119 那张端点表**里 `reconnect-check` 应为 `reconnect/check` ⇒ 已在本节标注，**待另立小任务**订正文档（**历史段不篡改**）；
+- ⏳ 共享库里的新曲目**要等服务端扫描完**才看得到（客户端不代劳扫描 —— 那是写操作）；
+- ⏳ **真机复验待装版后做**（本轮改动**未发版**）。
+

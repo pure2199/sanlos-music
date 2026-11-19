@@ -27,7 +27,8 @@
 //    ⇒ 判不了、归并不了 ⇒ **不用它**（也少一个副作用面）。
 // ---------------------------------------------------------------------------
 
-import { apiCall, normalizeCoverId } from './client'
+import type { Song } from '../../shared/types'
+import { apiCall, mapSong, normalizeCoverId } from './client'
 // ⚠ **只导类型**（编译后被擦除）⇒ 不会把 `library.ts` 拖进运行时依赖
 //    ⇒ 既有测试对 `../src/api/library` 的 `vi.mock` 不受影响。
 import type { ScanTrack } from './library'
@@ -179,6 +180,40 @@ function toScanTrack(raw: RawFolderTrack): ScanTrack {
     coverId: normalizeCoverId(raw.coverId),
     albumCoverId: normalizeCoverId(album?.coverId),
   }
+}
+
+/**
+ * 把**目录浏览**返回的曲目压成领域模型 `Song`（T122：共享库页要能直接播放）。
+ *
+ * ⚠️ **复用 `client.ts` 的 `mapSong`** ⇒ 单位与空值语义与曲库**完全一致**
+ *    （毫秒 → 秒、封面 id 归一、多歌手用 `' / '` 连接、无封面置空串）。
+ *    ⇒ 共享库里播出来的歌，与曲库里播出来的歌**是同一套字段**。
+ *
+ * ⚠️ 目录浏览返回的字段是**裁剪过的**（没有 `trackNo` / `createdAt` / `genres`）
+ *    ⇒ 这几个字段按「没有」处理（`null` / 空数组），**不猜**。
+ */
+export function folderTrackToSong(raw: RawFolderTrack): Song {
+  return mapSong({
+    guid: typeof raw.guid === 'string' ? raw.guid : '',
+    title: typeof raw.title === 'string' ? raw.title : '',
+    duration: typeof raw.duration === 'number' ? raw.duration : null,
+    coverId: raw.coverId ?? null,
+    artists: (raw.artists ?? []).map((artist) => ({
+      guid: artist.guid ?? '',
+      name: artist.name ?? '',
+    })),
+    album: raw.album
+      ? { guid: raw.album.guid ?? '', name: raw.album.name ?? '', coverId: raw.album.coverId ?? null }
+      : undefined,
+    audioSpec: raw.audioSpec
+      ? {
+          format: raw.audioSpec.format ?? null,
+          path: raw.audioSpec.path ?? null,
+          size: raw.audioSpec.size ?? null,
+        }
+      : undefined,
+    isFavorite: raw.isFavorite ?? null,
+  })
 }
 
 // ---------------------------------------------------------------------------

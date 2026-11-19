@@ -1000,6 +1000,28 @@ export function createMockServer(options?: MockServerOptions): MockServer {
     }))
   })
 
+  // ---- **T122**：共享库（**新增**端点 ⇒ 既有端点一个字没变）------------------
+  //
+  // ⚠️ **形状照真实服务端**（2026-11-20 真机实测，只读 GET）：
+  //    `{ guid, name, path, autoDownloadLyric, metadataPreference,
+  //       contentLastChangedAt, accessStatus }`
+  //    ⚠️ 实测 `name` **是空串** ⇒ 客户端要靠 `path` 末段兜底显示。
+  // ⚠️ **共享库的 `path` 就是授权目录**（真机实测两者逐一对应）
+  //    ⇒ mock 里也**从 `authedRoots` 推** ⇒ 不可能与曲库对不上。
+  getRoutes.set(`${API_BASE}/shared-library/list`, ({ res }) => {
+    sendJson(res, ok({
+      list: authedRoots.map((path) => ({
+        guid: createHash('md5').update(`shared-library:${path}`).digest('hex'),
+        name: '',
+        path,
+        autoDownloadLyric: true,
+        metadataPreference: 'cloud_preferred',
+        contentLastChangedAt: Math.floor(Date.now() / 1000),
+        accessStatus: 0,
+      })),
+    }))
+  })
+
   getRoutes.set(`${API_BASE}/app-center/authed-dir/sub/list`, ({ res, query }) => {
     const parent = query.get('parent') ?? ''
     const node = folderTree.get(parent)

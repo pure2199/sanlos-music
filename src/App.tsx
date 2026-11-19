@@ -21,6 +21,7 @@ import { LoginPage } from './pages/LoginPage'
 import { LocalMusicPage } from './pages/LocalMusicPage'
 import { PlaylistsPage } from './pages/PlaylistsPage'
 import { SearchPage } from './pages/SearchPage'
+import { SharedLibrariesPage } from './pages/SharedLibrariesPage'
 import { SongsPage } from './pages/SongsPage'
 import { getBridge } from './lib/bridge'
 import type { DetailKind } from './state/libraryStore'
@@ -120,6 +121,7 @@ type MainView =
   | 'playlists'
   | 'albums'
   | 'audiobooks'
+  | 'shared'
   | 'artists'
   | 'genres'
   | 'history'
@@ -415,6 +417,10 @@ export default function App() {
       case 'audiobooks':
         // ⚠️ T98：「有声读物」页（识别 + 一键改判 + 重新扫描）。
         return <AudiobooksPage onOpenAlbum={handleOpenAlbum} />
+      case 'shared':
+        // ⚠️ T122：「共享库」页（**只读**）——服务端共享出来的曲库视角。
+        //    浏览内容复用 T120 的目录浏览（`/folder-view/list`）。
+        return <SharedLibrariesPage onPlay={handlePlay} />
       case 'artists':
         return <ArtistsPage onOpenArtist={handleOpenArtist} />
       case 'genres':
@@ -516,6 +522,16 @@ export default function App() {
               label="歌单"
               active={view === 'playlists'}
               onSelect={() => goTo('playlists')}
+            />
+            {/*
+             * ⚠️ T122：「共享库」**需要 NAS**（数据来自服务端 `/shared-library/list`）
+             *    ⇒ 放在曲库导航组里（未登录时整组不渲染）。
+             *    放「歌单」**后面**：两者都是「一堆内容的集合」。
+             */}
+            <NavButton
+              label="共享"
+              active={view === 'shared'}
+              onSelect={() => goTo('shared')}
             />
             <NavButton
               label="专辑"

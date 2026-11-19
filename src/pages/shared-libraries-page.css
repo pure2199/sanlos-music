@@ -1,0 +1,106 @@
+/* 「共享库」页（T122）的样式。
+ *
+ * ⚠️ 颜色**只用 CSS 语义变量**（`src/styles/tokens.css`），不得出现硬编码颜色值。
+ */
+
+.sanlos-shared {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  /* ⚠️ 这一层是**整页的滚动容器**（页面外壳 `.sanlos-page` 本身**没有** overflow
+   *    ⇒ 不加这一层，内容一多就会**溢出到播放器条下面**）。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sanlos-shared__toolbar {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sanlos-shared__back {
+  padding: 6px 14px;
+  border-radius: var(--radius-field);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sanlos-shared__back:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sanlos-shared__trail {
+  font-size: 13px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.sanlos-shared__list,
+.sanlos-shared__folders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sanlos-shared__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sanlos-shared__item:hover {
+  border-color: var(--accent);
+}
+
+.sanlos-shared__name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sanlos-shared__path,
+.sanlos-shared__meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.sanlos-shared__folder {
+  padding: 6px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sanlos-shared__folder:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sanlos-shared__empty {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
