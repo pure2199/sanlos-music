@@ -45,6 +45,21 @@
 > 完整记录见 [calibration.md](./calibration.md) 第九十六节与规格
 > `docs/superpowers/specs/2026-11-19-sanlos-music-t118-audiobook-override-race.md`。
 
+> ✅ **T119 已于 2026-11-19 修订「服务端不能浏览目录」这 6 处过时结论**
+> （2026-11-19 飞牛更新后**真机实测**：服务端**已支持**按目录浏览
+> —— `/folder-view/*`、`/app-center/authed-dir/*`、`/shared-library/*`；
+> 旧结论「服务端**不能**浏览目录」**已不成立**）
+> ⇒ 改法：**只改陈述、不改行为** —— 6 处统一改成「**本客户端目前**是扫曲库后按目录名挑」
+> （客户端**还没接**那些接口 ⇒ 行为不变）；
+> 顺带加了 **5 条钉子**（4 条扫仓库文件 ＋ 1 条扫页面渲染结果）防回退。
+> **实测**：`tsc` **0 错**、Vitest **149 文件 / 3 045 条全绿**（新增 1 文件 4 条 ＋ 既有文件 1 条）、
+> Playwright **72 passed**、build exit **0**、字节体检 ＋ 控制字符 **bad=0**、
+> **变异自证 `MUTATION_OK`**（A⇒红 ①、B⇒红 ②⑤、C⇒红 ②⑤、D⇒红 ③、E⇒红 ①；
+> 还原后 21/21 全绿 ＋ 字节级一致）。
+> ⚠ **本条不含真机复验**（只改文档与文案 ⇒ 客户端行为一字未改）。
+> 完整记录见 [calibration.md](./calibration.md) 第九十七节与规格
+> `docs/superpowers/specs/2026-11-19-sanlos-music-t119-doc-claims.md`。
+
 **验证时间**：2026-11-04
 **平台**：Windows 10.0.26300 x64 / Node v26.13.0 / npm 11.x
 **分支**：`feature/fnmusic-desktop`

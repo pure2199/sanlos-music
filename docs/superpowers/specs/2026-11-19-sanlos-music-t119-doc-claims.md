@@ -95,16 +95,23 @@
 
 ---
 
-## 三、同步测试（**3 条新钉子**）
+## 三、同步测试（**5 条新钉子**）
 
 | # | 钉子 | 钉住什么 |
 |---|---|---|
-| ① | 页面提示里**不再**出现旧说法（含「不能浏览目录」「候选端点」），**仍**写明「主目录」「有声小说」，**且**有「本客户端目前」这类限定语 | 用户可见文案不许回退 |
-| ② | `README.md` **不含** 3 个旧串（`不能浏览目录`、`候选端点都不通`、`没有「浏览目录」的接口`），**且**含限定语 | 文档不许回退 |
-| ③ | 源码 `src/pages/AudiobooksPage.tsx` **不含**「不能浏览目录」 | 代码注释/文案不许回退 |
+| ① | `README.md` **不含**旧说法（**句式**正则 ＋ 「候选端点都不通」逐字），**仍**含「主目录」「有声小说」，**且**含「本客户端目前」类限定语 | 文档不许回退 |
+| ② | 源码 `src/pages/AudiobooksPage.tsx` **不含**旧说法，**仍**含「主目录」 | 代码注释/文案不许回退 |
+| ③ | `test/audiobooks-page.test.tsx` **不含**旧说法 | 测试注释不许回退（注释别把旧结论当依据留着） |
+| ④ | **历史段保持原样**：`docs/changelog.md` 里那句旧结论**仍在** | 把「历史不篡改」**钉成显式决定**（免得以后有人为「统一口径」去改历史） |
+| ⑤ | 页面**渲染**出来的提示里**不含**旧说法，**仍**写明「主目录」「有声小说」，**且**含「本客户端目前」 | 用户可见文案不许回退 |
 
-⚠ 新钉子放**新文件** `test/t119-doc-claims.test.ts`（沿用 `test/t115-rename-contract.test.ts`
-「扫仓库文件」的既有形状）＋ 页面那条放**既有** `test/audiobooks-page.test.tsx`（新增，不改既有）。
+⚠ ①②③ 放**新文件** `test/t119-doc-claims.test.ts`（沿用 `test/t115-rename-contract.test.ts`
+「扫仓库文件」的既有形状）；⑤ 加在**既有** `test/audiobooks-page.test.tsx`（**新增**，既有断言未动）。
+
+⚠ **一个自引用的坑（实施时踩了两次）**：钉子要扫的**文件里**写着「不能浏览目录」这个词
+（既有注释、**以及钉子自己的断言/标题**）⇒ **自己命中自己** ⇒ 假红。
+⇒ 正解：正则与关键字**都用片段拼**（`['(服务端|音乐服务)', …].join('')`）
+⇒ 片段之间隔着引号和逗号（**超出**间隔上限）⇒ **自我免疫**。
 
 ---
 
@@ -116,7 +123,7 @@
 | `README.md` | 改 3 处 | commit 2 |
 | `src/pages/AudiobooksPage.tsx` | 改 2 处 ＋ 补注释 | commit 2 |
 | `test/audiobooks-page.test.tsx` | 改 1 处注释 ＋ 新增 1 条钉子 | commit 2 |
-| `test/t119-doc-claims.test.ts` | 新建（2 条钉子） | commit 2 |
+| `test/t119-doc-claims.test.ts` | 新建（**4 条**钉子） | commit 2 |
 | `docs/calibration.md` | 新增第九十七节（**CRLF**） | commit 3 |
 | `release/verify/t119-01-mutation-check.mjs` | 新建（**gitignored**，不入库） | — |
 
@@ -125,7 +132,8 @@
 ## 五、验收点
 
 - `tsc --noEmit` **0 错**
-- `vitest` **全绿**（3040 ＋ 3 ⇒ **3043** 条；**既有测试一条不删、断言一条不弱化**）
+- `vitest` **全绿**（原 148 文件 / 3040 条 ＋ 新增 1 文件 **4** 条 ＋ 既有文件 **1** 条 ⇒
+  **149 文件 / 3045** 条；**既有测试一条不删、断言一条不弱化**）
 - `playwright` **72 条全绿**
 - `npm run build` **exit 0**
 - 字节体检 `release/verify/t115-10-bytes-check-all.mjs` **bad=0**
@@ -141,3 +149,21 @@
 - ⏳ 顺带发现的**没用过的既有端点**：`/search/playlist`、`/search/suggest`、
   `/artist/list-all`（**14875** 个歌手）、`/initialization/state` ⇒ 可另立小任务；
 - ⏳ **v0.4.4 未发**（本任务只改文案与测试）。
+
+---
+
+## 七、复验结果（**本轮实测**，2026-11-19）
+
+| 项 | 实测 |
+|---|---|
+| 实现改动量 | `README.md` 3 处 ＋ `src/pages/AudiobooksPage.tsx` 2 处文案 ＋ 1 段代码注释 ＋ `test/audiobooks-page.test.tsx` 1 处注释 ＋ **1 条新钉子** ＋ 新文件 `test/t119-doc-claims.test.ts`（**4 条**钉子）⇒ **客户端行为一字未改** |
+| 类型检查 | `tsc --noEmit` exit **0**（零错误） |
+| 单元测试 | Vitest **149 文件 / 3 045 条全绿**（原 148 / 3 040 ＋ 新增 1 文件 4 条 ＋ 既有文件 1 条；**既有测试一条不删、断言一条不弱化**） |
+| E2E | Playwright **72 passed**（1.6 分钟） |
+| 构建 | `npm run build` exit **0** |
+| 字节体检 | `release/verify/t115-10-bytes-check-all.mjs` ⇒ **bad=0**（字节 ＋ 控制字符） |
+| 变异自证 | `release/verify/t119-01-mutation-check.mjs` ⇒ **`MUTATION_OK`**（A⇒红 ①、B⇒红 ②⑤、C⇒红 ②⑤、D⇒红 ③、E⇒红 ①；还原后 **21/21 全绿** ＋ **字节级一致**） |
+| 提交序列 | `efc6cbc` 规格 → `66a951a` 实现 ＋ 钉子 → （本节）复验文档 |
+| 真机复验 | ✅ **不需要**（只改文档与文案 ⇒ 客户端行为一字未改）；⚠ 但**端点能力本身是真机实测**的（2026-11-19，FN 中继 `https://pure2199.fnos.net/music`，只打 GET） |
+
+⇒ 复验文档：`docs/calibration.md` **第九十七节** ＋ `docs/build-verification.md` 顶部一条。
