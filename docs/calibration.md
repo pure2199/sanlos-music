@@ -7156,3 +7156,75 @@ SignPath 以「**可信构建**」为前提：只签 **CI 从本仓库构建出�
 4. ⚠️ **「网页上两处自洽」不等于「资产是对的」** ⇒ 必须**下载一遍**、逐字比 sha256。
 5. ⚠️ **别杀用户自己开的已装应用**：装之前先查进程，若在跑就**停下来报错**（覆盖运行中的安装目录 ⇒ 装出来是半成品）。
 6. ⚠️ **`app.close()` 会挂住**（应用默认拦截窗口 `close`）⇒ 探针退出要用 `app.exit(0)`。
+
+## 九十二、T114：默认分支改名 —— `feature/fnmusic-desktop` → **`sanlos-music`**（2026-11-19）
+
+### 一、起因（用户一句话点出来的）
+
+用户在 GitHub Actions 页看到「**Release #18** · Manually run by pure2199 · **feature/fnmusic-desktop**」
+⇒ 问「**为什么不改成我们的项目名呢**，为什么不用现在的软件名？」
+
+⇒ 查证后确认：那确实是**产品改名前的遗留**。
+
+### 二、事实基线（**实测**，不是推测）
+
+| 项 | 实测 |
+|---|---|
+| 分支的来历 | 建于**软件还叫 "FN Music"** 的时候；T49/T50 改名成 "Sanlos Music" 时改的是**产品名 / 显示名 / userData 目录**，**分支名没跟着改** |
+| 它是**默认分支** | `api.github.com` ⇒ `default_branch = feature/fnmusic-desktop` ⇒ GitHub 首页 / Actions / Release 页面**全都顶着旧代号** |
+| `master` | `c640b25`；`git merge-base --is-ancestor` ⇒ **是祖先**；落后 **0** 个提交（已并入 **362** 个）⇒ 也是残留 |
+| CI **没有硬编码**分支名 | `.github/workflows/ci.yml:5` ⇒ `branches: ['**']`；`release.yml` 里那两处 `pure2199/sanlos-music` 是**仓库 slug**，不是分支 |
+| tag 与分支无关 | `v0.4.0` / `v0.4.1` 指向 **commit** ⇒ 分支改名**不影响**它们 |
+
+### 三、用户拍板
+
+| 决定 | 值 |
+|---|---|
+| 新分支名 | **`sanlos-music`**（用产品名；去掉误导的 `feature/` 前缀 —— 它是默认分支，不是特性分支） |
+| 旧 `master` | **一并删掉**（已 100% 并入，删了不影响任何提交历史） |
+| 执行范围 | **整套做**：推新分支 ＋ 网页切默认分支 ＋ 删旧分支 |
+
+### 四、执行过程（**实际怎么做的**）
+
+1. **规格先行**（`41608ef` 之前的那一版）⇒ `docs/superpowers/specs/2026-11-19-sanlos-music-branch-rename.md`；
+2. 本地 `git branch -m` ⇒ 推同名分支 ⇒ ⚠ **重名会挡住 GitHub 的改名** ⇒ 先把那份副本删掉；
+3. **网页改名**：Settings → **General** → 「Default branch」→ 铅笔 → 「Rename this branch」
+   ⇒ 填新名 ⇒ ⚠ **按钮默认禁用，要让输入框失焦才解禁** ⇒ 「Rename branch」
+   ⇒ GitHub **原生改名**（默认分支身份、内部引用一起搬）⇒ 旧名**直接消失**；
+4. 删远端 `master` ＋ 本地 `master`；
+5. 本地修上游：`git branch --set-upstream-to=origin/sanlos-music` ＋ `git remote set-head origin -a`
+   （⚠ 不修的话，下次 push 会把提交推回已删的旧分支，**GitHub 会自动重建它** ⇒ 改名白做）。
+
+### 五、复验结果（**改完之后**）
+
+| 项 | 实测 |
+|---|---|
+| 远端分支 | **只剩 `sanlos-music`** 一条；旧名与 `master` **都没了** |
+| 默认分支 | API `default_branch` = **`sanlos-music`** |
+| 提交一条不少 | 分支 tip = **`1d5484f`**（与改名前**同一个 commit**）；提交数 = **365** |
+| tag 没被挪动 | `v0.4.1` 仍解析到 **`11822c6a14de061f391613f3e032a4273b00b993`** |
+| CI 照常 | 改名动作**自动**触发了新分支上的 CI（run **44482556919**，分支 `sanlos-music`）⇒ **success** |
+| 本地一致 | 当前分支 = `sanlos-music`、上游 = `origin/sanlos-music`、`origin/HEAD` 已指新分支、旧分支与 `master` **本地也没了** |
+
+⇒ 探针 `release/verify/t114-01-verify.mjs`（结果 JSON 同目录）⇒ **BRANCH_RENAME_OK**。
+
+### 六、这一轮踩的坑（跨项目可复用）
+
+1. ⚠ **GitHub 新版设置 UI 把「默认分支」挪到了 Settings → General**
+   （**不是** Branches 页 —— 那一页现在只有「分支保护规则」）⇒ 找错页会以为功能没了。
+2. ⚠ **改名对话框的「Rename branch」按钮默认是禁用的** ⇒ 填完名字**必须让输入框失焦**（按 Tab）
+   ⇒ 只 `fill` 不失焦 ⇒ 按钮一直 `disabled` ⇒ 看着像「GitHub 不让改」。
+3. ⚠ **目标名已存在会挡住改名** ⇒ 先删掉同名分支（或改走「切换默认分支」那条路）。
+4. ⚠ **本地分支名不同步 = 改名白做**：本地还叫旧名 ⇒ 下次 push 会把提交推回已删的旧分支，
+   **GitHub 会自动把它重建** ⇒ 必须 `git branch -m`。
+5. ⚠ **本地 `origin/HEAD` 会悬空**（还指着已删的旧分支）⇒ `git remote set-head origin -a` 修。
+6. ⚠ **改名会连带触发/取消 CI run**（同名 commit 的旧 run 被 cancel、新的被触发）⇒ **别把 cancelled 当失败**。
+
+### 七、**没做**（划清边界）
+
+- ⚠ **没改** `package.json` 的 `"name": "fnmusic-desktop"`（包标识 ＋ exe 元数据里的公司名）⇒ 那要**单独一轮**；
+- ⚠ **没动** `LEGACY_USER_DATA_DIR_NAME = 'fnmusic-desktop'` ⇒ 它是**老用户数据目录的迁移源**，
+  删了老用户升级会**丢登录态与偏好**；
+- ⚠ **没改**几百处 CSS 类名（`fnm-*`）、旧规格文件名；
+- ⚠ **历史段一字未动**（含 `docs/releases/v0.2.0.md` 里指向旧分支的 blob 链接、
+  `docs/build-verification.md` 里 2026-11-04 那次验证的分支行）⇒ 历史是**当时的记录**。
