@@ -53,6 +53,8 @@ import {
   type ScanProgress,
   type ScanTrack,
 } from '../api/library'
+// ⚠ **T120**：按**服务端目录**浏览（替代「全库扫 87 页 ＋ 按 path 关键字挑」）。
+import { scanFolderTracks, type FolderScanResult } from '../api/folder'
 
 /** 人工改判的结果。 */
 export type AudiobookOverride = 'audiobook' | 'not-audiobook'
@@ -186,8 +188,16 @@ export interface AudiobookPersisted {
    *   也能直接改。**空串 = 还没扫过**。
    */
   keyword: string
-  /** 上次扫完的时间（Unix 毫秒）。 */
+  /** 上次扫完的时间（Unix 毫秒；`null` = 从没扫过）。 */
   scannedAt: number
+  /**
+   * **T120**：上次扫描定位到的目录（**绝对路径**；可能多个）。
+   *
+   * ⚠ **可选字段** ⇒ 旧落盘（v3）**照样读得出** ⇒ `STATE_VERSION` **不升**
+   *    ⇒ 老用户上次扫的结果**直接还在**（不用重扫）。
+   * ⚠ 空数组 = 上次走的是**全库扫描**（老服务端回落）。
+   */
+  folderPaths?: string[]
 }
 
 /** 持久化端口（单测可注入假实现；生产用 `localStorage`）。 */
@@ -286,6 +296,19 @@ export function createMemoryAudiobookPort(initial?: AudiobookPersisted): Audiobo
   }
 }
 
+/**
+ * 扫描进度（**T120：两种口径**）。
+ *
+ * ⚠ `page` / `pages` 在**全库扫描**下是「页码 / 总页数」；
+ *    在**目录浏览**下是「已访问的目录数 / `0`（未知）」⇒ 界面**按 `mode` 分文案**。
+ */
+export interface AudiobookProgress extends ScanProgress {
+  /** 口径：`library` = 全库扫描；`folder` = 按服务端目录浏览。 */
+  mode?: 'library' | 'folder'
+  /** 目录浏览时定位到的目录（**绝对路径**；`null` = 还没定位到）。 */
+  folderPath?: string | null
+}
+
 /** store 的形状。 */
 export interface AudiobookStore {
   /** 命中的专辑（**已按判定分降序**）。 */
@@ -301,9 +324,15 @@ export interface AudiobookStore {
   /** 正在扫描？ */
   scanning: boolean
   /** 扫描进度。 */
-  progress: ScanProgress | null
+  progress: AudiobookProgress | null
   /** 上一次的错误。 */
   error: string | null
+  /**
+   * **T120**：**提示**（不是错误）—— 例如「服务端不支持按目录浏览，已改用全库扫描」。
+   *
+   * ⚠ 为什么单独一个字段：塞进 `error` 会显示成「**加载失败**：…」⇒ **指错方向**。
+   */
+  notice: string | null
   /** 上次扫完的时间（Unix 毫秒；`null` = 从没扫过）。 */
   scannedAt: number | null
   /**
@@ -668,6 +697,8 @@ function emptyPersisted(): AudiobookPersisted {
     overrides: {},
     keyword: '',
     scannedAt: 0,
+    // ⚠️ **T120**：默认走**全库扫描**（没有目录路径）。
+    folderPaths: [],
   }
 }
 
@@ -731,6 +762,7 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
   scanning: false,
   progress: null,
   error: null,
+  notice: null,
   scannedAt: null,
   extraGroups: {},
 
@@ -750,28 +782,139 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
     const hasBreakpoint = !full && !keywordChanged && saved.nextPage > 0
     const startPage = hasBreakpoint ? saved.nextPage : 1
     const aggregator = new Map<string, Aggregator>()
-    if (hasBreakpoint) {
-      for (const snap of Object.values(saved.candidates)) {
-        const agg = fromSnapshot(snap)
-        aggregator.set(agg.albumId, agg)
-      }
-    }
+    // ⚠️ **T120**：**聚合器先不填** —— 「按目录浏览」那一路是**整份重来**的
+    //    ⇒ 只有**回落**到全库扫描时，才把旧断点的聚合灌进来
+    //    （两种口径的聚合混在一起 ⇒ 集数翻倍）。
     const baseScanned = hasBreakpoint ? saved.scannedCount : 0
 
     set({
       scanning: true,
       error: null,
+      notice: null,
       keyword,
       overrides: { ...saved.overrides },
-      progress: { page: startPage - 1, pages: 0, scanned: baseScanned, total: saved.total },
+      progress: {
+        page: startPage - 1,
+        pages: 0,
+        scanned: baseScanned,
+        total: saved.total,
+        mode: 'library',
+        folderPath: null,
+      },
     })
 
     let scannedCount = baseScanned
     let nextPage = startPage
     /** 落盘失败过没有（配额满 / 隐私模式）⇒ 要**如实告诉用户**。 */
     let persistFailed = false
+    /** ⚠️ **T120**：目录浏览的结果；`null` = 走了**全库扫描**。 */
+    let folderResult: FolderScanResult | null = null
+    /** ⚠️ **T120**：回落提示（如实告诉用户「服务端不支持目录浏览」）。 */
+    let notice: string | null = null
 
     try {
+      // ---- ① **T120**：先试「按服务端目录浏览」------------------------------
+      //
+      // ⚠️ **为什么先试它**：服务端**已支持**按目录浏览（2026-11-19 真机实测）
+      //    ⇒ 不用再把 17.3 万首曲目全扫一遍、再按 path 关键字挑
+      //    ⇒ 「有声」页从「87 页 / 约 1 分钟」变成「几十个目录 / 几秒」。
+      try {
+        folderResult = await scanFolderTracks({
+          keyword,
+          onProgress: (p) => {
+            set({
+              progress: {
+                page: p.dirs,
+                pages: 0,
+                scanned: p.tracks,
+                total: p.total,
+                mode: 'folder',
+                folderPath: p.folders[0]?.path ?? null,
+              },
+            })
+          },
+        })
+      } catch (err) {
+        // ⚠️ **回落**：老服务端（没更新飞牛）**没有** `/folder-view/*`
+        //    ⇒ 响应 body 是 `null` ⇒ `apiCall` 抛错 ⇒ 这里改走**旧的全库扫描**
+        //    ⇒ 结果**等价**（同样的 hits），只是慢。
+        notice = '服务端不支持按目录浏览（已改用全库扫描，较慢）。'
+      }
+
+      if (folderResult) {
+        // ---- 目录浏览那一路：判定 ＋ 落盘 ----------------------------------
+        //
+        // ⚠️ **判定 / 归并 / 卡片 / 下钻 / 改判 —— 一行都没改**：
+        //    目录浏览拿回来的就是 `ScanTrack[]` ⇒ 喂给**同一个** `accumulate()`。
+        accumulate(aggregator, folderResult.tracks, keyword)
+        scannedCount = folderResult.tracks.length
+
+        const hits = judgeAggregator(aggregator)
+        const candidates = snapshotCandidates(aggregator)
+        const folderPaths = folderResult.folders.map((f) => f.path)
+        const persisted: AudiobookPersisted = {
+          version: STATE_VERSION,
+          // ⚠️ 目录浏览**没有分页** ⇒ **没有断点** ⇒ 下次要重扫就整份重来。
+          nextPage: 0,
+          scannedCount,
+          total: folderResult.total,
+          candidates,
+          // ⚠️ **T118**：**活值**（扫描期间用户做的改判不能被覆盖）。
+          overrides: { ...get().overrides },
+          keyword,
+          scannedAt: Date.now(),
+          // ⚠️ **T120**：**可选字段** ⇒ 旧落盘照样读得出 ⇒ `STATE_VERSION` **不升**。
+          folderPaths,
+        }
+        const savedOk = port.save(persisted)
+        if (!savedOk) persistFailed = true
+
+        const tooMany = aggregator.size > MAX_AUDIOBOOK_ITEMS
+        const problems: string[] = []
+        if (persistFailed) {
+          problems.push('扫描完成了，但**结果没存到本机**（本地存储可能已满）⇒ 下次进入不会自动恢复。')
+        }
+        if (tooMany) {
+          problems.push(
+            `这个目录下面命中了 ${aggregator.size} 部作品，超过 ${MAX_AUDIOBOOK_ITEMS} 部 ⇒ 只保留集数最多的 ${MAX_AUDIOBOOK_ITEMS} 部；把目录名写得更具体就能看全。`,
+          )
+        }
+        // ⚠️ **目录没找到** ⇒ 如实告诉用户；⚠️ **不回落**
+        //    （回落也找不到那个目录，只是白扫一遍全库）。
+        if (folderResult.folders.length === 0) {
+          problems.push(
+            `服务端的目录里**没找到**叫「${keyword}」的文件夹 ⇒ 请确认它在音乐服务的曲库里（或换个目录名再试）。`,
+          )
+        }
+
+        set({
+          hits,
+          keyword,
+          overrides: persisted.overrides,
+          scanning: false,
+          error: problems.length > 0 ? problems.join(' ') : null,
+          notice,
+          scannedAt: persisted.scannedAt,
+          progress: {
+            page: folderResult.dirs,
+            pages: 0,
+            scanned: scannedCount,
+            total: folderResult.total,
+            mode: 'folder',
+            folderPath: folderPaths[0] ?? null,
+          },
+        })
+        return
+      }
+
+      // ---- ② 回落：全库扫描（**一字不改**）----------------------------------
+      // ⚠️ **断点续跑**在这里才把旧聚合灌进来（目录浏览那一路是整份重来的）。
+      if (hasBreakpoint) {
+        for (const snap of Object.values(saved.candidates)) {
+          const agg = fromSnapshot(snap)
+          aggregator.set(agg.albumId, agg)
+        }
+      }
       // ⚠️ 服务端**没有**「跳过前 N 页」的参数，但 `page` 本身就是偏移
       //    ⇒ 直接从断点页开始（`startPage`）⇒ 续跑不会重扫前面的页。
       const result = await scanLibraryTracks({
@@ -822,6 +965,8 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         overrides: { ...get().overrides },
         keyword,
         scannedAt: Date.now(),
+        // ⚠️ **T120**：这一路是**全库扫描** ⇒ 没有目录路径（空数组）。
+        folderPaths: [],
       }
       const savedOk = port.save(persisted)
       if (!savedOk) persistFailed = true
@@ -847,8 +992,18 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         overrides: persisted.overrides,
         scanning: false,
         error: problems.length > 0 ? problems.join(' ') : null,
+        // ⚠️ **T120**：回落提示放在**提示**里（**不是** `error`）
+        //    ⇒ 「加载失败：服务端不支持目录浏览」是**指错方向**的误导。
+        notice,
         scannedAt: persisted.scannedAt,
-        progress: { page: nextPage, pages: result.pages, scanned: scannedCount, total: result.total },
+        progress: {
+          page: nextPage,
+          pages: result.pages,
+          scanned: scannedCount,
+          total: result.total,
+          mode: 'library',
+          folderPath: null,
+        },
       })
     } catch (err) {
       set({
@@ -875,6 +1030,7 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         scannedAt: null,
         progress: null,
         error: null,
+        notice: null,
       })
       return
     }
@@ -883,6 +1039,8 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
       const agg = fromSnapshot(snap)
       aggregator.set(agg.albumId, agg)
     }
+    // ⚠️ **T120**：上次定位到的目录（**可选字段** ⇒ 旧落盘没有 ⇒ 空数组）。
+    const folderPaths = Array.isArray(saved.folderPaths) ? saved.folderPaths.filter(Boolean) : []
     set({
       hits: judgeAggregator(aggregator),
       overrides: { ...saved.overrides },
@@ -893,8 +1051,12 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         pages: saved.total > 0 ? Math.max(1, Math.ceil(saved.total / 2000)) : 0,
         scanned: saved.scannedCount,
         total: saved.total,
+        // ⚠️ **T120**：有目录路径 ⇒ 上一轮走的是**目录浏览**；没有 ⇒ 全库扫描。
+        mode: folderPaths.length > 0 ? 'folder' : 'library',
+        folderPath: folderPaths[0] ?? null,
       },
       error: null,
+      notice: null,
     })
   },
 

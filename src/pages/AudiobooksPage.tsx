@@ -234,6 +234,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
   const scanning = useStore(useAudiobookStore, (s) => s.scanning)
   const progress = useStore(useAudiobookStore, (s) => s.progress)
   const error = useStore(useAudiobookStore, (s) => s.error)
+  // ⚠️ **T120**：回落提示（「服务端不支持按目录浏览，已改用全库扫描」）。
+  const notice = useStore(useAudiobookStore, (s) => s.notice)
   const scannedAt = useStore(useAudiobookStore, (s) => s.scannedAt)
   const scan = useStore(useAudiobookStore, (s) => s.scan)
   const restore = useStore(useAudiobookStore, (s) => s.restore)
@@ -375,10 +377,16 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
   }, [items, setAlbumCover])
 
   const status = scanning
-    ? `正在扫描…第 ${progress?.page ?? 0} 页 / 共 ${progress?.pages ?? 0} 页（已扫 ${progress?.scanned ?? 0} 首）`
+    ? progress?.mode === 'folder'
+      ? `正在按目录浏览…已取 ${progress?.scanned ?? 0} 首（走过的目录 ${progress?.page ?? 0} 个）`
+      : `正在扫描…第 ${progress?.page ?? 0} 页 / 共 ${progress?.pages ?? 0} 页（已扫 ${progress?.scanned ?? 0} 首）`
     : scannedAt
-      ? `上次扫描：${new Date(scannedAt).toLocaleString()} · 目录「${keyword}」· ${items.length} 部`
+      ? `上次扫描：${new Date(scannedAt).toLocaleString()} · 目录「${keyword}」· ${items.length} 部${
+          progress?.folderPath ? `（${progress.folderPath}）` : ''
+        }`
       : '还没扫描过'
+  // ⚠️ **T120**：回落提示放**状态行**（不是 `error`）⇒ 「加载失败：…」是**指错方向**的误导。
+  const statusText = notice ? `${status} · ${notice}` : status
 
   /**
    * 列表区在「还没有作品」时给用户的话（**如实说明**正在发生什么）。
@@ -386,13 +394,13 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
    * ⚠️ 非扫描态的文案**沿用旧版**（T98 的 E2E 断言了它 ⇒ 不改）。
    */
   const emptyText = scanning
-    ? `正在扫描「${keyword}」文件夹里的作品…实测约 1 分钟；扫完会记在本机，下次进来直接看。`
+    ? `正在扫描「${keyword}」文件夹里的作品…扫完会记在本机，下次进来直接看。`
     : `当前曲库里没有识别到有声读物：这个目录下面没有找到作品（换个目录名再扫一次，或用上面的「搜作品」直接找）。⚠️ 有声小说要放在曲库主目录下的「${effectiveKeyword}」文件夹里才会被扫到。`
 
   return (
     <LibraryPageShell
       title="有声读物"
-      status={status}
+      status={statusText}
       error={error}
       loading={false}
       loadingText=""
@@ -401,15 +409,15 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
         {/* ---- 主入口：那个文件夹里的作品（**第一屏**，一本一条）---------------- */}
         <section className="sanlos-audiobooks__panel">
           <h2 className="sanlos-audiobooks__panel-title">那个文件夹里的作品</h2>
-          {/* ⚠️ **T119**（2026-11-19 真机实测）：飞牛更新后，服务端**已支持**按目录浏览
-              （`/folder-view/*`、`/app-center/authed-dir/*`）⇒ 旧的「服务端侧没有目录浏览能力」
-              那个结论**已过时**；⚠️ **客户端还没接**那些接口 ⇒ **行为不变**
-              （仍全库扫 ＋ 按目录名挑）⇒ 下面那句只说「本客户端目前」。 */}
+          {/* ⚠️ **T120**（2026-11-19）：服务端**已支持**按目录浏览，客户端**已接**
+              （`/folder-view/list`、`/app-center/authed-dir/list`）⇒ **不再全库扫**
+              ⇒ 「那个文件夹」是**服务端目录树里定位出来的**，不是按 path 关键字猜的。
+              ⚠️ 老服务端（没更新飞牛）**自动回落**到旧的「全库扫描」⇒ 状态行会说明。 */}
           <p className="sanlos-audiobooks__hint">
             「{keyword}」文件夹里的全都是有声小说，这里一本小说一条。
             点开就是全书（按集序排；服务端把一部作品拆成几张专辑时会自动合并）。
             ⚠️ <strong>文件要放在曲库主目录下的「{keyword}」文件夹里</strong>
-            （本客户端目前是扫一遍曲库、再按目录名挑出这个文件夹里的作品）——
+            （本客户端按服务端目录浏览出这个文件夹里的作品）——
             放在别处的，列表里不会出现。
           </p>
           {items.length === 0 ? (
@@ -523,8 +531,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
             </button>
           </div>
           <p className="sanlos-audiobooks__hint">
-            本客户端目前要先扫一遍曲库，再按目录名挑出这个文件夹里的作品。
-            实测 17.3 万首要扫 87 页，并发扫大约 1 分钟；扫一次记在本机，下次进来直接看。
+            本客户端按服务端目录浏览出这个文件夹里的作品（不用再把整个曲库扫一遍）。
+            扫一次记在本机，下次进来直接看。
             换目录名要重新扫一次。
           </p>
         </section>

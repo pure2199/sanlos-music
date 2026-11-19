@@ -26,10 +26,16 @@ const { scanLibraryTracks, albumWorkDir, album } = vi.hoisted(() => ({
   album: vi.fn(),
 }))
 const { searchApi } = vi.hoisted(() => ({ searchApi: { albums: vi.fn() } }))
+// ⚠️ **T120**：客户端现在**先试「按服务端目录浏览」**；老服务端没有那些端点 ⇒ 会抛错
+//    ⇒ **自动回落**到旧的「全库扫描」。
+//    ⇒ 本文件**默认把目录浏览 mock 成「不支持」** ⇒ 下面这些既有用例走的
+//    **正是回落那条路**（回归网：老服务端的行为一个字没变）。
+const { scanFolderTracks } = vi.hoisted(() => ({ scanFolderTracks: vi.fn() }))
 
 // ⚠️ **T101**：多了一个 `libraryApi.album`（旧落盘没有封面时**补拉一次**封面）。
 vi.mock('../src/api/library', () => ({ scanLibraryTracks, libraryApi: { albumWorkDir, album } }))
 vi.mock('../src/api/search', () => ({ searchApi }))
+vi.mock('../src/api/folder', () => ({ scanFolderTracks }))
 
 import { AudiobooksPage } from '../src/pages/AudiobooksPage'
 import { useAudiobookStore } from '../src/state/audiobookStore'
@@ -47,6 +53,10 @@ const FOUND_ALBUM = {
 
 describe('AudiobooksPage（有声读物页）', () => {
   beforeEach(() => {
+    // ⚠️ **T120**：默认「服务端**不支持**目录浏览」⇒ 走**回落**那条路
+    //    （老服务端的行为一个字没变 ⇒ 下面这些既有用例仍然是回归网）。
+    scanFolderTracks.mockReset()
+    scanFolderTracks.mockRejectedValue(new Error('服务端不支持按目录浏览'))
     scanLibraryTracks.mockReset()
     scanLibraryTracks.mockImplementation(async () => ({
       scanned: 0,
@@ -200,8 +210,11 @@ describe('AudiobooksPage（有声读物页）', () => {
     // ⚠️ **仍然为真**的事实必须留着（用户 2026-11-17 的原话：文件要放在主目录下的那个文件夹里）。
     expect(hints).toContain('主目录')
     expect(hints).toContain('有声小说')
-    // ⚠️ 新的限定语：「**本客户端目前**」⇒ 说明这是**客户端**的限制，不是服务端的。
-    expect(hints).toContain('本客户端目前')
+    // ⚠️ **T120**：**前提被显式推翻** ⇒ 这条断言**改写为新行为**。
+    //    T119 钉的是「**客户端还没接**目录接口 ⇒ 仍全库扫」⇒ 那是**当时**为真的事实；
+    //    T120 把客户端**接上了**（`/folder-view/list` ＋ `/app-center/authed-dir/list`）
+    //    ⇒ 现在说的是「**按服务端目录浏览**」⇒ 断言跟着改成**新行为**（不是弱化）。
+    expect(hints).toContain('按服务端目录浏览')
   })
 
   it('⑥ 「搜作品」⇒ 打专辑搜索并列出结果（**搜索本身**不触发扫描）', async () => {

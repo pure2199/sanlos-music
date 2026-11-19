@@ -688,6 +688,127 @@ export interface MockServerOptions {
   artists?: RawArtist[]
 }
 
+// ---------------------------------------------------------------------------
+// T120：服务端目录浏览（`/app-center/authed-dir/*`、`/folder-view/*`）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **纯增量**：只**新增**端点 ⇒ 既有端点的行为**一个字没变**。
+// ⚠️ 目录树是**从曲库的 `audioSpec.path` 现推**的 ⇒ 不另造一份 fixtures
+//    ⇒ **不可能**与曲库对不上（那才是「假绿」的根源）。
+// ⚠️ 形状照**真实服务端**（2026-11-19 真机实测）：
+//    - `/folder-view/list?parentPath=…&sort=…`
+//      ⇒ `{ code:0, msg:'', data:{ folder:{name,path,itemCount,folders[],tracks[]}, sort } }`
+//    - **中间层**（只有子目录）的 `tracks` 是**空数组**（真实服务端就是这样）
+//      ⇒ 客户端**必须递归**到文件层；
+//    - 曲目字段是**裁剪过**的（没有 `trackNo` / `createdAt` / `genres` …）。
+// ---------------------------------------------------------------------------
+
+/** 目录树节点（mock 内部）。 */
+interface MockFolderNode {
+  /** 目录名。 */
+  name: string
+  /** 绝对路径。 */
+  path: string
+  /** 直接挂在这个目录里的曲目。 */
+  tracks: RawSong[]
+  /** 一层子目录。 */
+  folders: MockFolderNode[]
+}
+
+/** 取路径的**目录段**（去掉文件名）。 */
+function mockDirSegments(path: string): string[] {
+  return path.split('/').filter(Boolean).slice(0, -1)
+}
+
+/**
+ * 从曲库推**授权目录**（曲库根）。
+ *
+ * ⚠️ **mock 的曲库根固定是 `/volXX/<库名>` 这一层**
+ *    （真机实测：`/vol02/1000-0-3d135437`、`/vol02/1000-0-music`）
+ *    ⇒ 取目录路径的**前 2 段**。
+ *
+ * ⚠⚠️ **踩过的坑**：原先取的是**前 3 段** ⇒ 根**深了一层**
+ *    （把作品目录 `sample` / `有声小说` 当成了根）
+ *    ⇒ 目录浏览**找不到**那个目录（名字对不上）⇒ 「有声」页列出 0 部作品。
+ *    ⇒ 教训：**根的深度是「部署」决定的，不是能从路径推出来的**。
+ */
+function mockAuthedRoots(songs: readonly RawSong[]): string[] {
+  const roots = new Set<string>()
+  for (const song of songs) {
+    const path = song?.audioSpec?.path
+    if (typeof path !== 'string' || path.length === 0) continue
+    const segs = mockDirSegments(path)
+    if (segs.length === 0) continue
+    roots.add(`/${segs.slice(0, Math.min(2, segs.length)).join('/')}`)
+  }
+  return [...roots]
+}
+
+/** 从曲库推**目录树**（含所有中间层目录）。 */
+function buildMockFolderTree(songs: readonly RawSong[]): Map<string, MockFolderNode> {
+  const tree = new Map<string, MockFolderNode>()
+  const ensure = (path: string, name: string): MockFolderNode => {
+    let node = tree.get(path)
+    if (!node) {
+      node = { name, path, tracks: [], folders: [] }
+      tree.set(path, node)
+    }
+    return node
+  }
+  for (const song of songs) {
+    const path = song?.audioSpec?.path
+    if (typeof path !== 'string' || path.length === 0) continue
+    const segs = mockDirSegments(path)
+    if (segs.length === 0) continue
+    let currentPath = ''
+    for (const name of segs) {
+      currentPath = `${currentPath}/${name}`
+      ensure(currentPath, name)
+    }
+    // ⚠️ 曲目挂在**最后一级目录**上（真实服务端就是这样）。
+    ensure(currentPath, segs[segs.length - 1] as string).tracks.push(song)
+  }
+  // ---- 建立父子关系 ----
+  for (const node of tree.values()) {
+    const cut = node.path.lastIndexOf('/')
+    if (cut <= 0) continue
+    const parent = tree.get(node.path.slice(0, cut))
+    if (parent && !parent.folders.includes(node)) parent.folders.push(node)
+  }
+  return tree
+}
+
+/** 目录下的曲目总数（**递归**口径 —— 与真实服务端一致，可对账）。 */
+function mockItemCount(node: MockFolderNode): number {
+  let total = node.tracks.length
+  for (const child of node.folders) total += mockItemCount(child)
+  return total
+}
+
+/** 把一条曲目压成**目录浏览**的形状（**裁剪过的** —— 与真实服务端一致）。 */
+function mockFolderTrack(song: RawSong) {
+  return {
+    guid: song.guid,
+    title: song.title,
+    coverId: song.coverId ?? null,
+    duration: song.duration,
+    isCue: song.isCue ?? false,
+    album: {
+      guid: song.album?.guid ?? '',
+      name: song.album?.name ?? '',
+      coverId: song.album?.coverId ?? null,
+    },
+    artists: (song.artists ?? []).map((a) => ({ guid: a.guid, name: a.name })),
+    audioSpec: {
+      format: song.audioSpec?.format ?? '',
+      path: song.audioSpec?.path ?? '',
+      size: song.audioSpec?.size ?? 0,
+    },
+    isFavorite: song.isFavorite ?? false,
+    isAdminDeleted: false,
+  }
+}
+
 /**
  * 启动一个 mock server（监听系统分配的空闲端口）。
  *
@@ -700,6 +821,10 @@ export interface MockServerOptions {
 export function createMockServer(options?: MockServerOptions): MockServer {
   // ---- 本实例的曲库 / 专辑 / 歌手（默认 = 共享 fixtures）-------------------
   const songs = options?.songs ?? SONGS
+  // ⚠️ **T120**：目录树（**从本实例的曲库现推** ⇒ 不可能与曲库对不上）
+  //    ＋ 授权目录（曲库根）。
+  const folderTree = buildMockFolderTree(songs)
+  const authedRoots = mockAuthedRoots(songs)
   const albums = options?.albums ?? ALBUMS
   const artists = options?.artists ?? ARTISTS
 
@@ -855,6 +980,67 @@ export function createMockServer(options?: MockServerOptions): MockServer {
 
   getRoutes.set(`${API_BASE}/track/list`, ({ res, query }) => {
     sendJson(res, ok(paginate(songs, query)))
+  })
+
+  // ---- **T120**：服务端目录浏览（**新增**端点 ⇒ 既有端点一个字没变）----------
+
+  getRoutes.set(`${API_BASE}/app-center/authed-dir/list`, ({ res }) => {
+    sendJson(res, ok({
+      list: authedRoots.map((path) => ({
+        path,
+        storageType: 2,
+        cloudStorageType: 0,
+        aliasName: '',
+        permission: 'rw',
+        uname: '',
+        address: '',
+        comment: 'music',
+        username: '',
+      })),
+    }))
+  })
+
+  getRoutes.set(`${API_BASE}/app-center/authed-dir/sub/list`, ({ res, query }) => {
+    const parent = query.get('parent') ?? ''
+    const node = folderTree.get(parent)
+    const list = node
+      ? node.folders.map((child) => ({
+          name: child.name,
+          path: child.path,
+          itemCount: mockItemCount(child),
+          isAdminDeleted: false,
+        }))
+      : []
+    sendJson(res, ok({ list }))
+  })
+
+  getRoutes.set(`${API_BASE}/folder-view/list`, ({ res, query }) => {
+    const parentPath = query.get('parentPath') ?? ''
+    const sort = query.get('sort') ?? 'title,asc'
+    // ⚠️ **缺参**：真实服务端返回 `code=100002 invalid arguments`（端点**存在**，只是缺参）
+    //    ⇒ **不是**「端点不存在」（那种是 body = `null`）。
+    if (!parentPath) {
+      sendJson(res, err(100002, 'invalid arguments'))
+      return
+    }
+    const node = folderTree.get(parentPath)
+    const folder = node
+      ? {
+          name: node.name,
+          path: node.path,
+          itemCount: mockItemCount(node),
+          folders: node.folders.map((child) => ({
+            name: child.name,
+            path: child.path,
+            itemCount: mockItemCount(child),
+            isAdminDeleted: false,
+          })),
+          // ⚠️ 中间层的 `tracks` 是**空数组**（真实服务端就是这样）
+          //    ⇒ 客户端**必须递归**到「直接含文件」的那一层。
+          tracks: node.tracks.map(mockFolderTrack),
+        }
+      : { name: '', path: parentPath, itemCount: 0, folders: [], tracks: [] }
+    sendJson(res, ok({ folder, sort }))
   })
 
   getRoutes.set(`${API_BASE}/track/album-detail/list`, ({ res, query }) => {
