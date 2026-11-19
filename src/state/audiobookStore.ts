@@ -37,6 +37,7 @@
 
 import { create } from 'zustand'
 
+import { LEGACY_AUDIOBOOK_STATE_KEY } from '../../shared/legacyStorageKeys'
 import {
   DEFAULT_FOLDER_KEYWORD,
   judgeAlbum,
@@ -202,7 +203,7 @@ export interface AudiobookPort {
   save(state: AudiobookPersisted): boolean
 }
 
-/** 落盘状态的键名。 */
+/** 落盘状态的键名（**新键**；旧键见 `shared/legacyStorageKeys.ts`）。 */
 const STORAGE_KEY = 'sanlos-audiobook-state'
 /**
  * 当前落盘结构版本（落盘形状变了要 +1 ⇒ 旧数据自动作废）。
@@ -228,7 +229,14 @@ export const MAX_AUDIOBOOK_ITEMS = 500
 export const localStorageAudiobookPort: AudiobookPort = {
   load(): AudiobookPersisted | null {
     try {
-      const raw = globalThis.localStorage?.getItem(STORAGE_KEY)
+      // ⚠️ **T117：新键没有才回落读旧键**（旧键**只读**、**不删**）
+      //    ⇒ 老用户升级后「有声读物的扫描结果」**不丢**
+      //    ⇒ 不丢 ⇒ ① **自动判定**还在（T112 的桌面歌词修复继续有效）
+      //    ② **手工改判**还在 ③ 「有声」页**不用**再全库重扫（87 页 / 6–47 分钟）。
+      //    ⚠️ 与另外三个键同一套纪律：**新键优先**、旧键只读、写入自然落到新键。
+      const raw =
+        globalThis.localStorage?.getItem(STORAGE_KEY) ??
+        globalThis.localStorage?.getItem(LEGACY_AUDIOBOOK_STATE_KEY)
       if (!raw) return null
       const parsed: unknown = JSON.parse(raw)
       if (typeof parsed !== 'object' || parsed === null) return null
