@@ -54,6 +54,27 @@ export const DEFAULT_PAGE_SIZE = 50
 export const MAX_PAGE_SIZE = 2000
 
 /**
+ * 页码的**绝对上界**（离谱值兜底）。
+ *
+ * ⚠️ **这不是「越界保护」**：真正合法的上界 = `ceil(total / size)`，
+ *    它**依赖服务端返回的 `total`**（会随曲库变化）⇒ **不能**拿来做夹取：
+ *    曲库变大时旧 `total` 偏小 ⇒ 会**静默截断新增曲目**（回归）。
+ *    真正防越界的是客户端现有两道护栏：按 `total` 判 `hasMore` ＋「3 页无进展」护栏。
+ *
+ * 这里的 100 万页只是「**荒谬值**」的门槛：
+ * - 折算成条目数：100 万页 × 50 条/页 = **5000 万首**，
+ *   是实测曲库（17.3 万首 = 3474 页）的 **288 倍** ⇒ 真实曲库**永远碰不到**它；
+ * - 它真正防的是「离谱输入」：`page = 1e300` 会被 `String()` 序列化成
+ *   **`1e+300`**（**指数记数法**）⇒ 服务端的整数解析行为**未定义**。
+ *
+ * 实测（2026-11-20，FN 中继 / 真实 NAS，只读 GET，`total = 173 671`）：
+ * 服务端对**越界 / 非法 page 一律静默回退第一页**
+ * （`code=0`、50 条、首曲 = 第一页那首、~300–430 ms，重复 3 次不变慢）——**不报错、不返回空**。
+ * ⇒ 客户端的义务不是「猜服务端第几页」（做不到），而是**别把离谱页码发出去**。
+ */
+export const MAX_PAGE_NUMBER = 1_000_000
+
+/**
  * 业务错误：服务端返回了 `code !== 0` 的信封。
  *
  * `code === 99999` 表示身份凭据已失效——**静默续期是主进程的职责**，
@@ -146,14 +167,18 @@ export interface ApiCallOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * 页码归一：非整数 / 非法值 / 小于 1 一律落到 1。
+ * 页码归一：非整数 / 非法值 / 小于 1 一律落到 1；**大于上界的一律夹到上界**。
  *
- * 业务模块在入口统一调它，避免把 `page=0` / `page=NaN` 这类值发到服务端。
+ * 业务模块在入口统一调它，避免把 `page=0` / `page=NaN` / `page=1e300` 这类值发到服务端。
+ *
+ * ⚠️ 上界是**绝对值**（`MAX_PAGE_NUMBER`），**不是**按 `total` 推的合法上界
+ *    （理由见 `MAX_PAGE_NUMBER` 的注释：按 `total` 夹会截断新增曲目）。
  */
 export function normalizePageNumber(page: number): number {
   if (!Number.isFinite(page)) return 1
   const floored = Math.floor(page)
-  return floored >= 1 ? floored : 1
+  if (floored < 1) return 1
+  return Math.min(floored, MAX_PAGE_NUMBER)
 }
 
 /**
@@ -446,10 +471,14 @@ export async function fetchAllByPaging<T, U>(
   options?: { pageSize?: number; maxPages?: number },
 ): Promise<U[]> {
   const pageSize = normalizePageSize(options?.pageSize ?? DEFAULT_PAGE_SIZE)
-  const maxPages = Math.max(1, Math.floor(options?.maxPages ?? 50))
+  // ⚠ `maxPages` 也夹到上界：否则循环里的页码会被 `normalizePageNumber` 夹成同一个值
+  //    ⇒ **同一个请求被反复重发**（且永远取不到新数据）。
+  const maxPages = Math.min(MAX_PAGE_NUMBER, Math.max(1, Math.floor(options?.maxPages ?? 50)))
   const items: U[] = []
   for (let page = 1; page <= maxPages; page += 1) {
-    const data = await apiCall<RawPage<T>>(path, { query: { page, size: pageSize } })
+    const data = await apiCall<RawPage<T>>(path, {
+      query: { page: normalizePageNumber(page), size: pageSize },
+    })
     const chunk = normalizePage<T>(data)
     for (const item of chunk.list) items.push(map(item))
     if (chunk.list.length === 0) break

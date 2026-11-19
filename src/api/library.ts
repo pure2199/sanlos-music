@@ -15,6 +15,7 @@ import {
   mapArtist,
   mapGenre,
   mapSong,
+  MAX_PAGE_NUMBER,
   MAX_PAGE_SIZE,
   normalizeCoverId,
   normalizePage,
@@ -340,7 +341,8 @@ async function fetchScanPage(
 ): Promise<{ list: RawSong[]; total: number }> {
   const raw = normalizePage<RawSong>(
     await apiCall<RawPage<RawSong>>('/track/list', {
-      query: { page, size: pageSize, sort: 'createdAt,desc' },
+      // ⚠ 页码**一律过归一**：与其它 `page` 出口保持同一条规则（夹下界 ＋ 夹上界）。
+      query: { page: normalizePageNumber(page), size: pageSize, sort: 'createdAt,desc' },
     }),
   )
   return { list: raw.list, total: raw.total }
@@ -354,8 +356,16 @@ async function fetchScanPage(
  */
 export async function scanLibraryTracks(options?: ScanOptions): Promise<ScanResult> {
   const pageSize = normalizePageSize(options?.pageSize ?? MAX_PAGE_SIZE)
-  const maxPages = Math.max(1, Math.floor(options?.maxPages ?? 2000))
-  const startPage = Math.max(1, Math.floor(options?.startPage ?? 1))
+  // ⚠ 起始页 / 页数上限**都夹到页码上界**：否则页码会被 `normalizePageNumber`
+  //    夹成同一个值 ⇒ **同一个请求被反复重发**（且永远取不到新数据）。
+  const maxPages = Math.min(
+    MAX_PAGE_NUMBER,
+    Math.max(1, Math.floor(options?.maxPages ?? 2000)),
+  )
+  const startPage = Math.min(
+    MAX_PAGE_NUMBER,
+    Math.max(1, Math.floor(options?.startPage ?? 1)),
+  )
   const since = typeof options?.sinceCreatedAt === 'number' ? options.sinceCreatedAt : null
   const concurrency = Math.max(1, Math.floor(options?.concurrency ?? DEFAULT_SCAN_CONCURRENCY))
 
