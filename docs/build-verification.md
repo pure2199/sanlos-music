@@ -60,6 +60,22 @@
 > 完整记录见 [calibration.md](./calibration.md) 第九十七节与规格
 > `docs/superpowers/specs/2026-11-19-sanlos-music-t119-doc-claims.md`。
 
+> ✅ **T120 已于 2026-11-19 把「有声」页改为按服务端目录浏览**
+> （数据源从「**全库扫 87 页**（17.3 万首）＋ 按 path 关键字挑」换成
+> 「**服务端目录树**定位那个文件夹 ＋ 递归取它下面的曲目」：
+> `/app-center/authed-dir/list` ＋ `/folder-view/list`，真机实测 2026-11-19）
+> ⇒ ⭐ **判定 / 归并 / 卡片 / 下钻 / 改判 —— 一行都没改**（同一个 `accumulate()`）；
+> ⇒ ⭐ **落盘形状不变**（`STATE_VERSION` **不升**）⇒ 老用户上次扫的结果**直接还在**；
+> ⇒ ⚠ 老服务端（没更新飞牛）**自动回落**到旧的全库扫描（提示放在**状态行**，不是错误条）；
+> ⇒ 顺带加了 **9 条钉子**（①/② 成对：目录浏览优先 ＋ 回落对照组）。
+> **实测**：`tsc` **0 错**、Vitest **150 文件 / 3 054 条全绿**（新增 1 文件 9 条）、
+> Playwright **72 passed**（1.6 分钟）、build exit **0**、字节体检 ＋ 控制字符 **bad=0**、
+> **变异自证 `MUTATION_OK`**（A⇒红 ①④⑤⑥⑦⑧⑨、B⇒红 ④⑤⑥⑦⑧⑨、C⇒红 ⑥⑦、
+> D⇒红 ②⑥、E⇒红 ⑧；还原后 9/9 全绿 ＋ 字节级一致）。
+> ⚠ **本条不含真机复验**（待真机项）。
+> 完整记录见 [calibration.md](./calibration.md) 第九十八节与规格
+> `docs/superpowers/specs/2026-11-19-sanlos-music-t120-folder-scan.md`。
+
 **验证时间**：2026-11-04
 **平台**：Windows 10.0.26300 x64 / Node v26.13.0 / npm 11.x
 **分支**：`feature/fnmusic-desktop`
