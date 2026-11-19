@@ -48,6 +48,9 @@ function formatDuration(seconds: number | null): string {
 
 /** 命中率的文案（**你的**曲库命中数）。 */
 function hitRateText(board: MatchedChartBoard): string {
+  // ⚠️ T124：**还在匹配** ⇒ 命中数**还没有结论** ⇒ 不报「0 首」（那是在说假话）。
+  const pending = board.entries.some((entry) => entry.pending)
+  if (pending) return `榜上 ${board.total} 首，正在匹配你的曲库…`
   return `榜上 ${board.total} 首，你的曲库里有 ${board.matched} 首`
 }
 
@@ -55,6 +58,7 @@ function hitRateText(board: MatchedChartBoard): string {
 export function DiscoverPage({ onPlay }: DiscoverPageProps): ReactElement {
   const boards = useDiscoverStore((s) => s.boards)
   const chartsLoading = useDiscoverStore((s) => s.chartsLoading)
+  const matching = useDiscoverStore((s) => s.matching)
   const chartsError = useDiscoverStore((s) => s.chartsError)
   const chartsNotice = useDiscoverStore((s) => s.chartsNotice)
   const matchError = useDiscoverStore((s) => s.matchError)
@@ -113,7 +117,11 @@ export function DiscoverPage({ onPlay }: DiscoverPageProps): ReactElement {
     [onPlay, playableSongs],
   )
 
-  const status = totalCount > 0 ? `共 ${totalCount} 条，你的曲库里有 ${matchedCount} 条` : undefined
+  const status = matching
+    ? `共 ${totalCount} 条，正在匹配你的曲库…`
+    : totalCount > 0
+      ? `共 ${totalCount} 条，你的曲库里有 ${matchedCount} 条`
+      : undefined
 
   return (
     <section className="sanlos-page sanlos-discover">
@@ -233,6 +241,9 @@ export function DiscoverPage({ onPlay }: DiscoverPageProps): ReactElement {
                       >
                         播放
                       </button>
+                    ) : entry.pending ? (
+                      // ⚠️ T124：**还没查完** ≠ 「不在曲库」⇒ 显示「匹配中…」。
+                      <span className="sanlos-discover__badge">匹配中…</span>
                     ) : (
                       <span className="sanlos-discover__badge">不在曲库</span>
                     )}

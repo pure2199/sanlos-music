@@ -55,6 +55,15 @@ export interface MatchedChartEntry extends ChartEntry {
   inLibrary: boolean
   /** 命中时的本地歌曲（**完整对象**：能直接播、也能显示封面）；未命中为 `null`。 */
   song: Song | null
+  /**
+   * 是否**还没匹配完**（T124：榜单**先出**、命中**异步补**）。
+   *
+   * ⚠️ **缺省 = 已匹配完**（既有行为一字未变）。
+   * ⚠️ `pending === true` 时，`inLibrary` / `song` **都还没有结论**
+   *    ⇒ 界面必须显示「**匹配中…**」，**不许**显示「不在曲库」
+   *    （那是**结论**，不是「还没查」）。
+   */
+  pending?: boolean
 }
 
 /** 一个已匹配的榜单。 */

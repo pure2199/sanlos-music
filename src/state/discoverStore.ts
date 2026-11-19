@@ -22,6 +22,7 @@ import {
   defaultDiscoverDeps,
   gatherRecommendCandidates,
   matchChartsToLibrary,
+  pendingChartBoards,
   type DiscoverDeps,
   type RecommendBlock,
 } from '../api/discover'
@@ -38,6 +39,39 @@ function playerBridge(): PlayerBridge | null {
 /** 服务端历史的取多少条（**只当曲目池**：顺序不可信、没有次数）。 */
 const SERVER_HISTORY_SIZE = 50
 
+// ---------------------------------------------------------------------------
+// T124：匹配结果**会话内缓存**（二次进入「发现」不再打 NAS）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么缓存**：匹配要**逐个歌手定向查** NAS（榜单里出现几个歌手就查几次）
+//    ⇒ 中继链路上要 **30–40 秒** ⇒ 二次进入再打一遍纯属浪费。
+//    ⇒ 缓存**匹配结果**（榜单条目 → 命中与否，体量只有几十条，**不是整份曲库**）。
+//
+// ⚠️ **为什么是「会话内」而不是带 TTL 的长期缓存**：
+//    曲库内容会变（用户新加了歌）⇒ 缓存久了会给出**过时**的命中状态；
+//    而「二次进入不重打」这个诉求**只需要覆盖同一次运行**⇒ 进程退出即失效，最安全。
+//
+// ⚠️ **缓存 key**：榜单 id ＋ 每个榜单的条目数 ＋ 首条标题
+//    ⇒ 榜单内容变了（条目数/标题变了）⇒ key 变了 ⇒ **不会命中旧缓存**。
+const matchCache = new Map<string, CachedMatch>()
+
+/** 缓存里的一条匹配结果。 */
+interface CachedMatch {
+  /** 匹配后的榜单。 */
+  boards: MatchedChartBoard[]
+  /** 命中数。 */
+  matched: number
+  /** 条目总数。 */
+  total: number
+}
+
+/** 算出榜单的**缓存 key**（内容变了 ⇒ key 变 ⇒ 不会命中旧缓存）。 */
+function cacheKeyOf(boards: ChartBoard[]): string {
+  return boards
+    .map((board) => `${board.id}:${board.entries.length}:${board.entries[0]?.title ?? ''}`)
+    .join('|')
+}
+
 /** 「发现」页 store 的形状。 */
 export interface DiscoverStore {
   /** 原始榜单（主进程回的，**还没跟曲库对过**）。 */
@@ -46,6 +80,13 @@ export interface DiscoverStore {
   boards: MatchedChartBoard[]
   /** 榜单正在拉。 */
   chartsLoading: boolean
+  /**
+   * **匹配**正在跑（T124：榜单先出、命中异步补）。
+   *
+   * ⚠️ `chartsLoading === false` 但 `matching === true` ⇒ 榜单**已经在屏幕上**，
+   *    命中结果**还没到**（条目显示「匹配中…」）。
+   */
+  matching: boolean
   /** **榜源**失败（可读中文）。 */
   chartsError: string | null
   /** 榜源部分失败（警告，**不是**错误）。 */
@@ -77,6 +118,7 @@ export const useDiscoverStore = create<DiscoverStore>()((set, get) => ({
   charts: [],
   boards: [],
   chartsLoading: false,
+  matching: false,
   chartsError: null,
   chartsNotice: null,
   matchError: null,
@@ -91,7 +133,7 @@ export const useDiscoverStore = create<DiscoverStore>()((set, get) => ({
     const bridge = playerBridge()
     set({ chartsLoading: true, chartsError: null, chartsNotice: null, matchError: null })
     if (!bridge) {
-      set({ chartsLoading: false, chartsError: '当前环境不支持榜单（缺少主进程桥）' })
+      set({ chartsLoading: false, matching: false, chartsError: '当前环境不支持榜单（缺少主进程桥）' })
       return
     }
 
@@ -99,13 +141,14 @@ export const useDiscoverStore = create<DiscoverStore>()((set, get) => ({
     try {
       result = await bridge.fetchCharts()
     } catch {
-      set({ chartsLoading: false, chartsError: '榜单源暂时不可用' })
+      set({ chartsLoading: false, matching: false, chartsError: '榜单源暂时不可用' })
       return
     }
 
     if (!result || result.status !== 'ok') {
       set({
         chartsLoading: false,
+        matching: false,
         charts: [],
         boards: [],
         chartsError: result?.message ?? '榜单源暂时不可用',
@@ -120,24 +163,67 @@ export const useDiscoverStore = create<DiscoverStore>()((set, get) => ({
     // ⚠️ **榜源部分失败**只是**警告**（已取到的照常显示）。
     const notice = result.message ?? null
 
+    // ---- T124：命中**异步补**（榜单先出）＋ **会话内缓存** ------------------
+    //
+    // ⚠️ 匹配要逐个歌手定向查 NAS ⇒ 中继链路上 **30–40 秒** ⇒
+    //    **不能**让它挡住榜单的显示 ⇒ 榜单先出（条目标 `pending`），命中**后台补**。
+    const cacheKey = cacheKeyOf(result.boards)
+    const cached = matchCache.get(cacheKey)
+    if (cached) {
+      // ⚠️ **缓存命中** ⇒ 直接用，**一个 NAS 请求都不发**（二次进入秒开）。
+      set({
+        chartsLoading: false,
+        charts: result.boards,
+        boards: cached.boards,
+        chartsError: null,
+        chartsNotice: notice,
+        matchError: null,
+        matchedCount: cached.matched,
+        totalCount: cached.total,
+        matching: false,
+      })
+      return
+    }
+
+    // 榜单**先出**（未匹配的条目显示「匹配中…」）。
+    set({
+      chartsLoading: false,
+      charts: result.boards,
+      boards: pendingChartBoards(result.boards),
+      chartsError: null,
+      chartsNotice: notice,
+      matchError: null,
+      matchedCount: 0,
+      totalCount: result.boards.reduce((sum, board) => sum + board.entries.length, 0),
+      matching: true,
+    })
+
     const outcome = await matchChartsToLibrary(result.boards, deps ?? defaultDiscoverDeps)
     if (outcome.status === 'unavailable') {
       // ⚠️ **曲库查不动** ⇒ 说「暂时无法匹配曲库」，**不说「都不在曲库」**。
       set({
         chartsLoading: false,
+        matching: false,
         charts: result.boards,
-        boards: [],
+        boards: pendingChartBoards(result.boards),
         chartsError: null,
         chartsNotice: notice,
         matchError: outcome.message ?? '暂时无法匹配曲库',
         matchedCount: 0,
-        totalCount: 0,
+        totalCount: result.boards.reduce((sum, board) => sum + board.entries.length, 0),
       })
       return
     }
 
+    // ⚠️ 匹配完成 ⇒ **补上**命中结果（榜单**已经**在屏幕上了）。
+    matchCache.set(cacheKey, {
+      boards: outcome.boards,
+      matched: outcome.matched,
+      total: outcome.total,
+    })
     set({
       chartsLoading: false,
+      matching: false,
       charts: result.boards,
       boards: outcome.boards,
       chartsError: null,

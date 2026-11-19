@@ -277,6 +277,30 @@ export async function matchChartsToLibrary(
   return { status: 'ok', boards: matchedBoards, matched: matchedCount, total: totalCount }
 }
 
+/**
+ * 造一份「**还没匹配**」的榜单（T124：榜单**先出**、命中**异步补**）。
+ *
+ * ⚠️ 每一条都标 `pending: true` ⇒ 界面显示「**匹配中…**」，
+ *    **不是**「不在曲库」（后者是**结论**，而这里**还没有结论**）。
+ * ⚠️ `total`（条目总数）**是已知的**（榜源给的）⇒ 界面可以先显示「共 N 条」；
+ *    `matched`（命中数）**未知** ⇒ 记 0，并靠 `pending` 区分「还没查」与「查了没有」。
+ */
+export function pendingChartBoards(boards: ChartBoard[]): MatchedChartBoard[] {
+  return boards.map((board) => ({
+    id: board.id,
+    name: board.name,
+    source: board.source,
+    entries: board.entries.map((entry) => ({
+      ...entry,
+      inLibrary: false,
+      song: null,
+      pending: true,
+    })),
+    matched: 0,
+    total: board.entries.length,
+  }))
+}
+
 // ---------------------------------------------------------------------------
 // (b) 为你推荐
 // ---------------------------------------------------------------------------
