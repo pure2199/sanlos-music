@@ -166,6 +166,14 @@ export interface PlayerStore {
    *    等引擎报出 `duration > 0` 之后再真正定位。
    */
   resumePlayback: (song: Song, positionSec: number) => void
+  /**
+   * **强制**把「上次播放」写出去一次（T123：退出前补写）。
+   *
+   * ⚠️ 平时写盘是**节流**的（切歌 / 暂停 / 每 10 秒）⇒ 异常退出最多丢 10 秒进度；
+   *    这个动作**不受节流约束** ⇒ 退出前调一次 ⇒ 误差压到 ≈ 0。
+   * ⚠️ **没有当前曲目** ⇒ **不写**（不制造「看起来存了、其实读不出来」的假状态）。
+   */
+  flushResume: () => void
 }
 
 /**
@@ -598,6 +606,17 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
       //    免得「恢复没成功 ⇒ 记录丢了 ⇒ 下次也没得恢复」。
       persistResume(song, value, song.duration, true)
       pendingSeekSec = value > 0 ? value : null
+    },
+
+    /**
+     * **强制**写一次「上次播放」（T123：退出前补写）。
+     *
+     * ⚠️ **不受 10 秒节流约束**（那正是这个动作存在的理由）。
+     * ⚠️ **没有当前曲目** ⇒ `persistResume` 内部直接返回（不写）。
+     */
+    flushResume: () => {
+      const state = get()
+      persistResume(state.current, state.position, state.duration, true)
     },
   }))
 

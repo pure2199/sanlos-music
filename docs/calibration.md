@@ -8346,3 +8346,67 @@ appId `com.sanlos.music` 没变 ⇒ 卸载项 GUID 不变 ⇒ **直接覆盖安�
 - ⏳ 共享库里的新曲目**要等服务端扫描完**才看得到（客户端不代劳扫描 —— 那是写操作）；
 - ⏳ **真机复验待装版后做**（本轮改动**未发版**）。
 
+## 第一百零二节、T123：退出前补写一次「上次播放」的位置（2026-11-20）
+
+> 起因：台账遗留原文 —— 「『退出前补写一次位置』（把续播误差从最多 10 s 压到 ≈ 0）本轮未实现」
+> ⇒ 用户 2026-11-20 拍板「ABCD 全做」⇒ 本节是**第二组（修既有缺陷）的第一项**。
+
+### 一、代码事实（不是推测）
+
+| 事实 | 出处 |
+|---|---|
+| 写盘是**节流**的：非 `force` 时 `now - lastResumeWriteAt < RESUME_SAVE_INTERVAL_MS` ⇒ **不写** | `src/state/playerStore.ts` 的 `persistResume()` |
+| `RESUME_SAVE_INTERVAL_MS = 10_000` | 同上 |
+| 强制写只发生在**切歌**（`playTrack` / `next` / `prev`）与**恢复**（`resumePlayback`） | 同上 |
+| **没有**「退出前写一次」的调用点 | 全仓库检索 |
+| 「关掉自动播放 ⇒ 不出声，但位置照记」**已经是既有行为**（`restoreLastPlayback` 的 `disabled` 分支：**连记录都不读** ⇒ 更不会覆盖它） | `src/state/resumeFlow.ts` |
+
+⚠ 最后那条**只是「代码层面已实现」** ⇒ 台账里它挂的是「**安装版实测**」
+⇒ 本轮补**单测钉子**（代码层面先钉死），**安装版真机复验另列**（**不假装验过**）。
+
+### 二、改动清单（**5 个文件**）
+
+| 文件 | 动作 |
+|---|---|
+| `src/state/playerStore.ts` | ＋`flushResume()`：**强制**写一次（`force = true` ⇒ 不受 10 秒节流约束）；**没有当前曲目 ⇒ 不写** |
+| `src/player/resumeFlush.ts` | **新建**：`installResumeFlush(flush)` ⇒ 装 `beforeunload` + `pagehide` 两个钩子；**写盘异常一律吞掉** |
+| `src/App.tsx` | `useEffect(() => installResumeFlush(() => usePlayerStore.getState().flushResume()), [])` |
+| `test/t123-resume-flush.test.ts` | **新建**：5 条钉子 |
+| `docs/superpowers/specs/2026-11-20-sanlos-music-t123-resume-flush.md` | **新建**：规格 |
+
+### 三、钉子（**5 条**）
+
+| # | 钉子 | 钉住什么 |
+|---|---|---|
+| ① | `flushResume()` **强制**写一次（拖到 42 秒后节流内**不写** ⇒ 补写后立刻写出 42 秒） | 「不受节流约束」这条契约 |
+| ② | **没有当前曲目** ⇒ 不写 | 不制造「看起来存了、其实读不出来」的假状态 |
+| ③ | `beforeunload` / `pagehide` 都会补写；卸载后不再补写 | 钩子接线 |
+| ④ | 补写抛异常 ⇒ **不冒泡** | 退出路径不被记录拖垮 |
+| ⑤ | 关掉自动播放 ⇒ `restored:false / reason:'disabled'`、`play` 未调用、**`load` 也没调用** | 「不出声但位置照记」 |
+
+### 四、⚠ 这一轮踩的坑（跨项目可复用）
+
+1. ⚠ **全量测试偶发 OOM**（`FATAL ERROR: MarkCompactCollector … JavaScript heap out of memory`）
+   ⇒ **不是**本轮改动引起的（本轮只加了一个 action ＋ 一个纯函数 ＋ 5 条钉子），
+   而是**机器当时的内存压力**（同时还跑着别的应用）⇒ **重跑一次就全绿**
+   ⇒ ⚠ **看到 OOM 先查机器内存，别急着怀疑自己的改动**；
+2. ⚠ **「关窗口只是隐藏、播放继续」**这条路**不会**触发 `beforeunload` / `pagehide`
+   ⇒ 装钩子**不会**改变「播放继续」时的任何行为（那本来就有 10 秒节流在写）⇒ **零回归面**；
+3. ⚠ **`beforeunload` 在窗口销毁路径上不一定发**（Chromium 某些路径只发 `pagehide`）
+   ⇒ **两个都挂**，别只挂一个。
+
+### 五、如实标注的边界
+
+- ⚠ **安装版真机复验待做**：「关掉自动播放 ⇒ 不出声但位置照记」与「退出前补写 ⇒ 误差 ≈ 0」；
+- ⚠ 「关掉自动播放」当前语义 = **完全恢复**（不加载、不定位）
+  ⇒ 若用户期待「**加载那首歌并定位到进度、但不出声**」，那是**另一种语义** ⇒ **待用户拍板**；
+- ⚠ 本轮**未发版**。
+
+### 六、遗留
+
+- ⏳ 发现页「**先出榜单、命中异步补**」＋「二次进入重打 NAS（匹配结果不缓存）」；
+- ⏳ 曲库分页 / `normalizePageNumber()` 的**上界 clamp**（现状：曲库 `size` 已 clamp ≤ 2000，
+  **页码上界仍未夹** ⇒ 需先实测服务端对超大 `page` 的行为再定上界，**不猜**）；
+- ⏳ 歌单面板**排序 / 分页**；
+- ⏳ README `### Code signing policy` ＋ `.github/CODEOWNERS`；
+- ⏳ `scripts/pack.cjs` 跨卷 EXDEV / 占用兜底（老问题 **T62**）。

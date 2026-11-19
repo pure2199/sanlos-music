@@ -29,6 +29,7 @@ import { useAppPrefsStore } from './state/appPrefsStore'
 import { usePlayerStore } from './state/playerStore'
 import { findSongById, restoreLastPlayback } from './state/resumeFlow'
 import { resumePort } from './player/resumeBridge'
+import { installResumeFlush } from './player/resumeFlush'
 import { useSessionStore } from './state/sessionStore'
 import { useCoverAccent } from './ui/useCoverAccent'
 import './styles/global.css'
@@ -266,6 +267,16 @@ export default function App() {
       })
     })()
   }, [restored, connected])
+
+  // -------------------------------------------------------------------------
+  // T123：退出前补写一次「上次播放」的位置
+  // -------------------------------------------------------------------------
+  //
+  // ⚠️ 平时写盘是**节流**的（切歌 / 暂停 / 每 10 秒）⇒ 异常退出最多丢 10 秒进度
+  //    ⇒ 窗口真要没了（`beforeunload` / `pagehide`）就**强制写一次**。
+  // ⚠️ 应用默认「关窗口只是隐藏、**播放继续**」⇒ 那条路**不触发**这两个事件
+  //    ⇒ 播放继续时的行为**一字不变**（本来就有 10 秒节流在写）。
+  useEffect(() => installResumeFlush(() => usePlayerStore.getState().flushResume()), [])
 
   // -------------------------------------------------------------------------
   // Fluent 主题的强调色取自封面主色（T89-④）
