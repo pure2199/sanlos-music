@@ -164,7 +164,7 @@ describe('AudiobooksPage（有声读物页）', () => {
       .join('\n')
     // ⚠️ **位置要求**（用户 2026-11-17 的原话：「有声小说，要放在主目录下的有声小说文件夹，
     //    这个写下说明。不然别人用读不到」）：
-    //    服务端**不能浏览目录** ⇒ 客户端只能扫曲库后**按目录名**挑 ⇒ 文件必须放进那个文件夹。
+    //    **本客户端目前**是扫曲库后**按目录名**挑 ⇒ 文件必须放进那个文件夹。
     expect(hints).toContain('主目录')
     expect(hints).toContain('有声小说')
     // ⚠️ **空态也要说这句** —— 用户**正是**在列表空的时候最需要知道「文件该放哪」。
@@ -172,6 +172,36 @@ describe('AudiobooksPage（有声读物页）', () => {
       const empty = container.querySelector('.sanlos-audiobooks__empty')?.textContent ?? ''
       expect(empty).toContain('主目录')
     })
+  })
+
+  it('⑤-c 提示里**不再**沿用「服务端侧没有目录浏览能力」的旧结论（**T119**：2026-11-19 实测已过时）', async () => {
+    const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
+    const hints = Array.from(container.querySelectorAll('.sanlos-audiobooks__hint'))
+      .map((h) => h.textContent ?? '')
+      .join('\n')
+    // ⚠️ **旧结论不许再出现**：2026-11-19 实测 ⇒ 飞牛更新后服务端侧**已支持**按目录浏览
+    //    （`/folder-view/*`、`/app-center/authed-dir/*`）⇒ 旧说法**已不成立**。
+    //    ⚠️ 正则用**片段拼**出来 ⇒ 本文件的源码**自己**不会被自己的正则命中
+    //    （本文件会被 `test/t119-doc-claims.test.ts` 那条「测试文件」钉子扫到）。
+    expect(hints).not.toMatch(
+      new RegExp(
+        [
+          '(服务端|音乐服务)',
+          '[^。；\\n]{0,20}',
+          '(不能|没有|不支持)',
+          '[^。；\\n]{0,10}',
+          '(浏览|列举|遍历)目录',
+        ].join(''),
+      ),
+    )
+    // ⚠️ 这句也用**片段拼** ⇒ 本文件的源码**自己**不会被自己这条断言命中
+    //    （本文件会被 `test/t119-doc-claims.test.ts` 的「测试文件」钉子扫到）。
+    expect(hints).not.toContain(['候选端点', '都不通'].join(''))
+    // ⚠️ **仍然为真**的事实必须留着（用户 2026-11-17 的原话：文件要放在主目录下的那个文件夹里）。
+    expect(hints).toContain('主目录')
+    expect(hints).toContain('有声小说')
+    // ⚠️ 新的限定语：「**本客户端目前**」⇒ 说明这是**客户端**的限制，不是服务端的。
+    expect(hints).toContain('本客户端目前')
   })
 
   it('⑥ 「搜作品」⇒ 打专辑搜索并列出结果（**搜索本身**不触发扫描）', async () => {

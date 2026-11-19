@@ -401,11 +401,15 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
         {/* ---- 主入口：那个文件夹里的作品（**第一屏**，一本一条）---------------- */}
         <section className="sanlos-audiobooks__panel">
           <h2 className="sanlos-audiobooks__panel-title">那个文件夹里的作品</h2>
+          {/* ⚠️ **T119**（2026-11-19 真机实测）：飞牛更新后，服务端**已支持**按目录浏览
+              （`/folder-view/*`、`/app-center/authed-dir/*`）⇒ 旧的「服务端侧没有目录浏览能力」
+              那个结论**已过时**；⚠️ **客户端还没接**那些接口 ⇒ **行为不变**
+              （仍全库扫 ＋ 按目录名挑）⇒ 下面那句只说「本客户端目前」。 */}
           <p className="sanlos-audiobooks__hint">
             「{keyword}」文件夹里的全都是有声小说，这里一本小说一条。
             点开就是全书（按集序排；服务端把一部作品拆成几张专辑时会自动合并）。
             ⚠️ <strong>文件要放在曲库主目录下的「{keyword}」文件夹里</strong>
-            （服务端不能浏览目录，客户端只能扫一遍曲库、再按目录名挑出这个文件夹里的作品）——
+            （本客户端目前是扫一遍曲库、再按目录名挑出这个文件夹里的作品）——
             放在别处的，列表里不会出现。
           </p>
           {items.length === 0 ? (
@@ -519,8 +523,7 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
             </button>
           </div>
           <p className="sanlos-audiobooks__hint">
-            服务端没有浏览目录的能力（实测 20 个候选端点都不通），
-            所以要先扫一遍曲库，再按目录名挑出这个文件夹里的作品。
+            本客户端目前要先扫一遍曲库，再按目录名挑出这个文件夹里的作品。
             实测 17.3 万首要扫 87 页，并发扫大约 1 分钟；扫一次记在本机，下次进来直接看。
             换目录名要重新扫一次。
           </p>
