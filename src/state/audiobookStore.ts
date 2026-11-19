@@ -791,7 +791,14 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
             scannedCount,
             total: progress.total,
             candidates: snapshotCandidates(aggregator),
-            overrides: { ...saved.overrides },
+            // ⚠️ **T118**：**不再写「扫描启动时的那份快照」** ⇒ 扫描期间用户做的
+            //    **手工改判**（详情页「这不是有声」/「这是有声读物」、秒搜点开）
+            //    **不会被这一页覆盖**。
+            //    ⇒ 取内存里的**活值**（`get().overrides`）：`setOverride` 写完盘立刻同步它
+            //    ⇒ 它永远是**完整且最新**的改判表。
+            //    ⚠ **只能整体替换、不能 merge**（`{...saved.overrides, ...get().overrides}`）
+            //    ⇒ 那样会把**「撤销改判」复活**（启动快照里有、活值里已删掉的键会回来）。
+            overrides: { ...get().overrides },
             keyword,
             scannedAt: saved.scannedAt,
           })
@@ -811,7 +818,8 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         scannedCount,
         total: result.total,
         candidates,
-        overrides: { ...saved.overrides },
+        // ⚠️ **T118**：同上 ⇒ **扫完**这一次落盘也用**活值**（扫描期间改的判要留下来）。
+        overrides: { ...get().overrides },
         keyword,
         scannedAt: Date.now(),
       }
@@ -833,6 +841,9 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
       set({
         hits,
         keyword,
+        // ⚠️ **T118**：`persisted.overrides` 现在就是**活值**
+        //    ⇒ 扫完**不会**把用户扫描期间做的改判从**内存**里抹掉
+        //    （修复前这里回退到启动快照 ⇒ 界面上刚点的「这不是有声」当场消失）。
         overrides: persisted.overrides,
         scanning: false,
         error: problems.length > 0 ? problems.join(' ') : null,
