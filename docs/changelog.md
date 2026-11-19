@@ -1,6 +1,6 @@
 # 版本变更说明
 
-本项目当前版本：**0.4.1**
+本项目当前版本：**0.4.2**
 
 > ⚠️ **当前状态（2026-11-12）**：SignPath Foundation 的免费代码签名申请**已被拒**
 > （原因是**可见度不足**，不是代码质量）⇒ **公开产物继续以「未签名」形式发布**。
@@ -13,6 +13,60 @@
 > **那个预期没有兑现**（申请已被拒）—— 历史记录按原样保留，**此处为准**。
 
 ---
+
+## 0.4.2 —— 2026-11-19
+
+相对 **v0.4.1** 的一次**改名**：**里层代号全部换成 `sanlos`**
+（包名 / appId / 内部协议 / 工具脚本 / 仓库默认分支）——
+**界面一个字没变**，**功能零变化**。
+
+⚠ **唯一要动手的一步**：**appId 变了** ⇒ **不是原地升级** ⇒ **先卸载旧版再装新版**
+（**登录态 / 播放历史 / 续播位置都不会丢** —— userData 目录名不变 ＋ 旧 localStorage 键回落）。
+
+产物**仍然没有代码签名** ⇒ 替代信任锚是 **GitHub 构建来源证明**（attestation）。
+详见 [发布说明](./releases/v0.4.2.md)。
+
+### 用户看得见的变化
+
+| 领域 | 内容 |
+|---|---|
+| **软件名 / 界面 / 快捷方式** | **完全不变**（仍是「Sanlos Music」） |
+| **安装包文件名** | `SanlosMusic-Setup-0.4.1.exe` ⇒ **`SanlosMusic-Setup-0.4.2.exe`** |
+| **appId（卸载项 GUID）** | `com.fnmusic.desktop` ⇒ **`com.sanlos.music`** ⇒ **不是原地升级** ⇒ **先卸载旧版** |
+| **内部协议** | `fnm://` / `fnml://` ⇒ **`sanlos://`** / **`sanlos-media://`**（应用自己用；外部脚本若直调旧协议需改） |
+| **npm 包名** | `fnmusic-desktop` ⇒ **`sanlos-music`** |
+| **仓库默认分支** | `feature/fnmusic-desktop` ⇒ **`sanlos-music`** ⇒ **clone 地址变了**；旧 tag **全部保留** |
+| **登录态 / 播放历史 / 续播位置** | **都不丢** |
+
+### 技术变更（T115 里层改名 ＋ T114 默认分支改名）
+
+- **改*** **51 个文件改名**（`tools/fn-*` ⇒ `tools/sanlos-*` 37 个；
+  `docs/superpowers/{specs,plans}/*fnmusic*` ⇒ `*sanlos-music*` 14 个）
+  ＋ **289 个文件内容改写**（2 816 增 / 2 816 删 ⇒ **完全对称** ⇒ 纯标识符替换）；
+- **协议**：`fnm://` ⇒ **`sanlos://`**、`fnml://` ⇒ **`sanlos-media://`**；
+  ⚠ **注册结构不动**（仍是「两个 scheme 合并成一次」`registerSchemePrivileges()`
+  ⇒ 第二次调用会静默覆盖 ⇒ 渲染层 `fetch` 抛 `TypeError` ⇒ **整个曲库拉不出来**）；
+- **包名** `fnmusic-desktop` ⇒ **`sanlos-music`**；
+  **appId** `com.fnmusic.desktop` ⇒ **`com.sanlos.music`**；
+  ⚠ **`productName` 仍是 `Sanlos Music`** ⇒ **userData 目录名不变** ⇒ **登录态不丢**；
+- **preload 桥** `fnmusic` / `fn` / `fnPlayer` ⇒ **`sanlos`** / **`sanlosAuth`** / **`sanlosPlayer`**；
+  **CSS 前缀** `fnm-*` ⇒ **`sanlos-*`**；**环境变量** `FNM_*` ⇒ **`SANLOS_*`**；
+- **新增** `shared/legacyStorageKeys.ts`：三个**旧 localStorage 键**的字面量的唯一居所
+  ⇒ 三个 store / port **旧键回落**（新键没有才读旧键，**旧键不删**）
+  ⇒ **播放历史 / 续播位置 / 按歌指定歌词源不丢**；
+  ⚠ **`resumeBridge.clear()` 必须新旧两键都删**（否则「清空」会**复活**旧数据）；
+- **T114**：GitHub **原生 rename** 默认分支 ⇒ 远端只剩 `sanlos-music`、
+  API `default_branch = sanlos-music`、`master` 已删、**tag `v0.4.1` 未动**、提交数未变。
+
+### 复验（T115 轮）
+
+- **单测**：**146 文件 / 3 024 条**全绿（既有 **2 997** 条**一条未删、断言一条未弱化**
+  ＋ 新增 `test/t115-rename-contract.test.ts` **27 条**契约钉子）；
+- **E2E**：**72 条**全绿（一条未删）；`tsc --noEmit` **0 error**；`npm run build` exit 0；
+- **字节体检 ＋ 控制字符扫描**：**bad=0**（292 文件）；
+- **验收探针** `t115-05-verify-rename.mjs` **19 条全过** ⇒ `RENAME_OK`；
+  **改名脚本连跑两次第二次 0 改动**（幂等）；
+- **CI** run **44489482209** 结论 **success**（远端 = 本地 `0ba8346`）。
 
 ## 0.4.1 —— 2026-11-19
 
