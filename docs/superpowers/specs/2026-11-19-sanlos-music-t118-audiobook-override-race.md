@@ -124,6 +124,12 @@ set({ overrides: persisted.overrides })   // 现在 persisted.overrides 已是�
 | ④ | 同 ①，但断言**内存** `getState().overrides['al-x']` ⇒ 扫完**不回退** | 钉 `:836` |
 | ⑤ | **对照组**：扫描期间**不改判** ⇒ 启动时的 `overrides` 原样保留 | 钉「没把正常路径写坏」 |
 | ⑥ | **页面级集成**：扫描**卡住**（`onPage` 后挂起）⇒ 点「搜作品」⇒ 点开结果（⇒ `setOverride`）⇒ 放行扫描 ⇒ 落盘里改判**还在** | 钉**用户真实路径**（秒搜点开） |
+| ⑦ | **扫描进行中**：每页落盘**之后**看磁盘 ⇒ 改判**已经在** | 钉 `:794` 的**中途**覆盖 |
+| ⑧ | **扫描中途出错**（网络断了 ⇒ 没有扫完那次落盘）⇒ 落盘里改判**还在** | 钉 `:794`（中断即丢） |
+
+⚠ **⑦⑧ 是实施时补上的**（规格初稿只写了 6 条）：①② 只看「**扫完后的**磁盘」
+⇒ **查不出页边界的中途覆盖**（最终落盘会把磁盘救回来）⇒ 必须钉「扫描进行中」
+与「扫描中断后」两个**时点**。
 
 ⚠ ①–⑤ 用**内存端口**（`createMemoryAudiobookPort`）⇒ 不碰 `localStorage`；
 ⑥ 用真 `localStorage` 端口（走 `localStorageAudiobookPort`）⇒ 与真机同一条路。
@@ -134,12 +140,15 @@ set({ overrides: persisted.overrides })   // 现在 persisted.overrides 已是�
 
 脚本：`release/verify/t118-01-mutation-check.mjs`（本地，gitignored）
 
+⚠ **脚本认的是「红了哪几条」**（不是「有没有红」）⇒ **每个变体必须由对应的那几条抓住**
+（一个「粗用例」能同时抓住所有变体 ⇒ 矩阵就白做了）。
+
 | 变异 | 改什么 | 预期变红的钉子 |
 |---|---|---|
-| **A** | 两处落盘都退回 `{ ...saved.overrides }`（= 复原原缺陷） | ① ② ③（落盘断言） |
-| **B** | **只**把 `:794`（每页落盘）退回启动快照 | ①（落盘断言）—— 证明「页边界覆盖」这条路径单独被钉住 |
-| **C** | 把 `:836` 的内存 `set` 退回启动快照 | ④ |
-| **D** | 改成 `{ ...saved.overrides, ...get().overrides }`（合并） | ③（撤销复活） |
+| **A** | 两处落盘都退回 `{ ...saved.overrides }`（= 复原原缺陷） | ①②③④⑥⑦⑧ |
+| **B** | **只**把 `:794`（每页落盘）退回启动快照 | ⑦⑧ |
+| **C** | 把 `:836` 的内存 `set` 退回启动快照 | ④⑥ |
+| **D** | 改成 `{ ...saved.overrides, ...get().overrides }`（合并） | ③ |
 
 ⇒ 四种变异**各自**让**对应的**钉子变红 ⇒ 钉子不是「碰巧绿」。
 ⇒ 全部还原后：**全绿** ＋ **字节级一致**（sha256 相同）。
@@ -152,7 +161,7 @@ set({ overrides: persisted.overrides })   // 现在 persisted.overrides 已是�
 |---|---|---|
 | `docs/superpowers/specs/2026-11-19-sanlos-music-t118-audiobook-override-race.md` | 新建（本文件） | commit 1 |
 | `src/state/audiobookStore.ts` | 改：`scan()` 内 2 处落盘的数据来源 | commit 2 |
-| `test/t118-audiobook-scan-override.test.tsx` | 新建：6 条钉子 | commit 2 |
+| `test/t118-audiobook-scan-override.test.tsx` | 新建：**8 条**钉子 | commit 2 |
 | `docs/calibration.md` | 新增一节（第九十六节） | commit 3 |
 | `docs/build-verification.md` | 顶部一条 | commit 3 |
 | `release/verify/t118-01-mutation-check.mjs` | 新建（**gitignored**，不入库） | — |
@@ -162,7 +171,7 @@ set({ overrides: persisted.overrides })   // 现在 persisted.overrides 已是�
 ## 六、验收点
 
 - `tsc --noEmit` **0 错**
-- `vitest` **全绿**（原 147 文件 / 3032 条 ＋ 新增 1 文件 / 6 条 ⇒ 3038 条）
+- `vitest` **全绿**（原 147 文件 / 3032 条 ＋ 新增 1 文件 / **8** 条 ⇒ **148 文件 / 3040 条**）
 - `playwright` **72 条全绿**
 - `npm run build` **exit 0**
 - 字节体检 `release/verify/t115-10-bytes-check-all.mjs` **bad=0**
@@ -185,21 +194,31 @@ set({ overrides: persisted.overrides })   // 现在 persisted.overrides 已是�
 
 ## 八、实施记录（**回填**）
 
-### 8.1 实现（commit 2）
+### 8.1 实现（commit 2 —— `3f81b63`）
 
 - `src/state/audiobookStore.ts`：`scan()` 的 `:794` / `:814` 两处 `overrides` 改取 `get().overrides`；`:836` 代码不动（数据源已是活值）⇒ 另加注释说明「为什么扫描不能拥有 `overrides` 的写权限」。
+- **实现只有 3 行数据源变化**（其余全是注释）；`git diff --stat` = **13 插入 / 2 删除**（一个文件）。
+- 提交：`aa9c703` 规格（commit 1）→ `3f81b63` 实现 ＋ 钉子（commit 2）⇒ 均已推送 `origin/sanlos-music`。
 
 ### 8.2 回归（**实测**）
 
-- `tsc --noEmit`：0 错
-- `vitest`：全绿（含新增 6 条）
-- `playwright`：72 条全绿
-- `npm run build`：exit 0
-- 字节体检：bad=0
+- `tsc --noEmit`：**0 错**
+- `vitest`：**148 文件 / 3 040 条全绿**（原 147 / 3 032 ＋ 新增 1 文件 **8 条**；**既有测试一条不删、断言一条不弱化**）
+- `playwright`：**72 passed**（1.6 分钟）
+- `npm run build`：exit **0**（由 `npm run e2e` 的前半段跑出）
+- 字节体检 ＋ 控制字符：**bad=0**（`release/verify/t115-10-bytes-check-all.mjs`）
 
-### 8.3 变异自证（**实测**）
+### 8.3 变异自证（**实测** —— `MUTATION_OK`）
 
-- **MUTATION_OK**：A / B / C / D 四种变异**各自**让对应钉子变红；还原后全绿 ＋ 字节级一致。
+| 变体 | 实际变红 | 期望 | 结论 |
+|---|---|---|---|
+| A 两处落盘都退回快照 | ①②③④⑥⑦⑧ | 同左 | ✅ |
+| B 只退 `:794` | ⑦⑧ | 同左 | ✅ |
+| C 退 `:836` 的内存 `set` | ④⑥ | 同左 | ✅ |
+| D 改成 merge | ③ | 同左 | ✅ |
+
+⇒ 还原后 **8/8 绿** ＋ **sha256 字节级一致**
+（`047f03474ec4392e35c82bf02d3323210617802a0a36972e175ccfe0d75a7220`，43 741 B ⇒ 工作区未被污染）。
 
 ### 8.4 待真机项（**本轮未做，写清楚怎么验**）
 

@@ -32,6 +32,19 @@
 > 对照组普通歌**仍然 67 行** ＋ 窗口可见。
 > 完整记录见 [calibration.md](./calibration.md) 第九十五节与 [releases/v0.4.3.md](./releases/v0.4.3.md) 第三节。
 
+> ✅ **T118 已于 2026-11-19 修复「有声」页扫描落盘覆盖手工改判**（`src/state/audiobookStore.ts`
+> 的 `scan()`：**每页断点落盘**与**扫完落盘**原先写的是**扫描启动时的 `overrides` 快照**
+> ⇒ 扫描进行中用户做的**手工改判**会被覆盖，**内存状态**也一起回退）
+> ⇒ 改法：**扫描不再拥有 `overrides` 的写权限** —— 它只写自己的字段，
+> `overrides` 一律取 store 内存里的**活值**（`get().overrides`）。
+> **实测**：`tsc` **0 错**、Vitest **148 文件 / 3 040 条全绿**（新增 1 文件 8 条）、
+> Playwright **72 passed**、build exit **0**、字节体检 ＋ 控制字符 **bad=0**、
+> **变异自证 `MUTATION_OK`**（A⇒红 ①②③④⑥⑦⑧、B⇒红 ⑦⑧、C⇒红 ④⑥、D⇒红 ③；
+> 还原后 8/8 全绿 ＋ sha256 字节级一致）。
+> ⚠ **本条不含真机复验**（扫描要 6–47 分钟 ⇒ 真机上做才有意义 ⇒ 列为待真机项）。
+> 完整记录见 [calibration.md](./calibration.md) 第九十六节与规格
+> `docs/superpowers/specs/2026-11-19-sanlos-music-t118-audiobook-override-race.md`。
+
 **验证时间**：2026-11-04
 **平台**：Windows 10.0.26300 x64 / Node v26.13.0 / npm 11.x
 **分支**：`feature/fnmusic-desktop`
