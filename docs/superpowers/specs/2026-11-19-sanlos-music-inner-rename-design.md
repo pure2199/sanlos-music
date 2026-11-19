@@ -236,4 +236,47 @@ T114 之前的清点（`release/verify/t115-01-scan-legacy-names.mjs`）：
 
 ## 13. 执行记录（回填）
 
-> 待实现完成后回填：实际改动文件数、规则命中数、测试结果、真机结果、遗留项。
+**已完成**（2026-11-19）。
+
+| 项 | 实测 |
+|---|---|
+| 改动规模 | 改写 **274** 个文件的内容（**2816** 增 / **2816** 删 ⇒ 完全对称 ⇒ 纯标识符替换）＋ `git mv` 改名 **51** 个文件（`tools/fn-*` **37** ＋ `docs/superpowers/**fnmusic*` **14**） |
+| 验收探针 | `release/verify/t115-05-verify-rename.mjs` ⇒ **19 条全过** ⇒ **RENAME_OK** |
+| 类型检查 | `tsc --noEmit` ⇒ **0 错** |
+| 单元测试 | **146** 个文件 / **3024** 条 ⇒ **全绿**（改名前 145 / 2997 ⇒ 既有 **2997 条一条不删**；新增 **27** 条契约钉子） |
+| E2E | Playwright **72** 条 ⇒ **全绿**（既有 72 条一条不删） |
+| 构建 | `npm run build` ⇒ **0** |
+| 字节体检 ＋ 控制字符 | **bad=0** |
+| 幂等 | 改名脚本连跑两次 ⇒ 第二次 **0 处改动** |
+| 新增钉子 | `test/t115-rename-contract.test.ts`（**27** 条）：包名 / appId / 环境变量前缀 / **协议一次注册两个** / 三页 CSP / preload 桥名 / 旧代号白名单 / 文件改名 / **`localStorage` 旧键回落** |
+
+**既有测试的处理**（前提被用户的新要求**显式推翻** ⇒ 断言**改写为新值**，**一条不删、一条不弱化**）：
+
+| 测试 | 改法 |
+|---|---|
+| `test/user-data-dir.test.ts` | `name` 的断言改写为 `sanlos-music`；**并补** `expect(pkg.name).not.toBe(USER_DATA_DIR_NAME)`（不变量「目录名取自 `productName`」**原样钉住**） |
+| `test/resume-playback.test.ts` | 「偏好文件里不该出现续播键」的断言**加钉**旧键名（旧键也不许进 `prefs.json`） |
+| `test/api-client.test.ts` / `test/local-playback-source.test.ts` / `test/proxy.test.ts` | URL / scheme 断言**逐字改值**（不是「包含任一」） |
+| CSS 选择器 / `vi.fn()` / 飞牛接口的 `fn` 字段 | **一个字都不改**（不是本项目代号） |
+
+**新增的用户数据迁移**（三个 `localStorage` 键 ⇒ 新键没有才**回落读旧键**，旧键只读、不删）：
+`shared/legacyStorageKeys.ts`（旧键字面量的**唯一居所**，改名脚本跳过它）＋
+`src/state/historyStore.ts` / `src/player/resumeBridge.ts` / `src/state/lyricOverrideStore.ts`。
+⚠️ **「清空」两个键都删**（只删新键 ⇒ 下次读回落到旧键 ⇒ 用户点了「清空」记录却复活）。
+
+**顺手修的 bug**：`tools/sanlos-ui-repro.mjs` 原先指着旧 userData 目录名 `fnmusic-desktop`
+⇒ 复制的是**一个不存在的目录** ⇒ 探针起不来 ⇒ 改成**从 `package.json` 读 `productName`**。
+
+**⚠️ 待真机复验**（要装上**改名后的构建**才能验）：
+
+| # | 项 | 判据 |
+|---|---|---|
+| 1 | 主窗口能起来 | 界面正常（截图） |
+| 2 | **曲库能拉出来** | ⭐ 协议改名最凶的失败模式就是「曲库空」 |
+| 3 | 桌面歌词仍成立 | 对照组 262 行⇒可见；有声那集 0 行⇒不可见（T112 没被改坏） |
+| 4 | 本地播放 | `sanlos-media://` 路由 ⇒ 真 `<audio>` 起播且进度推进 |
+| 5 | **「检查更新」能真拉到清单** | baseUrl = `https://github.com/pure2199/sanlos-music/releases/latest/download` |
+| 6 | 登录态还在 | userData 目录名没变 ⇒ 不用重新登录 |
+
+**⚠️ 发版提醒**：本轮改了 `appId` ⇒ **需要发一个新版本**（v0.4.2）才能让用户装到改名后的构建；
+v0.4.1 ⇒ v0.4.2 **不是原地升级**（卸载项 GUID 变，旧版会残留，需手工卸载）。

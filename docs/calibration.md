@@ -26,26 +26,26 @@
 | 项 | 实测结论 | 来源 |
 |---|---|---|
 | **端口** | `port.httpPort = 5666`、`port.httpsPort = 5667` | `/sys/config` |
-| **服务端转码** | 播放侧 `POST track/transcode` → `code=100001`（**16 种请求体形状全试过**）；**真正可用的是下载侧协议** `download/track/transcode/{prepare,status,file,delete}`（`prepare` / `status` / `delete` 全通）。⚠️ **T55 更正：服务端转码引擎其实是好的**（抽样 14 首 14/14 成功、平均就绪 988 ms）—— T54 当时的「引擎不可用」是**误判**，真凶是**客户端的就绪判定**（`percent>=100` 后单次预检）→ 详见「三十九、T54」与「四十、T55」 | `tools/fn-transcode-probe.mjs` + `release/verify/t54-*.mjs` |
+| **服务端转码** | 播放侧 `POST track/transcode` → `code=100001`（**16 种请求体形状全试过**）；**真正可用的是下载侧协议** `download/track/transcode/{prepare,status,file,delete}`（`prepare` / `status` / `delete` 全通）。⚠️ **T55 更正：服务端转码引擎其实是好的**（抽样 14 首 14/14 成功、平均就绪 988 ms）—— T54 当时的「引擎不可用」是**误判**，真凶是**客户端的就绪判定**（`percent>=100` 后单次预检）→ 详见「三十九、T54」与「四十、T55」 | `tools/sanlos-transcode-probe.mjs` + `release/verify/t54-*.mjs` |
 | **兜底方案** | 改为**客户端 FFmpeg** 转 Opus（见 README 常见问题） | `tools/ffmpeg-verify.mts` |
 | **本机 FFmpeg 覆盖度** | 9.0.2（Gyan full build）→ 支持 12 种容器：`ape`/`alac`/`dsf`/`wma`/`dts`/`aiff`/`ra`/`au`/`dvf`/`tta`/`dss`/`mmf`；**仅 `dff` 不支持**（无 `dsdiff` 解封装器） | `tools/ffmpeg-verify.mts` |
-| **中继链路是硬性关卡** | 不带 `mode=relay` Cookie → 返回 HTML 错误页 | `tools/fn-httstack-verify.mjs` |
-| **中继候选可达性** | `https://<fnId>.fnos.net` 命中；当前网络下内网/公网 v4/v6 不可达 | `tools/fn-probe.mjs` |
-| **播放历史端点** | `GET /music/api/v1/play-history/list` → `total=414`，条目为**完整歌曲对象** | `tools/fn-history-probe.mjs` |
-| **曲库编码分布** | 含 `alac` 46 首等 → **APE / ALAC 可以走兜底播放** | `tools/fn-codec-census.mjs` |
-| **中继端口** | 中继**只监听标准 HTTPS 端口 443**，**不监听** 5666 / 5667 | `tools/fn-live-check.mjs`（不写端口登录失败 → 写 `:443` 成功） |
+| **中继链路是硬性关卡** | 不带 `mode=relay` Cookie → 返回 HTML 错误页 | `tools/sanlos-httstack-verify.mjs` |
+| **中继候选可达性** | `https://<fnId>.fnos.net` 命中；当前网络下内网/公网 v4/v6 不可达 | `tools/sanlos-probe.mjs` |
+| **播放历史端点** | `GET /music/api/v1/play-history/list` → `total=414`，条目为**完整歌曲对象** | `tools/sanlos-history-probe.mjs` |
+| **曲库编码分布** | 含 `alac` 46 首等 → **APE / ALAC 可以走兜底播放** | `tools/sanlos-codec-census.mjs` |
+| **中继端口** | 中继**只监听标准 HTTPS 端口 443**，**不监听** 5666 / 5667 | `tools/sanlos-live-check.mjs`（不写端口登录失败 → 写 `:443` 成功） |
 | **自建反代的端口** | 与官方中继一样**只监听标准 HTTPS 端口 443**（实测用户的 openresty 反代：5666 / 5667 都 ECONNREFUSED，443 通且 `/music/api/v1/sys/config` 返回 200）| `release/verify/t43-relay-probe.mjs` |
-| **专辑详情取法** | `GET /album/detail?guid=<id>`；`data` 是**裸专辑对象**（不是 `{list,total}`）。用 `albumGUID` / `albumGuid` / `albumId` / `id` 一律 `code=100002` | `tools/fn-album-detail-probe.mjs` |
-| **服务端不提供播放历史写入端点** | 17 个候选**历史**写端点全是 SPA 兜底 HTML；`stream` **不写**播放历史 → **NAS 历史只读**，客户端「本机记录 + NAS 只读」的设计正确。⚠️ **这条只针对「历史」**——收藏 / 歌单的写端点**是存在的**（见下一行） | `tools/fn-history-probe.mjs` + `tools/fn-writeback-probe.mjs` |
-| **收藏 / 歌单写回可用** | `favorite-track/create` · `favorite-track/delete` → **`{ trackGUID }`**；`playlist/add-track` · `playlist/remove-track` → **`{ guid, trackGUIDs: [id] }`**；`playlist/create` → `{ name }`（**回显 guid**）；`playlist/delete` → `{ guid }`。四个端点**实测真生效**（收藏列表里出现 / 消失、歌单详情里出现 / 消失） | `tools/fn-writeback-probe.mjs` |
-| **曲目对象带 `isFavorite`** | 真实曲目的 16 个字段里**有** `isFavorite`，且**取值可信**（实测：已收藏的 `true`、未收藏的 `false`）→ 行内收藏按钮的初始态可以直接取服务端字段 | `tools/fn-writeback-probe.mjs` |
-| **历史排序依据不暴露** | 条目 `updatedAt` 与 `createdAt` **完全相同且非单调** → 服务端排序依据不可见 → 客户端**按返回顺序**展示 | `tools/fn-history-probe.mjs` |
-| **搜索忽略分页** | `search/{track,album,artist}` **完全忽略** `page`/`size`（`size=5` 也返回全部：占位歌手三 500 首 / 37 专辑 / 2 歌手），第 1、2 页完全重叠 | `tools/fn-calibrate-probe.mjs` |
-| **收藏取全** | `favorite-track/list`：`size=200` → 200 条，`size=500` / `size=2000` → 258 条，`total=258` → 客户端「size=200 分页循环」能取全 | `tools/fn-calibrate-probe.mjs` |
-| **歌单总数** | `playlist/list` → `total=0`（该账号当前没有歌单） | `tools/fn-calibrate-probe.mjs` |
-| **封面 `size` 白名单** | 只认 **200**（→ 200×200 JPEG，8.6 KB）与 **400**（→ 400×400 JPEG，26 KB）；其它值（含不传、100、300、640）都回落到**原始 640×640 WebP**（54.9 KB） | `tools/fn-cover-size-probe.mjs` |
-| **同名专辑是多个实体** | 曲库里**存在同名但不同实体的专辑**：搜索「占位曲目一」会命中一个 4 首的「占位曲目一」，而曲目内嵌的 `album.guid` 指向的是另一个只有 1 首的「占位曲目一」。**专辑实体 id**（`/album/detail` / `/search/album` / `/album/list` 用它）与**曲目内嵌 `album.guid`** 是**两套 id** | `tools/fn-album-guid-probe.mjs` |
-| **客户端取 id 的口径是对的** | 客户端用的是**专辑实体 id**（来自专辑列表 / 搜索结果）→ 专辑详情的曲目数与该实体一致；「按专辑名搜索」不可靠（会命中同名实体） | `tools/fn-album-guid-probe.mjs` + `tools/fn-live-check.mjs` |
+| **专辑详情取法** | `GET /album/detail?guid=<id>`；`data` 是**裸专辑对象**（不是 `{list,total}`）。用 `albumGUID` / `albumGuid` / `albumId` / `id` 一律 `code=100002` | `tools/sanlos-album-detail-probe.mjs` |
+| **服务端不提供播放历史写入端点** | 17 个候选**历史**写端点全是 SPA 兜底 HTML；`stream` **不写**播放历史 → **NAS 历史只读**，客户端「本机记录 + NAS 只读」的设计正确。⚠️ **这条只针对「历史」**——收藏 / 歌单的写端点**是存在的**（见下一行） | `tools/sanlos-history-probe.mjs` + `tools/sanlos-writeback-probe.mjs` |
+| **收藏 / 歌单写回可用** | `favorite-track/create` · `favorite-track/delete` → **`{ trackGUID }`**；`playlist/add-track` · `playlist/remove-track` → **`{ guid, trackGUIDs: [id] }`**；`playlist/create` → `{ name }`（**回显 guid**）；`playlist/delete` → `{ guid }`。四个端点**实测真生效**（收藏列表里出现 / 消失、歌单详情里出现 / 消失） | `tools/sanlos-writeback-probe.mjs` |
+| **曲目对象带 `isFavorite`** | 真实曲目的 16 个字段里**有** `isFavorite`，且**取值可信**（实测：已收藏的 `true`、未收藏的 `false`）→ 行内收藏按钮的初始态可以直接取服务端字段 | `tools/sanlos-writeback-probe.mjs` |
+| **历史排序依据不暴露** | 条目 `updatedAt` 与 `createdAt` **完全相同且非单调** → 服务端排序依据不可见 → 客户端**按返回顺序**展示 | `tools/sanlos-history-probe.mjs` |
+| **搜索忽略分页** | `search/{track,album,artist}` **完全忽略** `page`/`size`（`size=5` 也返回全部：占位歌手三 500 首 / 37 专辑 / 2 歌手），第 1、2 页完全重叠 | `tools/sanlos-calibrate-probe.mjs` |
+| **收藏取全** | `favorite-track/list`：`size=200` → 200 条，`size=500` / `size=2000` → 258 条，`total=258` → 客户端「size=200 分页循环」能取全 | `tools/sanlos-calibrate-probe.mjs` |
+| **歌单总数** | `playlist/list` → `total=0`（该账号当前没有歌单） | `tools/sanlos-calibrate-probe.mjs` |
+| **封面 `size` 白名单** | 只认 **200**（→ 200×200 JPEG，8.6 KB）与 **400**（→ 400×400 JPEG，26 KB）；其它值（含不传、100、300、640）都回落到**原始 640×640 WebP**（54.9 KB） | `tools/sanlos-cover-size-probe.mjs` |
+| **同名专辑是多个实体** | 曲库里**存在同名但不同实体的专辑**：搜索「占位曲目一」会命中一个 4 首的「占位曲目一」，而曲目内嵌的 `album.guid` 指向的是另一个只有 1 首的「占位曲目一」。**专辑实体 id**（`/album/detail` / `/search/album` / `/album/list` 用它）与**曲目内嵌 `album.guid`** 是**两套 id** | `tools/sanlos-album-guid-probe.mjs` |
+| **客户端取 id 的口径是对的** | 客户端用的是**专辑实体 id**（来自专辑列表 / 搜索结果）→ 专辑详情的曲目数与该实体一致；「按专辑名搜索」不可靠（会命中同名实体） | `tools/sanlos-album-guid-probe.mjs` + `tools/sanlos-live-check.mjs` |
 
 ---
 
@@ -57,7 +57,7 @@
 |---|---|---|
 | **A** | FN ID 探测 —— 候选构造与并行探测命中预期链路 | **[已实测]** 中继命中；内网/公网在当前网络不可达 |
 | **B** | 中继链路 —— `mode=relay` Cookie 生效、播放可用、界面显示限速提示 | **[已实测]** Cookie 是硬性关卡；**播放与限速提示已在真机复核**（真机播放「占位曲目一」成功，界面显示「中继带宽受限（约 0.5–4 Mbps）」） |
-| **C** | token 续期 —— 触发 token 失效，确认静默续期路径生效 | **[已实测]** ① 显式 `relogin()` 返回 `true`，续期后曲库立刻可用（`tools/fn-session-renew-probe.mjs`）；② **服务端「token 失效」的真实形状已测出来**（`tools/fn-token-expiry-probe.mjs`）：无效 token → **HTTP 401** + `{ code: 99999, msg: "INVALID TOKEN" }` —— 业务码与 `CODE_TOKEN_EXPIRED` 一致 ⇒ **静默续期的触发条件成立**（客户端只读 body 里的业务码，不按状态码判定，401 照样能续期）。③ 二进制流路径（`track/stream`）按 401/403 静默续期一次并重发（`electron/proxy.ts`）。⚠️ 服务端**不提供**「作废当前 token」的接口，**99999 自动续期**那条路径仍无法在真机上自然触发 → 单测覆盖（已补「HTTP 401 + 99999」的真实形状）。✅ 规格 §5.4 的「续期失败 → 派发 `auth-lost` 回登录页」**已实现**（`src/api/client.ts` 的 `onAuthLost` → `src/App.tsx` → `src/pages/LoginPage.tsx` 的 `notice` + `sessionLost`；回归测试 `test/auth-lost.test.tsx` 6 条，见第八节 T19-3） |
+| **C** | token 续期 —— 触发 token 失效，确认静默续期路径生效 | **[已实测]** ① 显式 `relogin()` 返回 `true`，续期后曲库立刻可用（`tools/sanlos-session-renew-probe.mjs`）；② **服务端「token 失效」的真实形状已测出来**（`tools/sanlos-token-expiry-probe.mjs`）：无效 token → **HTTP 401** + `{ code: 99999, msg: "INVALID TOKEN" }` —— 业务码与 `CODE_TOKEN_EXPIRED` 一致 ⇒ **静默续期的触发条件成立**（客户端只读 body 里的业务码，不按状态码判定，401 照样能续期）。③ 二进制流路径（`track/stream`）按 401/403 静默续期一次并重发（`electron/proxy.ts`）。⚠️ 服务端**不提供**「作废当前 token」的接口，**99999 自动续期**那条路径仍无法在真机上自然触发 → 单测覆盖（已补「HTTP 401 + 99999」的真实形状）。✅ 规格 §5.4 的「续期失败 → 派发 `auth-lost` 回登录页」**已实现**（`src/api/client.ts` 的 `onAuthLost` → `src/App.tsx` → `src/pages/LoginPage.tsx` 的 `notice` + `sessionLost`；回归测试 `test/auth-lost.test.tsx` 6 条，见第八节 T19-3） |
 | **D** | 转码兜底 —— 用一首 APE/ALAC 确认客户端 FFmpeg 兜底链路可用；确认系统无 ffmpeg 时的提示 | **[已实测]** 客户端 FFmpeg 兜底**全链路在真机跑通**：ALAC 曲（24.2 MB）下载 → 本地 → 播放时自动转成 **Opus**（3.43 MB）→ 经 `fnml://` 起播，**进度真的推进**（实测 `0:06`）、**0 条媒体错误**、提示显示「兜底播放使用 Opus 转码（音质有损…）」。⚠️ 过程中暴露并修掉了 **T18-6**（CSP 漏放 `fnml:` → 本地播放被 URL 安全检查拦死）。✅「系统无 ffmpeg 时的提示」也已实测（见第八节 T19-2）：「该格式（ALAC）当前无法播放：未检测到 FFmpeg。安装 FFmpeg 后即可通过转码播放。」 |
 | **E** | 端口核对 | **[已实测]** 5666 / 5667；**中继只听 443** |
 | **F** | 播放历史端点 —— 条目形状与规格 §15.7 一致；确认「最近播放」的排序依据（`updatedAt`？） | **[已实测]** 形状一致；**排序依据服务端不暴露**（`updatedAt`≡`createdAt` 且非单调）→ 客户端按返回顺序展示；**服务端无写接口** → NAS 历史只读 |
@@ -90,32 +90,32 @@
 ```powershell
 $env:FN_USER = '<飞牛音乐账号>'
 $env:FN_PASS = '<口令>'
-node tools/fn-history-probe.mjs      # 例：播放历史
+node tools/sanlos-history-probe.mjs      # 例：播放历史
 ```
 
 | 脚本 | 用途 |
 |---|---|
-| `tools/fn-probe.mjs` | FN ID 候选链路探测 |
-| `tools/fn-con-smoke.mjs` | 连接链路冒烟 |
-| `tools/fn-api-probe.mjs` | API 形状探测 |
-| `tools/fn-history-probe.mjs` | 播放历史端点与条目形状 |
-| `tools/fn-codec-census.mjs` | 曲库编码分布统计 |
-| `tools/fn-transcode-probe.mjs` | 服务端转码可用性 |
-| `tools/fn-empty-param-probe.mjs` | 空参数边界行为 |
-| `tools/fn-flac-probe.js` | FLAC 相关形状 |
-| `tools/fn-httstack-verify.mjs` | HttpStack / 中继 Cookie 行为 |
+| `tools/sanlos-probe.mjs` | FN ID 候选链路探测 |
+| `tools/sanlos-con-smoke.mjs` | 连接链路冒烟 |
+| `tools/sanlos-api-probe.mjs` | API 形状探测 |
+| `tools/sanlos-history-probe.mjs` | 播放历史端点与条目形状 |
+| `tools/sanlos-codec-census.mjs` | 曲库编码分布统计 |
+| `tools/sanlos-transcode-probe.mjs` | 服务端转码可用性 |
+| `tools/sanlos-empty-param-probe.mjs` | 空参数边界行为 |
+| `tools/sanlos-flac-probe.js` | FLAC 相关形状 |
+| `tools/sanlos-httstack-verify.mjs` | HttpStack / 中继 Cookie 行为 |
 | `tools/ffmpeg-verify.mts` | 本机 FFmpeg 探测 + 转码 + 回读 + 覆盖度核对 |
-| `tools/fn-calibrate-probe.mjs` | 搜索分页 / 收藏取全 / 专辑详情形状 / 歌单创建回显 |
-| `tools/fn-album-detail-probe.mjs` | `/album/detail` 的路径与参数名变体扫描 |
-| **`tools/fn-live-check.mjs`** | **真实 Electron 客户端 × 真实 NAS 的活体验检**（13 步主干路径） |
-| `tools/fn-electron-net-probe.mjs` | Electron 出网栈对照诊断（Node / Chromium / net.fetch） |
-| `tools/fn-partition-matrix.mjs` | 分区 × 证书校验回调的对照矩阵 |
-| `tools/fn-login-shape-probe.mjs` | 登录请求「逐项减法」（定位失败要素） |
-| `tools/fn-card-hit-probe.mjs` | 卡片命中检测（`elementFromPoint` + 截图） |
-| `tools/fn-session-renew-probe.mjs` | Step C：静默续期 |
-| `tools/fn-cover-size-probe.mjs` | Step K：封面 `size` 白名单 |
-| `tools/fn-alac-fallback-probe.mjs` | Step D：客户端 FFmpeg 兜底全链路 |
-| `tools/fn-first-paint-timing.mjs` | 各页首屏耗时测量 |
+| `tools/sanlos-calibrate-probe.mjs` | 搜索分页 / 收藏取全 / 专辑详情形状 / 歌单创建回显 |
+| `tools/sanlos-album-detail-probe.mjs` | `/album/detail` 的路径与参数名变体扫描 |
+| **`tools/sanlos-live-check.mjs`** | **真实 Electron 客户端 × 真实 NAS 的活体验检**（13 步主干路径） |
+| `tools/sanlos-electron-net-probe.mjs` | Electron 出网栈对照诊断（Node / Chromium / net.fetch） |
+| `tools/sanlos-partition-matrix.mjs` | 分区 × 证书校验回调的对照矩阵 |
+| `tools/sanlos-login-shape-probe.mjs` | 登录请求「逐项减法」（定位失败要素） |
+| `tools/sanlos-card-hit-probe.mjs` | 卡片命中检测（`elementFromPoint` + 截图） |
+| `tools/sanlos-session-renew-probe.mjs` | Step C：静默续期 |
+| `tools/sanlos-cover-size-probe.mjs` | Step K：封面 `size` 白名单 |
+| `tools/sanlos-alac-fallback-probe.mjs` | Step D：客户端 FFmpeg 兜底全链路 |
+| `tools/sanlos-first-paint-timing.mjs` | 各页首屏耗时测量 |
 
 ---
 
@@ -132,7 +132,7 @@ node tools/fn-history-probe.mjs      # 例：播放历史
 ## 七、真机联调发现的问题与修复（T18）
 
 本轮真机联调（真实 Electron 客户端 × 真实 NAS）发现 **6 个真实缺陷**，均已修复并**在真机复验通过**
-（`tools/fn-live-check.mjs` 从修复前的 9/13 变为 **14/14** —— 新增的「本地播放」一步专门盯 `fnml://` 这条线）。
+（`tools/sanlos-live-check.mjs` 从修复前的 9/13 变为 **14/14** —— 新增的「本地播放」一步专门盯 `fnml://` 这条线）。
 
 | 编号 | 缺陷 | 根因 | 修复 | 回归测试 |
 |---|---|---|---|---|
@@ -174,7 +174,7 @@ T19 就是把它们逐条换成实测事实。
 是因为服务端**不提供**「作废当前 token」的接口 —— 等不到 token 自然过期。
 
 **换个角度就能测**：**故意带错的 token** 打受保护端点。服务端看来这就是「token 对不上」，
-与「token 过期」是同一件事。新增 `tools/fn-token-expiry-probe.mjs`。
+与「token 过期」是同一件事。新增 `tools/sanlos-token-expiry-probe.mjs`。
 
 **实测结果（真实 NAS，中继链路）**：
 
@@ -208,7 +208,7 @@ T19 就是把它们逐条换成实测事实。
 **问题**：Step D 最后一个子项「确认系统无 ffmpeg 时的提示」一直没测 ——
 因为本机装了 winget 版 ffmpeg 9.0.2，平时测到的永远是「有 ffmpeg」那条分支。
 
-**做法**（新增 `tools/fn-no-ffmpeg-probe.mjs`）：**启动 Electron 时把 PATH 里的 ffmpeg 目录摘掉**，
+**做法**（新增 `tools/sanlos-no-ffmpeg-probe.mjs`）：**启动 Electron 时把 PATH 里的 ffmpeg 目录摘掉**，
 让应用「以为」本机没有 ffmpeg（`detectFfmpeg()` 逐个候选试 `-version`；
 摘掉 PATH 里那个之后，另外三个固定候选路径本机也不存在 → 必然探测不到），
 然后播一首 **ALAC**（Chromium 解不了的格式），看界面提示。
@@ -314,7 +314,7 @@ api-client 原有两条把 99999 当**普通业务码**断言「msg 原样带出
 |---|---|---|---|
 | ① HTTP 层 | mock 支持 `206`；Node 直打 | `Range` 头透传、`206` 原样带回、**字节切片真的对** | ⚠️ WAV 从中间字节开始返回时**没有文件头**，Chromium 的 WAV 解码器**解不了** → 浏览器层验不了字节正确性 |
 | ② 客户端契约层 | E2E 拖进度条 + 劫持 `HTMLMediaElement.prototype.currentTime` 的 setter | 「用户拖了 → 媒体元素**真的**被 seek 到目标位置」 | 不断言「能否从新位置继续播」——那是**上游能力**，不该由 mock 决定 |
-| ③ 上游能力层 | 真机探针 `tools/fn-range-probe.mjs` | **NAS 到底支不支持 Range、分段字节准不准** | mock 是假 NAS，**回答不了**上游能力 |
+| ③ 上游能力层 | 真机探针 `tools/sanlos-range-probe.mjs` | **NAS 到底支不支持 Range、分段字节准不准** | mock 是假 NAS，**回答不了**上游能力 |
 
 ### 改动
 
@@ -334,12 +334,12 @@ api-client 原有两条把 99999 当**普通业务码**断言「msg 原样带出
 | `test/mock-server.test.ts`（**+6 条**） | 无 `Range` → 200 + `accept-ranges`；`bytes=0-99` → 206 + `content-range` + **字节等于整段的前 100 字节**；`bytes=100-` → 起点真的是第 100 字节；`bytes=-100` → 取的是**最后** 100 字节；end 越界 → 钳到末尾（不是 416）；起点越界 → 416；多区间 / 空区间 → 416 |
 | `test/proxy-range.test.ts`（**新，3 条**） | **代理 × 真实 mock 的端到端**：`fnm://` 带 `Range` → 上游真回 206 → 状态码 / `content-range` / `accept-ranges` 原样带回 → **body 字节等于整段音频对应的切片**（且**确实不是**整段） |
 | `e2e/smoke.spec.ts`（**+1 条**） | 拖进度条 → 劫持 `currentTime` 的 setter → 断言**媒体元素真的被 seek 到目标位置**（不是只动滑块）；且那个写入值必须 **> 1 秒**（否则「只是重播了一下」也能满足） |
-| `tools/fn-live-check.mjs`（**+1 步**，14 → 15） | 真机拖动定位：断言 ① 媒体被 seek 到目标位置；断言 ② **进度从新位置继续推进**（真机独有：mock 做不到）。**另加构建新鲜度闸门**（见下） |
+| `tools/sanlos-live-check.mjs`（**+1 步**，14 → 15） | 真机拖动定位：断言 ① 媒体被 seek 到目标位置；断言 ② **进度从新位置继续推进**（真机独有：mock 做不到）。**另加构建新鲜度闸门**（见下） |
 | `tools/lib/fresh-build.mjs`（**新**） | 构建新鲜度闸门：产物（`dist/assets/main-*.js` + `dist-electron/main.js`）比源码（`src/` / `shared/` / `electron/`）旧就**硬失败**（退出码 3） |
-| `tools/fn-seek-diag.mjs` / `tools/fn-seek-diag2.mjs`（**新**） | 真机 seek 链路诊断：v1 = 用户路径四个实验；v2 = 读 **React fiber** 的 hook 状态 + 直接调用 fiber 上的 React handler（把「事件没送到」与「handler 跑了但没送达」彻底分开） |
-| `tools/fn-range-probe.mjs`（**新**） | 上游能力探针：NAS 支不支持 `Range`、分段字节准不准、越界行为 |
+| `tools/sanlos-seek-diag.mjs` / `tools/sanlos-seek-diag2.mjs`（**新**） | 真机 seek 链路诊断：v1 = 用户路径四个实验；v2 = 读 **React fiber** 的 hook 状态 + 直接调用 fiber 上的 React handler（把「事件没送到」与「handler 跑了但没送达」彻底分开） |
+| `tools/sanlos-range-probe.mjs`（**新**） | 上游能力探针：NAS 支不支持 `Range`、分段字节准不准、越界行为 |
 
-### 真机实测结论（`tools/fn-range-probe.mjs`，T20 新增）
+### 真机实测结论（`tools/sanlos-range-probe.mjs`，T20 新增）
 
 对真实 NAS（中继 `https://<FN-ID>.fnos.net`）实测 `GET /music/api/v1/track/stream?guid=…`：
 
@@ -364,7 +364,7 @@ api-client 原有两条把 99999 当**普通业务码**断言「msg 原样带出
 媒体元素的 `currentTime` **一次都没被写过**（劫持 `HTMLMediaElement.prototype.currentTime`
 的 setter 记录写入值 → 写入列表为空），而界面上的预览值会动、也会复位。
 
-排查用 `tools/fn-seek-diag.mjs`（用户路径四个实验）→ `tools/fn-seek-diag2.mjs`（读 React fiber），逐环排除：
+排查用 `tools/sanlos-seek-diag.mjs`（用户路径四个实验）→ `tools/sanlos-seek-diag2.mjs`（读 React fiber），逐环排除：
 
 | 环 | 怎么验的 | 结果 |
 |---|---|---|
@@ -386,7 +386,7 @@ api-client 原有两条把 99999 当**普通业务码**断言「msg 原样带出
 
 1. **重建产物**：`npm run build` 之后重跑真机 → 媒体的 `currentTime` 真的被写成目标值
    （探针实测 `writes: [52.5]`）并从新位置继续播，**零异常**；
-2. **加闸门**：新增 `tools/lib/fresh-build.mjs`，真机脚本（`fn-live-check.mjs`、`fn-seek-diag2.mjs`）
+2. **加闸门**：新增 `tools/lib/fresh-build.mjs`，真机脚本（`sanlos-live-check.mjs`、`sanlos-seek-diag2.mjs`）
    启动前一律检查「产物是否比源码新」，**旧了就以退出码 3 硬失败** ——
    宁可误报（多跑一次 build），不可漏报（静默测旧代码，正是 T20 踩的坑）。
 
@@ -406,13 +406,13 @@ api-client 原有两条把 99999 当**普通业务码**断言「msg 原样带出
   若哪天第一首换成**不可随机访问**的格式，该步会红（那是**上游事实**，不是回归）。
 - mock 的音频是 WAV（不可随机访问）→ **E2E 永远只能验客户端契约**，验不了「从新位置继续播」；
   这条只有真机能验（已进活体验检）。
-- 探针脚本 `tools/fn-range-probe.mjs` 只读，不写任何数据；凭证只从环境变量读，不打印、不落盘。
+- 探针脚本 `tools/sanlos-range-probe.mjs` 只读，不写任何数据；凭证只从环境变量读，不打印、不落盘。
 - ⚠️ **真机脚本现在会因「产物旧」而拒绝运行**（退出码 3）——这是**故意**的。
   跑真机前先 `npm run build`。
 - ⚠️ **真机上封面刷出上千条 `MediaImage src can only be of http/https/data/blob scheme: fnm://…`
   warning**。
   ⚠️ **T21 复核后更正**：这条 warning **不是**「应用内封面不显示」——
-  实测（`tools/fn-cover-probe.mjs`）应用内 `<img src="fnm://…">` **能正常解码**
+  实测（`tools/sanlos-cover-probe.mjs`）应用内 `<img src="fnm://…">` **能正常解码**
   （第一张 `naturalWidth = 200`），因为 `<img>` 走的是**另一条**图片加载器。
   真正被拒的是 **`navigator.mediaSession.metadata.artwork`**（Windows 快速设置 / SMTC 的专辑图），
   Chromium 的**媒体会话**图片加载器只认 `http/https/data/blob`。
@@ -431,7 +431,7 @@ T20 的真机活体验检刷出上千条：
 MediaImage src can only be of http/https/data/blob scheme: fnm://srv/static/cover?coverId=album_…&size=160
 ```
 
-当时记的是「封面没显示出来」。**这是误判** —— T21 用新探针 `tools/fn-cover-probe.mjs` 量过：
+当时记的是「封面没显示出来」。**这是误判** —— T21 用新探针 `tools/sanlos-cover-probe.mjs` 量过：
 
 | 测什么 | 实测 |
 |---|---|
@@ -466,9 +466,9 @@ MediaImage src can only be of http/https/data/blob scheme: fnm://srv/static/cove
 |---|---|
 | `src/player/mediaSession.ts` | 新增 `bytesToDataUrl()` / `dataUrlMime()` / `fetchArtworkDataUrl()`（默认实现）；`MediaSessionDeps` 新增可注入端口 `fetchArtwork`；元数据改成**两段式**：先出标题等元数据（artwork 暂空），封面字节到了再补一次；带 LRU 缓存（16 条）+ **换歌令牌**守卫（旧的封面回来不许盖掉新歌） |
 | `test/media-session.test.ts` | **改写 1 条**（旧断言钉的是「artwork 里塞 `fnm://`」—— 本任务明确推翻了该前提）+ **新增 9 条** |
-| `tools/fn-cover-probe.mjs`（新） | 真机探针：量应用内封面实况、渲染层 fetch、blob 解码、媒体会话 artwork 的 scheme、那条 warning 的条数 |
+| `tools/sanlos-cover-probe.mjs`（新） | 真机探针：量应用内封面实况、渲染层 fetch、blob 解码、媒体会话 artwork 的 scheme、那条 warning 的条数 |
 
-### 真机实测（`tools/fn-cover-probe.mjs`，T21 新增）
+### 真机实测（`tools/sanlos-cover-probe.mjs`，T21 新增）
 
 | 探针 | 修复前 | 修复后 |
 |---|---|---|
@@ -504,7 +504,7 @@ MediaImage src can only be of http/https/data/blob scheme: fnm://srv/static/cove
 T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当时判成「公共中继带宽不够」——
 **判错了**。继续挖才挖到真正的根因：根因在**客户端布局**，跟服务端没关系。
 
-### 真机量到的证据（`tools/fn-cover-probe.mjs` 的 ① / ①-b / ①-c 段）
+### 真机量到的证据（`tools/sanlos-cover-probe.mjs` 的 ① / ①-b / ①-c 段）
 
 | 量 | 修复前 | 修复后 |
 |---|---|---|
@@ -579,7 +579,7 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
    断言匹配到了**注释里的那行字** → 改成「先剥注释再匹配」后才有鉴别力；
 3. 把 `.app-shell` 的 `height: 100vh` 改成 `auto` → **E2E 红**（网格回到 40,000）。
 
-### 真机复验（`tools/fn-live-check.mjs` + `tools/fn-cover-probe.mjs`）
+### 真机复验（`tools/sanlos-live-check.mjs` + `tools/sanlos-cover-probe.mjs`）
 
 | 测什么 | 修复前 | 修复后 |
 |---|---|---|
@@ -666,7 +666,7 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
 
 ### 探针
 
-新增 `tools/fn-writeback-probe.mjs`（**一次登录、四段结论**）：
+新增 `tools/sanlos-writeback-probe.mjs`（**一次登录、四段结论**）：
 
 | 段 | 回答什么 |
 |---|---|
@@ -764,7 +764,7 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
 - 纯 CSS 缺陷用**契约测试**（**剥掉注释后**匹配，否则会匹配到注释正文 = 空断言）+ **E2E 几何断言**（`toBeInViewport`）双保险。
 - mock 只有 8 首歌 → **队列溢出类问题在 mock 下无鉴别力** → 必须靠契约测试兜。
 - **真机肉眼复验**：仍需用户确认一次（EQ / 队列面板可见、歌词不重复、背景有主色）。
-- `tools/fn-ui-repro.mjs`（本轮新增）保留为复现脚本：复制真实 userData → 起实例 → 截图 + 量几何。
+- `tools/sanlos-ui-repro.mjs`（本轮新增）保留为复现脚本：复制真实 userData → 起实例 → 截图 + 量几何。
 
 ## 十五、T32：外部歌词 API —— 选型实测与安全边界
 
@@ -974,7 +974,7 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
 
 - 日期：2026-11-04
 - 状态：已完成
-- 设计规格：`docs/superpowers/specs/2026-11-04-fnmusic-lyric-stage-design.md`
+- 设计规格：`docs/superpowers/specs/2026-11-04-sanlos-music-lyric-stage-design.md`
 
 ### 用户诉求与拍板
 
@@ -1075,7 +1075,7 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
 
 - 日期：2026-11-05
 - 状态：已完成
-- 设计规格：`docs/superpowers/specs/2026-11-05-fnmusic-settings-page-design.md`
+- 设计规格：`docs/superpowers/specs/2026-11-05-sanlos-music-settings-page-design.md`
 
 ### 用户反馈与拍板
 
@@ -1154,7 +1154,7 @@ T21 复查时顺带发现：真机跑一轮会冒出**九百多条 502**。当�
 | `test/settings-lyric-source.test.tsx` | 既有 11 条**断言一字未改**，只加「先点左侧『歌词』分类」这一步 |
 | `test/settings-panel.test.tsx` | 既有 4 条**一字未改**（默认分类就是「通用」） |
 | `e2e/smoke.spec.ts` | `dialog` → `region`（四处）+ 补分类切换 + 旧绕行步骤改写成新行为断言 + **新增 1 条**（整页 / 不遮挡顶栏 / 关掉回到原视图） |
-| `docs/superpowers/specs/2026-11-05-fnmusic-settings-page-design.md` | **新增**（设计规格） |
+| `docs/superpowers/specs/2026-11-05-sanlos-music-settings-page-design.md` | **新增**（设计规格） |
 | `README.md` / `docs/changelog.md` | 设置页形态说明、路径改为「设置 → 歌词 → 歌词来源」等 |
 
 ### 验证
@@ -1673,7 +1673,7 @@ T38 给顶栏加了一颗「本地」按钮 → 已登录态顶栏变成 **10 �
 
 - 日期：2026-11-05
 - 状态：**完成**
-- 规格：`docs/superpowers/specs/2026-11-05-fnmusic-app-info-design.md`（提交 `54d6b0c`）
+- 规格：`docs/superpowers/specs/2026-11-05-sanlos-music-app-info-design.md`（提交 `54d6b0c`）
 
 ### 用户诉求
 
@@ -3423,7 +3423,7 @@ T57 轮全面复验后，仓库与工作区里散落着**用户私有的标识**
 | --- | --- | --- |
 | `src/lib/address.ts` | 2 | **仅注释**里的域名换占位 |
 | `docs/calibration.md` | 11 | 同上 |
-| `docs/superpowers/specs/2026-11-05-fnmusic-domain-port-design.md` | 6 | 同上；「不能把私有域名硬编码进白名单」那条论断改为不含原值的表述 |
+| `docs/superpowers/specs/2026-11-05-sanlos-music-domain-port-design.md` | 6 | 同上；「不能把私有域名硬编码进白名单」那条论断改为不含原值的表述 |
 | `docs/superpowers/specs/2026-11-05-sanlos-music-stream-quality-ready-design.md` | 5 | 同上 |
 | `docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md` | 2 | IP 换占位；media 的 `src` 改仓库相对路径 |
 
@@ -3834,7 +3834,7 @@ T83 交付后用户要求用**真实文件**复验 ⇒ 下了真实语料 ⇒ �
 | `electron/audioTags.ts` | `parseSylltFrame()` 的时间格式判定：`timeFormat !== 1` ⇒ `timeFormat !== 1 && timeFormat !== 2`（其余取值仍整帧放弃）；注释里写明**实测依据**与**风险** |
 | `test/embedded-lyric-tags.test.ts` | 原「MPEG 帧号（= 2）⇒ 整帧放弃」**改写**为「格式 2 ⇒ 按毫秒读」（断言拿到什么 **+** `wordTimed` 为真）；**新增**「格式 0 / 3 ⇒ 仍整帧放弃」 |
 | `test/embedded-lyric-real-samples.test.ts`（新） | **真实文件**三态回归（真逐字 / 行级 / 无歌词 / FLAC 行级，共 4 条）；样本缺失 ⇒ `describe.skipIf` 整组 skip（**CI 不依赖网络**） |
-| `tools/fn-fetch-embedded-lyric-samples.mjs`（新） | 拉 3 个 mp3 + 用 ffmpeg 造带 `LYRICS` 注释的 FLAC ⇒ 落到 `release/samples/embedded-lyric/`（**gitignored**） |
+| `tools/sanlos-fetch-embedded-lyric-samples.mjs`（新） | 拉 3 个 mp3 + 用 ffmpeg 造带 `LYRICS` 注释的 FLAC ⇒ 落到 `release/samples/embedded-lyric/`（**gitignored**） |
 
 ⚠️ **既有断言的处理**：原那条「格式 2 ⇒ 整帧放弃」的**前提被用户显式推翻**
 ⇒ **改写为新行为断言**，且**不弱于**原来那条：原来只钉「拿不到」，
@@ -3976,8 +3976,8 @@ v0.2.3 发布后用户问「为什么签名没通过」⇒ 实测发现**真缺�
 
 | 文件 | 改什么 |
 | --- | --- |
-| `tools/fn-make-selfsigned-cert.mjs`（新） | 生成自签**代码签名**证书（RSA 3072 / SHA-256 / 3 年）→ `.pfx` + `.cer` + 口令落在 `release/certs/`（**gitignored**）；`--trust` 导入**当前用户**受信任根；**自检**（读回 .pfx 确认私钥在位、主体名一致） |
-| `tools/fn-check-signature.mjs`（新） | 读产物的 `Get-AuthenticodeSignature` ⇒ 打印 `Status` / 签名者 / 指纹；按 `--expect signed\|none` / `--expect-signer` / `--pfx` 判定，不符即非零退出 |
+| `tools/sanlos-make-selfsigned-cert.mjs`（新） | 生成自签**代码签名**证书（RSA 3072 / SHA-256 / 3 年）→ `.pfx` + `.cer` + 口令落在 `release/certs/`（**gitignored**）；`--trust` 导入**当前用户**受信任根；**自检**（读回 .pfx 确认私钥在位、主体名一致） |
+| `tools/sanlos-check-signature.mjs`（新） | 读产物的 `Get-AuthenticodeSignature` ⇒ 打印 `Status` / 签名者 / 指纹；按 `--expect signed\|none` / `--expect-signer` / `--pfx` 判定，不符即非零退出 |
 | `scripts/pack.cjs` | 打包后**主动断言**：配了证书却没签上 ⇒ **打包失败**；没配证书 ⇒ 只打印一行、**不**失败。查的是**暂存目录**（= 本次构建的产物，输出目录里可能躺着历史旧包 ⇒ 会误报） |
 | `electron-builder.yml` | **只加注释**：签不签由 `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` 决定（**不改 `win.sign`**） |
 | `electron/update.ts` | ⚠️ **修一个真缺陷**：签名者主体改走 **base64(UTF-8)** |
@@ -4073,8 +4073,8 @@ v0.2.3 发布后用户问「为什么签名没通过」⇒ 实测发现**真缺�
 | `shared/update.ts` | **唯一**的签名者匹配口径（`extractCommonNames` / `parseSignerCandidates` / `matchesExpectedSigner`）—— 客户端与构建期工具**共用** |
 | `electron/update.ts` | 主进程按新口径核对签名者 |
 | `src/components/SettingsPanel.tsx` | 「预期的代码签名者」支持**多候选**；文案写清 `SignPath Foundation` |
-| `tools/fn-check-signature.mjs` | 断言加严：`--expect valid` / `--require-timestamp` / `--expect-cn`；判定抽成**纯函数** `evaluateSignature()` |
-| `tools/fn-check-signature.d.mts` | 给 TS 侧 import 这个 `.mjs` 的手写声明（本仓库 tsconfig **无 `allowJs`**） |
+| `tools/sanlos-check-signature.mjs` | 断言加严：`--expect valid` / `--require-timestamp` / `--expect-cn`；判定抽成**纯函数** `evaluateSignature()` |
+| `tools/sanlos-check-signature.d.mts` | 给 TS 侧 import 这个 `.mjs` 的手写声明（本仓库 tsconfig **无 `allowJs`**） |
 | `scripts/pack.cjs` | 关掉「证书自动发现」；`FNM_EXPECT_SIGNER_CN` 加严开关；CI 适配说明 |
 | `scripts/publish-manifest.mjs` | 认 `FNM_PACK_OUTPUT`（清单与安装包**必须同目录**） |
 | `scripts/check-signpath-config.mjs` | 配置**快速失败**（缺一项就停） |
@@ -7228,3 +7228,121 @@ SignPath 以「**可信构建**」为前提：只签 **CI 从本仓库构建出�
 - ⚠ **没改**几百处 CSS 类名（`fnm-*`）、旧规格文件名；
 - ⚠ **历史段一字未动**（含 `docs/releases/v0.2.0.md` 里指向旧分支的 blob 链接、
   `docs/build-verification.md` 里 2026-11-04 那次验证的分支行）⇒ 历史是**当时的记录**。
+
+## 九十三、T115：里层命名全量改名 —— `fnm` / `fnmusic` ⇒ **`sanlos`**（2026-11-19）
+
+### 一、起因
+
+T114 把仓库默认分支改成了 `sanlos-music`，**里层**却还全是旧代号：
+包名 `fnmusic-desktop`、appId `com.fnmusic.desktop`、自定义协议 `fnm://` / `fnml://`、
+CSS 类名前缀 `fnm-`、preload 桥 `window.fn` / `window.fnmusic` / `window.fnPlayer`、
+环境变量前缀 `FNM_`、工具脚本 `tools/fn-*.mjs`、老规格文件名 `*fnmusic*`。
+
+### 二、清点（**实测**，不是推测）
+
+`release/verify/t115-01-scan-legacy-names.mjs` ⇒ 入库目录 **519** 个文件、**3373** 处命中：
+`fnm-` **2200**、`fnm` 独立词 **331**、`fn-` **302**、`fnmusic` **189**、
+`fnPlayer` **139**、`FN-Music` **126**、`FNM_` **86**、camelCase 变体 **0**。
+
+### 三、⚠️ 为什么**不能**全局替换（这一条最要紧）
+
+同一个词在仓库里指的是**四样东西**，其中**两样一个字都不能动**：
+
+| 指代 | 例子 | 处理 |
+|---|---|---|
+| A. 本客户端的内部标识 | `fnm://`、`fnm-app__nav`、`window.fnPlayer` | ✅ **全改** |
+| B. **飞牛 NAS 侧** | `fnos.net` / `fnId` / 连接接口返回的 `fn: [...]` / `FN_USER` / `FN_PASS` / `FN_ID` | ❌ **一个字都不动** |
+| C. **历史事实** | `FN-Music-Setup-0.2.4.exe` / 旧 userData 目录名 `fnmusic-desktop` / 历史文档里的实测记录 | ❌ **不动** |
+| D. **第三方项目名** | `XDORG-N1/FnMusic`（Apache-2.0） | ❌ **不动** |
+
+⚠️ **B 类里最阴险的一个**：`fn` 既是本客户端的**认证桥全局名**（`window.fn`），
+**也是**飞牛连接接口返回的**数组字段名**（`fn: ['xxx.fnos.net:443']`），
+**还是** Vitest 的 `vi.fn()`（**672** 处）⇒ 任何全局规则都必然误伤 ⇒ 只能**逐文件点名**。
+
+### 四、用户拍板
+
+**「全改」**｜**「以前版本不用理」**｜**「后面版本能更新就行」**（现在没有用户，都是自己在用）
+⇒ 四问全选推荐项：CSS 前缀 **`sanlos-`**｜appId **`com.sanlos.music`**｜协议一起改成 **`sanlos://`**｜**14 个**老规格/计划文件名一起改。
+
+### 五、执行（**规则驱动**，不手改）
+
+`release/verify/t115-03-apply-rename.mjs`：有序规则表 ＋ 保护机制（哨兵）＋ 文件作用域规则
+＋ **dry-run 逐行 diff**（本次逐条判读了 274 个文件的改动）＋ 幂等复跑。
+
+- 改写 **274** 个文件的内容（**2816** 增 / **2816** 删 ⇒ 完全对称 ⇒ 纯标识符替换）；
+- `git mv` 改名 **51** 个文件（`tools/fn-*` **37** ＋ `docs/superpowers/**fnmusic*` **14**）。
+
+### 六、协议改名的**六处联动**（漏一处就是「运行时才炸」）
+
+| 联动点 | 漏了会怎样 |
+|---|---|
+| `electron/schemes.ts` 的 `registerAppSchemes()`（**两个 scheme 合并成一次**） | ⚠ **静默覆盖** ⇒ 渲染层 `fetch` 抛 `TypeError: Failed to fetch` ⇒ **整个曲库拉不出来**，而**单测全绿** |
+| 三个 HTML 的 CSP | Chromium 的 URL 安全检查**直接拒绝** ⇒ 封面空白 / 本地播不了 |
+| `src/api/client.ts` 的 `BASE` | 全部 API 请求打不出去 |
+| `electron/proxy.ts` 的 `SCHEME` ＋ `protocol.handle` | 全部 404 |
+| `shared/localMedia.ts` 的 `LOCAL_MEDIA_SCHEME` | 本地曲目播不了 |
+| 常量名 `FNM_SCHEME` / `FNML_SCHEME` | 编译不过 |
+
+⇒ `fnml://` 单独改成 **`sanlos-media://`**（不是 `sanlosl://`）：名字自解释，
+**注册结构一字不动**（仍是「一次注册两个」）⇒ 不动 T13 那条「只能调用一次」的铁律。
+
+### 七、⚠️ `localStorage` 的三个用户数据键：**旧键回落**（不许静默丢数据）
+
+`fnmusic-local-history`（本机播放记录）/ `fnmusic-resume`（续播位置）/
+`fnmusic-lyric-overrides`（T107 按歌指定歌词源）⇒ **新键没有才回落读旧键**（旧键只读、不删）。
+
+⚠️ **「清空」必须两个键都删**：只删新键的话，新键一消失、下次读就**回落到旧键**
+⇒ 用户点了「清空」，记录却**复活**了 ⇒ 已在 `src/player/resumeBridge.ts` 补上，并钉进测试。
+
+旧键字面量的**唯一居所** = `shared/legacyStorageKeys.ts`（改名脚本**跳过**它）。
+
+### 八、⚠️ `appId` 改动是一次性**断点**（用户已确认接受）
+
+`com.fnmusic.desktop` ⇒ `com.sanlos.music` ⇒ NSIS 的**卸载项 GUID / 注册表项**全变
+⇒ **v0.4.1 ⇒ 新版本不是「原地升级」**（旧版会残留，需手工卸载）。
+
+⚠️ **但 userData 目录不受影响**：目录名 = `productName` = `Sanlos Music`，
+**与 `name` / `appId` 无关** ⇒ **登录态（`session.bin`）、偏好、本机记录都不丢**。
+⇒ **从本版起 `appId` 固定 ⇒ 之后版本之间升级正常**（这正是用户要的「后面版本能更新就行」）。
+
+### 九、这一轮踩的坑（**跨项目可复用**）
+
+1. ⚠ **「扩展名白名单」会漏文件**：第一版按 `/\.(ts|tsx|css|…)$/` 过滤
+   ⇒ **漏了 `.mts`**（`tools/sanlos-check-signature.d.mts` 的注释还指着旧文件名）
+   ⇒ 改成「按**二进制**排除」（`.png/.exe/.mp3/…`），**新扩展名自动被覆盖**。
+2. ⚠ **分段拼出来的路径匹配不到**：`path.join(root, 'tools', 'fn-check-signature.mjs')`
+   ⇒ `tools/fn-` 规则**匹配不到**（中间隔着 `', '`）⇒ `scripts/pack.cjs` 会**找不到签名断言脚本**
+   ⇒ **打包直接失败**（不是「检查漏了」，是「跑不起来」）⇒ 必须单列一条「文件名字面量」规则。
+3. ⚠ **`fn` 这个 token 不能全局动**（见第三节）⇒ 认证桥的改名只能**逐文件点名**
+   （`electron/preload.ts` / `src/lib/bridge.ts` / `src/vite-env.d.ts` / 两个测试文件）。
+4. ⚠ **历史文档不能全量替换**：`docs/superpowers/specs/2026-11-02-…-design.md` 里写着
+   「基址常量 `const BASE = 'fnm://srv'`」——那是**当天真的这么写的** ⇒ 改它就是**篡改历史**
+   ⇒ 历史文档**只改文件名**（外加**指针**：指向被改名文件的路径要跟着走，否则是**死链**）。
+5. ⚠ **T115 自己的规格要跳过**：它是**唯一**一份同时写着「旧名」和「新名」的文档
+   ⇒ 跑规则会把映射表**改没了**（自相矛盾）。
+6. ⚠ **工具脚本的 userData 路径本来是错的**：`tools/sanlos-ui-repro.mjs` 指着旧目录名
+   `fnmusic-desktop` ⇒ 复制的是一个**不存在的目录** ⇒ 探针起不来
+   ⇒ 改成**从 `package.json` 读 `productName`**（跟着软件名走，以后改名也不会再错）。
+
+### 十、复验结果
+
+| 项 | 实测 |
+|---|---|
+| 验收探针 | `release/verify/t115-05-verify-rename.mjs` ⇒ **19 条全过** ⇒ **RENAME_OK** |
+| 类型检查 | `tsc --noEmit` ⇒ **0 错** |
+| 单元测试 | **146** 个文件 / **3024** 条 ⇒ **全绿**（改名前 145 / 2997 ⇒ 既有 **2997 条一条不删**，新增 27 条契约钉子） |
+| E2E | Playwright **全绿**（既有 72 条一条不删） |
+| 构建 | `npm run build` ⇒ **0** |
+| 字节体检 ＋ 控制字符 | **bad=0** |
+| 幂等 | 改名脚本连跑两次 ⇒ 第二次 **0 处改动** |
+
+⇒ 规格 `docs/superpowers/specs/2026-11-19-sanlos-music-inner-rename-design.md`（§十三 回填）。
+
+### 十一、明确**没做什么**
+
+- ❌ **没改** `LEGACY_USER_DATA_DIR_NAME`（`'fnmusic-desktop'`）—— 它是**迁移源**，删了老用户升级会丢登录态；
+- ❌ **没改** `FN-Music-*`（历史产物名 ＋ 归一化测试的输入）；
+- ❌ **没改** 飞牛侧的任何名字（`fnos` / `fnId` / `FN_USER` / `FN_PASS` / `FN_ID` / `FN_CON_*`）；
+- ❌ **没改** 历史文档的**正文**（只改了文件名 ＋ 指向被改名文件的指针）；
+- ❌ **没改** `release/verify/fnm-*`（**gitignore** 的历史一次性脚本 ⇒ 改了会让台账与历史文档的引用全成死链）；
+- ❌ **没动** `docs/releases/*.md` 与历史 changelog 段。

@@ -9,6 +9,11 @@
 > ⚠️ **分支已于 2026-11-19 改名为 `sanlos-music`**（仓库默认分支；原名 `feature/fnmusic-desktop`）。
 > 下面记的分支名是**当时**的名字 —— 那是**历史记录，不改**。
 
+> ⚠️ **里层已于 2026-11-19 全量改名**（包名 `sanlos-music`、appId `com.sanlos.music`、
+> 自定义协议 `sanlos://` ＋ `sanlos-media://`、CSS 前缀 `sanlos-`、preload 桥
+> `sanlos` / `sanlosAuth` / `sanlosPlayer`）。
+> 下面记的**旧名**是**当时**的名字 —— 那是**历史记录，不改**。
+
 **验证时间**：2026-11-04
 **平台**：Windows 10.0.26300 x64 / Node v26.13.0 / npm 11.x
 **分支**：`feature/fnmusic-desktop`
