@@ -47,26 +47,26 @@ export interface LibraryPageShellProps {
 export function LibraryPageShell(props: LibraryPageShellProps): ReactElement {
   const { title, status, error, actionError, loading = false, loadingText, children } = props
   return (
-    <section className="fnm-page">
-      <header className="fnm-page__header">
-        <h1 className="fnm-page__title">{title}</h1>
-        {status && <p className="fnm-page__status">{status}</p>}
+    <section className="sanlos-page">
+      <header className="sanlos-page__header">
+        <h1 className="sanlos-page__title">{title}</h1>
+        {status && <p className="sanlos-page__status">{status}</p>}
       </header>
 
       {error && (
-        <p className="fnm-page__error" role="alert">
+        <p className="sanlos-page__error" role="alert">
           {`加载失败：${error}`}
         </p>
       )}
 
       {actionError && (
-        <p className="fnm-page__error" role="alert">
+        <p className="sanlos-page__error" role="alert">
           {`操作失败：${actionError}`}
         </p>
       )}
 
       {loading && (
-        <p className="fnm-page__loading" role="status">
+        <p className="sanlos-page__loading" role="status">
           {loadingText}
         </p>
       )}

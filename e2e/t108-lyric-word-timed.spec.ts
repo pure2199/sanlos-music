@@ -16,14 +16,14 @@ import { LYRICS, SONGS } from '../mock-server/fixtures'
 //    - 本条验的是 **外部源**给的那份 ⇒ **主进程选词 → IPC → 渲染**这一整段。
 //
 // ⚠️ **鉴别力（缺一不可）**：
-// 1. **零**行级整行强调（`.fnm-lyricview__line--whole` 不存在）
+// 1. **零**行级整行强调（`.sanlos-lyricview__line--whole` 不存在）
 //    ⇒ 证明走的是**逐字**那条路，不是「行级整行显示」；
 // 2. **有**词级元素（`[data-word]` / `--karaoke` / `--overlay`）
 //    ⇒ 证明**真的**按词级时间戳渲染（卡拉OK 在）；
 // 3. 内容是 **mock 那个端点**给的 ⇒ 证明**确实走了外部源**（NAS 里 `t2` 没有歌词）。
 //
 // ⚠️ **全程不碰真实外网**：E2E 夹具预置 `lyric.source = 'off'`，
-//    且 `launchApp` 设 `FNM_LYRIC_SOURCES=custom`（T108）⇒ 链里只有 `custom`
+//    且 `launchApp` 设 `SANLOS_LYRIC_SOURCES=custom`（T108）⇒ 链里只有 `custom`
 //    ⇒ 不会去问网易云 / lrclib / QQ / 酷狗 / 酷我 / 咪咕。
 // ---------------------------------------------------------------------------
 
@@ -122,7 +122,7 @@ test.describe.serial('T108：外部源的逐字歌词 ⇒ 真逐字（真实 Ele
       .click()
     const list = window.getByRole('listbox', { name: '歌曲列表' })
     await list.getByRole('option').filter({ hasText: SONG_WITHOUT_LOCAL_LYRIC.title }).first().dblclick()
-    await expect(window.locator('.fnm-playerbar__title')).toHaveText(SONG_WITHOUT_LOCAL_LYRIC.title)
+    await expect(window.locator('.sanlos-playerbar__title')).toHaveText(SONG_WITHOUT_LOCAL_LYRIC.title)
 
     // ⚠️ **暂停 + 精确定位**：位置冻结 ⇒ 断言才可复现。
     await window.getByRole('button', { name: '暂停', exact: true }).click()
@@ -132,7 +132,7 @@ test.describe.serial('T108：外部源的逐字歌词 ⇒ 真逐字（真实 Ele
     await window.getByRole('button', { name: '全屏播放页', exact: true }).click()
     const page = window.getByTestId('full-player')
     await expect(page).toBeVisible()
-    const stage = page.locator('.fnm-lyricview--all')
+    const stage = page.locator('.sanlos-lyricview--all')
     await expect(stage).toBeVisible()
 
     // --- 鉴别力 1：内容确实来自 mock 的**外部源**（NAS 里这首歌没有歌词）-----
@@ -142,12 +142,12 @@ test.describe.serial('T108：外部源的逐字歌词 ⇒ 真逐字（真实 Ele
 
     // --- 鉴别力 2：**有**词级元素 ⇒ 真的按词级时间戳渲染了 ---------------------
     expect(await stage.locator('[data-word]').count()).toBeGreaterThan(0)
-    expect(await stage.locator('.fnm-lyricview__word--karaoke').count()).toBeGreaterThan(0)
-    expect(await stage.locator('.fnm-lyricview__overlay').count()).toBeGreaterThan(0)
+    expect(await stage.locator('.sanlos-lyricview__word--karaoke').count()).toBeGreaterThan(0)
+    expect(await stage.locator('.sanlos-lyricview__overlay').count()).toBeGreaterThan(0)
 
     // --- 鉴别力 3：**没有**整行强调 ⇒ 走的是「逐字」那条路，不是「行级整行」 -----
     //    （T81：真逐字与整行强调**互斥** ⇒ 这一条同时排除了「退化成行级」。）
-    expect(await stage.locator('.fnm-lyricview__line--whole').count()).toBe(0)
+    expect(await stage.locator('.sanlos-lyricview__line--whole').count()).toBe(0)
 
     // 收尾：全屏页是全屏浮层 → 盖住顶栏 → 下一条用例点不到顶栏按钮。
     await window.getByRole('button', { name: '关闭全屏播放页' }).click()

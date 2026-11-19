@@ -81,12 +81,12 @@ export interface CandidateInfo {
 }
 
 /**
- * `window.fn` 桥接口（渲染进程侧的完整契约）。
+ * `window.sanlosAuth` 桥接口（渲染进程侧的完整契约）。
  *
  * 七个方法与主进程的七个 IPC 通道一一对应。
  * **没有任何一个方法能拿到 token 或密码。**
  */
-export interface FnBridge {
+export interface AuthBridge {
   /** 读取服务器信息（免凭证）：名称 / 版本 / 是否支持 NAS 账号登录。 */
   serverInfo(server: string): Promise<ServerInfo>
   /**

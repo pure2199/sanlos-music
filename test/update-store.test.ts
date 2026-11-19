@@ -80,11 +80,11 @@ function seed(state: {
 
 describe('渲染层启动安装的判定（T85）', () => {
   beforeEach(() => {
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = undefined
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = undefined
   })
 
   afterEach(() => {
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = undefined
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = undefined
   })
 
   it('未签名包 + **已授权** + 没配预期签名者 → **真的去启动**（T85 的核心）', async () => {
@@ -92,7 +92,7 @@ describe('渲染层启动安装的判定（T85）', () => {
       status: 'ok',
       path: 'C:\\Temp\\FN-Music-Setup-9.9.9.exe',
     }))
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
     seed({ download: downloaded(signature()), allowUnsigned: true })
 
     await useUpdateStore.getState().installUpdate()
@@ -113,7 +113,7 @@ describe('渲染层启动安装的判定（T85）', () => {
       status: 'ok',
       path: 'C:\\Temp\\FN-Music-Setup-9.9.9.exe',
     }))
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
     seed({ download: downloaded(signature()), allowUnsigned: false })
 
     await useUpdateStore.getState().installUpdate()
@@ -128,7 +128,7 @@ describe('渲染层启动安装的判定（T85）', () => {
       status: 'ok',
       path: 'C:\\Temp\\FN-Music-Setup-9.9.9.exe',
     }))
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
     seed({
       download: downloaded(signature({ ok: true, status: 'Valid', signer: 'CN=预期的人', reason: null })),
       allowUnsigned: false,
@@ -145,7 +145,7 @@ describe('渲染层启动安装的判定（T85）', () => {
       status: 'ok',
       path: 'C:\\Temp\\FN-Music-Setup-9.9.9.exe',
     }))
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
     seed({
       download: downloaded(
         signature({
@@ -169,7 +169,7 @@ describe('渲染层启动安装的判定（T85）', () => {
       status: 'ok',
       path: 'C:\\Temp\\FN-Music-Setup-9.9.9.exe',
     }))
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
     seed({ download: null, allowUnsigned: true })
 
     await useUpdateStore.getState().installUpdate()
@@ -207,7 +207,7 @@ describe('渲染层 ↔ 主进程的契约（T87.12）', () => {
   })
 
   it('检查 → 下载 → 启动安装 ⇒ **安装器真的起来**（不许报「安装包名不合法」）', async () => {
-    const destDir = mkdtempSync(join(tmpdir(), 'fnm-update-contract-'))
+    const destDir = mkdtempSync(join(tmpdir(), 'sanlos-update-contract-'))
     tempDirs.push(destDir)
 
     const file = {
@@ -237,7 +237,7 @@ describe('渲染层 ↔ 主进程的契约（T87.12）', () => {
     })
 
     // ⚠️ 假桥**只做转发**：渲染层发什么，就原样交给**真的**控制器判。
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       checkUpdate: async () => await controller.check(BASE),
       downloadUpdate: async (name: string) => await controller.download(name, SIGNER),
       installUpdate: async (name: string) => await controller.install(name, SIGNER, true),

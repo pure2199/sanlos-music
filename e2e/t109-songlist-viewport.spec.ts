@@ -79,7 +79,7 @@ test.describe.serial('T109：列表初始为空时也要量到真实视口高度
   async function readViewportInfo(): Promise<ViewportInfo | null> {
     return fixture.window.evaluate(
       ({ rowHeight, bufferRows, total }) => {
-        const v = document.querySelector('.fnm-songlist__viewport')
+        const v = document.querySelector('.sanlos-songlist__viewport')
         if (!v) return null
         const height = v.getBoundingClientRect().height
         // ⚠ 与组件口径一致：`clampViewportHeight` 把量到的值钳到**窗口高度**。
@@ -89,7 +89,7 @@ test.describe.serial('T109：列表初始为空时也要量到真实视口高度
           height,
           clamped,
           expected,
-          actual: document.querySelectorAll('.fnm-songlist__row').length,
+          actual: document.querySelectorAll('.sanlos-songlist__row').length,
         }
       },
       { rowHeight: ROW_HEIGHT, bufferRows: BUFFER_ROWS, total: LONG_ALBUM_TRACK_COUNT },
@@ -101,8 +101,8 @@ test.describe.serial('T109：列表初始为空时也要量到真实视口高度
 
     // 进「多集专辑示例」（40 集）的详情页 ⇒ 曲目**异步加载** ⇒ 列表初始为空。
     await win.getByRole('navigation', { name: '曲库导航' }).getByRole('button', { name: '专辑' }).click()
-    await win.locator('.fnm-card__button').filter({ hasText: '多集专辑示例' }).click()
-    await win.waitForSelector('.fnm-songlist__row')
+    await win.locator('.sanlos-card__button').filter({ hasText: '多集专辑示例' }).click()
+    await win.waitForSelector('.sanlos-songlist__row')
 
     // ⚠ 先等布局稳定（量高是**效果**触发的，布局还在动时会读到中间态）。
     await expect
@@ -134,7 +134,7 @@ test.describe.serial('T109：列表初始为空时也要量到真实视口高度
     expect(real.actual).toBeLessThan(LONG_ALBUM_TRACK_COUNT)
 
     // ④ 状态行说「已加载 40 / 40」⇒ 数据本身是齐的（**行数少不是数据少**）。
-    await expect(win.locator('.fnm-songlist__status')).toHaveText(
+    await expect(win.locator('.sanlos-songlist__status')).toHaveText(
       `已加载 ${LONG_ALBUM_TRACK_COUNT} / ${LONG_ALBUM_TRACK_COUNT}`,
     )
   })

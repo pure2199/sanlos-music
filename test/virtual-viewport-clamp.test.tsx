@@ -2,7 +2,7 @@
 // T22 回归：虚拟列表的「可视区高度」钳位
 // ---------------------------------------------------------------------------
 //
-// 缺陷（真机实测，`tools/fn-cover-probe.mjs` 量到）
+// 缺陷（真机实测，`tools/sanlos-cover-probe.mjs` 量到）
 // ---------------------------------------------------------------------------
 // 真实曲库有 34,071 张专辑。真机上曾经出现：
 //
@@ -294,14 +294,14 @@ describe('CSS 根因契约（T22）', () => {
 
   it('搜索页与搜索面板必须各自有确定高度 + 滚动容器', () => {
     // 主区修好之后（高度固定），这两个块级盒子若还是 auto 高度 → 内容溢出到播放条上。
-    const page = readCssRule('src/pages/search-page.css', '.fnm-searchpage')
+    const page = readCssRule('src/pages/search-page.css', '.sanlos-searchpage')
     expect(page).toMatch(/height:\s*100%/)
-    const panel = readCssRule('src/components/search-panel.css', '.fnm-searchpanel')
+    const panel = readCssRule('src/components/search-panel.css', '.sanlos-searchpanel')
     expect(panel).toMatch(/overflow-y:\s*auto/)
   })
 
   it('登录页必须能滚动（矮窗口下表单不能被裁掉）', () => {
-    const rule = readCssRule('src/pages/login-page.css', '.fnm-login')
+    const rule = readCssRule('src/pages/login-page.css', '.sanlos-login')
     expect(rule).toMatch(/height:\s*100%/)
     expect(rule).toMatch(/overflow-y:\s*auto/)
   })

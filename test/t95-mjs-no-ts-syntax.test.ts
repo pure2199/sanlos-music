@@ -82,7 +82,7 @@ describe('T95 —— .mjs / .cjs 只能是纯 JavaScript', () => {
     expect(SCRIPT_FILES.length).toBeGreaterThan(20)
     // ⚠️ 这两个是**真的出过事**的文件 ⇒ 必须每次都被扫到。
     expect(SCRIPT_FILES).toContain('scripts/publish-manifest.mjs')
-    expect(SCRIPT_FILES).toContain('tools/fn-electron-net-probe.mjs')
+    expect(SCRIPT_FILES).toContain('tools/sanlos-electron-net-probe.mjs')
   })
 
   it.each(SCRIPT_FILES)('%s 能被 Node 当作纯 JavaScript 解析（node --check）', (relPath) => {
@@ -105,8 +105,8 @@ describe('T95 —— .mjs / .cjs 只能是纯 JavaScript', () => {
     expect(source).toContain('@returns {{version: string, productName: string, prefix: string}}')
   })
 
-  it('tools/fn-electron-net-probe.mjs 里没有「两行挤成一行」的语句粘连', () => {
-    const source = readFileSync(join(REPO_ROOT, 'tools', 'fn-electron-net-probe.mjs'), 'utf8')
+  it('tools/sanlos-electron-net-probe.mjs 里没有「两行挤成一行」的语句粘连', () => {
+    const source = readFileSync(join(REPO_ROOT, 'tools', 'sanlos-electron-net-probe.mjs'), 'utf8')
     // ⚠️ 这条是那个已提交进仓库的语法错误（`})    try {`）的原样回归。
     //    ⚠️ 只认**同一行里的多个空格**（`[ \t]`）—— 用 `\s` 会把正常的换行也算进去
     //    ⇒ 反而匹配到**正确**的代码 ⇒ 假红。

@@ -25,13 +25,13 @@ import { coverUrl } from './coverUrl'
 // ---------------------------------------------------------------------------
 // 取色的技术前提（Task 15 真机踩出来的，别改）
 // ---------------------------------------------------------------------------
-// - 封面走 `fnm://` 代理，而渲染进程页面来自 `file://` / dev server → 与封面**跨源**
+// - 封面走 `sanlos://` 代理，而渲染进程页面来自 `file://` / dev server → 与封面**跨源**
 //   （`electron/proxy.ts` 的注释明写）→ 图片必须带 `crossOrigin = 'anonymous'`，
 //   否则 canvas 被污染、`getImageData` 抛 SecurityError → **永远取不到色**。
 //   代理对所有响应都带了 `access-control-allow-origin: *` → 普通 GET 不触发预检。
-// - ⚠️ 这条**只针对封面图片**（要喂给 canvas 取色）；媒体元素 `<audio src="fnm://…">`
+// - ⚠️ 这条**只针对封面图片**（要喂给 canvas 取色）；媒体元素 `<audio src="sanlos://…">`
 //   **不要**设 `crossOrigin`（Task 13 的要求 H）。
-// - CSP（`index.html`）已放行 `fnm:`（`img-src`）→ 取色不受 CSP 阻断。
+// - CSP（`index.html`）已放行 `sanlos:`（`img-src`）→ 取色不受 CSP 阻断。
 
 // ---------------------------------------------------------------------------
 // 常量（Task 15 原样搬）

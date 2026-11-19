@@ -96,7 +96,7 @@ describe('圆角令牌化（T51）', () => {
   it('词岛的胶囊**不跟主题走**（否则 Windows 11 风下词岛变成方块）', () => {
     const islandCss = readCss('src', 'island', 'island-window.css')
     // ⚠️ 词岛本体必须用 `--radius-island`（固定 999px）。
-    expect(blockOf(islandCss, '.fnm-island')).toMatch(/border-radius:\s*var\(--radius-island/)
+    expect(blockOf(islandCss, '.sanlos-island')).toMatch(/border-radius:\s*var\(--radius-island/)
     // ⚠️ **两套主题的值都必须是 999px**：
     //    Fluent 组里若写成 4px → 词岛在 Windows 11 风下**变成方块**
     //    （真机实测：屏幕顶部一个白色大矩形，完全没有「岛」的形状）。
@@ -114,12 +114,12 @@ describe('中继带宽提示挪到页面内容区（T51）', () => {
   })
 
   it('徽标里**不再有**带宽提示（提示不再把徽标撑到 320px 宽）', () => {
-    expect(badgeCss).not.toMatch(/\.fnm-badge__hint/)
-    expect(readCss('src', 'components', 'ConnectionBadge.tsx')).not.toMatch(/fnm-badge__hint/)
+    expect(badgeCss).not.toMatch(/\.sanlos-badge__hint/)
+    expect(readCss('src', 'components', 'ConnectionBadge.tsx')).not.toMatch(/sanlos-badge__hint/)
   })
 
   it('提示是主区顶部的一条**独立**提示（一行、12px、灰字）', () => {
-    const hint = blockOf(badgeCss, '.fnm-relayhint')
+    const hint = blockOf(badgeCss, '.sanlos-relayhint')
     expect(hint).toMatch(/font-size:\s*12px/)
     expect(hint).toMatch(/color:\s*var\(--text-secondary\)/)
     // ⚠️ **只占一行**：不许折行把主区撑高。

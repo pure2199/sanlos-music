@@ -3,9 +3,9 @@
 // ---------------------------------------------------------------------------
 //
 // 覆盖：
-// - **本地曲目**（`local:` 前缀）→ 直接 `fnml://`（**不走 NAS**，与「本地优先」开关无关）；
-// - **NAS 曲目** → 既有行为**一字不变**（命中下载索引且开关打开 → `fnml://`，
-//   否则 → `fnm://srv/track/stream?guid=…`）；
+// - **本地曲目**（`local:` 前缀）→ 直接 `sanlos-media://`（**不走 NAS**，与「本地优先」开关无关）；
+// - **NAS 曲目** → 既有行为**一字不变**（命中下载索引且开关打开 → `sanlos-media://`，
+//   否则 → `sanlos://srv/track/stream?guid=…`）；
 // - **`downloadEntryToSong`**：新条目用**快照**（精确），老条目回落**文件名反推**（近似）；
 // - **`localItemToSong`**：形状正确（无封面、时长 0、扩展名进 `codec`）。
 //
@@ -78,7 +78,7 @@ beforeEach(() => {
 })
 
 describe('T38 播放源解析', () => {
-  it('本地曲目 → 直接 `fnml://`（**不走 NAS**）', () => {
+  it('本地曲目 → 直接 `sanlos-media://`（**不走 NAS**）', () => {
     const song: Song = { ...NAS_SONG, id: LOCAL_ID }
     expect(resolvePlaybackSource(song)).toBe(localMediaUrl(LOCAL_ID))
   })
@@ -89,19 +89,19 @@ describe('T38 播放源解析', () => {
     expect(resolvePlaybackSource(song)).toBe(localMediaUrl(LOCAL_ID))
   })
 
-  it('NAS 曲目：本地有副本且开关打开 → `fnml://`（**既有行为不变**）', () => {
+  it('NAS 曲目：本地有副本且开关打开 → `sanlos-media://`（**既有行为不变**）', () => {
     useDownloadStore.setState({ entries: { [NAS_SONG_ID]: LEGACY_ENTRY }, localFirst: true })
     expect(resolvePlaybackSource(NAS_SONG)).toBe(localMediaUrl(NAS_SONG_ID))
   })
 
-  it('NAS 曲目：没有本地副本 → 照旧走 `fnm://` 流式地址（**既有行为不变**）', () => {
+  it('NAS 曲目：没有本地副本 → 照旧走 `sanlos://` 流式地址（**既有行为不变**）', () => {
     useDownloadStore.setState({ entries: {}, localFirst: true })
-    expect(resolvePlaybackSource(NAS_SONG)).toBe(`fnm://srv/track/stream?guid=${NAS_SONG_ID}`)
+    expect(resolvePlaybackSource(NAS_SONG)).toBe(`sanlos://srv/track/stream?guid=${NAS_SONG_ID}`)
   })
 
-  it('NAS 曲目：开关关掉 → 照旧走 `fnm://`（**既有行为不变**）', () => {
+  it('NAS 曲目：开关关掉 → 照旧走 `sanlos://`（**既有行为不变**）', () => {
     useDownloadStore.setState({ entries: { [NAS_SONG_ID]: LEGACY_ENTRY }, localFirst: false })
-    expect(resolvePlaybackSource(NAS_SONG)).toBe(`fnm://srv/track/stream?guid=${NAS_SONG_ID}`)
+    expect(resolvePlaybackSource(NAS_SONG)).toBe(`sanlos://srv/track/stream?guid=${NAS_SONG_ID}`)
   })
 })
 

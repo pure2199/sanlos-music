@@ -4,7 +4,7 @@
 //
 // ⚠️ 覆盖用户 2026-11-17 的反馈：
 //     「**不能做成专辑业那样吗，然后有声业的播放模块 UI 有问题**」
-//   ⇒ ① 有声页 = **封面卡片网格**（专辑页同款 `.fnm-card`）；
+//   ⇒ ① 有声页 = **封面卡片网格**（专辑页同款 `.sanlos-card`）；
 //      ② 卡片**有封面**（不是占位块）—— mock 补了 `/static/cover` 端点；
 //      ③ 卡片**不再**背结构信号长句（那行搬去了详情页 ⇒ 卡片才做得成封面网格）；
 //      ④ 详情页有「**播放全书**」⇒ 一键整队入队（连播）；
@@ -55,17 +55,17 @@ test.describe.serial('T101「有声页 = 专辑页同款封面网格 + 播放模
     await mock?.close()
   })
 
-  test('① 有声页 = **封面卡片网格**（专辑页同款 `.fnm-card`）+ 卡片**真的**有封面', async () => {
+  test('① 有声页 = **封面卡片网格**（专辑页同款 `.sanlos-card`）+ 卡片**真的**有封面', async () => {
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
 
-    // ⭐ 列表是**卡片网格**（`.fnm-card`），不是纯文字长列表。
-    const cards = fixture.window.locator('.fnm-audiobooks__list .fnm-card')
+    // ⭐ 列表是**卡片网格**（`.sanlos-card`），不是纯文字长列表。
+    const cards = fixture.window.locator('.sanlos-audiobooks__list .sanlos-card')
     await expect(cards).toHaveCount(1)
-    await expect(cards.first().locator('.fnm-audiobooks__title')).toHaveText('示例有声作品')
+    await expect(cards.first().locator('.sanlos-audiobooks__title')).toHaveText('示例有声作品')
 
     // ⭐ 真的是**网格**（不是竖着排的列表）。
     const display = await fixture.window
-      .locator('.fnm-audiobooks__list')
+      .locator('.sanlos-audiobooks__list')
       .evaluate((el) => getComputedStyle(el).display)
     expect(display).toBe('grid')
 
@@ -73,7 +73,7 @@ test.describe.serial('T101「有声页 = 专辑页同款封面网格 + 播放模
     // ⚠️ **T102**：显示统一为「**专辑自己的**封面」⇒ 这里从「曲目的封面」改成了「专辑的封面」
     //    （**前提被 T102 推翻**：曲目的封面与专辑的封面是**两个不同的 id** ⇒ 用曲目的封面
     //    ⇒ 同一张卡片在「主列表」与「秒搜结果」里会显示**两张不同的图**）。
-    const img = cards.first().locator('img.fnm-cover__image')
+    const img = cards.first().locator('img.sanlos-cover__image')
     await expect(img).toHaveCount(1)
     await expect(img).toHaveAttribute('src', new RegExp(`coverId=${ALBUM_COVER}`))
     // ⚠️ **不是**曲目的那个封面 id（这正是 T102 要消灭的分歧）。
@@ -84,9 +84,9 @@ test.describe.serial('T101「有声页 = 专辑页同款封面网格 + 播放模
   })
 
   test('② 卡片**不再**背结构信号长句（那行搬去了详情页 ⇒ 卡片才干净）', async () => {
-    const card = fixture.window.locator('.fnm-audiobooks__item').first()
-    // ⚠️ 旧版卡片上有一整句「判定依据」（`.fnm-audiobooks__reasons`）⇒ 现在**不该**再有。
-    await expect(card.locator('.fnm-audiobooks__reasons')).toHaveCount(0)
+    const card = fixture.window.locator('.sanlos-audiobooks__item').first()
+    // ⚠️ 旧版卡片上有一整句「判定依据」（`.sanlos-audiobooks__reasons`）⇒ 现在**不该**再有。
+    await expect(card.locator('.sanlos-audiobooks__reasons')).toHaveCount(0)
     await expect(card).not.toContainText('单集均长 ≥ 8 分钟')
   })
 
@@ -94,12 +94,12 @@ test.describe.serial('T101「有声页 = 专辑页同款封面网格 + 播放模
     await fixture.window.getByPlaceholder('输入作品名，例如：牧神记').fill('示例有声作品')
     await fixture.window.getByRole('button', { name: '搜作品' }).click()
 
-    const results = fixture.window.locator('.fnm-audiobooks__result')
+    const results = fixture.window.locator('.sanlos-audiobooks__result')
     await expect(results).toHaveCount(1)
-    await expect(results.first().locator('.fnm-audiobooks__title')).toHaveText('示例有声作品')
+    await expect(results.first().locator('.sanlos-audiobooks__title')).toHaveText('示例有声作品')
 
     // ⭐ 秒搜路径的封面来自 `/search/album` **自带**的专辑封面。
-    const img = results.first().locator('img.fnm-cover__image')
+    const img = results.first().locator('img.sanlos-cover__image')
     await expect(img).toHaveCount(1)
     await expect(img).toHaveAttribute('src', new RegExp(`coverId=${ALBUM_COVER}`))
   })
@@ -111,16 +111,16 @@ test.describe.serial('T101「有声页 = 专辑页同款封面网格 + 播放模
 
     // ① 主列表（**扫描**路径）的封面。
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
-    const listCard = fixture.window.locator('.fnm-audiobooks__list .fnm-card').first()
+    const listCard = fixture.window.locator('.sanlos-audiobooks__list .sanlos-card').first()
     await expect(listCard).toHaveCount(1)
-    const listSrc = await listCard.locator('img.fnm-cover__image').getAttribute('src')
+    const listSrc = await listCard.locator('img.sanlos-cover__image').getAttribute('src')
 
     // ② 秒搜（**搜索**路径）的封面。
     await fixture.window.getByPlaceholder('输入作品名，例如：牧神记').fill('示例有声作品')
     await fixture.window.getByRole('button', { name: '搜作品' }).click()
-    const resultCard = fixture.window.locator('.fnm-audiobooks__result').first()
+    const resultCard = fixture.window.locator('.sanlos-audiobooks__result').first()
     await expect(resultCard).toHaveCount(1)
-    const resultSrc = await resultCard.locator('img.fnm-cover__image').getAttribute('src')
+    const resultSrc = await resultCard.locator('img.sanlos-cover__image').getAttribute('src')
 
     // ⭐ **逐字相同**（不是「看起来像同一张」⇒ 是同一个 id）。
     expect(listSrc).toBe(resultSrc)
@@ -130,13 +130,13 @@ test.describe.serial('T101「有声页 = 专辑页同款封面网格 + 播放模
 
   test('④ 详情页有「**播放全书**」⇒ 一键整队入队；全屏页默认落在「**队列**」', async () => {
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
-    await fixture.window.locator('.fnm-audiobooks__title').first().click()
+    await fixture.window.locator('.sanlos-audiobooks__title').first().click()
 
     // 详情页确实按集序排了（说明整队已经拉下来了）。
-    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
+    await expect(fixture.window.locator('.sanlos-detail__audiobook-note')).toHaveText('已按集序排列')
 
     // ⭐ 结构信号在**详情页**里逐条给出来（信息一点没丢）。
-    const reasons = fixture.window.locator('.fnm-detail__audiobook-reasons')
+    const reasons = fixture.window.locator('.sanlos-detail__audiobook-reasons')
     await expect(reasons).toContainText('单集均长 ≥ 8 分钟')
     await expect(reasons).toContainText('集数 ≥ 8')
 
@@ -155,9 +155,9 @@ test.describe.serial('T101「有声页 = 专辑页同款封面网格 + 播放模
       'true',
     )
     // ⭐ 队列 = **整本书**（12 集）⇒ 播完一集自动下一集（连播）。
-    await expect(page.locator('.fnm-fullplayer__queue-item')).toHaveCount(12)
+    await expect(page.locator('.sanlos-fullplayer__queue-item')).toHaveCount(12)
     // ⭐ 正在播的是**第 1 集**（不是随便哪一集）。
-    await expect(page.locator('.fnm-fullplayer__title')).toHaveText('01- 第1集')
+    await expect(page.locator('.sanlos-fullplayer__title')).toHaveText('01- 第1集')
     // 队列里**没有**「正在加载歌词…」这种卡住的状态。
     await expect(page).not.toContainText('正在加载歌词')
 
@@ -226,20 +226,20 @@ test.describe.serial('T101「旧落盘补拉封面」', () => {
   test('旧落盘没有封面 ⇒ 进页面**补拉一次** ⇒ 卡片出现封面（且**不重扫**）', async () => {
     // 预置一份**没有封面**的旧落盘。
     await fixture.window.evaluate((state) => {
-      window.localStorage.setItem('fnmusic-audiobook-state', JSON.stringify(state))
+      window.localStorage.setItem('sanlos-audiobook-state', JSON.stringify(state))
     }, OLD_PERSISTED_STATE)
 
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
 
-    const card = fixture.window.locator('.fnm-audiobooks__item').first()
+    const card = fixture.window.locator('.sanlos-audiobooks__item').first()
     await expect(card).toHaveCount(1)
     // ⭐ 补拉到了 ⇒ 卡片出现**专辑封面**（`/album/detail` 自带的那个）。
-    const img = card.locator('img.fnm-cover__image')
+    const img = card.locator('img.sanlos-cover__image')
     await expect(img).toHaveCount(1)
     await expect(img).toHaveAttribute('src', new RegExp(`coverId=${ALBUM_COVER}`))
     // ⚠️ **T102**：旧落盘里那个**曲目**封面**不该**被用上（否则两处显示不同的图）。
     await expect(img).not.toHaveAttribute('src', new RegExp(`coverId=${TRACK_COVER}`))
     // ⚠️ **不重扫**（旧落盘还在 ⇒ 不用再花 52 秒）。
-    await expect(fixture.window.locator('.fnm-page__status')).toContainText('上次扫描')
+    await expect(fixture.window.locator('.sanlos-page__status')).toContainText('上次扫描')
   })
 })

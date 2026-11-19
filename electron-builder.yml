@@ -9,7 +9,7 @@
 #
 # 版本锁定：见 `scripts/pack.cjs`（锁 electron 版本 + 复用本地二进制，离线可打包）。
 
-appId: com.fnmusic.desktop
+appId: com.sanlos.music
 productName: Sanlos Music
 # ⚠️ **版权信息与「设置 → 关于」里的软件信息同源**（`shared/appInfo.ts`）。
 copyright: Copyright © 2026 广西闪链时空网络科技有限公司
@@ -113,13 +113,13 @@ portable:
 #    才是客户端的单一真相源（存 `prefs.json` 的 `update.baseUrl`）——
 #    换服务器时**不该重新打包**。
 #    下面这个占位符只是让 electron-builder 自己的工具有个默认值；
-#    换成你自己的地址即可（形如 `https://updates.example.com/fnmusic`）。
+#    换成你自己的地址即可（形如 `https://updates.example.com/sanlos`）。
 #
 # ⚠️ 清单是**本项目自定义的 JSON**（`latest.json`），不是 electron-builder 的
 #    `latest.yml` —— 理由见 `scripts/publish-manifest.mjs` 的注释（零新依赖）。
 publish:
   - provider: generic
-    url: https://updates.example.com/fnmusic
+    url: https://updates.example.com/sanlos
 
 # ⚠️ **代码签名**：本项目**默认不签**（`win.sign` 留空）⇒
 #    产物未签名 → Windows SmartScreen 会提示「未知发布者」。
@@ -129,7 +129,7 @@ publish:
 #      $env:WIN_CSC_KEY_PASSWORD='<证书口令>'
 #    没设就**自动跳过签名**（不报错）⇒ 证书到手时**不必改任何代码**。
 #
-# ⚠️ **打包后有断言**（T86，`scripts/pack.cjs` → `tools/fn-check-signature.mjs`）：
+# ⚠️ **打包后有断言**（T86，`scripts/pack.cjs` → `tools/sanlos-check-signature.mjs`）：
 #    配了证书却没签上 ⇒ **打包直接失败**（electron-builder 本身可能只警告）。
 #    没配证书 ⇒ 打印一行「产物未签名（预期行为）」，**不**失败。
 #

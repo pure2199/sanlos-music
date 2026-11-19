@@ -482,9 +482,9 @@ export interface LocalLibraryItem {
 // ---------------------------------------------------------------------------
 
 /**
- * `window.fnPlayer` 桥接口（渲染进程侧的完整契约）。
+ * `window.sanlosPlayer` 桥接口（渲染进程侧的完整契约）。
  *
- * 与 `window.fn`（认证桥）**并列**、互不重叠：本接口里没有任何一个方法能拿到凭证。
+ * 与 `window.sanlosAuth`（认证桥）**并列**、互不重叠：本接口里没有任何一个方法能拿到凭证。
  */
 export interface PlayerBridge {
   /**

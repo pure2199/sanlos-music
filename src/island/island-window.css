@@ -34,7 +34,7 @@ body {
  * 胶囊（词岛本体）
  * -------------------------------------------------------------------------- */
 
-.fnm-island {
+.sanlos-island {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -70,7 +70,7 @@ body {
  *    词岛是**点击穿透**的（`setIgnoreMouseEvents`），状态变化靠主进程轮询
  *    指针位置通知 → 淡出不会影响那个机制。
  */
-.fnm-island--pointer-inside {
+.sanlos-island--pointer-inside {
   opacity: 0;
   transform: scale(0.96);
 }
@@ -78,7 +78,7 @@ body {
 /*
  * ⚠️ T48：**当前词的整词发光规则已删除**。
  *
- * 词岛现在走**卡拉OK 渐进填色**（`.fnm-lyricview__word--karaoke`，
+ * 词岛现在走**卡拉OK 渐进填色**（`.sanlos-lyricview__word--karaoke`，
  * 见 `src/ui/lyrics/lyric-view.css`）：当前词**不再**整词跳变成强调色，
  * 而是按**词内连续比例**从左到右渐进染色 → 词与词的边界不再「闪一下」。
  *
@@ -94,7 +94,7 @@ body {
  * 左侧：曲目信息
  * -------------------------------------------------------------------------- */
 
-.fnm-island__meta {
+.sanlos-island__meta {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -105,7 +105,7 @@ body {
   min-width: 0;
 }
 
-.fnm-island__title {
+.sanlos-island__title {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
@@ -114,7 +114,7 @@ body {
   white-space: nowrap;
 }
 
-.fnm-island__artist {
+.sanlos-island__artist {
   font-size: 11px;
   color: var(--text-secondary);
   overflow: hidden;
@@ -126,7 +126,7 @@ body {
  * 右侧：歌词
  * -------------------------------------------------------------------------- */
 
-.fnm-island__lyrics {
+.sanlos-island__lyrics {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -156,7 +156,7 @@ body {
  * ⚠️ **T53：长歌词（>14 字）折成两行时，第二行原本会被裁掉**。
  *
  * 根因（真机实测，22 字长句）：
- * - `.fnm-lyricview__line--active` 是**定高 44px**（`height: 44px`），
+ * - `.sanlos-lyricview__line--active` 是**定高 44px**（`height: 44px`），
  *   而 `white-space: pre-wrap` 允许换行 → 长句折 2 行 = **88px 内容溢出定高盒**；
  * - 歌词视口是 `overflow: hidden` → 溢出部分**被裁掉**；
  * - 单行模式的滚动定位又按**44px 行盒**居中 → 越往歌后面裁得越狠。
@@ -168,7 +168,7 @@ body {
  *   → 折 2 行 = **64px ≤ 歌词带 74px** → **两行都完整可见**；
  *   → 胶囊高度**不变**（仍是 96px）。
  */
-.fnm-island__lyrics .fnm-lyricview {
+.sanlos-island__lyrics .sanlos-lyricview {
   overflow: hidden;
   /* 当前行按自己的高度居中（不再靠 `LyricView` 的滚动定位）。 */
   display: flex;
@@ -176,7 +176,7 @@ body {
 }
 
 /* 画布不再撑到「整份歌词的总高」——词岛只渲染当前一行。 */
-.fnm-island__lyrics .fnm-lyricview__canvas {
+.sanlos-island__lyrics .sanlos-lyricview__canvas {
   height: auto;
   /* ⚠️ 超长句（3 行以上）裁掉多出来的部分，但**上面**的行要留着。 */
   max-height: 100%;
@@ -184,12 +184,12 @@ body {
 }
 
 /* 当前行不再绝对定位（否则它的 `top` 会把它顶到画布外面去）。 */
-.fnm-island__lyrics .fnm-lyricview--single .fnm-lyricview__line {
+.sanlos-island__lyrics .sanlos-lyricview--single .sanlos-lyricview__line {
   position: static;
 }
 
 /* 当前行**可以长高**，行高压到 32px → 折两行也塞得进 74px 的歌词带。 */
-.fnm-island__lyrics .fnm-lyricview--single .fnm-lyricview__line--active {
+.sanlos-island__lyrics .sanlos-lyricview--single .sanlos-lyricview__line--active {
   height: auto;
   line-height: 32px;
 }
@@ -206,7 +206,7 @@ body {
  *    而不是「贴着底边长出来」。
  */
 
-.fnm-island__spectrum {
+.sanlos-island__spectrum {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -216,7 +216,7 @@ body {
   flex: 0 0 auto;
 }
 
-.fnm-island__bar {
+.sanlos-island__bar {
   display: block;
   width: 3px;
   min-height: 2px;
@@ -242,7 +242,7 @@ body {
  *    （服务端尺寸见 `src/island/IslandCover.tsx` 的 `ISLAND_COVER_SIZE`）。
  */
 
-.fnm-island__cover {
+.sanlos-island__cover {
   display: block;
   width: 56px;
   height: 56px;
@@ -267,7 +267,7 @@ body {
  * ⚠️ 与 `src/components/Cards.tsx` 的 `CoverImage` 同一口径：
  *    **不渲染 `<img>`**，不留浏览器默认破图。
  */
-.fnm-island__cover--placeholder {
+.sanlos-island__cover--placeholder {
   display: flex;
   align-items: center;
   justify-content: center;

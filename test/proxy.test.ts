@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 
 import {
   buildUpstreamRequest,
-  registerFnmSchemePrivileges,
+  registerSanlosSchemePrivileges,
   registerProxy,
   type ProtocolLike,
 } from '../electron/proxy'
@@ -18,7 +18,7 @@ interface FakeProtocol {
   proto: ProtocolLike
   /** `registerSchemesAsPrivileged` 收到的全部注册项。 */
   schemes: Array<{ scheme: string; privileges: Record<string, boolean> }>
-  /** 模拟渲染进程发起一次 `fnm://` 请求。 */
+  /** 模拟渲染进程发起一次 `sanlos://` 请求。 */
   call: (request: Request) => Promise<Response>
 }
 
@@ -27,7 +27,7 @@ function fakeProtocol(): FakeProtocol {
   const schemes: FakeProtocol['schemes'] = []
   const proto: ProtocolLike = {
     handle(scheme: string, h: (request: Request) => Promise<Response> | Response) {
-      if (scheme === 'fnm') handler = h
+      if (scheme === 'sanlos') handler = h
     },
     registerSchemesAsPrivileged(list) {
       for (const item of list) {
@@ -108,7 +108,7 @@ async function readJson(res: Response): Promise<any> {
  * 构造一个**未经 URL 规范化**的请求对象。
  *
  * WHATWG 的 URL 解析器会在构造 `Request` 时把路径里的 `..` 规范化掉
- * （`fnm://srv/album/../user/list` → `fnm://srv/user/list`），
+ * （`sanlos://srv/album/../user/list` → `sanlos://srv/user/list`），
  * 所以护栏对「原始路径里带 `..`」的行为只能这样直接测。
  */
 function rawRequest(url: string, init: { method?: string; headers?: HeadersInit } = {}): Request {
@@ -201,12 +201,12 @@ describe('buildUpstreamRequest', () => {
 // scheme 特权注册
 // ---------------------------------------------------------------------------
 
-describe('registerFnmSchemePrivileges', () => {
-  it('按规格注册 fnm 的特权', () => {
+describe('registerSanlosSchemePrivileges', () => {
+  it('按规格注册 sanlos 的特权', () => {
     const fake = fakeProtocol()
-    registerFnmSchemePrivileges(fake.proto)
+    registerSanlosSchemePrivileges(fake.proto)
     expect(fake.schemes).toHaveLength(1)
-    expect(fake.schemes[0]?.scheme).toBe('fnm')
+    expect(fake.schemes[0]?.scheme).toBe('sanlos')
     expect(fake.schemes[0]?.privileges).toEqual({
       standard: true,
       secure: true,
@@ -222,11 +222,11 @@ describe('registerFnmSchemePrivileges', () => {
 // ---------------------------------------------------------------------------
 
 describe('registerProxy 的路径护栏', () => {
-  it('注册 fnm 协议并防御性地注册 scheme 特权', () => {
+  it('注册 sanlos 协议并防御性地注册 scheme 特权', () => {
     const fake = fakeProtocol()
     const { session } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
-    expect(fake.schemes.some((s) => s.scheme === 'fnm')).toBe(true)
+    expect(fake.schemes.some((s) => s.scheme === 'sanlos')).toBe(true)
   })
 
   it('host 不是 srv 时拒绝', async () => {
@@ -234,7 +234,7 @@ describe('registerProxy 的路径护栏', () => {
     const { session, request } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    const res = await fake.call(new Request('fnm://evil.example/album/list'))
+    const res = await fake.call(new Request('sanlos://evil.example/album/list'))
     expect(res.status).toBe(502)
     const json = await readJson(res)
     expect(json.code).toBe(-1)
@@ -247,7 +247,7 @@ describe('registerProxy 的路径护栏', () => {
     const { session, request } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    const res = await fake.call(rawRequest('fnm://srv/album/../user/password-login'))
+    const res = await fake.call(rawRequest('sanlos://srv/album/../user/password-login'))
     expect(res.status).toBe(502)
     expect((await readJson(res)).code).toBe(-1)
     expect(request).not.toHaveBeenCalled()
@@ -260,7 +260,7 @@ describe('registerProxy 的路径护栏', () => {
 
     // `new Request()` 会把路径里的 `..` 规范化掉（`/album/../user/list` → `/user/list`），
     // 因此渲染进程**无法**借 `..` 逃出 API 前缀：有效路径仍是一个普通的相对路径。
-    const res = await fake.call(new Request('fnm://srv/album/../user/password-login'))
+    const res = await fake.call(new Request('sanlos://srv/album/../user/password-login'))
     expect(res.status).toBe(200)
     expect(request.mock.calls[0]?.[0]).toBe('user/password-login')
   })
@@ -270,7 +270,7 @@ describe('registerProxy 的路径护栏', () => {
     const { session, request } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    const res = await fake.call(new Request('fnm://srv/album%2f..%2fuser/list'))
+    const res = await fake.call(new Request('sanlos://srv/album%2f..%2fuser/list'))
     expect(res.status).toBe(502)
     expect((await readJson(res)).code).toBe(-1)
     expect(request).not.toHaveBeenCalled()
@@ -282,8 +282,8 @@ describe('registerProxy 的路径护栏', () => {
     registerProxy(session, { protocol: fake.proto })
 
     // 原始路径（非 ASCII）与规范化后的路径（百分号编码）两种形态都要被拒绝。
-    expect((await fake.call(rawRequest('fnm://srv/album/列表'))).status).toBe(502)
-    expect((await fake.call(new Request('fnm://srv/album/列表'))).status).toBe(502)
+    expect((await fake.call(rawRequest('sanlos://srv/album/列表'))).status).toBe(502)
+    expect((await fake.call(new Request('sanlos://srv/album/列表'))).status).toBe(502)
     expect(request).not.toHaveBeenCalled()
   })
 
@@ -292,9 +292,9 @@ describe('registerProxy 的路径护栏', () => {
     const { session } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    expect((await fake.call(new Request('fnm://srv/album//list'))).status).toBe(502)
-    expect((await fake.call(new Request('fnm://srv/album\\list'))).status).toBe(502)
-    expect((await fake.call(new Request('fnm://srv/'))).status).toBe(502)
+    expect((await fake.call(new Request('sanlos://srv/album//list'))).status).toBe(502)
+    expect((await fake.call(new Request('sanlos://srv/album\\list'))).status).toBe(502)
+    expect((await fake.call(new Request('sanlos://srv/'))).status).toBe(502)
   })
 
   it('渲染进程无法指定上游主机：目标地址只来自会话基址', async () => {
@@ -302,7 +302,7 @@ describe('registerProxy 的路径护栏', () => {
     const { session, request } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    await fake.call(new Request('fnm://srv/album/list'))
+    await fake.call(new Request('sanlos://srv/album/list'))
     expect(request).toHaveBeenCalledTimes(1)
     expect(request.mock.calls[0]?.[0]).toBe('album/list')
   })
@@ -319,7 +319,7 @@ describe('registerProxy 的 JSON 路径', () => {
     request.mockResolvedValue({ status: 200, json: { code: 0, msg: 'ok', data: { total: 3 } } })
     registerProxy(session, { protocol: fake.proto })
 
-    const res = await fake.call(new Request('fnm://srv/album/list?page=1&size=50'))
+    const res = await fake.call(new Request('sanlos://srv/album/list?page=1&size=50'))
 
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('application/json; charset=utf-8')
@@ -338,7 +338,7 @@ describe('registerProxy 的 JSON 路径', () => {
     request.mockResolvedValue({ status: 404, json: { code: 404, msg: '不存在' } })
     registerProxy(session, { protocol: fake.proto })
 
-    const res = await fake.call(new Request('fnm://srv/album/detail'))
+    const res = await fake.call(new Request('sanlos://srv/album/detail'))
     expect(res.status).toBe(404)
     expect((await readJson(res)).msg).toBe('不存在')
   })
@@ -348,7 +348,7 @@ describe('registerProxy 的 JSON 路径', () => {
     const { session, request } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    const req = new Request('fnm://srv/playlist/create', {
+    const req = new Request('sanlos://srv/playlist/create', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: '我的歌单' }),
@@ -366,7 +366,7 @@ describe('registerProxy 的 JSON 路径', () => {
     const { session, request } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    const res = await fake.call(new Request('fnm://srv/track/album-detail/list?albumGUID=a1'))
+    const res = await fake.call(new Request('sanlos://srv/track/album-detail/list?albumGUID=a1'))
     expect(res.status).toBe(200)
     expect(request.mock.calls[0]?.[0]).toBe('track/album-detail/list')
   })
@@ -395,7 +395,7 @@ describe('registerProxy 的二进制路径', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const res = await fake.call(
-      new Request('fnm://srv/track/stream?guid=g1', { headers: { range: 'bytes=0-2' } }),
+      new Request('sanlos://srv/track/stream?guid=g1', { headers: { range: 'bytes=0-2' } }),
     )
 
     expect(res.status).toBe(206)
@@ -416,7 +416,7 @@ describe('registerProxy 的二进制路径', () => {
     const fetchMock = vi.fn(async () => streamResponse(new Uint8Array([1]), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     const sent = firstFetchCall(fetchMock)
     expect(sent.url).toBe('http://nas.local:5666/music/api/v1/track/stream?guid=g1')
@@ -433,7 +433,7 @@ describe('registerProxy 的二进制路径', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await fake.call(
-      new Request('fnm://srv/track/stream?guid=g1', {
+      new Request('sanlos://srv/track/stream?guid=g1', {
         headers: { cookie: 'music-token=RENDERER', authorization: 'Bearer RENDERER' },
       }),
     )
@@ -452,7 +452,7 @@ describe('registerProxy 的二进制路径', () => {
     const fetchMock = vi.fn(async () => upstream)
     vi.stubGlobal('fetch', fetchMock)
 
-    const res = await fake.call(new Request('fnm://srv/static/cover?coverId=c1&size=300'))
+    const res = await fake.call(new Request('sanlos://srv/static/cover?coverId=c1&size=300'))
 
     // 响应体就是上游那条流：没有 arrayBuffer() 式的整块缓冲。
     expect(res.body).toBe(upstream.body)
@@ -466,7 +466,7 @@ describe('registerProxy 的二进制路径', () => {
     const fetchMock = vi.fn(async () => streamResponse(new Uint8Array([1]), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const res = await fake.call(new Request('fnm://srv/custom/blob'))
+    const res = await fake.call(new Request('sanlos://srv/custom/blob'))
     expect(res.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -513,7 +513,7 @@ describe('registerProxy 的二进制路径', () => {
     })
 
     const res = await fake.call(
-      new Request('fnm://srv/download/track/transcode/file?downloadId=d1'),
+      new Request('sanlos://srv/download/track/transcode/file?downloadId=d1'),
     )
 
     expect(res.status).toBe(206)
@@ -555,7 +555,7 @@ describe('registerProxy 的二进制路径', () => {
       },
     })
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(res.status).toBe(206)
     expect(res.headers.get('content-type')).toBeNull()
@@ -579,7 +579,7 @@ describe('registerProxy 的二进制路径', () => {
       },
     })
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(res.status).toBe(206)
     expect(res.headers.get('content-range')).toBe('bytes 0-2/1024')
@@ -603,7 +603,7 @@ describe('registerProxy 的响应头处理', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async () => upstream))
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(res.headers.get('content-encoding')).toBeNull()
     expect(res.headers.get('access-control-allow-origin')).toBe('*')
@@ -614,7 +614,7 @@ describe('registerProxy 的响应头处理', () => {
     const { session } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    const res = await fake.call(new Request('fnm://srv/album/list'))
+    const res = await fake.call(new Request('sanlos://srv/album/list'))
     expect(res.headers.get('access-control-allow-origin')).toBe('*')
     expect(res.headers.get('content-encoding')).toBeNull()
   })
@@ -624,7 +624,7 @@ describe('registerProxy 的响应头处理', () => {
     const { session, request } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    const res = await fake.call(new Request('fnm://srv/playlist/create', { method: 'OPTIONS' }))
+    const res = await fake.call(new Request('sanlos://srv/playlist/create', { method: 'OPTIONS' }))
     expect(res.status).toBe(204)
     expect(res.headers.get('access-control-allow-origin')).toBe('*')
     expect(res.headers.get('access-control-allow-methods')).toContain('POST')
@@ -645,7 +645,7 @@ describe('registerProxy 的错误处理', () => {
       }),
     )
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(res.status).toBe(502)
     const text = await res.text()
@@ -664,7 +664,7 @@ describe('registerProxy 的错误处理', () => {
     request.mockRejectedValue(new Error('boom'))
     registerProxy(session, { protocol: fake.proto })
 
-    const res = await fake.call(new Request('fnm://srv/album/list'))
+    const res = await fake.call(new Request('sanlos://srv/album/list'))
 
     expect(res.status).toBe(502)
     const text = await res.text()
@@ -679,11 +679,11 @@ describe('registerProxy 的错误处理', () => {
     request.mockRejectedValue(new SessionStateError('NO_SESSION', '尚未连接服务器'))
     registerProxy(session, { protocol: fake.proto })
 
-    const noSession = await readJson(await fake.call(new Request('fnm://srv/album/list')))
+    const noSession = await readJson(await fake.call(new Request('sanlos://srv/album/list')))
     expect(noSession.code).toBe(-1)
 
     request.mockRejectedValue(new SessionStateError('NO_CREDENTIAL', '尚未登录'))
-    const noCredential = await readJson(await fake.call(new Request('fnm://srv/album/list')))
+    const noCredential = await readJson(await fake.call(new Request('sanlos://srv/album/list')))
     expect(noCredential.code).toBe(-1)
 
     // 两条提示必须能区分（UI 要给不同引导），但都不含凭证。
@@ -700,7 +700,7 @@ describe('registerProxy 的错误处理', () => {
     const fetchMock = vi.fn(async () => streamResponse(new Uint8Array([1]), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
     expect(res.status).toBe(502)
     expect((await readJson(res)).code).toBe(-1)
     expect(fetchMock).not.toHaveBeenCalled()
@@ -720,7 +720,7 @@ describe('registerProxy 的中继判定', () => {
     const fetchMock = vi.fn(async () => streamResponse(new Uint8Array([1]), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(firstFetchCall(fetchMock).headers.get('cookie')).toBe(
       'music-token=TK-SECRET-TOKEN; mode=relay',
@@ -735,7 +735,7 @@ describe('registerProxy 的中继判定', () => {
     const fetchMock = vi.fn(async () => streamResponse(new Uint8Array([1]), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(firstFetchCall(fetchMock).headers.get('cookie')).toBe(
       'music-token=TK-SECRET-TOKEN; mode=relay',
@@ -762,7 +762,7 @@ describe('registerProxy 的中继判定', () => {
     vi.stubGlobal('fetch', fetchMock)
     registerProxy(session, { protocol: fake.proto, isRelay: () => true })
 
-    const res = await fake.call(new Request('fnm://srv/album/list'))
+    const res = await fake.call(new Request('sanlos://srv/album/list'))
 
     expect(res.status).toBe(200)
     const init = fetchMock.mock.calls[0]![1] as RequestInit
@@ -793,7 +793,7 @@ describe('修复轮次 1 · I1：压缩响应的长度语义', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async () => upstream))
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     // 只删 content-encoding 会让渲染进程拿到「声明 24 字节、实际 100 字节」的响应
     // → Chromium ERR_CONTENT_LENGTH_MISMATCH / 截断。
@@ -813,7 +813,7 @@ describe('修复轮次 1 · I1：压缩响应的长度语义', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async () => upstream))
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(res.headers.get('content-length')).toBe('3')
     expect(res.headers.get('content-encoding')).toBeNull()
@@ -840,7 +840,7 @@ describe('修复轮次 1 · I2：流式路径的静默续期', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(relogin).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -861,7 +861,7 @@ describe('修复轮次 1 · I2：流式路径的静默续期', () => {
       .mockResolvedValueOnce(streamResponse(new Uint8Array([1]), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(relogin).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -877,7 +877,7 @@ describe('修复轮次 1 · I2：流式路径的静默续期', () => {
     const fetchMock = vi.fn(async () => new Response('unauthorized', { status: 401 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(res.status).toBe(502)
     const json = await readJson(res)
@@ -895,7 +895,7 @@ describe('修复轮次 1 · I2：流式路径的静默续期', () => {
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('unauthorized', { status: 401 })))
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(res.status).toBe(502)
     expect((await readJson(res)).code).toBe(-1)
@@ -909,7 +909,7 @@ describe('修复轮次 1 · I2：流式路径的静默续期', () => {
     const fetchMock = vi.fn(async () => new Response('unauthorized', { status: 401 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     expect(relogin).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -927,9 +927,9 @@ describe('修复轮次 1 · I3：%2e%2e 的真实行为', () => {
     const { session, request } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    // 实测：new Request('fnm://srv/album/%2e%2e/user/list').url → 'fnm://srv/user/list'
+    // 实测：new Request('sanlos://srv/album/%2e%2e/user/list').url → 'sanlos://srv/user/list'
     // （WHATWG 解析器把 %2e%2e 解码成 .. 并弹栈，Chromium 同规范）。
-    const res = await fake.call(new Request('fnm://srv/album/%2e%2e/user/list'))
+    const res = await fake.call(new Request('sanlos://srv/album/%2e%2e/user/list'))
 
     // 护栏看到的是**规范化后**的路径：它是一个普通相对路径，仍在 API 前缀内 → 不会逃逸。
     expect(res.status).toBe(200)
@@ -948,7 +948,7 @@ describe('修复轮次 1 · M2：查询参数表', () => {
     registerProxy(session, { protocol: fake.proto })
 
     await fake.call(
-      new Request('fnm://srv/track/list?constructor=a&toString=b&__proto__=c'),
+      new Request('sanlos://srv/track/list?constructor=a&toString=b&__proto__=c'),
     )
 
     const query = request.mock.calls[0]?.[1]?.query as Record<string, string>
@@ -963,7 +963,7 @@ describe('修复轮次 1 · M2：查询参数表', () => {
     const { session, request } = fakeSession()
     registerProxy(session, { protocol: fake.proto })
 
-    await fake.call(new Request('fnm://srv/track/list?tag=a&tag=b'))
+    await fake.call(new Request('sanlos://srv/track/list?tag=a&tag=b'))
 
     const query = request.mock.calls[0]?.[1]?.query as Record<string, string>
     expect(query['tag']).toBe('a')
@@ -985,7 +985,7 @@ describe('修复轮次 1 · M3：二进制路径的请求体', () => {
 
     const body = JSON.stringify({ trackGUID: 'g1' })
     const res = await fake.call(
-      new Request('fnm://srv/track/stream', {
+      new Request('sanlos://srv/track/stream', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
@@ -1009,7 +1009,7 @@ describe('修复轮次 1 · M3：二进制路径的请求体', () => {
 
     const body = JSON.stringify({ trackGUID: 'g1' })
     await fake.call(
-      new Request('fnm://srv/track/stream', {
+      new Request('sanlos://srv/track/stream', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
@@ -1035,7 +1035,7 @@ describe('修复轮次 1 · M3：二进制路径的请求体', () => {
     const fetchMock = vi.fn(async () => streamResponse(new Uint8Array([1]), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await fake.call(new Request('fnm://srv/track/stream?guid=g1'))
+    await fake.call(new Request('sanlos://srv/track/stream?guid=g1'))
 
     const sent = firstFetchCall(fetchMock)
     expect(sent.method).toBe('GET')
@@ -1053,7 +1053,7 @@ describe('修复轮次 1 · M4：拿不到 protocol 时抛错', () => {
     expect(() => registerProxy(session)).toThrow(/protocol/)
   })
 
-  it('registerFnmSchemePrivileges 在同样条件下抛错', () => {
-    expect(() => registerFnmSchemePrivileges()).toThrow(/protocol/)
+  it('registerSanlosSchemePrivileges 在同样条件下抛错', () => {
+    expect(() => registerSanlosSchemePrivileges()).toThrow(/protocol/)
   })
 })

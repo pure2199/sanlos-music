@@ -7,17 +7,17 @@
 // （审计报表 P0-2「store 未传端口」）。
 //
 // ---------------------------------------------------------------------------
-// 为什么走 `window.fnPlayer`
+// 为什么走 `window.sanlosPlayer`
 // ---------------------------------------------------------------------------
 // 偏好文件的**唯一真相源在主进程**（`prefs.json`）：
-// - 读：`window.fnPlayer.getPrefs()` → `AppPrefs.eq`；
-// - 写：`window.fnPlayer.setPrefs({ eq })` → 主进程白名单校验后原子落盘。
+// - 读：`window.sanlosPlayer.getPrefs()` → `AppPrefs.eq`；
+// - 写：`window.sanlosPlayer.setPrefs({ eq })` → 主进程白名单校验后原子落盘。
 //
 // ⚠️ 渲染进程**碰不到** `prefs.json` 本身，也不碰任何凭证——
 //    这个端口传的只有曲线参数。
 //
 // ⚠️ **没有桥就降级**：浏览器里直接打开渲染层、或单元测试（jsdom）里
-//    `window.fnPlayer` 不存在 → `load()` 返回 `null`、`save()` 静默 no-op。
+//    `window.sanlosPlayer` 不存在 → `load()` 返回 `null`、`save()` 静默 no-op。
 //    EQ 在**本次运行内**照常可用，只是不落盘（**不崩、不静默写盘**）。
 // ---------------------------------------------------------------------------
 
@@ -26,8 +26,8 @@ import { createEqPrefsPort, type EqPrefs, type EqPrefsPort } from './eq'
 
 /** 拿渲染进程里的播放器桥（没有就返回 `null`）。 */
 function getPlayerBridge(): PlayerBridge | null {
-  const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
-  return scope.fnPlayer ?? null
+  const scope = globalThis as unknown as { sanlosPlayer?: PlayerBridge }
+  return scope.sanlosPlayer ?? null
 }
 
 /**

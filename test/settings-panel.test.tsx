@@ -14,7 +14,7 @@ import type { AppPrefs, PlayerBridge } from '../shared/playerBridge'
 import { SettingsPanel } from '../src/components/SettingsPanel'
 import { useAppPrefsStore, DEFAULT_CLOSE_BEHAVIOR } from '../src/state/appPrefsStore'
 
-/** 装一个假的 `window.fnPlayer`。 */
+/** 装一个假的 `window.sanlosPlayer`。 */
 function installBridge(overrides: Partial<PlayerBridge> = {}): {
   setPrefs: ReturnType<typeof vi.fn>
 } {
@@ -31,7 +31,7 @@ function installBridge(overrides: Partial<PlayerBridge> = {}): {
     onCommand: vi.fn(() => () => {}),
     ...overrides,
   } as unknown as PlayerBridge
-  ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+  ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
   return { setPrefs }
 }
 
@@ -44,7 +44,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete (globalThis as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
 })
 
 describe('设置面板', () => {

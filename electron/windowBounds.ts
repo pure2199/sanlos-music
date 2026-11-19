@@ -45,7 +45,7 @@ export interface WindowBoundsOptions {
  * ⚠️ T40：为什么是 800 —— 全部来自本轮**实测**（真实 Electron + mock NAS，已登录态
  *    顶栏 10 颗按钮），不是拍脑袋：
  *    - Windows 上**外框比内容宽 16px**（外框 800 → 内容 784）；
- *    - 播放条 `.fnm-playerbar` 需要 **717px**（`scrollWidth` 恒为 717）→ 内容宽
+ *    - 播放条 `.sanlos-playerbar` 需要 **717px**（`scrollWidth` 恒为 717）→ 内容宽
  *      必须 ≥ 717，否则整页出横向滚动条。⚠️ 播放条本身是 T11 的老问题，
  *      **本轮不修它**（用户拍板）→ 只能让**窗口缩不到那儿去**；
  *    - 顶栏在内容宽 784 下**不横向溢出**（实测门槛：外框 600）。

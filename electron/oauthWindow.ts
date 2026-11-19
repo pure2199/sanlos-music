@@ -875,5 +875,5 @@ function recordReloginFailure(
     'NO_CREDENTIAL',
     `OAuth 静默续期失败：${reason}`,
   )
-  console.warn(`[fnmusic] OAuth 静默续期失败：${reason}`)
+  console.warn(`[sanlos] OAuth 静默续期失败：${reason}`)
 }

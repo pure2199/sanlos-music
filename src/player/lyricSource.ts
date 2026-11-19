@@ -493,12 +493,12 @@ function playerBridge(): {
   readEmbeddedLyric?: (id: string) => Promise<string>
 } | null {
   const scope = globalThis as unknown as {
-    fnPlayer?: {
+    sanlosPlayer?: {
       fetchExternalLyric?: (query: ExternalLyricQuery) => Promise<ExternalLyricResult>
       readEmbeddedLyric?: (id: string) => Promise<string>
     }
   }
-  return scope.fnPlayer ?? null
+  return scope.sanlosPlayer ?? null
 }
 
 /**

@@ -116,20 +116,20 @@ export function DiscoverPage({ onPlay }: DiscoverPageProps): ReactElement {
   const status = totalCount > 0 ? `共 ${totalCount} 条，你的曲库里有 ${matchedCount} 条` : undefined
 
   return (
-    <section className="fnm-page fnm-discover">
-      <header className="fnm-page__header">
-        <h1 className="fnm-page__title">发现</h1>
-        {status && <p className="fnm-page__status">{status}</p>}
+    <section className="sanlos-page sanlos-discover">
+      <header className="sanlos-page__header">
+        <h1 className="sanlos-page__title">发现</h1>
+        {status && <p className="sanlos-page__status">{status}</p>}
       </header>
 
-      <div className="fnm-discover__tabs" role="tablist" aria-label="发现页分类">
+      <div className="sanlos-discover__tabs" role="tablist" aria-label="发现页分类">
         <button
           type="button"
           role="tab"
-          id="fnm-discover-tab-chart"
+          id="sanlos-discover-tab-chart"
           aria-selected={tab === 'chart'}
-          aria-controls="fnm-discover-panel-chart"
-          className="fnm-discover__tab"
+          aria-controls="sanlos-discover-panel-chart"
+          className="sanlos-discover__tab"
           onClick={() => handleTab('chart')}
         >
           榜单
@@ -137,10 +137,10 @@ export function DiscoverPage({ onPlay }: DiscoverPageProps): ReactElement {
         <button
           type="button"
           role="tab"
-          id="fnm-discover-tab-recommend"
+          id="sanlos-discover-tab-recommend"
           aria-selected={tab === 'recommend'}
-          aria-controls="fnm-discover-panel-recommend"
-          className="fnm-discover__tab"
+          aria-controls="sanlos-discover-panel-recommend"
+          className="sanlos-discover__tab"
           onClick={() => handleTab('recommend')}
         >
           为你推荐
@@ -152,89 +152,89 @@ export function DiscoverPage({ onPlay }: DiscoverPageProps): ReactElement {
        *    但「在不在你的曲库里」**匹配不了** ⇒ 如实说明，不假装。
        */}
       {!connected && (
-        <p className="fnm-discover__hint" role="status">
+        <p className="sanlos-discover__hint" role="status">
           还没连接 NAS：榜单能看，但暂时没法匹配你的曲库，也没有推荐。
         </p>
       )}
 
       {tab === 'chart' ? (
         <div
-          className="fnm-discover__panel"
-          id="fnm-discover-panel-chart"
+          className="sanlos-discover__panel"
+          id="sanlos-discover-panel-chart"
           role="tabpanel"
-          aria-labelledby="fnm-discover-tab-chart"
+          aria-labelledby="sanlos-discover-tab-chart"
         >
           {chartsError && (
-            <p className="fnm-discover__error" role="alert">
+            <p className="sanlos-discover__error" role="alert">
               {`榜单加载失败：${chartsError}`}
             </p>
           )}
-          {chartsNotice && <p className="fnm-discover__notice">{chartsNotice}</p>}
+          {chartsNotice && <p className="sanlos-discover__notice">{chartsNotice}</p>}
           {matchError && (
-            <p className="fnm-discover__error" role="alert">
+            <p className="sanlos-discover__error" role="alert">
               {`${matchError}`}
             </p>
           )}
           {chartsError && (
-            <button type="button" className="fnm-discover__retry" onClick={() => void loadCharts()}>
+            <button type="button" className="sanlos-discover__retry" onClick={() => void loadCharts()}>
               重试
             </button>
           )}
 
           {chartsLoading && (
-            <p className="fnm-page__loading" role="status">
+            <p className="sanlos-page__loading" role="status">
               正在加载榜单…
             </p>
           )}
 
           {!chartsLoading && !chartsError && !matchError && boards.length === 0 && (
-            <p className="fnm-discover__empty">暂时没有可显示的榜单。</p>
+            <p className="sanlos-discover__empty">暂时没有可显示的榜单。</p>
           )}
 
           {boards.length > 0 && (
-            <div className="fnm-discover__boards">
-              <nav className="fnm-discover__boardlist" aria-label="榜单列表">
+            <div className="sanlos-discover__boards">
+              <nav className="sanlos-discover__boardlist" aria-label="榜单列表">
                 {boards.map((board) => (
                   <button
                     key={board.id}
                     type="button"
-                    className="fnm-discover__board"
+                    className="sanlos-discover__board"
                     aria-current={board.id === activeBoard?.id}
                     onClick={() => setActiveBoardId(board.id)}
                   >
-                    <span className="fnm-discover__boardname">{board.name}</span>
-                    <span className="fnm-discover__boardcount">
+                    <span className="sanlos-discover__boardname">{board.name}</span>
+                    <span className="sanlos-discover__boardcount">
                       {`${board.matched}/${board.total}`}
                     </span>
                   </button>
                 ))}
               </nav>
 
-              <div className="fnm-discover__entries">
+              <div className="sanlos-discover__entries">
                 {activeBoard && (
-                  <p className="fnm-discover__hitrate">{hitRateText(activeBoard)}</p>
+                  <p className="sanlos-discover__hitrate">{hitRateText(activeBoard)}</p>
                 )}
                 {(activeBoard?.entries ?? []).map((entry) => (
                   <div
                     key={`${entry.rank}-${entry.title}`}
-                    className="fnm-discover__entry"
+                    className="sanlos-discover__entry"
                     data-in-library={entry.inLibrary ? 'true' : 'false'}
                   >
-                    <span className="fnm-discover__rank">{entry.rank}</span>
-                    <span className="fnm-discover__entrytitle">{entry.title}</span>
-                    <span className="fnm-discover__artist">{entry.artist}</span>
-                    <span className="fnm-discover__duration">{formatDuration(entry.duration)}</span>
+                    <span className="sanlos-discover__rank">{entry.rank}</span>
+                    <span className="sanlos-discover__entrytitle">{entry.title}</span>
+                    <span className="sanlos-discover__artist">{entry.artist}</span>
+                    <span className="sanlos-discover__duration">{formatDuration(entry.duration)}</span>
                     {entry.song ? (
                       <button
                         type="button"
-                        className="fnm-discover__play"
+                        className="sanlos-discover__play"
                         aria-label={`播放 ${entry.title}`}
                         onClick={() => handleChartPlay(entry.song as Song)}
                       >
                         播放
                       </button>
                     ) : (
-                      <span className="fnm-discover__badge">不在曲库</span>
+                      <span className="sanlos-discover__badge">不在曲库</span>
                     )}
                   </div>
                 ))}
@@ -244,49 +244,49 @@ export function DiscoverPage({ onPlay }: DiscoverPageProps): ReactElement {
         </div>
       ) : (
         <div
-          className="fnm-discover__panel"
-          id="fnm-discover-panel-recommend"
+          className="sanlos-discover__panel"
+          id="sanlos-discover-panel-recommend"
           role="tabpanel"
-          aria-labelledby="fnm-discover-tab-recommend"
+          aria-labelledby="sanlos-discover-tab-recommend"
         >
           {recommendError && (
-            <p className="fnm-discover__error" role="alert">
+            <p className="sanlos-discover__error" role="alert">
               {`推荐加载失败：${recommendError}`}
             </p>
           )}
           {recommendError && (
             <button
               type="button"
-              className="fnm-discover__retry"
+              className="sanlos-discover__retry"
               onClick={() => void loadRecommendations()}
             >
               重试
             </button>
           )}
           {recommendPartial && (
-            <p className="fnm-discover__notice">部分曲目没查到，结果可能不完整。</p>
+            <p className="sanlos-discover__notice">部分曲目没查到，结果可能不完整。</p>
           )}
           {recommendLoading && (
-            <p className="fnm-page__loading" role="status">
+            <p className="sanlos-page__loading" role="status">
               正在为你挑选…
             </p>
           )}
           {!recommendLoading && !recommendError && blocks.length === 0 && (
-            <p className="fnm-discover__empty">
+            <p className="sanlos-discover__empty">
               还没有可推荐的曲目（收藏几首、听几首就会出现）。
             </p>
           )}
           {blocks.map((block) => (
-            <section key={block.id} className="fnm-discover__block">
-              <h2 className="fnm-discover__blocktitle">{block.title}</h2>
+            <section key={block.id} className="sanlos-discover__block">
+              <h2 className="sanlos-discover__blocktitle">{block.title}</h2>
               {block.items.map((item) => (
-                <div key={item.song.id} className="fnm-discover__entry">
-                  <span className="fnm-discover__entrytitle">{item.song.title}</span>
-                  <span className="fnm-discover__artist">{item.song.artist}</span>
-                  <span className="fnm-discover__reason">{item.reason}</span>
+                <div key={item.song.id} className="sanlos-discover__entry">
+                  <span className="sanlos-discover__entrytitle">{item.song.title}</span>
+                  <span className="sanlos-discover__artist">{item.song.artist}</span>
+                  <span className="sanlos-discover__reason">{item.reason}</span>
                   <button
                     type="button"
-                    className="fnm-discover__play"
+                    className="sanlos-discover__play"
                     aria-label={`播放 ${item.song.title}`}
                     onClick={() =>
                       onPlay(

@@ -25,7 +25,7 @@
 // 1. **已确认态**（`libraryStore.favoriteStates`）：服务端收藏列表载入后登记，
 //    写回成功后更新 —— **单一真相源**；
 // 2. **兜底值**（`song.favorite`）：服务端 `isFavorite` 字段
-//    —— **真机已实测该字段存在且可信**（`tools/fn-writeback-probe.mjs`）；
+//    —— **真机已实测该字段存在且可信**（`tools/sanlos-writeback-probe.mjs`）；
 // 3. **乐观态**（写回器的 `target`）：点击后立刻生效、失败回滚到已确认态。
 //
 // 合成顺序：**乐观态 > 已确认态 > 兜底值**（见 `resolveFavoriteState`）。

@@ -66,49 +66,49 @@ function fakeBridge(): FakeBridge {
 }
 
 afterEach(() => {
-  delete (globalThis as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   vi.restoreAllMocks()
 })
 
 describe('T46 词岛：鼠标进入隐藏', () => {
   it('指针进入 → 根元素进入「淡出」态', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     render(<IslandApp />)
-    const root = screen.getByTestId('fnm-island')
-    expect(root.className).not.toMatch(/fnm-island--pointer-inside/)
+    const root = screen.getByTestId('sanlos-island')
+    expect(root.className).not.toMatch(/sanlos-island--pointer-inside/)
 
     act(() => {
       fake.emitPointer(true)
     })
 
-    expect(root.className).toMatch(/fnm-island--pointer-inside/)
+    expect(root.className).toMatch(/sanlos-island--pointer-inside/)
     expect(root.getAttribute('data-pointer-inside')).toBe('true')
   })
 
   it('指针离开 → 恢复显示', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     render(<IslandApp />)
-    const root = screen.getByTestId('fnm-island')
+    const root = screen.getByTestId('sanlos-island')
 
     act(() => {
       fake.emitPointer(true)
     })
-    expect(root.className).toMatch(/fnm-island--pointer-inside/)
+    expect(root.className).toMatch(/sanlos-island--pointer-inside/)
 
     act(() => {
       fake.emitPointer(false)
     })
-    expect(root.className).not.toMatch(/fnm-island--pointer-inside/)
+    expect(root.className).not.toMatch(/sanlos-island--pointer-inside/)
     expect(root.getAttribute('data-pointer-inside')).toBe('false')
   })
 
   it('没有桥（浏览器预览 / 单测）→ 不崩，也不进入淡出态', () => {
     render(<IslandApp />)
-    const root = screen.getByTestId('fnm-island')
+    const root = screen.getByTestId('sanlos-island')
     expect(root.getAttribute('data-pointer-inside')).toBe('false')
   })
 
@@ -149,26 +149,26 @@ const THREE_LINES: LyricOverlayLine[] = [
   { time: 20, text: '丙行丙', translation: '', words: [{ text: '丙行丙', start: 20, end: 30 }] },
 ]
 
-/** 词岛里渲染出来的歌词行（`.fnm-lyricview` 里的 `[data-index]`）。 */
+/** 词岛里渲染出来的歌词行（`.sanlos-lyricview` 里的 `[data-index]`）。 */
 function islandLyricLines(container: HTMLElement): Element[] {
-  return Array.from(container.querySelectorAll('.fnm-lyricview__line'))
+  return Array.from(container.querySelectorAll('.sanlos-lyricview__line'))
 }
 
 /**
  * 当前行的文本（**只取底层文本**）。
  *
- * ⚠️ 逐字着色层（`.fnm-lyricview__overlay`，`aria-hidden`）会把同一行文字**再渲染一遍**
+ * ⚠️ 逐字着色层（`.sanlos-lyricview__overlay`，`aria-hidden`）会把同一行文字**再渲染一遍**
  *    → `getByText` 会**同时命中两处** → 「found multiple elements」。
  *    → 这里改成直接读**行节点**的 `data-index` 与 `textContent`（断言更精确）。
  */
 function currentLine(container: HTMLElement): Element | null {
-  return container.querySelector('.fnm-lyricview__line')
+  return container.querySelector('.sanlos-lyricview__line')
 }
 
 describe('T46 补丁：词岛歌词只显示当前一行', () => {
   it('只渲染**一行**歌词（不是双行、也不是窗口裁剪的一堆行）', async () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
     act(() => {
@@ -190,7 +190,7 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
 
   it('那一行就是**播放位置所在行**', async () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
     act(() => {
@@ -214,7 +214,7 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
 
   it('当前行仍然**逐字推进**，并带 T48 的**卡拉OK 填色**', async () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
     act(() => {
@@ -230,19 +230,19 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
     //    位置还没传播到 15 秒时，**上一行**的「甲行甲」就已经带着 `--karaoke`
     //    （词内比例 0%）了 → 只等「有一个 `--karaoke`」会**抢跑**。
     await waitFor(() => {
-      expect(container.querySelector('.fnm-lyricview__word--karaoke')?.textContent).toBe('乙行乙')
+      expect(container.querySelector('.sanlos-lyricview__word--karaoke')?.textContent).toBe('乙行乙')
     })
-    const karaoke = container.querySelector('.fnm-lyricview__word--karaoke')
+    const karaoke = container.querySelector('.sanlos-lyricview__word--karaoke')
     expect(karaoke?.textContent).toBe('乙行乙')
     // ⚠️ 当前词**不许**再整词上色：整词已是强调色 → 词内填色就看不见了。
-    expect(karaoke?.className).not.toContain('fnm-lyricview__word--sung')
+    expect(karaoke?.className).not.toContain('sanlos-lyricview__word--sung')
     // ⚠️ 词「乙行乙」占 10~20s → t=15 → 词内比例正好 **50%**。
     expect(karaoke?.getAttribute('data-karaoke-progress')).toBe('50.0')
   })
 
   it('**伪逐字**（只有行级时间戳）⇒ **不假装逐字**：词岛也没有卡拉OK 填色（T81）', async () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
     act(() => {
@@ -260,14 +260,14 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
     })
     // ⚠️ 鉴别力：**零**词级元素 ⇒ 词岛也不会假装逐字（假扫光不可能出现）。
     expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
-    expect(container.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__word--karaoke')).toBeNull()
     // ⚠️ 当前行**整行**是强调色（不假装逐字）。
-    expect(currentLine(container)?.className).toContain('fnm-lyricview__line--whole')
+    expect(currentLine(container)?.className).toContain('sanlos-lyricview__line--whole')
   })
 
   it('词岛**不再**用整词发光（T46 的旧机制，已被卡拉OK 取代）', async () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
     act(() => {
@@ -283,12 +283,12 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
       expect(currentLine(container)?.getAttribute('data-index')).toBe('1')
     })
     // ⚠️ **整词发光与填色不能共存**：光晕会把填色的边界糊掉 → 看到的还是一条模糊亮边。
-    expect(container.querySelector('.fnm-lyricview__word--active')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__word--active')).toBeNull()
   })
 
   it('播放位置跨行 → 显示的行跟着换（仍只一行）', async () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
     act(() => {
@@ -328,9 +328,9 @@ describe('T46 补丁：词岛歌词只显示当前一行', () => {
 //    右端显示**原序**（低频 → 高频）。
 // ---------------------------------------------------------------------------
 
-/** 词岛里的某一侧波形柱（`.fnm-island__spectrum--<side>` 里的 `.fnm-island__bar`）。 */
+/** 词岛里的某一侧波形柱（`.sanlos-island__spectrum--<side>` 里的 `.sanlos-island__bar`）。 */
 function barsOf(container: HTMLElement, side: 'left' | 'right'): Element[] {
-  return Array.from(container.querySelectorAll(`.fnm-island__spectrum--${side} .fnm-island__bar`))
+  return Array.from(container.querySelectorAll(`.sanlos-island__spectrum--${side} .sanlos-island__bar`))
 }
 
 /** 柱子的高度（百分比，去掉 % 号）。 */
@@ -341,19 +341,19 @@ function heightsOf(container: HTMLElement, side: 'left' | 'right'): number[] {
 describe('T47 词岛：两端的频谱波形柱（T76：左端换成封面，只剩右端）', () => {
   it('**右端**仍是 8 根柱子；**左端**不再是频谱柱（换成专辑封面）', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
 
     expect(barsOf(container, 'right')).toHaveLength(8)
     // ⚠️ T76：左端**没有**频谱柱了（它的位置现在是封面）。
     expect(barsOf(container, 'left')).toHaveLength(0)
-    expect(container.querySelector('.fnm-island__spectrum--left')).toBeNull()
+    expect(container.querySelector('.sanlos-island__spectrum--left')).toBeNull()
   })
 
   it('还没收到频谱 → **右端**柱子是最小高度（**留一个小点**，不是空白）', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
 
@@ -362,7 +362,7 @@ describe('T47 词岛：两端的频谱波形柱（T76：左端换成封面，只
 
   it('收到频谱 → **右端**柱子高度跟着变（DOM 顺序 = **原序**：低频 → 高频）', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
     // 8 段，值各不相同 → 高度各不相同 → 顺序能被认出来。
@@ -380,7 +380,7 @@ describe('T47 词岛：两端的频谱波形柱（T76：左端换成封面，只
 
   it('左端**彻底不显示**频段（频谱柱只剩右端一组）', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
     const bins = [10, 20, 30, 40, 50, 60, 70, 80]
@@ -391,7 +391,7 @@ describe('T47 词岛：两端的频谱波形柱（T76：左端换成封面，只
 
     // ⚠️ **鉴别力**：左端一根柱都没有，且整个胶囊里**只有一组**频谱柱。
     //    若有人把左端柱子加回来（哪怕只有一根），这个断言**必红**。
-    expect(container.querySelectorAll('.fnm-island__spectrum')).toHaveLength(1)
+    expect(container.querySelectorAll('.sanlos-island__spectrum')).toHaveLength(1)
     expect(barsOf(container, 'left')).toHaveLength(0)
   })
 
@@ -408,6 +408,6 @@ describe('T47 词岛：两端的频谱波形柱（T76：左端换成封面，只
     const source = readFileSync(resolve(REPO_ROOT, 'src', 'lyric', 'main.tsx'), 'utf8')
     // ⚠️ 经典窗**不订阅** `onSpectrum` → 它拿不到频谱 → 显示内容一字不变。
     expect(source).not.toMatch(/onSpectrum/)
-    expect(source).not.toMatch(/fnm-island__spectrum/)
+    expect(source).not.toMatch(/sanlos-island__spectrum/)
   })
 })

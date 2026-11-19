@@ -6,8 +6,8 @@ import { defineConfig } from '@playwright/test'
 //
 // ⚠️ **为什么必须是 Playwright（Electron），而不是 Vitest + jsdom**：
 //    这个应用的核心链路**只在 Electron 主进程里存在**——
-//    `fnm://` 协议代理、主进程 IPC（`prefs:*` / `download:*` / `ffmpeg:*`）、
-//    `fnml://` 本地媒体协议、真实 `<audio>`、托盘、窗口、DPAPI 加密的会话。
+//    `sanlos://` 协议代理、主进程 IPC（`prefs:*` / `download:*` / `ffmpeg:*`）、
+//    `sanlos-media://` 本地媒体协议、真实 `<audio>`、托盘、窗口、DPAPI 加密的会话。
 //    jsdom 里这些**一个都没有**，在 jsdom 里「测通过」等于什么都没测。
 //
 // ⚠️ **一次只跑一个**（`workers: 1` + `fullyParallel: false`）：

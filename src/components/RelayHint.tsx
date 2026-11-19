@@ -27,7 +27,7 @@ export function RelayHint(): ReactElement | null {
   const hint = connection?.bandwidthHint?.trim() || RELAY_BANDWIDTH_HINT
 
   return (
-    <p className="fnm-relayhint" role="status">
+    <p className="sanlos-relayhint" role="status">
       {hint}
     </p>
   )

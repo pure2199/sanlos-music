@@ -1,7 +1,7 @@
 // 渲染进程的 API 客户端核心（**渲染进程里唯一一处出网代码**）。
 //
 // 安全边界（不可放宽）：
-// - 本模块发出的请求一律指向 `fnm://srv/...` 自定义协议，主进程的协议代理负责把它还原成
+// - 本模块发出的请求一律指向 `sanlos://srv/...` 自定义协议，主进程的协议代理负责把它还原成
 //   `<server>/music/api/v1/...` 并统一附加签名与身份凭据；
 // - 因此**渲染进程自己不带任何身份凭据**：本文件不会设置任何携带凭据的请求头，
 //   也没有任何读取凭据的入口。凭据只在主进程内存里，渲染进程永远拿不到。
@@ -33,10 +33,10 @@ import type {
 /**
  * 渲染进程的 API 基址。
  *
- * `fnm://srv/<path>` 由主进程的协议代理还原成 `<server>/music/api/v1/<path>`。
+ * `sanlos://srv/<path>` 由主进程的协议代理还原成 `<server>/music/api/v1/<path>`。
  * 这里**写死**，不做「可覆盖的基址」开关——测试用 fetch 包装器解决，不在生产代码里留后门。
  */
-const BASE = 'fnm://srv'
+const BASE = 'sanlos://srv'
 
 /**
  * 列表型接口的默认每页条数。
@@ -353,7 +353,7 @@ function mapAudioSpec(spec: RawAudioSpec | undefined): AudioSpec | undefined {
 /**
  * 调用服务端接口。
  *
- * 流程：`fnm://srv/<path>` → 主进程代理转发 → 解析 `{ code, msg, data }` 信封。
+ * 流程：`sanlos://srv/<path>` → 主进程代理转发 → 解析 `{ code, msg, data }` 信封。
  *
  * 错误语义：
  * - 业务错误（`code !== 0`）→ 抛 `ApiError(msg, code)`（消息含服务端 `msg`）；

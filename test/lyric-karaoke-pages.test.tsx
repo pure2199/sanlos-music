@@ -98,9 +98,9 @@ describe('T71：卡拉OK —— 所有歌词页面一致', () => {
       <LyricView lines={LINES} currentTime={1.5} mode="single" windowRadius={0} />,
     )
 
-    const karaoke = container.querySelector('.fnm-lyricview__word--karaoke')
+    const karaoke = container.querySelector('.sanlos-lyricview__word--karaoke')
     expect(karaoke?.textContent).toBe('乙')
-    expect(karaoke?.className).not.toContain('fnm-lyricview__word--sung')
+    expect(karaoke?.className).not.toContain('sanlos-lyricview__word--sung')
     // 乙 = 1~3s ⇒ t=1.5 ⇒ (1.5-1)/(3-1) = 25%
     expect(karaoke?.getAttribute('data-karaoke-progress')).toBe('25.0')
   })
@@ -114,9 +114,9 @@ describe('T71：卡拉OK —— 所有歌词页面一致', () => {
       />,
     )
 
-    const karaoke = container.querySelector('.fnm-lyricview__word--karaoke')
+    const karaoke = container.querySelector('.sanlos-lyricview__word--karaoke')
     expect(karaoke?.textContent).toBe('乙')
-    expect(karaoke?.className).not.toContain('fnm-lyricview__word--sung')
+    expect(karaoke?.className).not.toContain('sanlos-lyricview__word--sung')
     expect(karaoke?.getAttribute('data-karaoke-progress')).toBe('25.0')
   })
 
@@ -124,12 +124,12 @@ describe('T71：卡拉OK —— 所有歌词页面一致', () => {
     const { container } = render(<LyricView lines={LINES} currentTime={1.5} mode="all" />)
 
     const active = container.querySelector('[data-index="0"]')
-    expect(active?.querySelector('.fnm-lyricview__word--karaoke')?.textContent).toBe('乙')
+    expect(active?.querySelector('.sanlos-lyricview__word--karaoke')?.textContent).toBe('乙')
 
     // ⚠️ 非当前行**没有**当前词 ⇒ 既没有卡拉OK，也没有整词上色。
     const other = container.querySelector('[data-index="1"]')
-    expect(other?.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
-    expect(other?.querySelector('.fnm-lyricview__word--sung')).toBeNull()
+    expect(other?.querySelector('.sanlos-lyricview__word--karaoke')).toBeNull()
+    expect(other?.querySelector('.sanlos-lyricview__word--sung')).toBeNull()
   })
 
   it('**已唱过的词**照旧整词上色（卡拉OK 只取代「当前词」那一个）', () => {
@@ -137,9 +137,9 @@ describe('T71：卡拉OK —— 所有歌词页面一致', () => {
 
     // ⚠️ 双行模式第 0 页 = 第 0 行（正在唱）+ 第 1 行（还没唱）。
     //    第 0 行里「甲」(0~1s) 已唱完 ⇒ `--sung`；「乙」正在唱 ⇒ `--karaoke`。
-    const sung = container.querySelector('.fnm-lyricview__word--sung')
+    const sung = container.querySelector('.sanlos-lyricview__word--sung')
     expect(sung?.textContent).toBe('甲')
-    expect(wordAt(container, 1).className).toContain('fnm-lyricview__word--karaoke')
+    expect(wordAt(container, 1).className).toContain('sanlos-lyricview__word--karaoke')
   })
 })
 
@@ -185,7 +185,7 @@ describe('T71：行/字时间戳贯通', () => {
       <LyricView lines={state.lines} currentTime={1.5} mode="double" />,
     )
 
-    const karaoke = container.querySelector('.fnm-lyricview__word--karaoke')
+    const karaoke = container.querySelector('.sanlos-lyricview__word--karaoke')
     expect(karaoke?.textContent).toBe('乙')
     // 乙 = 1~3s ⇒ t=1.5 ⇒ (1.5-1)/(3-1) = 25%
     // ⚠️ **鉴别力**：若按「词数均分」（2 个词 → 每词 1.5s），
@@ -223,11 +223,11 @@ describe('T71：行/字时间戳贯通', () => {
     )
     // ⚠️ **鉴别力**：DOM 里**一个词元素都没有** ⇒ 卡拉OK 不可能出现在伪逐字上。
     expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
-    expect(container.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
-    expect(container.querySelector('.fnm-lyricview__overlay')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__word--karaoke')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__overlay')).toBeNull()
     // ⚠️ **鉴别力**：当前行**整行**是强调色（不假装逐字）。
     expect(container.querySelector('[data-index="0"]')?.className).toContain(
-      'fnm-lyricview__line--whole',
+      'sanlos-lyricview__line--whole',
     )
   })
 })

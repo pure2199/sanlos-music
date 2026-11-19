@@ -8,8 +8,10 @@
 //    `src/api/history.ts` 顶部的实测结论）。
 //    → 客户端**不臆造**上报调用；本机自己的播放记录改由这里记录。
 //
-// ⚠️ **存哪儿**：`localStorage`（键 `fnmusic-local-history`）——
+// ⚠️ **存哪儿**：`localStorage`（键 `sanlos-local-history`）——
 //    这里**只有曲目标题等播放相关信息，没有任何凭证**。
+//    ⚠️ **T115**：键名改过（旧键 `sanlos-local-history`）⇒ 读的时候**新键没有就回落读旧键**
+//    （旧键只读、不删）⇒ 老用户升级后记录**不丢**（见 `shared/legacyStorageKeys.ts`）。
 //
 // ⚠️ **与 NAS 历史是两回事**：NAS 那份是**只读**的（别的客户端 / 网页端写的），
 //    本页把两者分成两段展示，**不混为一谈**。
@@ -18,10 +20,11 @@
 import { create } from 'zustand'
 
 import type { Song } from '../../shared/types'
+import { LEGACY_LOCAL_HISTORY_KEY } from '../../shared/legacyStorageKeys'
 import { usePlayerStore } from './playerStore'
 
 /** `localStorage` 的键。 */
-export const LOCAL_HISTORY_KEY = 'fnmusic-local-history'
+export const LOCAL_HISTORY_KEY = 'sanlos-local-history'
 
 /** 最多保留多少条（超了丢最旧的）。 */
 export const LOCAL_HISTORY_LIMIT = 100
@@ -39,7 +42,10 @@ export interface LocalHistoryStore {
 /** 从 `localStorage` 读回（损坏 / 不可用 → 空列表，不抛异常）。 */
 function readStored(): Song[] {
   try {
-    const raw = globalThis.localStorage?.getItem(LOCAL_HISTORY_KEY)
+    const storage = globalThis.localStorage
+    // ⚠️ **T115：新键没有才回落读旧键**（旧键只读、不删）
+    //    ⇒ 老用户升级后「本机播放记录」**不丢**。
+    const raw = storage?.getItem(LOCAL_HISTORY_KEY) ?? storage?.getItem(LEGACY_LOCAL_HISTORY_KEY)
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []

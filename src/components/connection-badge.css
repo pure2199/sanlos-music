@@ -4,7 +4,7 @@
  * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
  */
 
-.fnm-badge {
+.sanlos-badge {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -12,7 +12,7 @@
   gap: 4px;
 }
 
-.fnm-badge__trigger {
+.sanlos-badge__trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -25,18 +25,18 @@
   cursor: pointer;
 }
 
-.fnm-badge__caret {
+.sanlos-badge__caret {
   color: var(--text-secondary);
 }
 
 /*
  * 中继带宽提示（T51）。
  *
- * ⚠️ **它不再是徽标的一部分** —— 原来挂在 `.fnm-badge` 里（徽标是纵向 flex，
+ * ⚠️ **它不再是徽标的一部分** —— 原来挂在 `.sanlos-badge` 里（徽标是纵向 flex，
  *    被这条提示撑到 320px 宽 → 顶栏被撑成两行，58px → 141px 真机实测）。
  *    ⇒ 现在独立渲染在**主区顶部**：一行 12px 灰字，不占顶栏、不折行。
  */
-.fnm-relayhint {
+.sanlos-relayhint {
   /* ⚠️ 主区是 flex 列容器 → 必须**不参与伸缩**，否则会被页面挤扁。 */
   flex: 0 0 auto;
   margin: 0;
@@ -51,12 +51,12 @@
   text-overflow: ellipsis;
 }
 
-.fnm-badge__panel {
+.sanlos-badge__panel {
   /*
    * ⚠️ **必须是浮层**（T52 真机实测修的）。
    *
    * ⚠️ **原来的 bug**：面板是 `position: static`（普通流内的块级元素）
-   *    → 它是 `.fnm-badge`（纵向 flex）的**第二个子元素**，
+   *    → 它是 `.sanlos-badge`（纵向 flex）的**第二个子元素**，
    *      于是把徽标从 69px 撑到 **306px 宽**；
    *    → 顶栏第一行放不下 306px → 徽标**整块换行到第二行**；
    *    → 顶栏高度 **58px → 175px**，面板还横在左边**盖住主区内容**
@@ -80,20 +80,20 @@
   box-shadow: 0 8px 24px var(--shadow);
 }
 
-.fnm-badge__url {
+.sanlos-badge__url {
   margin: 0 0 8px;
   font-size: 12px;
   color: var(--text-secondary);
   word-break: break-all;
 }
 
-.fnm-badge__empty {
+.sanlos-badge__empty {
   margin: 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.fnm-badge__candidates {
+.sanlos-badge__candidates {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -102,7 +102,7 @@
   list-style: none;
 }
 
-.fnm-badge__candidate {
+.sanlos-badge__candidate {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -111,24 +111,24 @@
   color: var(--text-primary);
 }
 
-.fnm-badge__candidate-label {
+.sanlos-badge__candidate-label {
   font-weight: 600;
 }
 
-.fnm-badge__candidate-kind,
-.fnm-badge__candidate-status {
+.sanlos-badge__candidate-kind,
+.sanlos-badge__candidate-status {
   color: var(--text-secondary);
 }
 
-.fnm-badge__candidate-address {
+.sanlos-badge__candidate-address {
   color: var(--text-secondary);
   word-break: break-all;
 }
 
-.fnm-badge__candidate-note {
+.sanlos-badge__candidate-note {
   color: var(--warning);
 }
 
-.fnm-badge__candidate[data-status='unreachable'] .fnm-badge__candidate-note {
+.sanlos-badge__candidate[data-status='unreachable'] .sanlos-badge__candidate-note {
   color: var(--danger);
 }

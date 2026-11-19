@@ -32,15 +32,15 @@ function blockOf(css: string, selector: string): string {
 
 describe('卡拉OK 填色的 CSS 契约（T48）', () => {
   const css = readCss('src', 'ui', 'lyrics', 'lyric-view.css')
-  const karaoke = blockOf(css, '.fnm-lyricview__word--karaoke')
+  const karaoke = blockOf(css, '.sanlos-lyricview__word--karaoke')
 
   it('这条规则**存在**（否则卡拉OK 什么都不发生）', () => {
     expect(karaoke).not.toBe('')
   })
 
-  it('填充宽度由**词内进度变量**驱动（`--fnm-lyricview__karaoke-progress`）', () => {
+  it('填充宽度由**词内进度变量**驱动（`--sanlos-lyricview__karaoke-progress`）', () => {
     // ⚠️ 必须是**变量**而不是写死的百分比：进度是运行时算出来的（逐帧变）。
-    expect(karaoke).toMatch(/background-size:\s*var\(--fnm-lyricview__karaoke-progress/)
+    expect(karaoke).toMatch(/background-size:\s*var\(--sanlos-lyricview__karaoke-progress/)
   })
 
   it('用 `background-clip: text`（**不改字形** → 与底层原文严丝合缝）', () => {
@@ -81,7 +81,7 @@ describe('卡拉OK 填色的 CSS 契约（T48）', () => {
 
 describe('伪逐字整行强调色的 CSS 契约（T81）', () => {
   const css = readCss('src', 'ui', 'lyrics', 'lyric-view.css')
-  const whole = blockOf(css, '.fnm-lyricview__line--whole')
+  const whole = blockOf(css, '.sanlos-lyricview__line--whole')
 
   it('这条规则**存在**（否则伪逐字时当前行没有任何区分）', () => {
     expect(whole).not.toBe('')
@@ -91,11 +91,11 @@ describe('伪逐字整行强调色的 CSS 契约（T81）', () => {
     // ⚠ **T89-⑪：前提被推翻**（真机实测：强调色当文字色只有 **3.67** ⇒ 低于 AA 4.5）
     //    ⇒ 全屏播放页里改用「按取色背景校正过」的强调色（回退到 `--accent`）。
     //    ⇒ **语义没变**（仍是主题色），只是多了「按背景校正」这一层。
-    expect(whole).toMatch(/color:\s*var\(--fnm-fullplayer__accent-text,\s*var\(--accent\)\)/)
+    expect(whole).toMatch(/color:\s*var\(--sanlos-fullplayer__accent-text,\s*var\(--accent\)\)/)
     // ⚠ 「与真逐字下『已唱过的词』**同一个色**」这条语义不许丢：
     //    整行与已唱词必须用**同一个**颜色表达式。
-    const sung = blockOf(css, '.fnm-lyricview__word--sung')
-    expect(sung).toMatch(/color:\s*var\(--fnm-fullplayer__accent-text,\s*var\(--accent\)\)/)
+    const sung = blockOf(css, '.sanlos-lyricview__word--sung')
+    expect(sung).toMatch(/color:\s*var\(--sanlos-fullplayer__accent-text,\s*var\(--accent\)\)/)
   })
 
   it('颜色**只用语义变量**（不许硬编码色值）', () => {
@@ -104,8 +104,8 @@ describe('伪逐字整行强调色的 CSS 契约（T81）', () => {
   })
 
   it('⚠️ **必须排在 `--active` 之后**（两者特异性相同 ⇒ 后者胜，否则被盖掉）', () => {
-    const activeIndex = css.indexOf('.fnm-lyricview__line--active')
-    const wholeIndex = css.indexOf('.fnm-lyricview__line--whole')
+    const activeIndex = css.indexOf('.sanlos-lyricview__line--active')
+    const wholeIndex = css.indexOf('.sanlos-lyricview__line--whole')
     expect(activeIndex).toBeGreaterThanOrEqual(0)
     expect(wholeIndex).toBeGreaterThan(activeIndex)
   })

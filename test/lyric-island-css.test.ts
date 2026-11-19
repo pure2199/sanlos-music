@@ -36,18 +36,18 @@ describe('词岛的 CSS 契约（T46 补丁②：单行居中）', () => {
   const css = readCss('src', 'island', 'island-window.css')
 
   it('歌词区高度**必须由胶囊给**，不能跟歌词总高走', () => {
-    const block = blockOf(css, '.fnm-island__lyrics')
+    const block = blockOf(css, '.sanlos-island__lyrics')
     // ⚠️ `align-self: stretch` 是关键：没有它，歌词区高度 = 画布高度（整份歌词的总高）
     //    → 胶囊里露出的是「歌词表的垂直中点」，当前行根本不在视野里。
     expect(block).toMatch(/align-self:\s*stretch/)
   })
 
   it('胶囊纵向用 `align-items: center`（曲名/歌手仍垂直居中）', () => {
-    expect(blockOf(css, '.fnm-island')).toMatch(/align-items:\s*center/)
+    expect(blockOf(css, '.sanlos-island')).toMatch(/align-items:\s*center/)
   })
 
   it('歌词视口**裁掉溢出的画布**（否则整份歌词会顶出胶囊）', () => {
-    expect(blockOf(css, '.fnm-island__lyrics .fnm-lyricview')).toMatch(/overflow:\s*hidden/)
+    expect(blockOf(css, '.sanlos-island__lyrics .sanlos-lyricview')).toMatch(/overflow:\s*hidden/)
   })
 })
 
@@ -67,19 +67,19 @@ describe('词岛的 CSS 契约（T47：频谱波形柱）', () => {
   const css = readCss('src', 'island', 'island-window.css')
 
   it('柱子**垂直居中**（从胶囊中线上下对称生长，而不是贴着底边长）', () => {
-    expect(blockOf(css, '.fnm-island__spectrum')).toMatch(/align-items:\s*center/)
+    expect(blockOf(css, '.sanlos-island__spectrum')).toMatch(/align-items:\s*center/)
   })
 
   it('柱子高度**不许被挤扁**（`flex: 0 0 auto`）', () => {
-    expect(blockOf(css, '.fnm-island__spectrum')).toMatch(/flex:\s*0 0 auto/)
+    expect(blockOf(css, '.sanlos-island__spectrum')).toMatch(/flex:\s*0 0 auto/)
   })
 
   it('高度变化要有**过渡**（24fps 的数据裸奔会像在闪）', () => {
-    expect(blockOf(css, '.fnm-island__bar')).toMatch(/transition:\s*height/)
+    expect(blockOf(css, '.sanlos-island__bar')).toMatch(/transition:\s*height/)
   })
 
   it('柱子颜色**只用语义变量**（不许硬编码色值）', () => {
-    const block = blockOf(css, '.fnm-island__bar')
+    const block = blockOf(css, '.sanlos-island__bar')
     expect(block).toMatch(/background:\s*var\(--accent\)/)
     // ⚠️ `#hex` / `rgb()` / `hsl()` 一律不许（词岛窗支持明暗两套主题）。
     expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}/)
@@ -87,7 +87,7 @@ describe('词岛的 CSS 契约（T47：频谱波形柱）', () => {
   })
 
   it('柱子**不许**出现会改变字形/布局的动画（只过渡 height）', () => {
-    const block = blockOf(css, '.fnm-island__bar')
+    const block = blockOf(css, '.sanlos-island__bar')
     expect(block).not.toMatch(/transform:\s*scale/)
     expect(block).not.toMatch(/animation:/)
   })
@@ -109,8 +109,8 @@ describe('词岛的 CSS 契约（T47：频谱波形柱）', () => {
 describe('词岛的 CSS 契约（T48：不再整词发光）', () => {
   const css = readCss('src', 'island', 'island-window.css')
 
-  it('**不再有** `.fnm-lyricview__word--active` 的规则（发光已被卡拉OK 取代）', () => {
-    expect(css).not.toMatch(/fnm-lyricview__word--active/)
+  it('**不再有** `.sanlos-lyricview__word--active` 的规则（发光已被卡拉OK 取代）', () => {
+    expect(css).not.toMatch(/sanlos-lyricview__word--active/)
   })
 
   it('词岛样式里**没有**任何 `text-shadow`（光晕会把填色边界糊掉）', () => {
@@ -133,7 +133,7 @@ describe('词岛的 CSS 契约（T48：不再整词发光）', () => {
 
 describe('词岛的 CSS 契约（T76：左端专辑封面）', () => {
   const css = readCss('src', 'island', 'island-window.css')
-  const coverBlock = blockOf(css, '.fnm-island__cover')
+  const coverBlock = blockOf(css, '.sanlos-island__cover')
 
   it('封面**尺寸固定**（不许被歌词挤扁）', () => {
     // ⚠️ 跨文件一致性：显示边长只有一个取值点（`ISLAND_COVER_BOX`）。
@@ -167,7 +167,7 @@ describe('词岛的 CSS 契约（T76：左端专辑封面）', () => {
   })
 
   it('占位块**居中显示 ♪**（没有封面 / 加载失败时不留破图）', () => {
-    const block = blockOf(css, '.fnm-island__cover--placeholder')
+    const block = blockOf(css, '.sanlos-island__cover--placeholder')
     expect(block).toMatch(/display:\s*flex/)
     expect(block).toMatch(/align-items:\s*center/)
     expect(block).toMatch(/justify-content:\s*center/)
@@ -181,7 +181,7 @@ describe('词岛的 CSS 契约（T76：左端专辑封面）', () => {
 // ⚠️ **为什么必须钉**：用户报障「长歌词显示不完整，他会变两行也看不到」。
 //
 // 根因（真机实测，22 字长句）：
-// - `.fnm-lyricview__line--active` 是**定高 44px**，而 `white-space: pre-wrap`
+// - `.sanlos-lyricview__line--active` 是**定高 44px**，而 `white-space: pre-wrap`
 //   允许换行 → 长句折 2 行 = **88px 内容溢出定高盒**；
 // - 歌词视口 `overflow: hidden` → 溢出部分**被裁掉**；
 // - 单行模式的滚动定位按**44px 行盒**居中 → 越往歌后面裁得越狠。
@@ -196,7 +196,7 @@ describe('词岛的 CSS 契约（T53：长歌词折行不被裁）', () => {
   const css = readCss('src', 'island', 'island-window.css')
   const activeBlock = blockOf(
     css,
-    '.fnm-island__lyrics .fnm-lyricview--single .fnm-lyricview__line--active',
+    '.sanlos-island__lyrics .sanlos-lyricview--single .sanlos-lyricview__line--active',
   )
 
   it('当前行**可以长高**（不能再是定高 44px → 否则长句折行会溢出盒子）', () => {
@@ -209,25 +209,25 @@ describe('词岛的 CSS 契约（T53：长歌词折行不被裁）', () => {
   })
 
   it('歌词视口改成 **flex 居中**（当前行按自己的高度居中，不靠滚动定位）', () => {
-    const block = blockOf(css, '.fnm-island__lyrics .fnm-lyricview')
+    const block = blockOf(css, '.sanlos-island__lyrics .sanlos-lyricview')
     expect(block).toMatch(/display:\s*flex/)
     expect(block).toMatch(/align-items:\s*center/)
   })
 
   it('画布高度 **auto**（不撑到整份歌词的总高），超出的部分被裁', () => {
-    const block = blockOf(css, '.fnm-island__lyrics .fnm-lyricview__canvas')
+    const block = blockOf(css, '.sanlos-island__lyrics .sanlos-lyricview__canvas')
     expect(block).toMatch(/height:\s*auto/)
     expect(block).toMatch(/max-height:\s*100%/)
     expect(block).toMatch(/overflow:\s*hidden/)
   })
 
   it('当前行**不再绝对定位**（否则它的 `top` 会把它顶到画布外面去）', () => {
-    const block = blockOf(css, '.fnm-island__lyrics .fnm-lyricview--single .fnm-lyricview__line')
+    const block = blockOf(css, '.sanlos-island__lyrics .sanlos-lyricview--single .sanlos-lyricview__line')
     expect(block).toMatch(/position:\s*static/)
   })
 
   it('**两行必须塞得进胶囊**（跨文件不等式：窗口高 − 上下留白 − 边框 ≥ 2 × 行高）', () => {
-    const island = blockOf(css, '.fnm-island')
+    const island = blockOf(css, '.sanlos-island')
     // ⚠️ `padding: 10px 18px` → 取**上下**的 10px；`border: 1px solid …` → 上下共 2px。
     const pad = Number(/padding:\s*(\d+)px/.exec(island)?.[1] ?? NaN)
     const border = Number(/border:\s*(\d+)px/.exec(island)?.[1] ?? NaN)

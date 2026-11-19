@@ -28,6 +28,7 @@ import {
   type ResumeRecord,
 } from '../src/player/resume'
 import { createResumePort, type ResumeStorageLike } from '../src/player/resumeBridge'
+import { LEGACY_RESUME_STORAGE_KEY } from '../shared/legacyStorageKeys'
 import type { PlayOptions } from '../src/player/engine'
 import { restoreLastPlayback } from '../src/state/resumeFlow'
 import { createPlayerStore, type PlayerEngineLike } from '../src/state/playerStore'
@@ -231,13 +232,13 @@ describe('T89-⑲ localStorage 端口', () => {
   })
 
   it('损坏的 JSON ⇒ 读回 null（不抛）', async () => {
-    const storage = fakeStorage({ 'fnmusic-resume': '{ 这不是 JSON' })
+    const storage = fakeStorage({ 'sanlos-resume': '{ 这不是 JSON' })
     const port = createResumePort(storage)
     expect(await port.load()).toBeNull()
   })
 
   it('形状不对 ⇒ 读回 null（不返回半截数据）', async () => {
-    const storage = fakeStorage({ 'fnmusic-resume': JSON.stringify({ id: 'x' }) })
+    const storage = fakeStorage({ 'sanlos-resume': JSON.stringify({ id: 'x' }) })
     const port = createResumePort(storage)
     expect(await port.load()).toBeNull()
   })
@@ -465,7 +466,7 @@ describe('T89-⑲ store 的记录与恢复', () => {
 describe('T89-⑲ 「启动时自动播放」偏好', () => {
   /** 每次用例一个独立的偏好文件（系统临时目录，不入库）。 */
   function tempFile(): string {
-    const dir = mkdtempSync(join(tmpdir(), 'fnm-t89-19-'))
+    const dir = mkdtempSync(join(tmpdir(), 'sanlos-t89-19-'))
     return join(dir, 'prefs.json')
   }
 
@@ -492,7 +493,10 @@ describe('T89-⑲ 「启动时自动播放」偏好', () => {
     prefs.write({ autoplay: true })
     const dumped = JSON.stringify(prefs.read())
     expect(dumped).not.toContain('positionSec')
-    expect(dumped).not.toContain('fnmusic-resume')
+    expect(dumped).not.toContain('sanlos-resume')
+    // ⚠️ **T115**：键名改过 ⇒ **新旧两个键名**都得不在偏好文件里
+    //    （旧键是「T115 之前」的键，用户数据在 `localStorage` 里，不该进 `prefs.json`）。
+    expect(dumped).not.toContain(LEGACY_RESUME_STORAGE_KEY)
   })
 })
 

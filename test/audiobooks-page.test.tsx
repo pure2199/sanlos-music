@@ -110,7 +110,7 @@ describe('AudiobooksPage（有声读物页）', () => {
     // ⚠️ 先埋一个**断点**（上次扫到第 2 页）⇒ 「续跑」会从第 2 页开始，
     //    而「从头重扫」必须从**第 1 页**开始 ⇒ 这样才真能区分两者。
     window.localStorage.setItem(
-      'fnmusic-audiobook-state',
+      'sanlos-audiobook-state',
       JSON.stringify({
         version: 3,
         nextPage: 2,
@@ -150,7 +150,7 @@ describe('AudiobooksPage（有声读物页）', () => {
 
   it('⑤ 文案里**不许漏出 Markdown 星号**', () => {
     const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
-    const hints = Array.from(container.querySelectorAll('.fnm-audiobooks__hint'))
+    const hints = Array.from(container.querySelectorAll('.sanlos-audiobooks__hint'))
     expect(hints.length).toBeGreaterThan(0)
     for (const hint of hints) {
       expect(hint.textContent ?? '').not.toContain('*')
@@ -159,7 +159,7 @@ describe('AudiobooksPage（有声读物页）', () => {
 
   it('⑤-b 说明里**写明了文件要放在哪**（这条说明不许被悄悄删掉）', async () => {
     const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
-    const hints = Array.from(container.querySelectorAll('.fnm-audiobooks__hint'))
+    const hints = Array.from(container.querySelectorAll('.sanlos-audiobooks__hint'))
       .map((h) => h.textContent ?? '')
       .join('\n')
     // ⚠️ **位置要求**（用户 2026-11-17 的原话：「有声小说，要放在主目录下的有声小说文件夹，
@@ -169,7 +169,7 @@ describe('AudiobooksPage（有声读物页）', () => {
     expect(hints).toContain('有声小说')
     // ⚠️ **空态也要说这句** —— 用户**正是**在列表空的时候最需要知道「文件该放哪」。
     await waitFor(() => {
-      const empty = container.querySelector('.fnm-audiobooks__empty')?.textContent ?? ''
+      const empty = container.querySelector('.sanlos-audiobooks__empty')?.textContent ?? ''
       expect(empty).toContain('主目录')
     })
   })
@@ -270,7 +270,7 @@ describe('AudiobooksPage（有声读物页）', () => {
   //    - **旧落盘**：没有封面 ⇒ 补拉**一次** `/album/detail` ⇒ **回写落盘**。
   // -------------------------------------------------------------------------
 
-  it('⑨ 列表是**封面卡片网格**（专辑页同款 `.fnm-card`）+ 卡片**有封面**（**T102：专辑封面**）', async () => {
+  it('⑨ 列表是**封面卡片网格**（专辑页同款 `.sanlos-card`）+ 卡片**有封面**（**T102：专辑封面**）', async () => {
     scanLibraryTracks.mockImplementation(async (options: unknown) => {
       const opts = options as { onPage?: (tracks: unknown[], progress: unknown) => void }
       opts.onPage?.(
@@ -299,14 +299,14 @@ describe('AudiobooksPage（有声读物页）', () => {
     const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
 
     await waitFor(() => {
-      expect(container.querySelectorAll('.fnm-audiobooks__item').length).toBe(1)
+      expect(container.querySelectorAll('.sanlos-audiobooks__item').length).toBe(1)
     })
-    const item = container.querySelector('.fnm-audiobooks__item') as HTMLElement
+    const item = container.querySelector('.sanlos-audiobooks__item') as HTMLElement
     // ⭐ 与专辑页**同款**的卡片结构（不是纯文字行）。
-    expect(item.classList.contains('fnm-card')).toBe(true)
-    expect(item.querySelector('.fnm-card__title')).not.toBeNull()
+    expect(item.classList.contains('sanlos-card')).toBe(true)
+    expect(item.querySelector('.sanlos-card__title')).not.toBeNull()
     // ⭐ 卡片**有封面**（不是占位块）。
-    const img = item.querySelector('img.fnm-cover__image')
+    const img = item.querySelector('img.sanlos-cover__image')
     // ⚠️ **T102**：显示的是**专辑自己的**封面（**不是**曲目的那个）⇒
     //    「主列表」与「秒搜结果」才能显示**同一张图**。
     expect(img?.getAttribute('src')).toContain('album_0011223344556677')
@@ -315,7 +315,7 @@ describe('AudiobooksPage（有声读物页）', () => {
 
   it('⑩ 旧落盘没有封面 ⇒ **补拉一次** `/album/detail` ⇒ 卡片出现封面（且**不重扫**）', async () => {
     window.localStorage.setItem(
-      'fnmusic-audiobook-state',
+      'sanlos-audiobook-state',
       JSON.stringify({
         version: 3,
         nextPage: 0,
@@ -354,7 +354,7 @@ describe('AudiobooksPage（有声读物页）', () => {
       expect(album).toHaveBeenCalledWith('al-old')
     })
     await waitFor(() => {
-      const img = container.querySelector('.fnm-audiobooks__item img.fnm-cover__image')
+      const img = container.querySelector('.sanlos-audiobooks__item img.sanlos-cover__image')
       expect(img?.getAttribute('src')).toContain('album_0011223344556677')
     })
     // ⚠️ **不重扫**（旧落盘还在 ⇒ 不用再花 52 秒）。
@@ -363,7 +363,7 @@ describe('AudiobooksPage（有声读物页）', () => {
 
   it('⑪ 补拉封面**只做一次**（同一张专辑不会被反复拉）', async () => {
     window.localStorage.setItem(
-      'fnmusic-audiobook-state',
+      'sanlos-audiobook-state',
       JSON.stringify({
         version: 3,
         nextPage: 0,
@@ -418,9 +418,9 @@ describe('AudiobooksPage（有声读物页）', () => {
     fireEvent.click(screen.getByText('搜作品'))
 
     await waitFor(() => {
-      expect(container.querySelectorAll('.fnm-audiobooks__result').length).toBe(1)
+      expect(container.querySelectorAll('.sanlos-audiobooks__result').length).toBe(1)
     })
-    const img = container.querySelector('.fnm-audiobooks__result img.fnm-cover__image')
+    const img = container.querySelector('.sanlos-audiobooks__result img.sanlos-cover__image')
     expect(img?.getAttribute('src')).toContain('album_0011223344556677')
   })
 
@@ -435,7 +435,7 @@ describe('AudiobooksPage（有声读物页）', () => {
 
   it('⑬ **T101 的旧落盘**（只有曲目封面）⇒ 补拉一次 ⇒ 卡片换成**专辑封面**', async () => {
     window.localStorage.setItem(
-      'fnmusic-audiobook-state',
+      'sanlos-audiobook-state',
       JSON.stringify({
         version: 3,
         nextPage: 0,
@@ -476,7 +476,7 @@ describe('AudiobooksPage（有声读物页）', () => {
       expect(album).toHaveBeenCalledWith('al-old')
     })
     await waitFor(() => {
-      const img = container.querySelector('.fnm-audiobooks__item img.fnm-cover__image')
+      const img = container.querySelector('.sanlos-audiobooks__item img.sanlos-cover__image')
       // ⭐ 换成了**专辑封面**……
       expect(img?.getAttribute('src')).toContain('album_0011223344556677')
       // ……**不是**曲目封面（那才是「两张不同的图」的根源）。
@@ -486,7 +486,7 @@ describe('AudiobooksPage（有声读物页）', () => {
 
   it('⑭ 落盘里**已有**专辑封面 ⇒ **不**补拉（零额外请求）', async () => {
     window.localStorage.setItem(
-      'fnmusic-audiobook-state',
+      'sanlos-audiobook-state',
       JSON.stringify({
         version: 3,
         nextPage: 0,
@@ -514,7 +514,7 @@ describe('AudiobooksPage（有声读物页）', () => {
     const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
 
     await waitFor(() => {
-      const img = container.querySelector('.fnm-audiobooks__item img.fnm-cover__image')
+      const img = container.querySelector('.sanlos-audiobooks__item img.sanlos-cover__image')
       expect(img?.getAttribute('src')).toContain('album_0011223344556677')
     })
     // ⭐ **零请求**（封面已知 ⇒ 不用补拉）。
@@ -523,7 +523,7 @@ describe('AudiobooksPage（有声读物页）', () => {
 
   it('⑮ 落盘里专辑封面 = `null`（**确认没有封面**）⇒ **不**补拉 ⇒ 卡片是占位块', async () => {
     window.localStorage.setItem(
-      'fnmusic-audiobook-state',
+      'sanlos-audiobook-state',
       JSON.stringify({
         version: 3,
         nextPage: 0,
@@ -551,11 +551,11 @@ describe('AudiobooksPage（有声读物页）', () => {
     const { container } = render(<AudiobooksPage onOpenAlbum={() => {}} />)
 
     await waitFor(() => {
-      expect(container.querySelectorAll('.fnm-audiobooks__item').length).toBe(1)
+      expect(container.querySelectorAll('.sanlos-audiobooks__item').length).toBe(1)
     })
     // ⭐ **不补拉**。
     expect(album).not.toHaveBeenCalled()
     // ⭐ 没有封面 ⇒ 画占位块（不是破图）。
-    expect(container.querySelector('.fnm-audiobooks__item img.fnm-cover__image')).toBeNull()
+    expect(container.querySelector('.sanlos-audiobooks__item img.sanlos-cover__image')).toBeNull()
   })
 })

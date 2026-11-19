@@ -5,11 +5,11 @@
 // 覆盖**只有真实 Electron 才跑得通**的那条链路：
 //   登录（主进程 IPC → HTTP → mock NAS）
 //     → 发现页 → 主进程抓榜（`discover:charts` → mock 的 `/mock-chart`）
-//       → 渲染层**定向查曲库**（`fnm://` 协议代理 → mock）
+//       → 渲染层**定向查曲库**（`sanlos://` 协议代理 → mock）
 //         → 榜单条目标出「在不在曲库」
-//           → 点「播放」走既有播放路径（真实 `<audio>` ← `fnm://` 流 → mock 的 WAV）
+//           → 点「播放」走既有播放路径（真实 `<audio>` ← `sanlos://` 流 → mock 的 WAV）
 //
-// ⚠️ **榜源指向 mock**（`FNM_CHART_URL`，见 `e2e/helpers/app.ts`）
+// ⚠️ **榜源指向 mock**（`SANLOS_CHART_URL`，见 `e2e/helpers/app.ts`）
 //    ⇒ E2E **不打真实外网**（QQ 音乐），既确定又不被限流。
 // ⚠️ **曲库是 mock 自己的那 8 首歌** ⇒ 「命中 8 / 榜上 9」是**这台 mock** 的事实，
 //    不是通用结论（真实用户的曲库是**他自己的**，命中率因人而异）。
@@ -54,7 +54,7 @@ test.describe.serial('T96「发现」页：榜单 + 为你推荐', () => {
 
     // 命中的那首：**能播**（走既有 `playerStore` → NAS `track/stream`，不新增播放路径）。
     await fixture.window.getByRole('button', { name: '播放 示例曲目 1' }).click()
-    await expect(fixture.window.locator('.fnm-playerbar__title')).toHaveText('示例曲目 1')
+    await expect(fixture.window.locator('.sanlos-playerbar__title')).toHaveText('示例曲目 1')
   })
 
   test('「为你推荐」：每条都带**可读理由**，且点得动', async () => {
@@ -65,18 +65,18 @@ test.describe.serial('T96「发现」页：榜单 + 为你推荐', () => {
     await expect(fixture.window.getByText('因为你最近听过', { exact: true })).toBeVisible()
 
     // 每条都带理由（「因为你最近听过 …」）。
-    const reasons = fixture.window.locator('.fnm-discover__reason')
+    const reasons = fixture.window.locator('.sanlos-discover__reason')
     await expect(reasons.first()).toBeVisible()
     await expect(reasons.first()).toContainText('因为你最近听过')
 
     // 推荐项**能播**（走同一条既有播放路径）。
-    const playButton = fixture.window.locator('.fnm-discover__block .fnm-discover__play').first()
+    const playButton = fixture.window.locator('.sanlos-discover__block .sanlos-discover__play').first()
     const title = await fixture.window
-      .locator('.fnm-discover__block .fnm-discover__entrytitle')
+      .locator('.sanlos-discover__block .sanlos-discover__entrytitle')
       .first()
       .textContent()
     await playButton.click()
-    await expect(fixture.window.locator('.fnm-playerbar__title')).toHaveText(
+    await expect(fixture.window.locator('.sanlos-playerbar__title')).toHaveText(
       (title ?? '').trim(),
     )
   })

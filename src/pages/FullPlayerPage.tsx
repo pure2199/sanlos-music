@@ -17,11 +17,11 @@
 // 封面取色（控制器追加要求 F / N）
 // ---------------------------------------------------------------------------
 // - 封面地址**只**由 `components/coverUrl.ts` 拼（全项目唯一的拼装点），本文件**不拼第二份**；
-// - 取色用 **canvas 绘制封面并取像素**：封面走 `fnm://` 代理，与页面**跨源**
-//   （`electron/proxy.ts` 的注释明写「渲染进程页面来自 `file://` / dev server，与 `fnm://` 跨源」）
+// - 取色用 **canvas 绘制封面并取像素**：封面走 `sanlos://` 代理，与页面**跨源**
+//   （`electron/proxy.ts` 的注释明写「渲染进程页面来自 `file://` / dev server，与 `sanlos://` 跨源」）
 //   → 图片必须带 `crossOrigin = 'anonymous'`，否则 canvas 被污染、取不到像素。
 //   代理对所有响应都带了 `access-control-allow-origin: *` → 普通 GET 不触发预检 → 能读到像素。
-//   CSP（`index.html`）已放行 `fnm:`（`img-src`）→ **取色不受 CSP 阻断**。
+//   CSP（`index.html`）已放行 `sanlos:`（`img-src`）→ **取色不受 CSP 阻断**。
 //   ⚠️ 本任务**不改 CSP**。
 // - 取色**必须异步**、**不得阻塞**首屏渲染；
 // - 取不到色（无封面 / 加载失败 / canvas 被污染）→ **回退到默认背景**（CSS 变量）；
@@ -465,7 +465,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
   //    （真机实测，T89-⑩）。⇒ 这里出一个**只用于文字/图标色**的校正版。
   //
   // ⚠️ **真机实测的「真实落点」与它们真正压着的背景**（T89-⑪ 诊断，修复前）：
-  //    · 歌词当前行 `.fnm-lyricview__line--whole` ⇒ 压在**全屏页渐变**上 ⇒ 3.67
+  //    · 歌词当前行 `.sanlos-lyricview__line--whole` ⇒ 压在**全屏页渐变**上 ⇒ 3.67
   //    · 悬停的底部控制按钮图标 ⇒ 压在 `--surface-sunken`（不透明）上 ⇒ 3.91
   //    ⇒ 渐变那一处用**取色背景**校正；悬停那一处用它**自己真正的**背景校正。
   //
@@ -522,23 +522,23 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
 
   const style: CssVars | undefined = useMemo(() => {
     if (!tint) return undefined
-    const vars: Record<`--${string}`, string> = { '--fnm-fullplayer__tint': tint }
+    const vars: Record<`--${string}`, string> = { '--sanlos-fullplayer__tint': tint }
     // ⚠️ **只给「文字/图标色」用**；「强调色作底色 + 白字」那几处仍用全局 `--accent`
     //    （那条由 `toFluentAccent` 的「白字 ≥ 4.5」保证，**不要动**）。
-    if (readableAccent) vars['--fnm-fullplayer__accent-text'] = readableAccent
-    if (readableAccentHover) vars['--fnm-fullplayer__accent-text-hover'] = readableAccentHover
+    if (readableAccent) vars['--sanlos-fullplayer__accent-text'] = readableAccent
+    if (readableAccentHover) vars['--sanlos-fullplayer__accent-text-hover'] = readableAccentHover
     return vars as CssVars
   }, [tint, readableAccent, readableAccentHover])
 
-  const classes = className ? `fnm-fullplayer ${className}` : 'fnm-fullplayer'
+  const classes = className ? `sanlos-fullplayer ${className}` : 'sanlos-fullplayer'
 
   const lyricBody = ((): ReactElement => {
     if (lyricStatus === 'loading') {
-      return <p className="fnm-fullplayer__status">正在加载歌词…</p>
+      return <p className="sanlos-fullplayer__status">正在加载歌词…</p>
     }
     if (lyricStatus === 'error') {
       return (
-        <p className="fnm-fullplayer__error" role="alert">
+        <p className="sanlos-fullplayer__error" role="alert">
           {/* ⚠️ 有具体原因就显示原因（Task 32：外部歌词源失败要**如实说**）。 */}
           {lyricReason ?? '歌词加载失败'}
         </p>
@@ -561,10 +561,10 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
 
   return (
     <div className={classes} data-testid="full-player" style={style} role="dialog" aria-label="全屏播放页">
-      <header className="fnm-fullplayer__header">
+      <header className="sanlos-fullplayer__header">
         <button
           type="button"
-          className="fnm-fullplayer__button"
+          className="sanlos-fullplayer__button"
           onClick={() => onClose?.()}
           aria-label="关闭全屏播放页"
         >
@@ -572,19 +572,19 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
         </button>
       </header>
 
-      <div className="fnm-fullplayer__body">
-        <section className="fnm-fullplayer__cover">
+      <div className="sanlos-fullplayer__body">
+        <section className="sanlos-fullplayer__cover">
           <CoverImage coverId={coverId} alt="" boxSize={280} />
         </section>
 
-        <section className="fnm-fullplayer__panel">
-          <h1 className="fnm-fullplayer__title">{current?.title ?? '未在播放'}</h1>
-          <p className="fnm-fullplayer__artist">{current?.artist ?? ''}</p>
+        <section className="sanlos-fullplayer__panel">
+          <h1 className="sanlos-fullplayer__title">{current?.title ?? '未在播放'}</h1>
+          <p className="sanlos-fullplayer__artist">{current?.artist ?? ''}</p>
 
-          <nav className="fnm-fullplayer__tabs">
+          <nav className="sanlos-fullplayer__tabs">
             <button
               type="button"
-              className={`fnm-fullplayer__tab${tab === 'lyrics' ? ' fnm-fullplayer__tab--active' : ''}`}
+              className={`sanlos-fullplayer__tab${tab === 'lyrics' ? ' sanlos-fullplayer__tab--active' : ''}`}
               onClick={() => setTab('lyrics')}
               aria-pressed={tab === 'lyrics'}
             >
@@ -592,7 +592,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
             </button>
             <button
               type="button"
-              className={`fnm-fullplayer__tab${tab === 'queue' ? ' fnm-fullplayer__tab--active' : ''}`}
+              className={`sanlos-fullplayer__tab${tab === 'queue' ? ' sanlos-fullplayer__tab--active' : ''}`}
               onClick={() => setTab('queue')}
               aria-pressed={tab === 'queue'}
             >
@@ -606,9 +606,9 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
               {/* ⚠️ T73：如实显示**实际命中的那个源**（源链依次试，未必是首选）。 */}
               {/* ⚠️ T83：**内嵌**也是一个来源 ⇒ 单独一行如实显示。 */}
               {lyricEmbedded ? (
-                <p className="fnm-fullplayer__status">歌词来源：音频内嵌</p>
+                <p className="sanlos-fullplayer__status">歌词来源：音频内嵌</p>
               ) : lyricSourceUsed ? (
-                <p className="fnm-fullplayer__status">歌词来源：{LYRIC_SOURCE_LABEL[lyricSourceUsed]}</p>
+                <p className="sanlos-fullplayer__status">歌词来源：{LYRIC_SOURCE_LABEL[lyricSourceUsed]}</p>
               ) : null}
               {/* T107：**按歌指定源**的控件。
                   有声读物（有声小说）本来就没歌词 ⇒ **不给这个控件**（不给无用控件）。 */}
@@ -623,31 +623,31 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
               ) : null}
             </>
           ) : (
-            <ul className="fnm-fullplayer__queue">
+            <ul className="sanlos-fullplayer__queue">
               {queue.length === 0 ? (
-                <li className="fnm-fullplayer__status">队列为空</li>
+                <li className="sanlos-fullplayer__status">队列为空</li>
               ) : (
                 <>
                   {/* 队列只剩一首歌 → 移除按钮禁用 + 给出可读提示（不静默无反应）。 */}
                   {queue.length === 1 && (
-                    <li className="fnm-fullplayer__status">{QUEUE_ONLY_ONE_HINT}</li>
+                    <li className="sanlos-fullplayer__status">{QUEUE_ONLY_ONE_HINT}</li>
                   )}
                   {queue.map((song) => (
-                    <li key={song.id} className="fnm-fullplayer__queue-row">
+                    <li key={song.id} className="sanlos-fullplayer__queue-row">
                       <button
                         type="button"
-                        className={`fnm-fullplayer__queue-item${
-                          song.id === current?.id ? ' fnm-fullplayer__queue-item--current' : ''
+                        className={`sanlos-fullplayer__queue-item${
+                          song.id === current?.id ? ' sanlos-fullplayer__queue-item--current' : ''
                         }`}
                         onClick={() => store.getState().playTrack(song, queue)}
                       >
-                        <span className="fnm-fullplayer__queue-name">
+                        <span className="sanlos-fullplayer__queue-name">
                           {`${song.title} · ${song.artist}`}
                         </span>
                       </button>
                       <button
                         type="button"
-                        className="fnm-fullplayer__queue-remove"
+                        className="sanlos-fullplayer__queue-remove"
                         aria-label={`从队列移除 ${song.title}`}
                         title={canRemove ? `从队列移除 ${song.title}` : QUEUE_ONLY_ONE_HINT}
                         disabled={!canRemove}
@@ -664,10 +664,10 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
         </section>
       </div>
 
-      <footer className="fnm-fullplayer__controls">
+      <footer className="sanlos-fullplayer__controls">
         <button
           type="button"
-          className="fnm-fullplayer__button"
+          className="sanlos-fullplayer__button"
           onClick={() => store.getState().prev()}
           disabled={!current}
           aria-label="上一首"
@@ -676,7 +676,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
         </button>
         <button
           type="button"
-          className="fnm-fullplayer__button fnm-fullplayer__button--primary"
+          className="sanlos-fullplayer__button sanlos-fullplayer__button--primary"
           onClick={() => store.getState().togglePlay()}
           disabled={!current}
           aria-label={isPlaying ? '暂停' : '播放'}
@@ -685,7 +685,7 @@ export function FullPlayerPage(props: FullPlayerPageProps): ReactElement {
         </button>
         <button
           type="button"
-          className="fnm-fullplayer__button"
+          className="sanlos-fullplayer__button"
           onClick={() => store.getState().next()}
           disabled={!current}
           aria-label="下一首"

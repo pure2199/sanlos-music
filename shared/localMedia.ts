@@ -19,7 +19,7 @@
 //    「本地曲目登记表」决定 ⇒ **不新增路由种类 = 不放宽任何安全边界**。
 
 /** 协议 scheme 名。 */
-export const LOCAL_MEDIA_SCHEME = 'fnml'
+export const LOCAL_MEDIA_SCHEME = 'sanlos-media'
 
 /** 唯一允许的虚拟主机名。 */
 export const LOCAL_MEDIA_HOST = 'local'
@@ -49,7 +49,7 @@ export function isLocalTrackId(id: string): boolean {
 /**
  * 构造某个歌曲的本地媒体地址。
  *
- * 形状：`fnml://local/track/<encodeURIComponent(songId)>`。
+ * 形状：`sanlos-media://local/track/<encodeURIComponent(songId)>`。
  *
  * @param songId 歌曲 guid。
  */

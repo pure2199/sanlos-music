@@ -30,7 +30,7 @@ import { DEFAULT_STREAM_QUALITY } from '../src/player/transcode'
 
 const prepareTranscode = vi.fn(async (_songId: string, _quality: string) => ({
   downloadId: '0123456789abcdef0123456789abcdef',
-  url: 'fnm://srv/download/track/transcode/file?downloadId=0123456789abcdef0123456789abcdef',
+  url: 'sanlos://srv/download/track/transcode/file?downloadId=0123456789abcdef0123456789abcdef',
   dispose: async () => undefined,
 }))
 
@@ -90,7 +90,7 @@ function fakeStore(overrides: Partial<PlayerStore> = {}): PlayerStoreLike {
   }
 }
 
-/** 装一个假的 `globalThis.fnPlayer`。 */
+/** 装一个假的 `globalThis.sanlosPlayer`。 */
 function installBridge(overrides: Partial<PlayerBridge> = {}): {
   setPrefs: ReturnType<typeof vi.fn>
 } {
@@ -107,7 +107,7 @@ function installBridge(overrides: Partial<PlayerBridge> = {}): {
     onCommand: vi.fn(() => () => {}),
     ...overrides,
   } as unknown as PlayerBridge
-  ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+  ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
   return { setPrefs }
 }
 
@@ -123,7 +123,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete (globalThis as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   vi.unstubAllGlobals()
 })
 
@@ -233,7 +233,7 @@ describe('T54 播放源准备', () => {
     const { prepareStandardQualitySource } = await import('../src/state/downloadStore')
     const url = await prepareStandardQualitySource(SONG)
     expect(prepareTranscode).toHaveBeenCalledWith(SONG.id, 'standard')
-    expect(url).toContain('fnm://srv/download/track/transcode/file')
+    expect(url).toContain('sanlos://srv/download/track/transcode/file')
   })
 
   it('本地曲目 → **不转码**（NAS 上根本没有这个文件）', async () => {

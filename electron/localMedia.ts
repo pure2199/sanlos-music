@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
-// 本地媒体协议 `fnml://`（**主进程**，Task 11）
+// 本地媒体协议 `sanlos-media://`（**主进程**，Task 11）
 // ---------------------------------------------------------------------------
 //
 // 职责
 // ---------------------------------------------------------------------------
 // 把**已经下载到本地**的音频文件交给渲染进程的 `<audio>` 播放：
-// `fnml://local/track/<songId>` → 主进程查本地索引 → 返回文件字节。
+// `sanlos-media://local/track/<songId>` → 主进程查本地索引 → 返回文件字节。
 //
 // ---------------------------------------------------------------------------
 // 为什么不用 `file://`
@@ -13,7 +13,7 @@
 // - **开发模式**下渲染进程的页面来自 `http://127.0.0.1:5173`，与 `file://` **跨源**，
 //   Chromium 对 `file://` 页面的本地文件访问还有额外限制（`allow-file-access-from-files` 默认关）；
 // - **生产模式**下页面本身是 `file://`，再拿 `file://` 的音频会撞上「不透明源」问题；
-// - 自定义协议与既有的 `fnm://` **同构**（`standard` / `secure` / `stream` / `corsEnabled`），
+// - 自定义协议与既有的 `sanlos://` **同构**（`standard` / `secure` / `stream` / `corsEnabled`），
 //   行为可预期，也不用放宽任何 Web 安全设置。
 //
 // ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ export interface LocalMediaOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * 解析 `fnml://` 请求 → 歌曲 guid。
+ * 解析 `sanlos-media://` 请求 → 歌曲 guid。
  *
  * @returns 歌曲 guid；地址不合法时返回 `null`（**必须**整条拒绝）。
  */
@@ -181,13 +181,13 @@ export function parseRangeHeader(header: string | null, size: number): ParsedRan
 // ---------------------------------------------------------------------------
 
 // ⚠️ `resolveElectronProtocol` 住在 `electron/schemes.ts`——
-//    `fnm` 与 `fnml` **共用**同一个「惰性取 protocol」的实现（见该文件的说明：
+//    `sanlos` 与 `sanlos-media` **共用**同一个「惰性取 protocol」的实现（见该文件的说明：
 //    两个 scheme 必须**一次**注册，第二个会把第一个覆盖掉）。
 
 /**
  * 跨源放行头。
  *
- * ⚠️ **必须带**：`fnml` 注册时开了 `corsEnabled`（见 `electron/schemes.ts`），
+ * ⚠️ **必须带**：`sanlos-media` 注册时开了 `corsEnabled`（见 `electron/schemes.ts`），
  *    Chromium 会对该 scheme 施加 CORS 校验 → 响应不带
  *    `Access-Control-Allow-Origin` 就会被**浏览器直接拒掉**。
  */
@@ -257,7 +257,7 @@ function errorResponse(status: number, message: string): Response {
 // ---------------------------------------------------------------------------
 
 /**
- * 处理一次 `fnml://` 请求（**导出以便单测**）。
+ * 处理一次 `sanlos-media://` 请求（**导出以便单测**）。
  *
  * @returns 200（整份）/ 206（分段）/ 4xx（地址非法、文件不存在、范围不合法）。
  */
@@ -280,7 +280,7 @@ export async function handleLocalMediaRequest(
     'accept-ranges': 'bytes',
     'cache-control': 'no-cache',
   })
-  // ⚠️ `fnml` 开了 `corsEnabled` → 响应**必须**带跨源放行头，否则浏览器直接拒收。
+  // ⚠️ `sanlos-media` 开了 `corsEnabled` → 响应**必须**带跨源放行头，否则浏览器直接拒收。
   for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value)
 
   const range = parseRangeHeader(request.headers.get('range'), size)
@@ -301,14 +301,14 @@ export async function handleLocalMediaRequest(
 // 注册
 // ---------------------------------------------------------------------------
 
-// ⚠️ 这里**不再**提供「只注册 `fnml`」的入口——Electron 的
+// ⚠️ 这里**不再**提供「只注册 `sanlos-media`」的入口——Electron 的
 //    `registerSchemesAsPrivileged()` 整个进程只能调用一次，
 //    单 scheme 注册会**覆盖掉**另一个 scheme 的特权（这正是本项目踩过的坑：
-//    `fnm` 被 `fnml` 覆盖掉 → 渲染进程里 `fnm://` 完全不可用）。
+//    `sanlos` 被 `sanlos-media` 覆盖掉 → 渲染进程里 `sanlos://` 完全不可用）。
 //    → 正确的入口只有 `electron/schemes.ts` 的 `registerAppSchemes()`。
 
 /**
- * 注册 `fnml://` 协议处理器（**必须在 app ready 之后调用**）。
+ * 注册 `sanlos-media://` 协议处理器（**必须在 app ready 之后调用**）。
  *
  * @param deps  依赖（查本地索引 + 读文件）。
  * @param opts  可选参数（`protocol` 替身）。
@@ -316,7 +316,7 @@ export async function handleLocalMediaRequest(
 export function registerLocalMedia(deps: LocalMediaDeps, opts: LocalMediaOptions = {}): void {
   const protocol = opts.protocol ?? resolveElectronProtocol()
   if (!protocol) {
-    throw new Error('fnml:// 协议注册失败：当前进程没有可用的 Electron protocol 模块')
+    throw new Error('sanlos-media:// 协议注册失败：当前进程没有可用的 Electron protocol 模块')
   }
 
   try {

@@ -33,7 +33,7 @@ const tempDirs: string[] = []
 
 /** 造一个临时偏好文件。 */
 function tempFile(name = 'prefs.json'): string {
-  const dir = mkdtempSync(join(tmpdir(), 'fnm-t82-'))
+  const dir = mkdtempSync(join(tmpdir(), 'sanlos-t82-'))
   tempDirs.push(dir)
   return join(dir, name)
 }
@@ -125,13 +125,13 @@ describe('自动更新从项目拉取（T82）', () => {
     const { ipcMain, handlers } = fakeIpcMain()
     const { controller, checked } = stubController()
     const prefs = new PrefsStore({ filePath: tempFile() })
-    prefs.write({ update: { baseUrl: 'https://updates.example.com/fnmusic' } })
+    prefs.write({ update: { baseUrl: 'https://updates.example.com/sanlos' } })
     registerUpdateIpc({ ipcMain, prefs, update: controller })
 
     const handler = handlers.get('update:check')
     await handler?.({}, undefined)
 
-    expect(checked).toEqual(['https://updates.example.com/fnmusic'])
+    expect(checked).toEqual(['https://updates.example.com/sanlos'])
   })
 
   it('`allowUnsigned` 能落盘，且**只认布尔**（别的类型整段丢弃）', () => {

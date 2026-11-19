@@ -297,13 +297,13 @@ export function DetailPage(props: DetailPageProps): ReactElement {
       loading={loading}
       loadingText="正在加载详情…"
     >
-      <div className="fnm-detail">
-        <div className="fnm-detail__head">
-          <button type="button" className="fnm-detail__back" onClick={onBack}>
+      <div className="sanlos-detail">
+        <div className="sanlos-detail__head">
+          <button type="button" className="sanlos-detail__back" onClick={onBack}>
             返回
           </button>
           <CoverImage coverId={cover} alt="" boxSize={DETAIL_COVER_SIZE} />
-          <p className="fnm-detail__subtitle">{subtitle}</p>
+          <p className="sanlos-detail__subtitle">{subtitle}</p>
         </div>
 
         {/*
@@ -313,8 +313,8 @@ export function DetailPage(props: DetailPageProps): ReactElement {
          */}
         {kind === 'album' && isAudiobook && (
           <>
-            <p className="fnm-detail__audiobook">
-              <span className="fnm-detail__audiobook-note">{orderNote}</span>
+            <p className="sanlos-detail__audiobook">
+              <span className="sanlos-detail__audiobook-note">{orderNote}</span>
               {/*
                * ⚠️ **T101**：「**播放全书**」——
                *    有声作品最需要的入口（整队入队 ⇒ 播完一集自动下一集 ⇒ 连播）。
@@ -323,7 +323,7 @@ export function DetailPage(props: DetailPageProps): ReactElement {
               {onPlay && orderedSongs && orderedSongs.length > 0 ? (
                 <button
                   type="button"
-                  className="fnm-detail__audiobook-btn"
+                  className="sanlos-detail__audiobook-btn"
                   onClick={() => {
                     const first = orderedSongs[0]
                     if (first) onPlay(first, 0, orderedSongs)
@@ -334,7 +334,7 @@ export function DetailPage(props: DetailPageProps): ReactElement {
               ) : null}
               <button
                 type="button"
-                className="fnm-detail__audiobook-btn"
+                className="sanlos-detail__audiobook-btn"
                 onClick={() => setOverride(entityId, 'not-audiobook', undefined, heading)}
               >
                 这不是有声
@@ -346,7 +346,7 @@ export function DetailPage(props: DetailPageProps): ReactElement {
              *    但**信息一点没丢**（在这里照样看得见）。
              */}
             {audiobookReasons.length > 0 ? (
-              <p className="fnm-detail__audiobook-reasons">
+              <p className="sanlos-detail__audiobook-reasons">
                 {`为什么列在这里：${audiobookReasons.join(' · ')}`}
               </p>
             ) : null}
@@ -354,8 +354,8 @@ export function DetailPage(props: DetailPageProps): ReactElement {
         )}
 
         {kind === 'artist' && (
-          <section className="fnm-detail__section">
-            <h2 className="fnm-detail__section-title">专辑</h2>
+          <section className="sanlos-detail__section">
+            <h2 className="sanlos-detail__section-title">专辑</h2>
             <CardGrid
               items={artistAlbums.items}
               keyOf={(album) => album.id}
@@ -371,8 +371,8 @@ export function DetailPage(props: DetailPageProps): ReactElement {
           </section>
         )}
 
-        <section className="fnm-detail__section">
-          <h2 className="fnm-detail__section-title">曲目</h2>
+        <section className="sanlos-detail__section">
+          <h2 className="sanlos-detail__section-title">曲目</h2>
           <BatchDownloadBar
             songs={batch.selectedSongs}
             onClear={batch.clear}
@@ -402,7 +402,7 @@ export function DetailPage(props: DetailPageProps): ReactElement {
                 ? (song) => {
                     const episode = episodeBySongId.get(song.id)
                     if (!episode) return null
-                    return <span className="fnm-detail__episode">第 {episode.join('.')} 集</span>
+                    return <span className="sanlos-detail__episode">第 {episode.join('.')} 集</span>
                   }
                 : undefined
             }
@@ -416,10 +416,10 @@ export function DetailPage(props: DetailPageProps): ReactElement {
          *    判为有声后：这一页会改成「一次性拉全量 + 按集序排」。
          */}
         {kind === 'album' && !isAudiobook && (
-          <p className="fnm-detail__audiobook">
+          <p className="sanlos-detail__audiobook">
             <button
               type="button"
-              className="fnm-detail__audiobook-btn"
+              className="sanlos-detail__audiobook-btn"
               onClick={() => setOverride(entityId, 'audiobook', undefined, heading)}
             >
               这是有声读物

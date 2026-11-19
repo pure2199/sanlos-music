@@ -244,7 +244,7 @@ describe('auth:restore', () => {
 
   it('load() 失败但内存里的会话仍有效时，仍返回已连接（审查 M3）', async () => {
     // 落盘失败 / 文件损坏，但内存里的会话还带着有效 token：
-    // 界面报「未登录」会与仍在工作的 fnm:// 代理对不上，故按内存状态如实上报。
+    // 界面报「未登录」会与仍在工作的 sanlos:// 代理对不上，故按内存状态如实上报。
     const session = fakeSession()
     session.load.mockReturnValue(false)
     session.lastLoadError = new Error('会话解密失败：DPAPI 密钥不可用')

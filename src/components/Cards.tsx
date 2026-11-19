@@ -95,12 +95,12 @@ export function CoverImage({ coverId, alt, boxSize = CARD_COVER_SIZE, className 
     setFailed(false)
   }, [coverId])
 
-  const classNames = className ? `${className} fnm-cover` : 'fnm-cover'
+  const classNames = className ? `${className} sanlos-cover` : 'sanlos-cover'
 
   if (!url || failed) {
     return (
       <div
-        className={`${classNames} fnm-cover__placeholder`}
+        className={`${classNames} sanlos-cover__placeholder`}
         data-testid="cover-placeholder"
         aria-hidden="true"
         style={{ width: boxSize, height: boxSize }}
@@ -112,7 +112,7 @@ export function CoverImage({ coverId, alt, boxSize = CARD_COVER_SIZE, className 
 
   return (
     <img
-      className={`${classNames} fnm-cover__image`}
+      className={`${classNames} sanlos-cover__image`}
       src={url}
       alt={alt}
       // ⚠️ 懒加载：不在视口里的卡片不发起封面请求（要求 A）。
@@ -146,11 +146,11 @@ export interface AlbumCardProps {
 /** 专辑卡片。 */
 export function AlbumCard({ album, onOpen, subtitle }: AlbumCardProps): ReactElement {
   return (
-    <article className="fnm-card" data-testid="fnm-card">
-      <button type="button" className="fnm-card__button" onClick={() => onOpen?.(album)}>
+    <article className="sanlos-card" data-testid="sanlos-card">
+      <button type="button" className="sanlos-card__button" onClick={() => onOpen?.(album)}>
         <CoverImage coverId={album.coverId} alt={album.title} />
-        <span className="fnm-card__title">{album.title}</span>
-        <span className="fnm-card__subtitle">{subtitle ?? album.artist}</span>
+        <span className="sanlos-card__title">{album.title}</span>
+        <span className="sanlos-card__subtitle">{subtitle ?? album.artist}</span>
       </button>
     </article>
   )
@@ -167,11 +167,11 @@ export interface ArtistCardProps {
 /** 歌手卡片。 */
 export function ArtistCard({ artist, onOpen }: ArtistCardProps): ReactElement {
   return (
-    <article className="fnm-card" data-testid="fnm-card">
-      <button type="button" className="fnm-card__button" onClick={() => onOpen?.(artist)}>
+    <article className="sanlos-card" data-testid="sanlos-card">
+      <button type="button" className="sanlos-card__button" onClick={() => onOpen?.(artist)}>
         <CoverImage coverId={artist.coverId} alt={artist.name} />
-        <span className="fnm-card__title">{artist.name}</span>
-        <span className="fnm-card__subtitle">{`${artist.albumCount} 张专辑 · ${artist.trackCount} 首`}</span>
+        <span className="sanlos-card__title">{artist.name}</span>
+        <span className="sanlos-card__subtitle">{`${artist.albumCount} 张专辑 · ${artist.trackCount} 首`}</span>
       </button>
     </article>
   )
@@ -188,11 +188,11 @@ export interface GenreCardProps {
 /** 风格卡片。 */
 export function GenreCard({ genre, onOpen }: GenreCardProps): ReactElement {
   return (
-    <article className="fnm-card" data-testid="fnm-card">
-      <button type="button" className="fnm-card__button" onClick={() => onOpen?.(genre)}>
+    <article className="sanlos-card" data-testid="sanlos-card">
+      <button type="button" className="sanlos-card__button" onClick={() => onOpen?.(genre)}>
         <CoverImage coverId={genre.coverId} alt={genre.name} />
-        <span className="fnm-card__title">{genre.name}</span>
-        <span className="fnm-card__subtitle">{`${genre.trackCount} 首`}</span>
+        <span className="sanlos-card__title">{genre.name}</span>
+        <span className="sanlos-card__subtitle">{`${genre.trackCount} 首`}</span>
       </button>
     </article>
   )
@@ -209,11 +209,11 @@ export interface PlaylistCardProps {
 /** 歌单卡片。 */
 export function PlaylistCard({ playlist, onOpen }: PlaylistCardProps): ReactElement {
   return (
-    <article className="fnm-card" data-testid="fnm-card">
-      <button type="button" className="fnm-card__button" onClick={() => onOpen?.(playlist)}>
+    <article className="sanlos-card" data-testid="sanlos-card">
+      <button type="button" className="sanlos-card__button" onClick={() => onOpen?.(playlist)}>
         <CoverImage coverId={playlist.coverId} alt={playlist.name} />
-        <span className="fnm-card__title">{playlist.name}</span>
-        <span className="fnm-card__subtitle">{`${playlist.trackCount} 首`}</span>
+        <span className="sanlos-card__title">{playlist.name}</span>
+        <span className="sanlos-card__subtitle">{`${playlist.trackCount} 首`}</span>
       </button>
     </article>
   )
@@ -370,7 +370,7 @@ export function CardGrid<T>(props: CardGridProps<T>): ReactElement {
 
   return (
     <div
-      className="fnm-cardgrid"
+      className="sanlos-cardgrid"
       role="list"
       aria-label={ariaLabel}
       ref={viewportRef}
@@ -380,9 +380,9 @@ export function CardGrid<T>(props: CardGridProps<T>): ReactElement {
       style={{ '--grid-row-height': `${rowHeight}px` } as StyleVars}
     >
       {items.length === 0 ? (
-        loading ? null : <p className="fnm-cardgrid__empty">{emptyLabel}</p>
+        loading ? null : <p className="sanlos-cardgrid__empty">{emptyLabel}</p>
       ) : (
-        <div className="fnm-cardgrid__canvas" style={{ height: rowCount * rowHeight }}>
+        <div className="sanlos-cardgrid__canvas" style={{ height: rowCount * rowHeight }}>
           {visibleItems.map((item, offset) => {
             const index = startIndex + offset
             const column = index % columns
@@ -390,7 +390,7 @@ export function CardGrid<T>(props: CardGridProps<T>): ReactElement {
             return (
               <div
                 key={keyOf(item, index)}
-                className="fnm-cardgrid__cell"
+                className="sanlos-cardgrid__cell"
                 role="listitem"
                 data-index={index}
                 style={{

@@ -88,16 +88,16 @@ describe('LyricView：全量模式（歌词舞台）', () => {
     //    **已唱过的词**才挂 `--sung`。
     //    ⚠️ 本用例里 t=13 恰好落在**第一个词**上 ⇒ 「已唱过的词」为 0 个
     //    ⇒ 原断言「有 `--sung`」的前提被 T71 **显式推翻** ⇒ 拆成两条更强的事实：
-    const karaoke = active.querySelectorAll('.fnm-lyricview__word--karaoke')
+    const karaoke = active.querySelectorAll('.sanlos-lyricview__word--karaoke')
     expect(karaoke).toHaveLength(1)
     // (13-10)/(15-10) = 60%
     expect(karaoke[0]!.getAttribute('data-karaoke-progress')).toBe('60.0')
 
     const other = lineAt(container, 1)
     expect(other.className).not.toMatch(/active/)
-    expect(other.querySelectorAll('.fnm-lyricview__word--sung')).toHaveLength(0)
+    expect(other.querySelectorAll('.sanlos-lyricview__word--sung')).toHaveLength(0)
     // ⚠️ **非**当前行**也没有**卡拉OK（只有当前行在推进）。
-    expect(other.querySelectorAll('.fnm-lyricview__word--karaoke')).toHaveLength(0)
+    expect(other.querySelectorAll('.sanlos-lyricview__word--karaoke')).toHaveLength(0)
   })
 
   // ⚠️ **T81 新增**：伪逐字（行级 LRC）下**不假装逐字**。
@@ -106,14 +106,14 @@ describe('LyricView：全量模式（歌词舞台）', () => {
 
     const active = lineAt(container, 0)
     // ⚠️ 鉴别力：当前行**整行**是强调色（`--whole`）。
-    expect(active.className).toContain('fnm-lyricview__line--whole')
+    expect(active.className).toContain('sanlos-lyricview__line--whole')
     // ⚠️ 鉴别力：**零**词元素 ⇒ 没有任何词级高亮（假扫光不可能出现）。
     expect(active.querySelectorAll('[data-word]')).toHaveLength(0)
-    expect(active.querySelectorAll('.fnm-lyricview__word--karaoke')).toHaveLength(0)
-    expect(container.querySelector('.fnm-lyricview__overlay')).toBeNull()
+    expect(active.querySelectorAll('.sanlos-lyricview__word--karaoke')).toHaveLength(0)
+    expect(container.querySelector('.sanlos-lyricview__overlay')).toBeNull()
 
     const other = lineAt(container, 1)
-    expect(other.className).not.toContain('fnm-lyricview__line--whole')
+    expect(other.className).not.toContain('sanlos-lyricview__line--whole')
   })
 
   it('**翻译只给当前行看**（每行都挂翻译 → 槽位等高的前提就破了）', () => {
@@ -149,7 +149,7 @@ describe('LyricView：全量模式（歌词舞台）', () => {
 
     const tops = Array.from(container.querySelectorAll('[data-index]')).map((element) =>
       Number(
-        (element as HTMLElement).style.getPropertyValue('--fnm-lyricview__line-top').replace('px', ''),
+        (element as HTMLElement).style.getPropertyValue('--sanlos-lyricview__line-top').replace('px', ''),
       ),
     )
     expect(tops).toHaveLength(10)

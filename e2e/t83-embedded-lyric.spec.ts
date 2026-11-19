@@ -66,7 +66,7 @@ test.describe.serial('T83：音频内嵌歌词（真实 Electron）', () => {
     const window = fixture.window
     const list = window.getByRole('listbox', { name: '歌曲列表' })
     await list.getByRole('option').filter({ hasText: songTitle }).first().dblclick()
-    await expect(window.locator('.fnm-playerbar__title')).toHaveText(songTitle)
+    await expect(window.locator('.sanlos-playerbar__title')).toHaveText(songTitle)
     await window.getByRole('button', { name: '全屏播放页', exact: true }).click()
     await expect(window.getByTestId('full-player')).toBeVisible()
   }
@@ -81,7 +81,7 @@ test.describe.serial('T83：音频内嵌歌词（真实 Electron）', () => {
     //    否则 Chromium 读不到 `data` 块 ⇒ 直接报「当前内核不支持该格式」。
     await expect(window.getByText('该音频无法播放')).toHaveCount(0)
 
-    const stage = window.getByTestId('full-player').locator('.fnm-lyricview--all')
+    const stage = window.getByTestId('full-player').locator('.sanlos-lyricview--all')
     await expect(stage).toBeVisible()
 
     // --- 鉴别力 3：内嵌歌词的**两行**都在歌词舞台里 -------------------------
@@ -99,6 +99,6 @@ test.describe.serial('T83：音频内嵌歌词（真实 Electron）', () => {
 
     // ⚠️ NAS 的歌词在库里 ⇒ 走的是 NAS 那一层 ⇒ **不该**出现内嵌的标签。
     await expect(window.getByText('歌词来源：音频内嵌')).toHaveCount(0)
-    await expect(window.getByTestId('full-player').locator('.fnm-lyricview--all')).toBeVisible()
+    await expect(window.getByTestId('full-player').locator('.sanlos-lyricview--all')).toBeVisible()
   })
 })

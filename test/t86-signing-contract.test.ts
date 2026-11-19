@@ -29,7 +29,7 @@ describe('T86 签名链路契约', () => {
 
     // ⚠️ 断言用的是**暂存目录**（= 本次构建的产物）——
     //    用输出目录会把**历史旧包**一起算进来 ⇒ 误报。
-    expect(src).toContain('fn-check-signature.mjs')
+    expect(src).toContain('sanlos-check-signature.mjs')
     expect(src).toContain("'--expect', 'signed'")
     expect(src).toContain('stagingDir')
     // ⚠️ 断言失败 ⇒ 打包失败（不是「打个警告就算了」）。
@@ -67,7 +67,7 @@ describe('T86 签名链路契约', () => {
   })
 
   it('签名断言工具在**源码层**声明了「没有签名 ⇒ 失败」这条判定', () => {
-    const src = readRepoFile('tools', 'fn-check-signature.mjs')
+    const src = readRepoFile('tools', 'sanlos-check-signature.mjs')
 
     expect(src).toContain("'--expect'")
     expect(src).toContain("'signed'")
@@ -81,7 +81,7 @@ describe('T86 签名链路契约', () => {
   })
 
   it('证书生成工具**不许**把私钥或口令写进仓库（只落在 gitignored 目录）', () => {
-    const src = readRepoFile('tools', 'fn-make-selfsigned-cert.mjs')
+    const src = readRepoFile('tools', 'sanlos-make-selfsigned-cert.mjs')
 
     // ⚠️ `.pfx` / 口令文件都在 `release/` 下 ⇒ 整个目录被 gitignore。
     expect(src).toContain("'release', 'certs'")

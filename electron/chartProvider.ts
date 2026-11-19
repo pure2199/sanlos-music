@@ -54,7 +54,7 @@ export const DEFAULT_QQ_TOPLIST_URL = 'https://c.y.qq.com/v8/fcg-bin/fcg_v8_topl
  * ⇒ 回落默认榜源。
  *
  * ⚠️ **为什么不让渲染层指定地址**：渲染层是**不可信输入**；
- *    可覆盖的地址只由**主进程**从**环境变量**读（`FNM_CHART_URL`），
+ *    可覆盖的地址只由**主进程**从**环境变量**读（`SANLOS_CHART_URL`），
  *    且必须过这一关。
  *
  * @param raw 原始值（通常是环境变量）。

@@ -5,8 +5,8 @@
 // 覆盖：
 // - **扩展名推导**（`downloadExtension`）：优先 `audioSpec.format`，退回 `codec`，都不合法 → `bin`；
 // - **本地优先播放**（`resolvePlaybackSource`）：
-//   命中本地且开关打开 → `fnml://local/track/<id>`；
-//   没命中 / 开关关掉 → `fnm://srv/track/stream?guid=…`（**与之前完全一致**）；
+//   命中本地且开关打开 → `sanlos-media://local/track/<id>`；
+//   没命中 / 开关关掉 → `sanlos://srv/track/stream?guid=…`（**与之前完全一致**）；
 // - **下载状态镜像**（`useDownloadStore`）：读索引、乐观开关 + 失败回滚；
 // - **行内下载按钮**（`DownloadButton`）：各状态的文案与点击行为。
 //
@@ -104,7 +104,7 @@ function fakeBridge(): {
 }
 
 beforeEach(() => {
-  delete (globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   useDownloadStore.setState({
     entries: {},
     tasks: {},
@@ -138,19 +138,19 @@ describe('下载：扩展名推导', () => {
 // ---------------------------------------------------------------------------
 
 describe('下载：本地优先播放', () => {
-  it('本地有副本且开关打开 → 用 fnml://（不再走 NAS）', () => {
+  it('本地有副本且开关打开 → 用 sanlos-media://（不再走 NAS）', () => {
     useDownloadStore.setState({ entries: { [SONG_ID]: ENTRY }, localFirst: true })
     expect(resolvePlaybackSource(SONG)).toBe(localMediaUrl(SONG_ID))
   })
 
-  it('本地没副本 → 照旧走 fnm:// 流式地址', () => {
+  it('本地没副本 → 照旧走 sanlos:// 流式地址', () => {
     useDownloadStore.setState({ entries: {}, localFirst: true })
-    expect(resolvePlaybackSource(SONG)).toBe(`fnm://srv/track/stream?guid=${SONG_ID}`)
+    expect(resolvePlaybackSource(SONG)).toBe(`sanlos://srv/track/stream?guid=${SONG_ID}`)
   })
 
   it('开关关掉 → 即使本地有副本也走流式地址', () => {
     useDownloadStore.setState({ entries: { [SONG_ID]: ENTRY }, localFirst: false })
-    expect(resolvePlaybackSource(SONG)).toBe(`fnm://srv/track/stream?guid=${SONG_ID}`)
+    expect(resolvePlaybackSource(SONG)).toBe(`sanlos://srv/track/stream?guid=${SONG_ID}`)
   })
 
   it('正在下载的**半成品不算**（entries 里没有 → 走流式）', () => {
@@ -170,7 +170,7 @@ describe('下载：本地优先播放', () => {
       },
       localFirst: true,
     })
-    expect(resolvePlaybackSource(SONG)).toBe(`fnm://srv/track/stream?guid=${SONG_ID}`)
+    expect(resolvePlaybackSource(SONG)).toBe(`sanlos://srv/track/stream?guid=${SONG_ID}`)
   })
 })
 
@@ -188,7 +188,7 @@ describe('下载：状态镜像', () => {
     const handlers: Array<(tasks: DownloadTask[]) => void> = []
     let entries: Record<string, DownloadEntry> = {}
     let listCalls = 0
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       ...fakeBridge().bridge,
       listDownloads: async () => {
         listCalls += 1
@@ -229,7 +229,7 @@ describe('下载：状态镜像', () => {
   it('下载完成后行内按钮显示「本地」（不是退回「下载」）', async () => {
     const handlers: Array<(tasks: DownloadTask[]) => void> = []
     let entries: Record<string, DownloadEntry> = {}
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       ...fakeBridge().bridge,
       listDownloads: async () => ({ entries, tasks: [] as DownloadTask[], dir: 'C:\\Music' }),
       onDownloadChange: (h: (tasks: DownloadTask[]) => void) => {
@@ -240,7 +240,7 @@ describe('下载：状态镜像', () => {
 
     const dispose = installDownloadStore()
     render(<DownloadButton song={SONG} />)
-    expect(screen.getByTestId('fnm-download-button').getAttribute('data-status')).toBe('idle')
+    expect(screen.getByTestId('sanlos-download-button').getAttribute('data-status')).toBe('idle')
 
     entries = { [SONG_ID]: ENTRY }
     handlers[0]?.([
@@ -257,7 +257,7 @@ describe('下载：状态镜像', () => {
     ])
 
     await waitFor(() =>
-      expect(screen.getByTestId('fnm-download-button').getAttribute('data-status')).toBe('done'),
+      expect(screen.getByTestId('sanlos-download-button').getAttribute('data-status')).toBe('done'),
     )
     dispose()
   })
@@ -273,7 +273,7 @@ describe('下载：状态镜像', () => {
       error: null,
       file: null,
     }
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       ...fakeBridge().bridge,
       listDownloads: async () => ({ entries: { [SONG_ID]: ENTRY }, tasks: [task], dir: 'C:\\Music' }),
       getPrefs: async () => ({ localFirst: false }),
@@ -304,7 +304,7 @@ describe('下载：状态镜像', () => {
           rejectors.push(reject)
         }),
     )
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       ...fakeBridge().bridge,
       setPrefs,
     } as unknown as PlayerBridge
@@ -323,7 +323,7 @@ describe('下载：状态镜像', () => {
 
   it('「本地优先」写回成功 → 保持新值且无错误', async () => {
     const setPrefs = vi.fn(async () => ({}))
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       ...fakeBridge().bridge,
       setPrefs,
     } as unknown as PlayerBridge
@@ -348,10 +348,10 @@ describe('下载：状态镜像', () => {
 describe('下载：行内按钮', () => {
   it('未下载 → 显示「下载」，点击发起下载', () => {
     const fake = fakeBridge()
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     render(<DownloadButton song={SONG} />)
-    const button = screen.getByTestId('fnm-download-button')
+    const button = screen.getByTestId('sanlos-download-button')
     expect(button.textContent).toBe('下载')
     expect(button.getAttribute('data-status')).toBe('idle')
 
@@ -363,7 +363,7 @@ describe('下载：行内按钮', () => {
     useDownloadStore.setState({ entries: { [SONG_ID]: ENTRY } })
     render(<DownloadButton song={SONG} />)
 
-    const button = screen.getByTestId('fnm-download-button')
+    const button = screen.getByTestId('sanlos-download-button')
     expect(button.textContent).toBe('本地')
     expect(button.getAttribute('data-status')).toBe('done')
     expect((button as HTMLButtonElement).disabled).toBe(true)
@@ -371,7 +371,7 @@ describe('下载：行内按钮', () => {
 
   it('下载中 → 显示百分比，点击取消', () => {
     const fake = fakeBridge()
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
     useDownloadStore.setState({
       tasks: {
         [SONG_ID]: {
@@ -388,7 +388,7 @@ describe('下载：行内按钮', () => {
     })
 
     render(<DownloadButton song={SONG} />)
-    const button = screen.getByTestId('fnm-download-button')
+    const button = screen.getByTestId('sanlos-download-button')
     expect(button.textContent).toBe('25%')
 
     fireEvent.click(button)
@@ -398,7 +398,7 @@ describe('下载：行内按钮', () => {
 
   it('失败 → 显示「重试」，点击重新下载', () => {
     const fake = fakeBridge()
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
     useDownloadStore.setState({
       tasks: {
         [SONG_ID]: {
@@ -415,7 +415,7 @@ describe('下载：行内按钮', () => {
     })
 
     render(<DownloadButton song={SONG} />)
-    const button = screen.getByTestId('fnm-download-button')
+    const button = screen.getByTestId('sanlos-download-button')
     expect(button.textContent).toBe('重试')
     expect(button.getAttribute('title')).toContain('无法连接音乐服务')
 
@@ -425,7 +425,7 @@ describe('下载：行内按钮', () => {
 
   it('点击**不冒泡**到行上（行单击是「选中」）', () => {
     const fake = fakeBridge()
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
     const onRowClick = vi.fn()
 
     render(
@@ -433,21 +433,21 @@ describe('下载：行内按钮', () => {
         <DownloadButton song={SONG} />
       </div>,
     )
-    fireEvent.click(screen.getByTestId('fnm-download-button'))
+    fireEvent.click(screen.getByTestId('sanlos-download-button'))
 
     expect(onRowClick).not.toHaveBeenCalled()
   })
 
   it('样式走类名（不在内联 style 里写死几何）', () => {
     render(<DownloadButton song={SONG} />)
-    const button = screen.getByTestId('fnm-download-button')
-    expect(button.className).toContain('fnm-download')
+    const button = screen.getByTestId('sanlos-download-button')
+    expect(button.className).toContain('sanlos-download')
     expect(button.getAttribute('style')).toBeNull()
   })
 
   it('没有桥时点击不崩（浏览器预览）', async () => {
     render(<DownloadButton song={SONG} />)
-    fireEvent.click(screen.getByTestId('fnm-download-button'))
+    fireEvent.click(screen.getByTestId('sanlos-download-button'))
     await waitFor(() => {
       expect(useDownloadStore.getState().error).toBe('当前环境不支持下载')
     })

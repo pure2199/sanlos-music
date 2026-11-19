@@ -18,8 +18,8 @@
 // ---------------------------------------------------------------------------
 // 模块约束
 // ---------------------------------------------------------------------------
-// - **不 import Electron**；桥通过 `window.fnPlayer` 拿（单测可注入替身）。
-// - 渲染进程**永远拿不到凭证**：歌词接口走既有的 `fnm://` 代理，与本模块无关。
+// - **不 import Electron**；桥通过 `window.sanlosPlayer` 拿（单测可注入替身）。
+// - 渲染进程**永远拿不到凭证**：歌词接口走既有的 `sanlos://` 代理，与本模块无关。
 // ---------------------------------------------------------------------------
 
 import type { LyricEntry } from '../api/types'
@@ -88,8 +88,8 @@ export interface LyricOverlayPlayerStore {
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。 */
 function defaultBridge(): LyricOverlayBridge | null {
-  const scope = globalThis as { fnPlayer?: PlayerBridge }
-  const bridge = scope.fnPlayer
+  const scope = globalThis as { sanlosPlayer?: PlayerBridge }
+  const bridge = scope.sanlosPlayer
   if (!bridge) return null
   return {
     pushLyricState: (message) => bridge.pushLyricState(message),
@@ -100,7 +100,7 @@ function defaultBridge(): LyricOverlayBridge | null {
 
 /** `installLyricOverlay` 的参数（全部可注入，便于单测）。 */
 export interface LyricOverlayOptions {
-  /** 桥；不传则取 `window.fnPlayer`（没有则整个模块**不装**）。 */
+  /** 桥；不传则取 `window.sanlosPlayer`（没有则整个模块**不装**）。 */
   bridge?: LyricOverlayBridge | null
   /** 歌词接口；不传则用真实的 `lyricApi`。 */
   api?: LyricOverlayApi

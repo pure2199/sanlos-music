@@ -242,7 +242,7 @@ describe('T101：详情页的播放模块', () => {
     )
 
     const reasons = await waitFor(() => {
-      const element = container.querySelector('.fnm-detail__audiobook-reasons')
+      const element = container.querySelector('.sanlos-detail__audiobook-reasons')
       expect(element).not.toBeNull()
       return element as HTMLElement
     })
@@ -262,7 +262,7 @@ describe('T101：详情页的播放模块', () => {
       expect(screen.getByText('歌1')).toBeTruthy()
     })
     expect(screen.queryByRole('button', { name: '播放全书' })).toBeNull()
-    expect(document.querySelector('.fnm-detail__audiobook-reasons')).toBeNull()
+    expect(document.querySelector('.sanlos-detail__audiobook-reasons')).toBeNull()
   })
 })
 

@@ -99,7 +99,7 @@ test.describe.serial('T107：按歌选源（真实 Electron）', () => {
       .click()
     const list = window.getByRole('listbox', { name: '歌曲列表' })
     await list.getByRole('option').filter({ hasText: songTitle }).first().dblclick()
-    await expect(window.locator('.fnm-playerbar__title')).toHaveText(songTitle)
+    await expect(window.locator('.sanlos-playerbar__title')).toHaveText(songTitle)
     await window.getByRole('button', { name: /全屏/ }).first().click()
     await expect(window.getByTestId('full-player')).toBeVisible()
   }
@@ -110,7 +110,7 @@ test.describe.serial('T107：按歌选源（真实 Electron）', () => {
     await openStageWith('示例曲目 3')
 
     const page = window.getByTestId('full-player')
-    const stage = page.locator('.fnm-lyricview--all')
+    const stage = page.locator('.sanlos-lyricview--all')
     await expect(stage).toBeVisible()
 
     // --- 鉴别力 1：不指定时 = NAS 那份（全局源是「不用外部」）----------------

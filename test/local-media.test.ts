@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// T11 本地媒体协议 `fnml://`（主进程）
+// T11 本地媒体协议 `sanlos-media://`（主进程）
 // ---------------------------------------------------------------------------
 //
 // 覆盖：
@@ -49,7 +49,7 @@ function memoryFile(bytes: Uint8Array): {
 describe('本地媒体：地址解析', () => {
   it('构造的地址能被自己解析回来', () => {
     const url = localMediaUrl(SONG_ID)
-    expect(url).toBe(`fnml://local/track/${SONG_ID}`)
+    expect(url).toBe(`sanlos-media://local/track/${SONG_ID}`)
     expect(parseLocalMediaTarget(url)).toBe(SONG_ID)
   })
 
@@ -59,12 +59,12 @@ describe('本地媒体：地址解析', () => {
   })
 
   it('主机名不对 / 路径段数不对 / scheme 不对 → 一律拒绝', () => {
-    expect(parseLocalMediaTarget('fnml://evil/track/x')).toBeNull()
-    expect(parseLocalMediaTarget('fnml://local/track')).toBeNull()
-    expect(parseLocalMediaTarget('fnml://local/track/a/b')).toBeNull()
-    expect(parseLocalMediaTarget('fnml://local/other/x')).toBeNull()
+    expect(parseLocalMediaTarget('sanlos-media://evil/track/x')).toBeNull()
+    expect(parseLocalMediaTarget('sanlos-media://local/track')).toBeNull()
+    expect(parseLocalMediaTarget('sanlos-media://local/track/a/b')).toBeNull()
+    expect(parseLocalMediaTarget('sanlos-media://local/other/x')).toBeNull()
     expect(parseLocalMediaTarget('http://local/track/x')).toBeNull()
-    expect(parseLocalMediaTarget('fnml://local/track/')).toBeNull()
+    expect(parseLocalMediaTarget('sanlos-media://local/track/')).toBeNull()
   })
 })
 
@@ -144,7 +144,7 @@ describe('本地媒体：响应', () => {
 
   it('地址非法 → 400', async () => {
     const { deps } = memoryFile(new Uint8Array([1]))
-    const response = await handleLocalMediaRequest(new Request('fnml://evil/track/x'), deps)
+    const response = await handleLocalMediaRequest(new Request('sanlos-media://evil/track/x'), deps)
     expect(response.status).toBe(400)
   })
 

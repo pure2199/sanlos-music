@@ -65,14 +65,14 @@ function SpectrumBarsImpl(props: SpectrumBarsProps): ReactElement {
   const { values, side } = props
   return (
     <div
-      className={`fnm-island__spectrum fnm-island__spectrum--${side}`}
-      data-testid={`fnm-spectrum-${side}`}
+      className={`sanlos-island__spectrum sanlos-island__spectrum--${side}`}
+      data-testid={`sanlos-spectrum-${side}`}
       aria-hidden="true"
     >
       {values.map((value, index) => (
         <span
           key={index}
-          className="fnm-island__bar"
+          className="sanlos-island__bar"
           data-index={index}
           style={{ height: `${barHeightPercent(value)}%` }}
         />

@@ -77,7 +77,7 @@ jobs:
       ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
       ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download
       # ⚠️ 产物目录（`scripts/pack.cjs` 与 `scripts/publish-manifest.mjs` 共用这个变量）。
-      FNM_PACK_OUTPUT: release-ci
+      SANLOS_PACK_OUTPUT: release-ci
 
     steps:
       - name: Checkout
@@ -175,7 +175,7 @@ jobs:
         #    ⚠️ CN 口径与**客户端**同一份（`shared/update.ts`）⇒ 客户端认的，
         #       这里也认；客户端不认的，这里也不认。
         run: >
-          node tools/fn-check-signature.mjs
+          node tools/sanlos-check-signature.mjs
           --expect valid
           --require-timestamp
           --expect-cn "${{ vars.SIGNPATH_EXPECTED_CN || 'SignPath Foundation' }}"
@@ -207,7 +207,7 @@ jobs:
         #    产物若因为任何原因带上了签名（本地装了证书 / 环境里有 WIN_CSC_LINK……）
         #    ⇒ **工作流失败，绝不发布**。
         #    （`--expect none` 是既有选项，语义 = 每个产物都必须**没有**签名，一字未改。）
-        run: node tools/fn-check-signature.mjs --expect none release-ci
+        run: node tools/sanlos-check-signature.mjs --expect none release-ci
 
       - name: Write update manifest (unsigned)
         if: ${{ !inputs.pack_only && !inputs.sign }}

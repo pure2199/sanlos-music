@@ -27,7 +27,7 @@ import { PrefsStore, registerPlayerIpc, type IpcMainEventsLike } from '../electr
 // 假桥
 // ---------------------------------------------------------------------------
 
-/** 装一个假的 `window.fnPlayer`。 */
+/** 装一个假的 `window.sanlosPlayer`。 */
 function installBridge(overrides: Partial<PlayerBridge> = {}): {
   getPrefs: ReturnType<typeof vi.fn>
   setTheme: ReturnType<typeof vi.fn>
@@ -46,7 +46,7 @@ function installBridge(overrides: Partial<PlayerBridge> = {}): {
     onCommand: vi.fn(() => () => {}),
     ...overrides,
   } as unknown as PlayerBridge
-  ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+  ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
   return { getPrefs, setTheme }
 }
 
@@ -56,7 +56,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete (globalThis as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   delete document.documentElement.dataset['theme']
 })
 
@@ -196,7 +196,7 @@ describe('主进程：theme:set 落盘后回调 onTheme', () => {
     const { ipcMain, handlers } = fakeIpcMain()
     const onTheme = vi.fn()
     // ⚠️ 偏好文件必须落在**临时目录**里——写进仓库会留下垃圾文件。
-    const dir = mkdtempSync(join(tmpdir(), 'fnmusic-theme-'))
+    const dir = mkdtempSync(join(tmpdir(), 'sanlos-theme-'))
     const prefs = new PrefsStore({ filePath: join(dir, 'prefs.json') })
     try {
       registerPlayerIpc({ ipcMain, prefs, onTheme })

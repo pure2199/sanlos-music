@@ -71,16 +71,16 @@ async function captureMediaElement(window: Page): Promise<void> {
     const proto = HTMLMediaElement.prototype
     const descriptor = Object.getOwnPropertyDescriptor(proto, 'currentTime')
     if (!descriptor?.get || !descriptor.set) throw new Error('currentTime 不是可劫持的 accessor')
-    const scope = window as unknown as { __fnmMedia?: HTMLMediaElement }
+    const scope = window as unknown as { __sanlosMedia?: HTMLMediaElement }
     Object.defineProperty(proto, 'currentTime', {
       configurable: true,
       enumerable: descriptor.enumerable,
       get(this: HTMLMediaElement): number {
-        scope.__fnmMedia = this
+        scope.__sanlosMedia = this
         return descriptor.get!.call(this)
       },
       set(this: HTMLMediaElement, value: number): void {
-        scope.__fnmMedia = this
+        scope.__sanlosMedia = this
         descriptor.set!.call(this, value)
       },
     })
@@ -90,8 +90,8 @@ async function captureMediaElement(window: Page): Promise<void> {
 /** 媒体元素的**真实**播放位置（秒）。 */
 async function mediaPosition(window: Page): Promise<number> {
   const value = await window.evaluate(() => {
-    const scope = window as unknown as { __fnmMedia?: HTMLMediaElement }
-    return scope.__fnmMedia?.currentTime ?? Number.NaN
+    const scope = window as unknown as { __sanlosMedia?: HTMLMediaElement }
+    return scope.__sanlosMedia?.currentTime ?? Number.NaN
   })
   expect(Number.isFinite(value)).toBe(true)
   return value
@@ -157,7 +157,7 @@ interface KaraokeWord {
  */
 async function snapshotKaraoke(panel: Locator): Promise<KaraokeWord> {
   return panel.evaluate((root) => {
-    const words = root.querySelectorAll('.fnm-lyricview__word--karaoke')
+    const words = root.querySelectorAll('.sanlos-lyricview__word--karaoke')
     const word = words.length === 1 ? words[0]! : null
     const line = word ? word.closest('[data-index]') : null
     const computed = word ? getComputedStyle(word) : null
@@ -307,7 +307,7 @@ test.describe.serial('T71：卡拉OK —— 所有歌词页面一致（真实 El
 
     // 播那首带**词级时间戳**的歌。
     await list.getByRole('option').filter({ hasText: WORD_LEVEL_SONG.title }).first().dblclick()
-    await expect(window.locator('.fnm-playerbar__title')).toHaveText(WORD_LEVEL_SONG.title)
+    await expect(window.locator('.sanlos-playerbar__title')).toHaveText(WORD_LEVEL_SONG.title)
 
     // 先记住引擎那个媒体元素（后面要用它的**真实**位置）。
     await captureMediaElement(window)
@@ -319,7 +319,7 @@ test.describe.serial('T71：卡拉OK —— 所有歌词页面一致（真实 El
 
     // --- 开全屏页（歌词舞台）--------------------------------------------------
     await window.getByRole('button', { name: '全屏播放页', exact: true }).click()
-    const stage = window.getByTestId('full-player').locator('.fnm-lyricview--all')
+    const stage = window.getByTestId('full-player').locator('.sanlos-lyricview--all')
     await expect(stage).toBeVisible()
 
     await expectRealKaraoke(stage, window)
@@ -357,7 +357,7 @@ test.describe.serial('T71：卡拉OK —— 所有歌词页面一致（真实 El
     //    （补丁前：只有「曲目 + 歌词」⇒ 位置停在 0 ⇒ `--karaoke` 数量 = 0。）
     // ⚠️ **T79**：经典浮窗用 `mode="current"`（当前句 / 下一句）⇒ 定位器跟着换。
     //    **断言强度不变**：仍然验「卡拉OK 填色真的跟着音频走」。
-    await expectRealKaraoke(classic!.locator('.fnm-lyricview--current'), window)
+    await expectRealKaraoke(classic!.locator('.sanlos-lyricview--current'), window)
   })
 
   test('灵动态词岛：同样按**词级时间**连续填色', async () => {
@@ -378,6 +378,6 @@ test.describe.serial('T71：卡拉OK —— 所有歌词页面一致（真实 El
     }
     expect(island).not.toBeNull()
 
-    await expectKaraokeTracksAudio(island!.locator('.fnm-lyricview--single'), window)
+    await expectKaraokeTracksAudio(island!.locator('.sanlos-lyricview--single'), window)
   })
 })

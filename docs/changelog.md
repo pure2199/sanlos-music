@@ -788,7 +788,7 @@ T110 发版之后，**在本机装上 v0.4.0**，并把发布说明里标注「�
   （`.mjs` 是 Node 直接执行的 ⇒ **类型剥离只对 `.ts` / `.mts` / `.cts` 生效**
   ⇒ 那一行在 **Node 22（CI 用的版本）与 Node 26（本机）上都是语法错误**）
   ⇒ 它让 v0.3.0 的发版工作流（Release run #15）挂在「写更新清单」这一步；
-- **修** `tools/fn-electron-net-probe.mjs`：补回一个**缺失的换行**
+- **修** `tools/sanlos-electron-net-probe.mjs`：补回一个**缺失的换行**
   （`})    try {` ⇒ 整个文件在**任何** Node 上都是语法错误 ⇒ 一直没法用）；
 - **新增** `test/t95-mjs-no-ts-syntax.test.ts`：**45 条**守护 ——
   用 `node --check` 把仓库里所有 `.mjs` / `.cjs` 当**纯 JavaScript** 解析一遍
@@ -1055,7 +1055,7 @@ v0.2.7 发布说明里那句「**修法已定方向，待安排；本版未修**
 |---|---|
 | **签名者匹配** | 「预期的代码签名者」从**整串精确相等**改成 **CN 相等 + 多候选**（逗号 / 分号 / 换行分隔，自动去掉 `CN=` 前缀，大小写与空白不敏感）—— 真实证书的 Subject 必然带 O / C ⇒ 老口径根本没法用；**绝不做「包含」匹配**（`CN=SignPath Foundation Evil` 骗不过去） |
 | **一份口径** | 判定逻辑收在 `shared/update.ts`（`matchesExpectedSigner`）—— **客户端（主进程）与构建期断言工具共用同一份**；工具用 esbuild **运行时复用**它，**不复制逻辑** |
-| **断言加严** | `tools/fn-check-signature.mjs` 新增 `--expect valid`（状态必须是 `Valid`）、`--require-timestamp`（必须有 RFC 3161 时间戳）、`--expect-cn`（按 CN 匹配）；**既有选项（`--expect signed|none` / `--expect-signer` / `--pfx`）语义一字不变** |
+| **断言加严** | `tools/sanlos-check-signature.mjs` 新增 `--expect valid`（状态必须是 `Valid`）、`--require-timestamp`（必须有 RFC 3161 时间戳）、`--expect-cn`（按 CN 匹配）；**既有选项（`--expect signed|none` / `--expect-signer` / `--pfx`）语义一字不变** |
 | **fail-closed** | `--expect` 的值拼错、`--expect-cn` / `--expect-signer` 给空值 ⇒ **直接失败**（不许「什么都不检查就通过」） |
 | **打包适配 CI** | `scripts/pack.cjs` 默认**关掉证书自动发现**（本机装了证书也会自动签 ⇒ 结果不可预期）+ 新增 `FNM_EXPECT_SIGNER_CN` 加严开关；`scripts/publish-manifest.mjs` 认 `FNM_PACK_OUTPUT`（CI 的产物在 `release-ci/`） |
 | **发版工作流** | 新增 `.github/workflows/release.yml`（手动触发，参数 `tag` + `pack_only` + `sign`）：构建 → 打包 →（`sign=true` 时）送签 → **人工审批** → 取回 → **校验**（`Valid` + 时间戳 + CN）→ 生成清单 → 发 Release；**任一环节不过 ⇒ 工作流失败，绝不发布**。⚠️ **`sign=false` 走「未签名发布」**：断言产物**确实没有签名**（`--expect none`）→ 生成清单 → 发 Release ⇒ 「这一版没签名」是**构建期事实**，不是口头承诺 |
@@ -1113,7 +1113,7 @@ v0.2.7 发布说明里那句「**修法已定方向，待安排；本版未修**
 | **判定口径** | 「允许安装未签名的更新包」与「预期的代码签名者」**解耦**：包**没有签名** + 用户**显式授权** + 清单 **SHA-512 相符** ⇒ **放行**（**不要求**填预期签名者）；包**有**签名 ⇒ 仍必须与预期签名者一致（没填 / 不符 ⇒ **拒绝**，授权**也救不了**） |
 | **一份口径** | 判定逻辑收到 `shared/update.ts` 的 `evaluateSignatureGate()` —— **主进程与渲染层共用同一份**（T85 的根因就是两边各判各的）；主进程**一律探测**文件，不再因「没填预期签名者」提前返回 |
 | **界面** | 设置页那三段说明文案**不再自相矛盾**；「启动安装」按钮按**已保存**的授权判定（只勾了**没保存**会提示「保存后才会生效」，不会「界面说可以、主进程拒」） |
-| **能签名了** | 新增 `tools/fn-make-selfsigned-cert.mjs`（本地自签代码签名证书，可导入本机受信任根）与 `tools/fn-check-signature.mjs`（读产物的签名状态并判定）；`scripts/pack.cjs` **打包后主动断言**（配了证书却没签上 ⇒ **打包失败**；没配证书 ⇒ 只打印一行、**不**失败）；**不用改 `electron-builder.yml`** —— 设 `WIN_CSC_LINK` + `WIN_CSC_KEY_PASSWORD` 就签，没设就跳过 |
+| **能签名了** | 新增 `tools/sanlos-make-selfsigned-cert.mjs`（本地自签代码签名证书，可导入本机受信任根）与 `tools/sanlos-check-signature.mjs`（读产物的签名状态并判定）；`scripts/pack.cjs` **打包后主动断言**（配了证书却没签上 ⇒ **打包失败**；没配证书 ⇒ 只打印一行、**不**失败）；**不用改 `electron-builder.yml`** —— 设 `WIN_CSC_LINK` + `WIN_CSC_KEY_PASSWORD` 就签，没设就跳过 |
 | **中文主体名** | 签名者主体改走 **base64(UTF-8)**（T86）—— PowerShell 往管道写 stdout 用的是**控制台代码页**（简体中文机器 = 936/GBK）⇒ 主体名含中文时直传是**乱码** ⇒ 与用户填的「预期签名者」**永远对不上** |
 | **工程** | 单元测试 **2195** 条（+31）；Playwright E2E **34** 条（不变）；新增 `test/update-store.test.ts`、`test/t86-signing-contract.test.ts`；**矩阵契约测试**逐行钉死判定表；**变异自证 10 条全部被抓住**（T85 五条 + T86 五条） |
 
@@ -1140,7 +1140,7 @@ v0.2.7 发布说明里那句「**修法已定方向，待安排；本版未修**
 | **来源优先级** | 内嵌算**本地侧**、排在 NAS 前面（用户 2026-11-10 拍板）：「线上优先」= **线上 → 内嵌 → NAS**；「本地优先」= **内嵌 → NAS → 线上**；**不用外部源**时内嵌照用（**不需要外网**） |
 | **三层覆盖** | ① **本地导入**的歌 ② **已下载**的 NAS 曲目（读**原文件**，标签最全）③ **NAS 在线播放**（只读**文件头 64 KB**，读满即断开，**不把整首歌拉下来**） |
 | **界面** | 全屏歌词页**如实显示**「歌词来源：音频内嵌」（不装作是别的源）；设置里的「歌词来源」下拉**不加**内嵌（内嵌不是外部源） |
-| **工程** | 单元测试 **2164** 条（+53）；Playwright E2E **34** 条（+2，真实 Electron）；新增 `electron/embeddedLyric.ts`、`shared/embeddedLyric.ts`、`test/embedded-lyric.test.ts`、`test/embedded-lyric-tags.test.ts`、`test/t83-mock-wav.test.ts`、`test/embedded-lyric-real-samples.test.ts`、`e2e/t83-embedded-lyric.spec.ts`、`tools/fn-fetch-embedded-lyric-samples.mjs`；**变异自证 10 条全部被抓住**（T84 新增 2 条：只读格式 1 / 格式 0·3 也照读） |
+| **工程** | 单元测试 **2164** 条（+53）；Playwright E2E **34** 条（+2，真实 Electron）；新增 `electron/embeddedLyric.ts`、`shared/embeddedLyric.ts`、`test/embedded-lyric.test.ts`、`test/embedded-lyric-tags.test.ts`、`test/t83-mock-wav.test.ts`、`test/embedded-lyric-real-samples.test.ts`、`e2e/t83-embedded-lyric.spec.ts`、`tools/sanlos-fetch-embedded-lyric-samples.mjs`；**变异自证 10 条全部被抓住**（T84 新增 2 条：只读格式 1 / 格式 0·3 也照读） |
 
 ### 已知影响
 

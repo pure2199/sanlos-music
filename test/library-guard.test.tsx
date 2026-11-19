@@ -10,7 +10,7 @@
 //   撤掉人为上限后 node 100% CPU、RSS 涨到 1.17 GB、vitest 挂死。
 //   → 护栏必须落在 **store 层**（两个页面的 effect 都被同一处状态挡住）。
 //
-// - **NEW-04**：组件吐出的 `fnm-*` 类名 ↔ 对应 `.css` 里的选择器**双向**一一对应。
+// - **NEW-04**：组件吐出的 `sanlos-*` 类名 ↔ 对应 `.css` 里的选择器**双向**一一对应。
 //   类名既是**样式钩子**也是**测试钩子**，必须被用例守住（上一轮这个结论
 //   只存在于审查报告里，仓库没有用例）。
 //
@@ -235,14 +235,14 @@ function readSource(relativePath: string): string {
 }
 
 /**
- * 抽出 TSX 源码里**真正作为 className 出现**的 `fnm-*` 类名。
+ * 抽出 TSX 源码里**真正作为 className 出现**的 `sanlos-*` 类名。
  *
  * 两种形态都要覆盖：
- * 1. `className="fnm-…"` / `className={`… fnm-…`}`（属性）；
- * 2. `const classNames = … 'fnm-…'`（**类名变量**，随后被塞进 `className`）——
- *    例如 `Cards.tsx` 里的 `fnm-cover` 就是这么来的。
+ * 1. `className="sanlos-…"` / `className={`… sanlos-…`}`（属性）；
+ * 2. `const classNames = … 'sanlos-…'`（**类名变量**，随后被塞进 `className`）——
+ *    例如 `Cards.tsx` 里的 `sanlos-cover` 就是这么来的。
  *
- * ⚠️ 为什么不是「全文 grep `fnm-`」：注释里提到的类名**不算**组件吐出的类名
+ * ⚠️ 为什么不是「全文 grep `sanlos-`」：注释里提到的类名**不算**组件吐出的类名
  *    （否则一条注释就能冒充一个「有选择器」的类名）。
  */
 function extractEmittedClassNames(source: string): Set<string> {
@@ -253,7 +253,7 @@ function extractEmittedClassNames(source: string): Set<string> {
   let match: RegExpExecArray | null
   while ((match = attrPattern.exec(source)) !== null) {
     const fragment = readAttributeValue(source, match.index + match[0].length)
-    for (const token of fragment.match(/fnm-[A-Za-z0-9_-]+/g) ?? []) names.add(token)
+    for (const token of fragment.match(/sanlos-[A-Za-z0-9_-]+/g) ?? []) names.add(token)
   }
 
   // 形态 2：类名变量（`const classNames = …`）。
@@ -263,7 +263,7 @@ function extractEmittedClassNames(source: string): Set<string> {
     const valueStart = match.index + match[0].length
     const lineEnd = source.indexOf('\n', valueStart)
     const line = source.slice(valueStart, lineEnd === -1 ? source.length : lineEnd)
-    for (const token of line.match(/fnm-[A-Za-z0-9_-]+/g) ?? []) names.add(token)
+    for (const token of line.match(/sanlos-[A-Za-z0-9_-]+/g) ?? []) names.add(token)
   }
 
   return names
@@ -293,7 +293,7 @@ function readAttributeValue(source: string, start: number): string {
 }
 
 /**
- * 抽出 CSS 里的类选择器（`.fnm-*`）。
+ * 抽出 CSS 里的类选择器（`.sanlos-*`）。
  *
  * ⚠️ 先去掉 CSS 注释：注释里提到的类名**不算**有选择器
  *    （这样「每个选择器都有类名」这一侧才是真的在查死样式）。
@@ -301,7 +301,7 @@ function readAttributeValue(source: string, start: number): string {
 function extractCssClassSelectors(source: string): Set<string> {
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '')
   const names = new Set<string>()
-  for (const token of code.match(/\.(fnm-[A-Za-z0-9_-]+)/g) ?? []) names.add(token.slice(1))
+  for (const token of code.match(/\.(sanlos-[A-Za-z0-9_-]+)/g) ?? []) names.add(token.slice(1))
   return names
 }
 
@@ -309,7 +309,7 @@ function extractCssClassSelectors(source: string): Set<string> {
  * 「类名 ↔ 选择器」契约的对照表。
  *
  * ⚠️ 范围**限定在 Task 14 的曲库区**：仓库里别处存在**动态拼接**的类名
- *    （例如 `fnm-playerbar__button--${quality}`、`fnm-lyricview__line--${slot}`），
+ *    （例如 `sanlos-playerbar__button--${quality}`、`sanlos-lyricview__line--${slot}`），
  *    静态扫描无法穷举，那部分不在本任务的改动范围内。
  */
 const STYLE_CONTRACTS: Array<{ source: string; style: string }> = [

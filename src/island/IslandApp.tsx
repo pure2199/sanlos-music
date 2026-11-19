@@ -21,8 +21,8 @@ import { SpectrumBars } from './SpectrumBars'
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览里为 `null`）。 */
 export function islandBridge(): PlayerBridge | null {
-  const scope = globalThis as { fnPlayer?: PlayerBridge }
-  return scope.fnPlayer ?? null
+  const scope = globalThis as { sanlosPlayer?: PlayerBridge }
+  return scope.sanlosPlayer ?? null
 }
 
 /** 位置更新的最小步长（秒）：小于它就不重渲染（省掉无意义的 60fps 重绘）。 */
@@ -121,19 +121,19 @@ export function IslandApp(): ReactElement {
 
   return (
     <div
-      className={`fnm-island${pointerInside ? ' fnm-island--pointer-inside' : ''}`}
-      data-testid="fnm-island"
+      className={`sanlos-island${pointerInside ? ' sanlos-island--pointer-inside' : ''}`}
+      data-testid="sanlos-island"
       data-pointer-inside={pointerInside ? 'true' : 'false'}
     >
       {/* ⚠️ T76：左端 = **专辑封面**（原先是频谱柱；用户指令：
           「灵动歌词的左边音效动画换成专辑封面」）。
           没有封面 / 加载失败 ⇒ `IslandCover` 内部渲染占位块（♪）。 */}
       <IslandCover coverId={track?.coverId} />
-      <div className="fnm-island__meta">
-        <span className="fnm-island__title">{title}</span>
-        <span className="fnm-island__artist">{artist}</span>
+      <div className="sanlos-island__meta">
+        <span className="sanlos-island__title">{title}</span>
+        <span className="sanlos-island__artist">{artist}</span>
       </div>
-      <div className="fnm-island__lyrics">
+      <div className="sanlos-island__lyrics">
         {/* ⚠️ **不给 `onSeek`**：词岛是**点击穿透**的（不挡屏幕顶部的应用）
             → 点了词岛也是点下面的应用 → 词岛**不做**点歌跳转。
             ⚠️ **T77：经典悬浮窗现在也点穿透** ⇒ 点歌跳转**两种形态都没有了**。 */}

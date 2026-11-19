@@ -55,7 +55,7 @@ function readPackageMeta(): { version: string; productName: string; prefix: stri
 | 文件 | 改什么 | 行尾 |
 |---|---|---|
 | `scripts/publish-manifest.mjs` | 第 66 行**去掉 TS 返回类型注解** ⇒ 改成 JSDoc 注释（`@returns {{version: string, ...}}`）；全文其余部分**已是纯 JS**，不动 | LF |
-| `tools/fn-electron-net-probe.mjs` | 第 174 行 `})    try {` **缺一个换行** ⇒ 这是**已提交进仓库的语法错误**（任何 Node 都跑不起来），顺手补回换行 | LF |
+| `tools/sanlos-electron-net-probe.mjs` | 第 174 行 `})    try {` **缺一个换行** ⇒ 这是**已提交进仓库的语法错误**（任何 Node 都跑不起来），顺手补回换行 | LF |
 | `test/t95-mjs-no-ts-syntax.test.ts`（**新增**） | **守护**：用 `node --check` 逐个校验仓库里所有 `.mjs` / `.cjs` | LF |
 | `docs/superpowers/specs/2026-11-15-sanlos-music-t95-mjs-no-ts-syntax.md`（**新增**） | 本规格 | LF |
 | `docs/changelog.md` | 0.3.0 段补一条如实说明（发版链路自身修好了） | **CRLF**（保持原样） |
@@ -80,7 +80,7 @@ function readPackageMeta(): { version: string; productName: string; prefix: stri
 ### 本机
 
 1. `node --check scripts/publish-manifest.mjs` ⇒ **退出码 0**；
-2. `node --check tools/fn-electron-net-probe.mjs` ⇒ **退出码 0**；
+2. `node --check tools/sanlos-electron-net-probe.mjs` ⇒ **退出码 0**；
 3. **本地真跑** `node scripts/publish-manifest.mjs` ⇒ 真的产出 `latest.json`
    （⚠️ 这一条是本轮**最关键**的验收点 —— 上一轮就是「只做静态检查、从没执行过」才漏掉的）；
 4. `tsc --noEmit` ⇒ **0 error**；

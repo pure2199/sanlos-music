@@ -26,8 +26,8 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describePowerShellFailure, evaluateSignature, powershellEnv } from '../tools/fn-check-signature.mjs'
-import type { SignatureProbeInfo } from '../tools/fn-check-signature.mjs'
+import { describePowerShellFailure, evaluateSignature, powershellEnv } from '../tools/sanlos-check-signature.mjs'
+import type { SignatureProbeInfo } from '../tools/sanlos-check-signature.mjs'
 import { extractCommonNames, matchesExpectedSigner, parseSignerCandidates } from '../shared/update'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -179,7 +179,7 @@ describe('T87 签名断言 —— 与客户端**共用同一套**匹配口径', 
   })
 
   it('工具源码**真的在调用** shared（而不是抄一份逻辑）', () => {
-    const src = readFileSync(join(REPO_ROOT, 'tools', 'fn-check-signature.mjs'), 'utf8')
+    const src = readFileSync(join(REPO_ROOT, 'tools', 'sanlos-check-signature.mjs'), 'utf8')
     expect(src).toContain('shared/update.ts')
     expect(src).toContain('getSharedSigning')
     expect(src).toContain('matchesExpectedSigner')
@@ -187,7 +187,7 @@ describe('T87 签名断言 —— 与客户端**共用同一套**匹配口径', 
   })
 
   it('工具源码里**探测了时间戳**（不是靠猜）', () => {
-    const src = readFileSync(join(REPO_ROOT, 'tools', 'fn-check-signature.mjs'), 'utf8')
+    const src = readFileSync(join(REPO_ROOT, 'tools', 'sanlos-check-signature.mjs'), 'utf8')
     expect(src).toContain('TimeStamperCertificate')
     expect(src).toContain('hasTimestamp')
     expect(src).toContain("'--require-timestamp'")
@@ -200,13 +200,13 @@ describe('T87 打包脚本适配 CI', () => {
 
   it('**关掉证书自动发现**（本机装了证书也会自动签 ⇒ 结果不可预期）', () => {
     expect(packSrc).toContain('CSC_IDENTITY_AUTO_DISCOVERY')
-    expect(packSrc).toContain('FNM_CSC_AUTO_DISCOVERY')
+    expect(packSrc).toContain('SANLOS_CSC_AUTO_DISCOVERY')
     // ⚠️ 默认必须是「关」—— 只有显式 `=1` 才打开。
-    expect(packSrc).toMatch(/CSC_IDENTITY_AUTO_DISCOVERY:\s*process\.env\.FNM_CSC_AUTO_DISCOVERY\s*===\s*'1'\s*\?\s*'true'\s*:\s*'false'/)
+    expect(packSrc).toMatch(/CSC_IDENTITY_AUTO_DISCOVERY:\s*process\.env\.SANLOS_CSC_AUTO_DISCOVERY\s*===\s*'1'\s*\?\s*'true'\s*:\s*'false'/)
   })
 
-  it('加严断言由 `FNM_EXPECT_SIGNER_CN` 开关控制（默认关 ⇒ 老行为一字不变）', () => {
-    expect(packSrc).toContain('FNM_EXPECT_SIGNER_CN')
+  it('加严断言由 `SANLOS_EXPECT_SIGNER_CN` 开关控制（默认关 ⇒ 老行为一字不变）', () => {
+    expect(packSrc).toContain('SANLOS_EXPECT_SIGNER_CN')
     expect(packSrc).toContain("'--require-timestamp'")
     expect(packSrc).toContain("'--expect-cn'")
     expect(packSrc).toContain("'--expect', 'valid'")
@@ -238,7 +238,7 @@ describe('T87 打包脚本适配 CI', () => {
 })
 
 describe('T87 签名断言 —— CLI 层', () => {
-  const tool = join(REPO_ROOT, 'tools', 'fn-check-signature.mjs')
+  const tool = join(REPO_ROOT, 'tools', 'sanlos-check-signature.mjs')
 
   it('`--help` ⇒ 退出码 0，且**列出新选项**', () => {
     const result = spawnSync(process.execPath, [tool, '--help'], { encoding: 'utf8' })
@@ -293,7 +293,7 @@ describe('T87 签名断言 —— CLI 层', () => {
 // ⚠️ **纪律**：本节只**追加**；既有断言一条不删、一条不削弱。
 
 describe('T87.11-b —— 签名探测在 CI 上的两个坑', () => {
-  const tool = join(REPO_ROOT, 'tools', 'fn-check-signature.mjs')
+  const tool = join(REPO_ROOT, 'tools', 'sanlos-check-signature.mjs')
   const toolSrc = readFileSync(tool, 'utf8')
 
   describe('① PowerShell 5.1 加载不了安全模块', () => {

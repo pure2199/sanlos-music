@@ -22,7 +22,7 @@ import { join } from 'node:path'
 const tempDirs: string[] = []
 
 function tempFile(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'fnmusic-bounds-'))
+  const dir = mkdtempSync(join(tmpdir(), 'sanlos-bounds-'))
   tempDirs.push(dir)
   return join(dir, 'prefs.json')
 }
@@ -133,7 +133,7 @@ describe('保存窗口位置尺寸', () => {
 // ⚠️ **为什么要有下限**：窗口缩到极窄时，实测会出现三件事——
 //    1. 顶栏自己横向溢出（外框 600 时 `scrollWidth` 594 > `clientWidth` 567）；
 //    2. 品牌名被压成 15px 宽 / 4 行竖排；
-//    3. 整页出横向滚动条（**元凶是播放条**：它需要 717px，`.fnm-playerbar` 的
+//    3. 整页出横向滚动条（**元凶是播放条**：它需要 717px，`.sanlos-playerbar` 的
 //       `scrollWidth` 恒为 717）。
 // ⇒ 尺寸一律**夹紧到下限**；位置语义（缺位置就不给位置）**一字不改**。
 // ---------------------------------------------------------------------------

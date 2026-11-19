@@ -11,7 +11,7 @@
 //   - 专辑 / 歌手 / 风格 / 歌单 / 搜索结果五个页面的卡片**全部叠在左侧 1/6 区域**；
 //   - 卡片互相遮挡，标题压在一起；
 //   - 后面的卡片把前面的卡片**完全挡住** → **点不中**（Playwright 报
-//     `<div class="fnm-cardgrid__cell"> intercepts pointer events`）。
+//     `<div class="sanlos-cardgrid__cell"> intercepts pointer events`）。
 //
 // 为什么单测之前没抓到：没有任何用例断言过单元格的 `left`；
 // 而这个缺陷**只影响布局**，不产生任何 DOM 结构差异，

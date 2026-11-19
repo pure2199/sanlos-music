@@ -78,14 +78,14 @@ export function LyricSourcePicker(props: LyricSourcePickerProps): ReactElement {
   )
 
   return (
-    <div className="fnm-lyric-source">
-      <p className="fnm-lyric-source__hint">歌词不准确？指定一个源（只影响这一首歌）</p>
-      <div className="fnm-lyric-source__row">
+    <div className="sanlos-lyric-source">
+      <p className="sanlos-lyric-source__hint">歌词不准确？指定一个源（只影响这一首歌）</p>
+      <div className="sanlos-lyric-source__row">
         {sources.map((source) => (
           <button
             key={source}
             type="button"
-            className={`fnm-lyric-source__btn${value === source ? ' fnm-lyric-source__btn--active' : ''}`}
+            className={`sanlos-lyric-source__btn${value === source ? ' sanlos-lyric-source__btn--active' : ''}`}
             aria-pressed={value === source}
             onClick={() => onPick(source)}
           >
@@ -94,13 +94,13 @@ export function LyricSourcePicker(props: LyricSourcePickerProps): ReactElement {
         ))}
         {/* ⚠️ 「恢复自动」**只在有指定时出现**（没有指定时点它毫无意义）。 */}
         {value ? (
-          <button type="button" className="fnm-lyric-source__btn fnm-lyric-source__btn--reset" onClick={onRestore}>
+          <button type="button" className="sanlos-lyric-source__btn sanlos-lyric-source__btn--reset" onClick={onRestore}>
             恢复自动
           </button>
         ) : null}
       </div>
       {/* ⚠️ 写回失败要**看得见**（不许静默假装成功）。 */}
-      {error ? <p className="fnm-lyric-source__error">{error}</p> : null}
+      {error ? <p className="sanlos-lyric-source__error">{error}</p> : null}
     </div>
   )
 }

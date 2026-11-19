@@ -5,11 +5,11 @@
 // 职责
 // 1. 判断「这首歌能不能兜底」：有本地副本吗？本机有 FFmpeg 吗？
 // 2. 把本地文件转成 **Opus**（Chromium 能解），产物放进**临时目录**；
-// 3. 产物通过**既有的** `fnml://local/track/<songId>` 路由喂给渲染进程
+// 3. 产物通过**既有的** `sanlos-media://local/track/<songId>` 路由喂给渲染进程
 //    （**不新增路由种类**——见 `electron/localMedia.ts`）。
 //
 // ---------------------------------------------------------------------------
-// 为什么产物走 `fnml://local/track/<songId>`
+// 为什么产物走 `sanlos-media://local/track/<songId>`
 // ---------------------------------------------------------------------------
 // - 渲染进程的 `<audio>` **只认这一种本地媒体地址**，进度 / seek / EQ /
 //   媒体会话 / 悬浮歌词全都白拿；
@@ -118,7 +118,7 @@ async function defaultRemoveDir(dir: string): Promise<void> {
  *   lookupLocal: (id) => downloads.localPath(id),
  *   tempDir: path.join(app.getPath('userData'), 'fallback'),
  * })
- * // `fnml://` 的 lookup：临时产物优先 → 下载索引
+ * // `sanlos-media://` 的 lookup：临时产物优先 → 下载索引
  * registerLocalMedia({ lookup: (id) => transcoder.lookup(id) ?? downloads.localPath(id) })
  * ```
  */
@@ -160,7 +160,7 @@ export class FallbackTranscoder {
   /**
    * 这首歌的**兜底产物**路径（没有 = `null`）。
    *
-   * ⚠️ 这是 `fnml://` 的 `lookup` 用的——**临时产物优先**于下载索引。
+   * ⚠️ 这是 `sanlos-media://` 的 `lookup` 用的——**临时产物优先**于下载索引。
    */
   lookup(songId: string): string | null {
     if (!this.slot) return null
@@ -171,7 +171,7 @@ export class FallbackTranscoder {
    * 为一首歌准备兜底产物。
    *
    * @param songId 歌曲 guid（**只当索引键**，绝不参与拼路径）。
-   * @returns 成功时 `{ url: 'fnml://local/track/<id>' }`；
+   * @returns 成功时 `{ url: 'sanlos-media://local/track/<id>' }`；
    *          失败时带**可判别**的 `reason`（`no-ffmpeg` / `no-local` / `failed`）。
    */
   async prepare(songId: string): Promise<FfmpegFallbackResult> {

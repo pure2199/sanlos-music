@@ -197,7 +197,7 @@ describe('P-LIB-4 分页护栏：停下后有「继续加载」入口', () => {
     render(<SongsPage store={store} />)
 
     await waitFor(() => expect(store.getState().songs.stalled).toBe(true))
-    const button = await screen.findByTestId('fnm-paging-resume-songs')
+    const button = await screen.findByTestId('sanlos-paging-resume-songs')
     expect(button.textContent).toContain('继续加载')
 
     fireEvent.click(button)
@@ -223,7 +223,7 @@ describe('P-LIB-4 分页护栏：停下后有「继续加载」入口', () => {
     render(<SongsPage store={store} />)
 
     await waitFor(() => expect(store.getState().songs.loaded).toBe(true))
-    expect(screen.queryByTestId('fnm-paging-resume-songs')).toBeNull()
+    expect(screen.queryByTestId('sanlos-paging-resume-songs')).toBeNull()
   })
 })
 
@@ -297,7 +297,7 @@ describe('P-LIB-3 收藏态：单一真相源', () => {
     render(<SearchPanel api={api} store={store} debounceMs={0} />)
     await typeKeyword('甲')
 
-    const button = await screen.findByTestId('fnm-favorite-toggle')
+    const button = await screen.findByTestId('sanlos-favorite-toggle')
     expect(button.getAttribute('aria-pressed')).toBe('true')
   })
 
@@ -316,7 +316,7 @@ describe('P-LIB-3 收藏态：单一真相源', () => {
     render(<SearchPanel api={api} store={store} debounceMs={0} />)
     await typeKeyword('甲')
 
-    fireEvent.click(await screen.findByTestId('fnm-favorite-toggle'))
+    fireEvent.click(await screen.findByTestId('sanlos-favorite-toggle'))
 
     await waitFor(() => expect(setFavorite).toHaveBeenCalledWith('song-1', true))
     await waitFor(() => expect(store.getState().isFavorite('song-1', false)).toBe(true))
@@ -336,13 +336,13 @@ describe('P-LIB-5 歌单写回：清空选中 + 刷新 trackCount', () => {
     await typeKeyword('甲')
     fireEvent.click(await screen.findByText('歌1'))
 
-    const addButton = screen.getByTestId('fnm-add-to-playlist')
+    const addButton = screen.getByTestId('sanlos-add-to-playlist')
     await waitFor(() => expect((addButton as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(addButton)
 
     await waitFor(() => expect(screen.getByText('已选中 0 首歌曲')).toBeTruthy())
     await waitFor(() =>
-      expect((screen.getByTestId('fnm-add-to-playlist') as HTMLButtonElement).disabled).toBe(true),
+      expect((screen.getByTestId('sanlos-add-to-playlist') as HTMLButtonElement).disabled).toBe(true),
     )
   })
 
@@ -354,7 +354,7 @@ describe('P-LIB-5 歌单写回：清空选中 + 刷新 trackCount', () => {
     await typeKeyword('甲')
     fireEvent.click(await screen.findByText('歌1'))
 
-    const removeButton = screen.getByTestId('fnm-remove-from-playlist')
+    const removeButton = screen.getByTestId('sanlos-remove-from-playlist')
     await waitFor(() => expect((removeButton as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(removeButton)
 
@@ -379,7 +379,7 @@ describe('P-LIB-5 歌单写回：清空选中 + 刷新 trackCount', () => {
     await typeKeyword('甲')
     fireEvent.click(await screen.findByText('歌1'))
 
-    fireEvent.click(await screen.findByTestId('fnm-add-to-playlist'))
+    fireEvent.click(await screen.findByTestId('sanlos-add-to-playlist'))
 
     // store 里的歌单列表被刷新 → `trackCount` 跟上
     await waitFor(() => expect(store.getState().playlists.items).toHaveLength(1))

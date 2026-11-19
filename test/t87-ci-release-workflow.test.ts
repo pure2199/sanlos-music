@@ -66,7 +66,7 @@ describe('T87 发版工作流 —— 结构', () => {
   })
 
   it('送签前跑的是**加严**断言（Valid + 时间戳 + CN）', () => {
-    expect(yml).toContain('tools/fn-check-signature.mjs')
+    expect(yml).toContain('tools/sanlos-check-signature.mjs')
     expect(yml).toContain('--expect valid')
     expect(yml).toContain('--require-timestamp')
     expect(yml).toContain('--expect-cn')
@@ -76,7 +76,7 @@ describe('T87 发版工作流 —— 结构', () => {
     expect(yml).toContain('run: node scripts/pack.cjs')
     expect(yml).not.toMatch(/run:\s*npm run pack/)
     // ⚠️ CI 的产物目录与打包脚本共用同一个变量。
-    expect(yml).toContain('FNM_PACK_OUTPUT: release-ci')
+    expect(yml).toContain('SANLOS_PACK_OUTPUT: release-ci')
   })
 
   it('**只发 3 个资产**（不发基于未签名 exe 算出来的 `latest.yml` / `blockmap`）', () => {
@@ -228,9 +228,9 @@ describe('T87 SignPath 配置检查（快速失败）', () => {
 })
 
 describe('T87 更新清单与产物目录', () => {
-  it('`publish-manifest.mjs` 认 `FNM_PACK_OUTPUT`（CI 的产物在 `release-ci/`）', () => {
+  it('`publish-manifest.mjs` 认 `SANLOS_PACK_OUTPUT`（CI 的产物在 `release-ci/`）', () => {
     const src = readRepoFile('scripts', 'publish-manifest.mjs')
-    expect(src).toContain('FNM_PACK_OUTPUT')
+    expect(src).toContain('SANLOS_PACK_OUTPUT')
     // ⚠️ 清单与安装包**必须同一个目录**（客户端拒绝跨源）。
     expect(src).toContain('RELEASE_DIR')
   })

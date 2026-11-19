@@ -381,13 +381,13 @@ describe('搜索面板：收藏按钮（要求 C / E）', () => {
     render(createElement(SearchPanel, { api, store, debounceMs: 0 }))
     await typeKeyword('甲')
 
-    const button = await screen.findByTestId('fnm-favorite-toggle')
+    const button = await screen.findByTestId('sanlos-favorite-toggle')
     expect(button.getAttribute('aria-pressed')).toBe('false')
 
     fireEvent.click(button)
 
     // 乐观更新：界面**立刻**反映（不等请求回来）
-    expect(screen.getByTestId('fnm-favorite-toggle').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('sanlos-favorite-toggle').getAttribute('aria-pressed')).toBe('true')
     await waitFor(() => expect(setFavorite).toHaveBeenCalledWith('song-1', true))
   })
 
@@ -407,14 +407,14 @@ describe('搜索面板：收藏按钮（要求 C / E）', () => {
     render(createElement(SearchPanel, { api, store, debounceMs: 0 }))
     await typeKeyword('甲')
 
-    fireEvent.click(await screen.findByTestId('fnm-favorite-toggle'))
+    fireEvent.click(await screen.findByTestId('sanlos-favorite-toggle'))
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('收藏写回失败')
     expect(alert.textContent).toContain('服务端拒绝')
     // 回滚：按钮回到「未收藏」
     await waitFor(() =>
-      expect(screen.getByTestId('fnm-favorite-toggle').getAttribute('aria-pressed')).toBe('false'),
+      expect(screen.getByTestId('sanlos-favorite-toggle').getAttribute('aria-pressed')).toBe('false'),
     )
   })
 
@@ -430,11 +430,11 @@ describe('搜索面板：收藏按钮（要求 C / E）', () => {
     const { container } = render(createElement(SearchPanel, { api, store, debounceMs: 0 }))
     await typeKeyword('甲')
 
-    const button = await screen.findByTestId('fnm-favorite-toggle')
-    expect(button.className).toContain('fnm-searchpanel__favorite')
+    const button = await screen.findByTestId('sanlos-favorite-toggle')
+    expect(button.className).toContain('sanlos-searchpanel__favorite')
     // ⚠️ 静态几何不进内联 style（伪类只能靠样式表表达）
     expect(button.getAttribute('style')).toBeNull()
-    expect(container.querySelector('.fnm-searchpanel')).not.toBeNull()
+    expect(container.querySelector('.sanlos-searchpanel')).not.toBeNull()
   })
 })
 
@@ -485,12 +485,12 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
     const { container } = render(createElement(SearchPanel, { api, debounceMs: 0 }))
     await typeKeyword('甲')
 
-    expect((await screen.findByTestId('fnm-search-count-tracks')).textContent).toContain('命中 2 首')
-    expect(screen.getByTestId('fnm-search-count-albums').textContent).toContain('命中 1 张专辑')
-    expect(screen.getByTestId('fnm-search-count-artists').textContent).toContain('命中 1 位歌手')
+    expect((await screen.findByTestId('sanlos-search-count-tracks')).textContent).toContain('命中 2 首')
+    expect(screen.getByTestId('sanlos-search-count-albums').textContent).toContain('命中 1 张专辑')
+    expect(screen.getByTestId('sanlos-search-count-artists').textContent).toContain('命中 1 位歌手')
     // 专辑段 / 歌手段都渲染了卡片（复用的是 Task 14 的 Cards）
     const cardTitles = Array.from(
-      container.querySelectorAll('[data-testid="fnm-card"] .fnm-card__title'),
+      container.querySelectorAll('[data-testid="sanlos-card"] .sanlos-card__title'),
     ).map((element) => element.textContent)
     expect(cardTitles).toEqual(['示例专辑', '示例歌手'])
   })
@@ -554,10 +554,10 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
     render(createElement(SearchPanel, { api: { query }, debounceMs: 0 }))
     await typeKeyword('甲')
 
-    await waitFor(() => expect(screen.getByTestId('fnm-load-more-tracks')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('sanlos-load-more-tracks')).toBeTruthy())
     expect(screen.getByText(/已加载 50 \/ 200/)).toBeTruthy()
 
-    fireEvent.click(screen.getByTestId('fnm-load-more-tracks'))
+    fireEvent.click(screen.getByTestId('sanlos-load-more-tracks'))
 
     await waitFor(() =>
       expect(query).toHaveBeenCalledWith('甲', { page: 2, size: SEARCH_PAGE_SIZE }),
@@ -576,14 +576,14 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
     render(createElement(SearchPanel, { api: { query }, debounceMs: 0 }))
     await typeKeyword('甲')
 
-    await waitFor(() => expect(screen.getByTestId('fnm-load-more-tracks')).toBeTruthy())
-    fireEvent.click(screen.getByTestId('fnm-load-more-tracks'))
+    await waitFor(() => expect(screen.getByTestId('sanlos-load-more-tracks')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('sanlos-load-more-tracks'))
     await waitFor(() =>
       expect(query).toHaveBeenCalledWith('甲', { page: 2, size: SEARCH_PAGE_SIZE }),
     )
 
     // 第 2 页去重后**没有任何新增** → 「加载更多」必须消失（否则永远重复同一页）
-    await waitFor(() => expect(screen.queryByTestId('fnm-load-more-tracks')).toBeNull())
+    await waitFor(() => expect(screen.queryByTestId('sanlos-load-more-tracks')).toBeNull())
   })
 
   it('服务端 total 不可信（=0）但确实返回了满页时：「加载更多」仍然存在', async () => {
@@ -597,7 +597,7 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
     render(createElement(SearchPanel, { api: { query }, debounceMs: 0 }))
     await typeKeyword('甲')
 
-    await waitFor(() => expect(screen.getByTestId('fnm-load-more-tracks')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('sanlos-load-more-tracks')).toBeTruthy())
   })
 
   it('单次请求的条数被限制住（搜索不退化成「拉全库再本地过滤」）', async () => {
@@ -624,9 +624,9 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
     render(createElement(SearchPanel, { api: { query }, debounceMs: 0 }))
     await typeKeyword('甲')
 
-    await waitFor(() => expect(screen.getByTestId('fnm-search-count-tracks')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('sanlos-search-count-tracks')).toBeTruthy())
     // 服务端没按 size 截断 → 认定「不支持分页」→ 不再翻页（否则会一路把曲库拉完）
-    expect(screen.queryByTestId('fnm-load-more-tracks')).toBeNull()
+    expect(screen.queryByTestId('sanlos-load-more-tracks')).toBeNull()
   })
 
   it('歌曲段复用 SongList：双击播放并传出真实下标与整队列表', async () => {
@@ -656,7 +656,7 @@ describe('搜索面板：搜索结果（要求 A / B / E）', () => {
 describe('SongList：行内操作是可选增量（要求 H）', () => {
   /** 取第一行的子节点类名列表（行内结构的「指纹」）。 */
   function rowChildClasses(container: HTMLElement): string[] {
-    const row = container.querySelector('.fnm-songlist__row')
+    const row = container.querySelector('.sanlos-songlist__row')
     return Array.from(row?.children ?? []).map((child) => child.className)
   }
 
@@ -664,16 +664,16 @@ describe('SongList：行内操作是可选增量（要求 H）', () => {
     // ⚠️ 基线是**写死的结构指纹**（不是「自己跟自己比」——那是恒真断言）。
     //    行内只有：封面 / 标题 / 歌手 / 专辑 / 时长（歌曲未收藏 → 没有 ♡ 标记）。
     const expected = [
-      'fnm-songlist__cover',
-      'fnm-songlist__title',
-      'fnm-songlist__artist',
-      'fnm-songlist__album',
-      'fnm-songlist__duration',
+      'sanlos-songlist__cover',
+      'sanlos-songlist__title',
+      'sanlos-songlist__artist',
+      'sanlos-songlist__album',
+      'sanlos-songlist__duration',
     ]
 
     const baseline = render(createElement(SongList, { songs: SONGS, onPlay: vi.fn() }))
     expect(rowChildClasses(baseline.container)).toEqual(expected)
-    expect(baseline.container.querySelector('[data-testid="fnm-favorite-toggle"]')).toBeNull()
+    expect(baseline.container.querySelector('[data-testid="sanlos-favorite-toggle"]')).toBeNull()
   })
 
   it('传了 renderRowActions 但回调返回 null 时，行内结构与不传时逐项相等', () => {
@@ -718,7 +718,7 @@ describe('歌单写回（要求 D / J）', () => {
     const playlistApi = makePlaylistApi({ list: vi.fn(async () => []) })
     render(createElement(SearchPage, { api: makeSearchApi(), playlistApi }))
 
-    expect(await screen.findByTestId('fnm-playlists-empty')).toBeTruthy()
+    expect(await screen.findByTestId('sanlos-playlists-empty')).toBeTruthy()
     expect(screen.getByText('暂无歌单')).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
   })
@@ -736,7 +736,7 @@ describe('歌单写回（要求 D / J）', () => {
     await typeKeyword('甲')
     fireEvent.click(await screen.findByText('歌一'))
 
-    const addButton = screen.getByTestId('fnm-add-to-playlist')
+    const addButton = screen.getByTestId('sanlos-add-to-playlist')
     await waitFor(() => expect((addButton as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(addButton)
 
@@ -759,7 +759,7 @@ describe('歌单写回（要求 D / J）', () => {
     await typeKeyword('甲')
     fireEvent.click(await screen.findByText('歌一'))
 
-    const removeButton = screen.getByTestId('fnm-remove-from-playlist')
+    const removeButton = screen.getByTestId('sanlos-remove-from-playlist')
     await waitFor(() => expect((removeButton as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(removeButton)
 
@@ -777,7 +777,7 @@ describe('歌单写回（要求 D / J）', () => {
     await typeKeyword('甲')
     fireEvent.click(await screen.findByText('歌一'))
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist'))
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('服务端拒绝')
@@ -925,17 +925,17 @@ describe('应用外壳：搜索页接线（要求 I）', () => {
   it('顶栏入口按钮的样式归属**应用外壳**（app-shell.css），类名与归属一致（M-9）', () => {
     const shell = readRepoFile('src', 'styles', 'app-shell.css')
     // 样式在**外壳**的样式文件里（将来改成代码分割也不会丢样式）
-    expect(shell).toContain('.fnm-app__nav')
-    expect(shell).toContain('.fnm-app__nav-button')
+    expect(shell).toContain('.sanlos-app__nav')
+    expect(shell).toContain('.sanlos-app__nav-button')
 
     // 页面样式文件里**不再有** nav 规则（避免两处各写一份）
     const pageCss = readRepoFile('src', 'pages', 'search-page.css')
-    expect(pageCss).not.toContain('.fnm-app__nav')
-    expect(pageCss).not.toContain('.fnm-searchpage__nav')
+    expect(pageCss).not.toContain('.sanlos-app__nav')
+    expect(pageCss).not.toContain('.sanlos-searchpage__nav')
 
     // 标记用的类名与归属一致
     const app = readRepoFile('src', 'App.tsx')
-    expect(app).toContain('fnm-app__nav-button')
-    expect(app).not.toContain('fnm-searchpage__nav')
+    expect(app).toContain('sanlos-app__nav-button')
+    expect(app).not.toContain('sanlos-searchpage__nav')
   })
 })

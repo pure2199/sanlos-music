@@ -2,10 +2,10 @@
  * 行内下载按钮（Task 11）
  * ---------------------------------------------------------------------------
  * 颜色**只用语义变量**（`src/styles/tokens.css`），两套主题自动跟随。
- * 类名 BEM，`fnm-` 前缀。
+ * 类名 BEM，`sanlos-` 前缀。
  * ------------------------------------------------------------------------- */
 
-.fnm-download {
+.sanlos-download {
   flex: 0 0 auto;
   min-width: 52px;
   padding: 2px 8px;
@@ -19,47 +19,47 @@
   cursor: pointer;
 }
 
-.fnm-download:hover {
+.sanlos-download:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-download:active {
+.sanlos-download:active {
   background: var(--surface-sunken);
 }
 
-.fnm-download:focus-visible {
+.sanlos-download:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 下载中：进度用强调色。 */
-.fnm-download--running {
+.sanlos-download--running {
   border-color: var(--accent);
   color: var(--accent);
 }
 
 /* 排队中：还没开始，用弱化色。 */
-.fnm-download--pending {
+.sanlos-download--pending {
   border-color: var(--border-strong);
   color: var(--text-secondary);
 }
 
 /* 失败：可点重试。 */
-.fnm-download--error {
+.sanlos-download--error {
   border-color: var(--danger);
   color: var(--danger);
 }
 
 /* 已下载：不可点，用成功色示意。 */
-.fnm-download--done {
+.sanlos-download--done {
   border-color: var(--success);
   background: var(--success-surface);
   color: var(--success);
   cursor: default;
 }
 
-.fnm-download:disabled {
+.sanlos-download:disabled {
   border-color: var(--border);
   background: var(--surface-sunken);
   color: var(--disabled);

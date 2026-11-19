@@ -5,7 +5,7 @@
  *    （`#hex` / `rgb()` / `hsl()` 一律不行）。
  *
  * ⚠️ **T77 的三件事**：
- * - **去掉底板**：原先 `.fnm-lyricoverlay` 画了 `--surface-raised` 底板 + 边框
+ * - **去掉底板**：原先 `.sanlos-lyricoverlay` 画了 `--surface-raised` 底板 + 边框
  *    ⇒ 窗口虽然 `transparent: true`，页面里却是一块**不透明面板**。
  *    现在底板、边框、圆角**全部去掉** ⇒ 桌面直接透出来。
  * - **纯歌词**：曲名/歌手（标题条）、播放控制（三个按钮）**整块删掉**；
@@ -26,7 +26,7 @@
  * 根容器（**透明**）
  * -------------------------------------------------------------------------- */
 
-.fnm-lyricoverlay {
+.sanlos-lyricoverlay {
   display: flex;
   flex-direction: column;
   /* 纯歌词 ⇒ 上下都居中（双行歌词正好落在窗口中间）。 */
@@ -46,7 +46,7 @@
  * 歌词区
  * -------------------------------------------------------------------------- */
 
-.fnm-lyricoverlay__lyrics {
+.sanlos-lyricoverlay__lyrics {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -54,7 +54,7 @@
 }
 
 /* 悬浮窗里只留双行模式；单行模式的滚动条在这里没有意义。 */
-.fnm-lyricoverlay__lyrics .fnm-lyricview {
+.sanlos-lyricoverlay__lyrics .sanlos-lyricview {
   overflow: hidden;
 }
 
@@ -74,11 +74,11 @@
  * ⚠️ **为什么描边画在「行」上、且把着色层的描边关掉**：
  * - 描边画在**字形外侧**（±1px 四个方向）⇒ 卡拉OK 的**填色边界**（字形内部的竖线）
  *   不受影响 ⇒ 边界仍然清晰（T48 的教训只针对**同色光晕**）；
- * - 逐字着色层（`.fnm-lyricview__overlay`）是**绝对定位**盖在底层原文上的
+ * - 逐字着色层（`.sanlos-lyricview__overlay`）是**绝对定位**盖在底层原文上的
  *   ⇒ 它再画一遍描边就会**加倍**、字看起来发虚 ⇒ 这里显式 `none`，
  *   描边由**底层原文**提供一份就够（着色层只负责把字填成强调色）。
  */
-.fnm-lyricoverlay .fnm-lyricview__line {
+.sanlos-lyricoverlay .sanlos-lyricview__line {
   color: var(--lyric-float-text-dim);
   text-shadow:
     -1px 0 var(--lyric-float-shadow),
@@ -91,32 +91,32 @@
 /*
  * ⚠️ **「当前行」在双行模式下没有类名** —— 这是 `LyricView` 的既有约定：
  *    double 模式把两行都渲染成 `active: false`（见 `LyricView.tsx` 的
- *    `renderLine({... active: false ...})`）⇒ `.fnm-lyricview__line--active`
+ *    `renderLine({... active: false ...})`）⇒ `.sanlos-lyricview__line--active`
  *    **在双行模式下永远不会出现**（单行 / 全量模式才有）。
  *    ⇒ 想让「正在唱的那一行」更亮，只能靠**它自己身上的卡拉OK 词**来认：
- *    `.fnm-lyricview__word--karaoke` 只挂在**正在推进的那一个词**上
+ *    `.sanlos-lyricview__word--karaoke` 只挂在**正在推进的那一个词**上
  *    ⇒ `:has()` 就能认出当前行（Chromium 105+ / Electron 32 支持）。
  *    ⇒ 下一行（还没唱到）身上没有卡拉OK词 ⇒ 保持暗白。
  *
- * ⚠️ 这**只影响本窗**（选择器带 `.fnm-lyricoverlay` 前缀）⇒
+ * ⚠️ 这**只影响本窗**（选择器带 `.sanlos-lyricoverlay` 前缀）⇒
  *    主界面歌词 / 歌词舞台 / 词岛**一字不变**。
  */
-.fnm-lyricoverlay .fnm-lyricview__line:has(.fnm-lyricview__word--karaoke) {
+.sanlos-lyricoverlay .sanlos-lyricview__line:has(.sanlos-lyricview__word--karaoke) {
   color: var(--lyric-float-text);
 }
 
 /* 兜底：万一将来换成别的模式（单行 / 全量），`--active` 同样代表「当前行」。 */
-.fnm-lyricoverlay .fnm-lyricview__line--active {
+.sanlos-lyricoverlay .sanlos-lyricview__line--active {
   color: var(--lyric-float-text);
 }
 
 /* 空态文案（「未在播放」/「暂无歌词」）与翻译副行同样走暗白。 */
-.fnm-lyricoverlay .fnm-lyricview__empty,
-.fnm-lyricoverlay .fnm-lyricview__translation {
+.sanlos-lyricoverlay .sanlos-lyricview__empty,
+.sanlos-lyricoverlay .sanlos-lyricview__translation {
   color: var(--lyric-float-text-dim);
 }
 
-.fnm-lyricoverlay .fnm-lyricview__overlay {
+.sanlos-lyricoverlay .sanlos-lyricview__overlay {
   text-shadow: none;
 }
 
@@ -130,13 +130,13 @@
  *    ⇒ 真机实测：整行都是主题蓝，白字几乎看不见
  *    ⇒ 与「固定白字、任何壁纸都一个样」的口径冲突。
  *
- * ⚠️ **为什么只在**本窗**覆盖**：`.fnm-lyricview__word--sung` /
- *    `.fnm-lyricview__word--karaoke` 住在**共享组件** `lyric-view.css`
+ * ⚠️ **为什么只在**本窗**覆盖**：`.sanlos-lyricview__word--sung` /
+ *    `.sanlos-lyricview__word--karaoke` 住在**共享组件** `lyric-view.css`
  *    （词岛 / 歌词舞台 / 主界面**都在用**）⇒ 直接改共享文件会**连带改掉**
  *    另外三处的卡拉OK 颜色（那是 T71「三处一致」的承诺）。
- *    ⇒ 只在本窗用 `.fnm-lyricoverlay …` 前缀覆盖 ⇒ **作用域最小**。
+ *    ⇒ 只在本窗用 `.sanlos-lyricoverlay …` 前缀覆盖 ⇒ **作用域最小**。
  */
-.fnm-lyricoverlay .fnm-lyricview__word--sung {
+.sanlos-lyricoverlay .sanlos-lyricview__word--sung {
   color: var(--lyric-float-accent);
 }
 
@@ -145,7 +145,7 @@
  *    `background-repeat` / `background-position` 与 `color: transparent`
  *    都仍由共享规则提供 ⇒ **扫光推进逻辑一字不改**。
  */
-.fnm-lyricoverlay .fnm-lyricview__word--karaoke {
+.sanlos-lyricoverlay .sanlos-lyricview__word--karaoke {
   background-image: linear-gradient(
     90deg,
     var(--lyric-float-accent) 0%,

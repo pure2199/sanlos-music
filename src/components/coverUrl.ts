@@ -3,7 +3,7 @@
 //
 // 渲染进程里封面的最终形状是：
 //
-//     fnm://srv/static/cover?coverId=<encoded>&size=<size>
+//     sanlos://srv/static/cover?coverId=<encoded>&size=<size>
 //
 // - `srv` 之后是**相对 API 基址**的路径，**不含** `/music/api/v1`
 //   （主进程的协议代理会把它还原成 `<server>/music/api/v1/static/cover`）；
@@ -48,7 +48,7 @@ export function coverUrl(
       : COVER_SIZE_DEFAULT
 
   return (
-    `fnm://srv/static/cover?coverId=${encodeURIComponent(trimmed)}` +
+    `sanlos://srv/static/cover?coverId=${encodeURIComponent(trimmed)}` +
     `&size=${encodeURIComponent(String(normalizedSize))}`
   )
 }

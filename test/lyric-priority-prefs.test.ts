@@ -16,7 +16,7 @@ import { PrefsStore } from '../electron/ipc'
 
 /** 每次用例一个独立的偏好文件（系统临时目录，不入库）。 */
 function tempFile(): string {
-  return join(tmpdir(), `fnm-t70-prefs-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
+  return join(tmpdir(), `sanlos-t70-prefs-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
 }
 
 describe('T70 歌词优先级偏好', () => {

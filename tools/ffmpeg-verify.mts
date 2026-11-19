@@ -27,7 +27,7 @@ import { spawnSync } from 'node:child_process'
 
 import { detectFfmpeg, transcodeToOpus, readableFfmpegError } from '../electron/ffmpeg.ts'
 
-const dir = join(tmpdir(), 'fnm-ffmpeg-verify')
+const dir = join(tmpdir(), 'sanlos-ffmpeg-verify')
 rmSync(dir, { recursive: true, force: true })
 mkdirSync(dir, { recursive: true })
 const wav = join(dir, 'probe.wav')

@@ -203,7 +203,7 @@ export interface AudiobookPort {
 }
 
 /** 落盘状态的键名。 */
-const STORAGE_KEY = 'fnmusic-audiobook-state'
+const STORAGE_KEY = 'sanlos-audiobook-state'
 /**
  * 当前落盘结构版本（落盘形状变了要 +1 ⇒ 旧数据自动作废）。
  *

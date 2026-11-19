@@ -45,7 +45,7 @@ test.describe.serial('Sanlos Music 桌面端：T82 外壳（F12 / 版本号 / �
   //    ⇒ 把 F12 重新绑回 `openDevTools`（T82 之前那样），它**必定变红**。
   //
   // ⚠️ **必须用主进程的 `sendInputEvent`，不能用 `page.keyboard.press`**：
-  //    实测（`release/verify/fnm-keylog2-probe.mjs`，真机探针）：
+  //    实测（`release/verify/sanlos-keylog2-probe.mjs`，真机探针）：
   //    · `page.keyboard.press(...)` = CDP `Input.dispatchKeyEvent`
   //      ⇒ **直接注入渲染进程** ⇒ **根本不触发** `before-input-event`
   //      ⇒ 我们的快捷键接缝**一次都不会执行** ⇒ 测出来的「没反应」是**假绿**；
@@ -169,7 +169,7 @@ test.describe.serial('Sanlos Music 桌面端：T82 外壳（F12 / 版本号 / �
 
     // 更新源输入框：**空**（没配）⇒ 主进程会**回落项目地址**；
     // placeholder 就是那个项目地址。
-    const input = fixture.window.locator('input[name="fnm-update-base-url"]')
+    const input = fixture.window.locator('input[name="sanlos-update-base-url"]')
     await expect(input).toHaveValue('')
     await expect(input).toHaveAttribute('placeholder', UPDATE_BASE_URL)
 

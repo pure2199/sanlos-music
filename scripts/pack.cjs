@@ -35,7 +35,7 @@
  *
  * 2. **输出目录可切换**
  *    - 默认 `release/`；
- *    - `FNM_PACK_OUTPUT=<dir>` 可改到别处。
+ *    - `SANLOS_PACK_OUTPUT=<dir>` 可改到别处。
  *
  * 3. **入口固定**
  *    - 直接用 node 跑本仓库 `node_modules/electron-builder/cli.js`，
@@ -53,7 +53,7 @@
  *      ⇒ 干净 runner 上找不到（无害），但**本机**若装了证书就会**自动签**
  *      ⇒「本机产物有签名、CI 产物没签名」⇒ 不可预期。
  *    - 要签就**显式**给 `WIN_CSC_LINK`（口径唯一）；临时打开用
- *      `FNM_CSC_AUTO_DISCOVERY=1`。
+ *      `SANLOS_CSC_AUTO_DISCOVERY=1`。
  *
  * 2. **CI 里直接跑 `node scripts/pack.cjs`**（不要 `npm run pack`）
  *    - `npm run pack` 会**再跑一次 build**（`npm run build && node scripts/pack.cjs`）
@@ -61,11 +61,11 @@
  *    - 本脚本**自带前置检查**（缺 `dist/index.html` / `dist-electron/main.js`
  *      会**早失败**并说清楚缺什么）。
  *
- * 3. **输出目录用 `FNM_PACK_OUTPUT=release-ci`**
+ * 3. **输出目录用 `SANLOS_PACK_OUTPUT=release-ci`**
  *    - CI 上传到 artifact、交给 SignPath 送签的，就是这个目录。
  *    - ⚠️ 目录名以 `release-` 开头 ⇒ 已在 `.gitignore` 里（本地试跑也不脏仓库）。
  *
- * ⚠️ **加严签名断言是可选的**（`FNM_EXPECT_SIGNER_CN`）：设了就额外要求
+ * ⚠️ **加严签名断言是可选的**（`SANLOS_EXPECT_SIGNER_CN`）：设了就额外要求
  *    「状态 Valid + 带 RFC 3161 时间戳 + CN 相等」。
  *    ⚠️ **SignPath 路线用不着它** —— SignPath 是在**打包之后**签的
  *    ⇒ 打包阶段产物必然没签名 ⇒ 断言要放在「取回签名件之后」（release.yml 里做）。
@@ -81,8 +81,8 @@ const { spawnSync } = require('node:child_process')
 const repoRoot = path.resolve(__dirname, '..')
 const electronDist = path.join(repoRoot, 'node_modules', 'electron', 'dist')
 const defaultOut = path.join(repoRoot, 'release')
-const outDir = process.env.FNM_PACK_OUTPUT
-  ? path.resolve(repoRoot, process.env.FNM_PACK_OUTPUT)
+const outDir = process.env.SANLOS_PACK_OUTPUT
+  ? path.resolve(repoRoot, process.env.SANLOS_PACK_OUTPUT)
   : defaultOut
 
 function fail(msg) {
@@ -173,8 +173,8 @@ const result = spawnSync(process.execPath, [builderBin, ...args], {
     //    - 但**本机**若装了证书就会**自动签** ⇒「本机产物有签名、CI 产物没签名」
     //      ⇒ 同一份代码、两种结果 ⇒ 不可预期。
     //    ⇒ 默认关掉；要签就**显式**给 `WIN_CSC_LINK`（口径唯一）。
-    //    临时需要打开时：`FNM_CSC_AUTO_DISCOVERY=1`。
-    CSC_IDENTITY_AUTO_DISCOVERY: process.env.FNM_CSC_AUTO_DISCOVERY === '1' ? 'true' : 'false',
+    //    临时需要打开时：`SANLOS_CSC_AUTO_DISCOVERY=1`。
+    CSC_IDENTITY_AUTO_DISCOVERY: process.env.SANLOS_CSC_AUTO_DISCOVERY === '1' ? 'true' : 'false',
   },
 })
 
@@ -199,16 +199,16 @@ if (result.status !== 0) {
 //    输出目录里可能还躺着**历史上**的旧产物（老版本号的安装包），
 //    拿整个输出目录去查会把旧包一起算进来 ⇒ 误报。
 const cscLink = (process.env.WIN_CSC_LINK || process.env.CSC_LINK || '').trim()
-const checkScript = path.join(repoRoot, 'tools', 'fn-check-signature.mjs')
+const checkScript = path.join(repoRoot, 'tools', 'sanlos-check-signature.mjs')
 
 // ⚠️ **T87：加严断言的开关**（默认**关** ⇒ 行为与 T86 一字不变）。
-// 设了 `FNM_EXPECT_SIGNER_CN` ⇒ 除了「有签名」，还要求：
+// 设了 `SANLOS_EXPECT_SIGNER_CN` ⇒ 除了「有签名」，还要求：
 //   ① 签名状态是 **Valid**（不是 HashMismatch / Expired / NotTrusted）；
 //   ② 带 **RFC 3161 时间戳**（证书到期后历史安装包不会集体失效）；
 //   ③ 签名者 **CN** 与它**相等**（口径与客户端**同一份**：`shared/update.ts`）。
 // ⚠️ **SignPath 路线用不着这个开关**：SignPath 是在**打包之后**签的
 //    ⇒ 打包阶段产物必然没签名 ⇒ 断言要放在「取回签名件之后」（见 release.yml）。
-const expectCn = (process.env.FNM_EXPECT_SIGNER_CN || '').trim()
+const expectCn = (process.env.SANLOS_EXPECT_SIGNER_CN || '').trim()
 
 if (cscLink === '') {
   console.log('[pack] ℹ️ 未配置签名证书（WIN_CSC_LINK / CSC_LINK）⇒ 产物**未签名**（预期行为）')

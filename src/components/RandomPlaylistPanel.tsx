@@ -147,20 +147,20 @@ export function RandomPlaylistPanel({
   }, [name, onSaved, save, songs])
 
   return (
-    <div className="fnm-random">
-      <div className="fnm-random__head">
+    <div className="sanlos-random">
+      <div className="sanlos-random__head">
         <div>
-          <h2 className="fnm-random__title">{`随机 ${count} 首`}</h2>
-          <p className="fnm-random__hint">
+          <h2 className="sanlos-random__title">{`随机 ${count} 首`}</h2>
+          <p className="sanlos-random__hint">
             {songs.length > 0
               ? `从你的曲库随机挑了 ${songs.length} 首`
               : '从你的曲库随机挑几首，能直接播，也能存成歌单'}
           </p>
         </div>
-        <div className="fnm-random__actions">
+        <div className="sanlos-random__actions">
           <button
             type="button"
-            className="fnm-random__button fnm-random__button--primary"
+            className="sanlos-random__button sanlos-random__button--primary"
             onClick={() => void handleRandom()}
             disabled={loading}
           >
@@ -169,7 +169,7 @@ export function RandomPlaylistPanel({
           {songs.length > 0 && (
             <button
               type="button"
-              className="fnm-random__button"
+              className="sanlos-random__button"
               onClick={handlePlayAll}
               disabled={loading}
             >
@@ -180,17 +180,17 @@ export function RandomPlaylistPanel({
       </div>
 
       {error && (
-        <p className="fnm-random__error" role="alert">
+        <p className="sanlos-random__error" role="alert">
           {`随机失败：${error}`}
         </p>
       )}
 
       {songs.length > 0 && (
         <>
-          <div className="fnm-random__save">
+          <div className="sanlos-random__save">
             <input
-              className="fnm-random__name"
-              name="fnm-random-playlist-name"
+              className="sanlos-random__name"
+              name="sanlos-random-playlist-name"
               type="text"
               placeholder="存成歌单的名字"
               aria-label="随机歌单名称"
@@ -200,7 +200,7 @@ export function RandomPlaylistPanel({
             />
             <button
               type="button"
-              className="fnm-random__button"
+              className="sanlos-random__button"
               onClick={() => void handleSave()}
               disabled={saving || trimmedName.length === 0 || nameTooLong}
             >
@@ -208,17 +208,17 @@ export function RandomPlaylistPanel({
             </button>
           </div>
           {nameTooLong && (
-            <p className="fnm-random__error" role="alert">
+            <p className="sanlos-random__error" role="alert">
               {`歌单名不能超过 ${MAX_PLAYLIST_NAME_LENGTH} 个字符（现在 ${trimmedName.length} 个）`}
             </p>
           )}
           {saveError && (
-            <p className="fnm-random__error" role="alert">
+            <p className="sanlos-random__error" role="alert">
               {`存为歌单失败：${saveError}`}
             </p>
           )}
           {message && (
-            <p className="fnm-random__message" role="status">
+            <p className="sanlos-random__message" role="status">
               {message}
             </p>
           )}

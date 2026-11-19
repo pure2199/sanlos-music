@@ -32,7 +32,7 @@ const tempDirs: string[] = []
 
 /** 造一个临时目录。 */
 function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'fnm-t89-3-'))
+  const dir = mkdtempSync(join(tmpdir(), 'sanlos-t89-3-'))
   tempDirs.push(dir)
   return dir
 }

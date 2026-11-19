@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 // 曲库列表页里多选若干首 → 点「加入歌单」→ 挑一个或**几个**歌单 → 一次写回 NAS。
 //
-// ⚠️ **写回端点已真机校准**（T25 的探针 `tools/fn-writeback-probe.mjs`）：
+// ⚠️ **写回端点已真机校准**（T25 的探针 `tools/sanlos-writeback-probe.mjs`）：
 //    `playlist/add-track` → `{ guid, trackGUIDs: [id] }` ✅ 真生效
 //    （歌单详情里那几首**真的出现了**）。
 //
@@ -283,11 +283,11 @@ export function AddToPlaylist({
   if (count === 0 && !open) return null
 
   return (
-    <span className="fnm-addtoplaylist">
+    <span className="sanlos-addtoplaylist">
       <button
         type="button"
-        className="fnm-addtoplaylist__open"
-        data-testid="fnm-add-to-playlist-button"
+        className="sanlos-addtoplaylist__open"
+        data-testid="sanlos-add-to-playlist-button"
         aria-label={`把选中的 ${count} 首加入歌单`}
         aria-expanded={open}
         disabled={count === 0 || busy}
@@ -301,11 +301,11 @@ export function AddToPlaylist({
 
       {open && (
         // ⚠️ **浮层**：绝对定位 → 不占文档流 → 工具条高度恒定（列表不位移）。
-        <span className="fnm-addtoplaylist__panel" ref={panelRef} role="group" aria-label="加入歌单">
-          {loading && <span className="fnm-addtoplaylist__loading">正在加载歌单…</span>}
+        <span className="sanlos-addtoplaylist__panel" ref={panelRef} role="group" aria-label="加入歌单">
+          {loading && <span className="sanlos-addtoplaylist__loading">正在加载歌单…</span>}
 
           {!loading && playlists.length === 0 && (
-            <span className="fnm-addtoplaylist__empty">
+            <span className="sanlos-addtoplaylist__empty">
               还没有歌单 —— 先到「歌单」页新建一个
             </span>
           )}
@@ -315,7 +315,7 @@ export function AddToPlaylist({
               {/* ⚠️ **搜索**（T30）：歌单多了以后，光靠滚动找不动。 */}
               <input
                 type="search"
-                className="fnm-addtoplaylist__search"
+                className="sanlos-addtoplaylist__search"
                 aria-label="搜索歌单"
                 placeholder="搜索歌单…"
                 value={query}
@@ -323,16 +323,16 @@ export function AddToPlaylist({
               />
 
               {filtered.length === 0 ? (
-                <span className="fnm-addtoplaylist__empty">
+                <span className="sanlos-addtoplaylist__empty">
                   {`没有匹配「${query.trim()}」的歌单`}
                 </span>
               ) : (
-                <span className="fnm-addtoplaylist__list" role="group" aria-label="歌单列表">
+                <span className="sanlos-addtoplaylist__list" role="group" aria-label="歌单列表">
                   {filtered.map((item) => (
-                    <label key={item.id} className="fnm-addtoplaylist__option">
+                    <label key={item.id} className="sanlos-addtoplaylist__option">
                       <input
                         type="checkbox"
-                        className="fnm-addtoplaylist__checkbox"
+                        className="sanlos-addtoplaylist__checkbox"
                         // ⚠️ **显式 `aria-label`**：复选框在 `<label>` 里，
                         //    没有它的话可访问名会把**曲目数**也带进去
                         //    （「占位歌单 0 首」）→ 名字不稳定、不好选中。
@@ -341,9 +341,9 @@ export function AddToPlaylist({
                         checked={selectedIds.includes(item.id)}
                         onChange={() => togglePlaylist(item.id)}
                       />
-                      <span className="fnm-addtoplaylist__name">{item.name}</span>
+                      <span className="sanlos-addtoplaylist__name">{item.name}</span>
                       {typeof item.trackCount === 'number' && (
-                        <span className="fnm-addtoplaylist__count">{item.trackCount} 首</span>
+                        <span className="sanlos-addtoplaylist__count">{item.trackCount} 首</span>
                       )}
                     </label>
                   ))}
@@ -352,7 +352,7 @@ export function AddToPlaylist({
 
               <button
                 type="button"
-                className="fnm-addtoplaylist__confirm"
+                className="sanlos-addtoplaylist__confirm"
                 disabled={busy || selectedIds.length === 0 || count === 0}
                 onClick={() => void handleAdd()}
               >
@@ -363,7 +363,7 @@ export function AddToPlaylist({
 
           <button
             type="button"
-            className="fnm-addtoplaylist__cancel"
+            className="sanlos-addtoplaylist__cancel"
             disabled={busy}
             onClick={() => setOpen(false)}
           >
@@ -371,12 +371,12 @@ export function AddToPlaylist({
           </button>
 
           {message && (
-            <span className="fnm-addtoplaylist__message" role="status">
+            <span className="sanlos-addtoplaylist__message" role="status">
               {message}
             </span>
           )}
           {error && (
-            <span className="fnm-addtoplaylist__error" role="alert">
+            <span className="sanlos-addtoplaylist__error" role="alert">
               {`操作失败：${error}`}
             </span>
           )}

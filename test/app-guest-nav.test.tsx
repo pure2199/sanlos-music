@@ -93,7 +93,7 @@ const DISCONNECTED: AuthSessionInfo = {
 /** 挂一个「restore 什么时候落定由我说了算」的假认证桥。 */
 function installBridge(): { resolveRestore: (info: AuthSessionInfo) => void } {
   let resolveRestore: (info: AuthSessionInfo) => void = () => undefined
-  ;(window as unknown as { fn?: unknown }).fn = {
+  ;(window as unknown as { sanlosAuth?: unknown }).sanlosAuth = {
     restore: () =>
       new Promise<AuthSessionInfo>((resolve) => {
         resolveRestore = resolve
@@ -118,7 +118,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete (window as unknown as { fn?: unknown }).fn
+  delete (window as unknown as { sanlosAuth?: unknown }).sanlosAuth
 })
 
 describe('T38 未登录时的界面', () => {

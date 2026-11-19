@@ -9,7 +9,7 @@
  */
 
 /* 歌单页双栏布局 */
-.fnm-playlists {
+.sanlos-playlists {
   display: flex;
   gap: 16px;
   flex: 1 1 auto;
@@ -17,7 +17,7 @@
 }
 
 /* 左侧歌单栏 */
-.fnm-playlists__side {
+.sanlos-playlists__side {
   flex: 0 0 300px;
   display: flex;
   flex-direction: column;
@@ -25,7 +25,7 @@
 }
 
 /* 右侧歌曲栏 */
-.fnm-playlists__detail {
+.sanlos-playlists__detail {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
@@ -33,7 +33,7 @@
 }
 
 /* 提示文案（未选中歌单时） */
-.fnm-playlists__hint {
+.sanlos-playlists__hint {
   margin: 0;
   padding: 24px 12px;
   font-size: 13px;
@@ -45,14 +45,14 @@
  * -------------------------------------------------------------------------- */
 
 /* 新建歌单：名字输入 + 按钮（并排一行） */
-.fnm-playlists__create {
+.sanlos-playlists__create {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 10px;
 }
 
-.fnm-playlists__name {
+.sanlos-playlists__name {
   flex: 1 1 auto;
   min-width: 0;
   height: 30px;
@@ -65,16 +65,16 @@
   font-family: inherit;
 }
 
-.fnm-playlists__name:focus-visible {
+.sanlos-playlists__name:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.fnm-playlists__name:disabled {
+.sanlos-playlists__name:disabled {
   color: var(--disabled);
 }
 
-.fnm-playlists__create-button {
+.sanlos-playlists__create-button {
   flex: 0 0 auto;
   height: 30px;
   padding: 0 10px;
@@ -87,30 +87,30 @@
   cursor: pointer;
 }
 
-.fnm-playlists__create-button:hover:not(:disabled) {
+.sanlos-playlists__create-button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-playlists__create-button:focus-visible {
+.sanlos-playlists__create-button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.fnm-playlists__create-button:disabled {
+.sanlos-playlists__create-button:disabled {
   color: var(--disabled);
   cursor: not-allowed;
 }
 
 /* 删除歌单的工具条 */
-.fnm-playlists__toolbar {
+.sanlos-playlists__toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
 }
 
-.fnm-playlists__delete {
+.sanlos-playlists__delete {
   height: 26px;
   padding: 0 10px;
   border: 1px solid var(--border);
@@ -122,23 +122,23 @@
   cursor: pointer;
 }
 
-.fnm-playlists__delete:hover:not(:disabled) {
+.sanlos-playlists__delete:hover:not(:disabled) {
   border-color: var(--warning);
   color: var(--warning);
 }
 
-.fnm-playlists__delete:focus-visible {
+.sanlos-playlists__delete:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.fnm-playlists__delete:disabled {
+.sanlos-playlists__delete:disabled {
   color: var(--disabled);
   cursor: not-allowed;
 }
 
 /* 取消删除（两步确认的第二步旁边） */
-.fnm-playlists__cancel-delete {
+.sanlos-playlists__cancel-delete {
   height: 26px;
   padding: 0 10px;
   border: 1px solid var(--border);
@@ -150,13 +150,13 @@
   cursor: pointer;
 }
 
-.fnm-playlists__cancel-delete:focus-visible {
+.sanlos-playlists__cancel-delete:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 写回成功的提示 */
-.fnm-playlists__message {
+.sanlos-playlists__message {
   margin: 8px 0 0;
   font-size: 13px;
   color: var(--accent);
@@ -171,7 +171,7 @@
  * -------------------------------------------------------------------------- */
 
 /* 左栏的入口按钮 */
-.fnm-playlists__random-button {
+.sanlos-playlists__random-button {
   width: 100%;
   height: 30px;
   margin-bottom: 10px;
@@ -185,17 +185,17 @@
   cursor: pointer;
 }
 
-.fnm-playlists__random-button:hover {
+.sanlos-playlists__random-button:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-playlists__random-button:focus-visible {
+.sanlos-playlists__random-button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.fnm-playlists__random-button[aria-pressed='true'] {
+.sanlos-playlists__random-button[aria-pressed='true'] {
   border-color: var(--accent);
   color: var(--accent);
 }

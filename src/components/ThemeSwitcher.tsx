@@ -45,13 +45,13 @@ export function ThemeSwitcher(props: ThemeSwitcherProps): ReactElement {
     void setTheme(next.name)
   }, [next.name, setTheme])
 
-  const rootClass = className ? `fnm-theme ${className}` : 'fnm-theme'
+  const rootClass = className ? `sanlos-theme ${className}` : 'sanlos-theme'
 
   return (
     <div className={rootClass}>
       <button
         type="button"
-        className="fnm-theme__button"
+        className="sanlos-theme__button"
         onClick={handleClick}
         title={`切换到${next.label}`}
         aria-label="切换主题"
@@ -59,7 +59,7 @@ export function ThemeSwitcher(props: ThemeSwitcherProps): ReactElement {
         {current.label}
       </button>
       {error && (
-        <p className="fnm-theme__error" role="alert">
+        <p className="sanlos-theme__error" role="alert">
           {error}
         </p>
       )}

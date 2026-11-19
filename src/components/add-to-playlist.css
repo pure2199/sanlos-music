@@ -2,21 +2,21 @@
  * 「加入歌单」控件（T28）
  * ---------------------------------------------------------------------------
  * 颜色**只用语义变量**（`src/styles/tokens.css`），两套主题自动跟随。
- * 类名 BEM，`fnm-` 前缀。
+ * 类名 BEM，`sanlos-` 前缀。
  *
  * ⚠️ **面板是浮层**（absolute）——它**不能**占文档流：
  *    展开成行会改变工具条高度 → 整个列表位移 → 用户的第二击落空
  *    → 浏览器不再派发 `dblclick` → **双击播放失效**（T27 踩过这个坑）。
  * ------------------------------------------------------------------------- */
 
-.fnm-addtoplaylist {
+.sanlos-addtoplaylist {
   position: relative;
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
 }
 
-.fnm-addtoplaylist__open {
+.sanlos-addtoplaylist__open {
   padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -27,18 +27,18 @@
   cursor: pointer;
 }
 
-.fnm-addtoplaylist__open:hover:not(:disabled) {
+.sanlos-addtoplaylist__open:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-addtoplaylist__open:disabled {
+.sanlos-addtoplaylist__open:disabled {
   color: var(--disabled);
   cursor: not-allowed;
 }
 
 /* 浮层面板：绝对定位 → 不占文档流 → 工具条高度恒定。 */
-.fnm-addtoplaylist__panel {
+.sanlos-addtoplaylist__panel {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
@@ -55,21 +55,21 @@
   box-shadow: 0 6px 18px var(--shadow);
 }
 
-.fnm-addtoplaylist__loading,
-.fnm-addtoplaylist__empty {
+.sanlos-addtoplaylist__loading,
+.sanlos-addtoplaylist__empty {
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 18px;
 }
 
-.fnm-addtoplaylist__field {
+.sanlos-addtoplaylist__field {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
 /* 搜索框（T30）：歌单多了以后光靠滚动找不动。 */
-.fnm-addtoplaylist__search {
+.sanlos-addtoplaylist__search {
   flex: 1 1 100%;
   box-sizing: border-box;
   padding: 4px 8px;
@@ -82,7 +82,7 @@
 }
 
 /* 复选列表（T30）：多选歌单。 */
-.fnm-addtoplaylist__list {
+.sanlos-addtoplaylist__list {
   flex: 1 1 100%;
   display: flex;
   flex-direction: column;
@@ -94,7 +94,7 @@
   border-radius: var(--radius-control);
 }
 
-.fnm-addtoplaylist__option {
+.sanlos-addtoplaylist__option {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -105,16 +105,16 @@
   cursor: pointer;
 }
 
-.fnm-addtoplaylist__option:hover {
+.sanlos-addtoplaylist__option:hover {
   background: var(--surface-sunken);
 }
 
-.fnm-addtoplaylist__checkbox {
+.sanlos-addtoplaylist__checkbox {
   margin: 0;
   cursor: pointer;
 }
 
-.fnm-addtoplaylist__name {
+.sanlos-addtoplaylist__name {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -122,20 +122,20 @@
   white-space: nowrap;
 }
 
-.fnm-addtoplaylist__count {
+.sanlos-addtoplaylist__count {
   flex: 0 0 auto;
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 18px;
 }
 
-.fnm-addtoplaylist__label {
+.sanlos-addtoplaylist__label {
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 18px;
 }
 
-.fnm-addtoplaylist__select {
+.sanlos-addtoplaylist__select {
   padding: 3px 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -145,7 +145,7 @@
   line-height: 18px;
 }
 
-.fnm-addtoplaylist__confirm {
+.sanlos-addtoplaylist__confirm {
   padding: 4px 12px;
   border: 1px solid var(--accent);
   border-radius: var(--radius-control);
@@ -156,19 +156,19 @@
   cursor: pointer;
 }
 
-.fnm-addtoplaylist__confirm:hover:not(:disabled) {
+.sanlos-addtoplaylist__confirm:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
 
-.fnm-addtoplaylist__confirm:disabled {
+.sanlos-addtoplaylist__confirm:disabled {
   border-color: var(--border);
   background: var(--surface-sunken);
   color: var(--disabled);
   cursor: not-allowed;
 }
 
-.fnm-addtoplaylist__cancel {
+.sanlos-addtoplaylist__cancel {
   padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -179,19 +179,19 @@
   cursor: pointer;
 }
 
-.fnm-addtoplaylist__cancel:hover:not(:disabled) {
+.sanlos-addtoplaylist__cancel:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-addtoplaylist__message {
+.sanlos-addtoplaylist__message {
   flex: 1 1 100%;
   color: var(--success);
   font-size: 12px;
   line-height: 18px;
 }
 
-.fnm-addtoplaylist__error {
+.sanlos-addtoplaylist__error {
   flex: 1 1 100%;
   color: var(--danger);
   font-size: 12px;

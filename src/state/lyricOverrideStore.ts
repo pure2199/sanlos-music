@@ -25,13 +25,14 @@ import {
   type LyricOverrideMap,
 } from '../player/lyricOverride'
 import type { LyricSource } from '../../shared/lyricProvider'
+import { LEGACY_LYRIC_OVERRIDE_STORAGE_KEY } from '../../shared/legacyStorageKeys'
 
 // ---------------------------------------------------------------------------
 // 存储端口
 // ---------------------------------------------------------------------------
 
-/** `localStorage` 的键（与 `fnmusic-resume` / `fnmusic-local-history` 同族命名）。 */
-export const LYRIC_OVERRIDE_STORAGE_KEY = 'fnmusic-lyric-overrides'
+/** `localStorage` 的键（与 `sanlos-resume` / `sanlos-local-history` 同族命名）。 */
+export const LYRIC_OVERRIDE_STORAGE_KEY = 'sanlos-lyric-overrides'
 
 /**
  * 最小化的存储接口（**便于单测注入**）。
@@ -79,7 +80,11 @@ export function createLyricOverridePort(storage: LyricOverrideStorageLike | null
     load: (): LyricOverrideMap => {
       if (!storage) return {}
       try {
-        const raw = storage.getItem(LYRIC_OVERRIDE_STORAGE_KEY)
+        // ⚠️ **T115：新键没有才回落读旧键**（旧键只读、不删）
+        //    ⇒ 老用户升级后「按歌指定歌词源」**不丢**。
+        const raw =
+          storage.getItem(LYRIC_OVERRIDE_STORAGE_KEY) ??
+          storage.getItem(LEGACY_LYRIC_OVERRIDE_STORAGE_KEY)
         if (!raw) return {}
         // ⚠️ 损坏的 JSON / 陌生形状 ⇒ **整条丢弃**（不抛、不返回半截数据）。
         return normalizeLyricOverrides(JSON.parse(raw))

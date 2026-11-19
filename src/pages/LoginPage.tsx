@@ -19,7 +19,7 @@ import './login-page.css'
 // 凭证边界（追加要求 E）：
 // - **口令只存在于本组件的本地 `useState`**——不进 store、不进 localStorage、
 //   不进 URL、不进日志；登录成功后立刻清空。
-// - `window.fn` 的返回也只有脱敏的 `AuthSessionInfo`（没有 token / 口令）。
+// - `window.sanlosAuth` 的返回也只有脱敏的 `AuthSessionInfo`（没有 token / 口令）。
 // ---------------------------------------------------------------------------
 
 /** 连接方式：直连地址 / FN ID 探测。 */
@@ -282,30 +282,30 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
   const connected = session.connected
 
   return (
-    <div className="fnm-login">
-      <section className="fnm-login__card" aria-label="登录">
-        <h1 className="fnm-login__title">连接飞牛音乐</h1>
+    <div className="sanlos-login">
+      <section className="sanlos-login__card" aria-label="登录">
+        <h1 className="sanlos-login__title">连接飞牛音乐</h1>
 
         {connected && (
-          <section className="fnm-login__connected" role="status">
-            <h2 className="fnm-login__connected-title">已连接</h2>
-            <dl className="fnm-login__facts">
-              <div className="fnm-login__fact">
+          <section className="sanlos-login__connected" role="status">
+            <h2 className="sanlos-login__connected-title">已连接</h2>
+            <dl className="sanlos-login__facts">
+              <div className="sanlos-login__fact">
                 <dt>服务器</dt>
                 <dd>{session.serverLabel ?? '—'}</dd>
               </div>
-              <div className="fnm-login__fact">
+              <div className="sanlos-login__fact">
                 <dt>登录账号</dt>
                 <dd>{session.username ?? '—'}</dd>
               </div>
-              <div className="fnm-login__fact">
+              <div className="sanlos-login__fact">
                 <dt>登录方式</dt>
                 <dd>{session.mode === 'nas' ? 'NAS 授权登录' : '独立账号登录'}</dd>
               </div>
             </dl>
             <button
               type="button"
-              className="fnm-login__button fnm-login__button--ghost"
+              className="sanlos-login__button sanlos-login__button--ghost"
               onClick={() => void handleLogout()}
               disabled={busy}
             >
@@ -315,14 +315,14 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
         )}
 
         <form
-          className="fnm-login__form"
+          className="sanlos-login__form"
           hidden={connected}
           onSubmit={(event) => void handleLogin(event)}
         >
-          <div className="fnm-login__modes" role="group" aria-label="连接方式">
+          <div className="sanlos-login__modes" role="group" aria-label="连接方式">
             <button
               type="button"
-              className="fnm-login__mode"
+              className="sanlos-login__mode"
               aria-pressed={target === 'address'}
               onClick={() => setTarget('address')}
             >
@@ -330,7 +330,7 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
             </button>
             <button
               type="button"
-              className="fnm-login__mode"
+              className="sanlos-login__mode"
               aria-pressed={target === 'fnid'}
               onClick={() => setTarget('fnid')}
             >
@@ -339,13 +339,13 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
           </div>
 
           {target === 'address' ? (
-            <div className="fnm-login__field">
-              <label className="fnm-login__label" htmlFor="fnm-address">
+            <div className="sanlos-login__field">
+              <label className="sanlos-login__label" htmlFor="sanlos-address">
                 NAS 地址
               </label>
               <input
-                id="fnm-address"
-                className="fnm-login__input"
+                id="sanlos-address"
+                className="sanlos-login__input"
                 type="text"
                 placeholder="NAS 地址，例如 http://192.168.1.2:5666"
                 value={address}
@@ -353,30 +353,30 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
                 autoComplete="off"
                 spellCheck={false}
               />
-              <p className="fnm-login__hint">
+              <p className="sanlos-login__hint">
                 未填写端口时：IP 地址自动补 HTTP {DEFAULT_HTTP_PORT} / HTTPS{' '}
                 {DEFAULT_HTTPS_PORT}；域名地址走标准端口（80 / 443，适合反代与中继）。
                 非标准端口请显式写出（如 host:5666）
               </p>
               <button
                 type="button"
-                className="fnm-login__button fnm-login__button--secondary"
+                className="sanlos-login__button sanlos-login__button--secondary"
                 onClick={() => void handleCheckServer()}
                 disabled={busy}
               >
                 检测服务器
               </button>
               {serverInfo && (
-                <dl className="fnm-login__facts">
-                  <div className="fnm-login__fact">
+                <dl className="sanlos-login__facts">
+                  <div className="sanlos-login__fact">
                     <dt>服务器名称</dt>
                     <dd>{serverInfo.serverName ?? '未提供'}</dd>
                   </div>
-                  <div className="fnm-login__fact">
+                  <div className="sanlos-login__fact">
                     <dt>服务器版本</dt>
                     <dd>{serverInfo.serverVersion ?? '未提供'}</dd>
                   </div>
-                  <div className="fnm-login__fact">
+                  <div className="sanlos-login__fact">
                     <dt>NAS 账号登录</dt>
                     <dd>{serverInfo.supportsNasLogin ? '支持' : '不支持'}</dd>
                   </div>
@@ -384,13 +384,13 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
               )}
             </div>
           ) : (
-            <div className="fnm-login__field">
-              <label className="fnm-login__label" htmlFor="fnm-fnid">
+            <div className="sanlos-login__field">
+              <label className="sanlos-login__label" htmlFor="sanlos-fnid">
                 设备标识
               </label>
               <input
-                id="fnm-fnid"
-                className="fnm-login__input"
+                id="sanlos-fnid"
+                className="sanlos-login__input"
                 type="text"
                 aria-label="FN ID"
                 placeholder="FN ID，例如 example-fn-id"
@@ -401,36 +401,36 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
               />
               <button
                 type="button"
-                className="fnm-login__button fnm-login__button--secondary"
+                className="sanlos-login__button sanlos-login__button--secondary"
                 onClick={() => void handleProbe()}
                 disabled={busy}
               >
                 探测链路
               </button>
               {candidates.length > 0 && (
-                <ul className="fnm-login__candidates">
+                <ul className="sanlos-login__candidates">
                   {candidates.map((candidate) => {
                     const status = candidateStatus(candidate)
                     return (
-                      <li key={candidate.address} className="fnm-login__candidate">
+                      <li key={candidate.address} className="sanlos-login__candidate">
                         <button
                           type="button"
-                          className="fnm-login__candidate-button"
+                          className="sanlos-login__candidate-button"
                           aria-pressed={selectedAddress === candidate.address}
                           onClick={() => handleSelectCandidate(candidate)}
                         >
-                          <span className="fnm-login__candidate-label">{candidate.label}</span>
-                          <span className="fnm-login__candidate-kind">
+                          <span className="sanlos-login__candidate-label">{candidate.label}</span>
+                          <span className="sanlos-login__candidate-kind">
                             {KIND_LABELS[candidate.kind]}
                           </span>
-                          <span className="fnm-login__candidate-address">{candidate.address}</span>
-                          <span className="fnm-login__candidate-status">
+                          <span className="sanlos-login__candidate-address">{candidate.address}</span>
+                          <span className="sanlos-login__candidate-status">
                             {candidate.ok ? '可达' : '不可达'}
                           </span>
                         </button>
                         {candidate.error && (
                           <p
-                            className="fnm-login__candidate-note"
+                            className="sanlos-login__candidate-note"
                             data-status={status}
                           >
                             {candidate.error}
@@ -441,28 +441,28 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
                   })}
                 </ul>
               )}
-              <p className="fnm-login__hint">
+              <p className="sanlos-login__hint">
                 将连接到：{selectedAddress ?? '（请先选择一条链路）'}
               </p>
             </div>
           )}
 
-          <fieldset className="fnm-login__fieldset">
-            <legend className="fnm-login__legend">登录方式</legend>
-            <label className="fnm-login__radio">
+          <fieldset className="sanlos-login__fieldset">
+            <legend className="sanlos-login__legend">登录方式</legend>
+            <label className="sanlos-login__radio">
               <input
                 type="radio"
-                name="fnm-login-method"
+                name="sanlos-login-method"
                 value="password"
                 checked={method === 'password'}
                 onChange={() => setMethod('password')}
               />
               <span>独立账号</span>
             </label>
-            <label className="fnm-login__radio">
+            <label className="sanlos-login__radio">
               <input
                 type="radio"
-                name="fnm-login-method"
+                name="sanlos-login-method"
                 value="nas"
                 checked={method === 'nas'}
                 onChange={() => setMethod('nas')}
@@ -472,14 +472,14 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
           </fieldset>
 
           {method === 'password' && (
-            <div className="fnm-login__credentials">
-              <div className="fnm-login__field">
-                <label className="fnm-login__label" htmlFor="fnm-username">
+            <div className="sanlos-login__credentials">
+              <div className="sanlos-login__field">
+                <label className="sanlos-login__label" htmlFor="sanlos-username">
                   账号
                 </label>
                 <input
-                  id="fnm-username"
-                  className="fnm-login__input"
+                  id="sanlos-username"
+                  className="sanlos-login__input"
                   type="text"
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
@@ -487,13 +487,13 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
                   spellCheck={false}
                 />
               </div>
-              <div className="fnm-login__field">
-                <label className="fnm-login__label" htmlFor="fnm-password">
+              <div className="sanlos-login__field">
+                <label className="sanlos-login__label" htmlFor="sanlos-password">
                   密码
                 </label>
                 <input
-                  id="fnm-password"
-                  className="fnm-login__input"
+                  id="sanlos-password"
+                  className="sanlos-login__input"
                   type="password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
@@ -504,18 +504,18 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
           )}
 
           {notice && (
-            <p className="fnm-login__notice" role="status">
+            <p className="sanlos-login__notice" role="status">
               {notice}
             </p>
           )}
 
           {error && (
-            <p className="fnm-login__error" role="alert">
+            <p className="sanlos-login__error" role="alert">
               {error}
             </p>
           )}
 
-          <button type="submit" className="fnm-login__button" disabled={busy}>
+          <button type="submit" className="sanlos-login__button" disabled={busy}>
             登录
           </button>
         </form>

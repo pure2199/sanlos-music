@@ -250,7 +250,7 @@ npm run pack      # 打包 → release/
 electron/          主进程：窗口、托盘、IPC、NAS 代理、下载器、FFmpeg 兜底、悬浮歌词窗
 shared/            渲染层与主进程共用：类型、桥接口、主题、签名常量
 src/
-  api/             NAS API 客户端（走 fnm:// 代理）
+  api/             NAS API 客户端（走 sanlos:// 代理）
   components/      通用组件（播放条、歌曲列表、卡片、EQ 面板、设置页…）
   pages/           曲库各页面 + 登录页 + 全屏播放页
   player/          播放引擎、队列、EQ、歌词、媒体会话
@@ -272,14 +272,14 @@ docs/              设计与计划文档、打包与验证文档、界面截图
 这些是本项目的硬约束，改动前请先读 [`docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md`](./docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md)：
 
 - **渲染进程永远拿不到凭证**：token 由主进程用 DPAPI（Windows `safeStorage`）加密存进 `session.bin`；`prefs.json` 只存非敏感偏好。
-- **唯一出网通道**是主进程代理的自定义协议 `fnm://`；渲染层不能直接发网络请求。
+- **唯一出网通道**是主进程代理的自定义协议 `sanlos://`；渲染层不能直接发网络请求。
 - **证书只对 TrustedHosts 放行**，不做全局 `callback(0)`。
 - **主进程的 NAS 流量走同一个 Chromium 分区 HttpStack**，与渲染层共享连接池与 Cookie 语义。
 - **自动更新的出网由主进程发起**（渲染层同样不碰网络）：更新服务器**不在 TrustedHosts 里**
   → 该分区对它走 Chromium **默认**证书校验（自签**不会**被放行）；
   安装包还必须 **SHA-512 相符** + **Authenticode 签名者与用户配置的预期一致**才允许启动。
-- 自定义协议特权**整个进程只注册一次**（`fnm` 与 `fnml` 必须合并注册，见 `electron/schemes.ts`）—— Electron 的 `registerSchemesAsPrivileged()` 第二次调用会**静默覆盖**第一次。
-- **仓库里不写任何真实凭证**：`tools/` 下的联调探针**一律**从环境变量（`FNM_USER` / `FNM_PASS` / `FNM_FNID`）取账号口令，**不落盘、不进测试、不进提交历史**。
+- 自定义协议特权**整个进程只注册一次**（`sanlos` 与 `sanlos-media` 必须合并注册，见 `electron/schemes.ts`）—— Electron 的 `registerSchemesAsPrivileged()` 第二次调用会**静默覆盖**第一次。
+- **仓库里不写任何真实凭证**：`tools/` 下的联调探针**一律**从环境变量（`FN_USER` / `FN_PASS` / `FN_ID`）取账号口令，**不落盘、不进测试、不进提交历史**。
 
 ---
 

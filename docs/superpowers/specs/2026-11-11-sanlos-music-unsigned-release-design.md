@@ -76,7 +76,7 @@ SignPath Foundation 的申请在 **2026-11-11 已提交成功**（页面回执 `
 
 ### 4.2 未签名发布也必须过一道**机械断言**
 
-`node tools/fn-check-signature.mjs --expect none release-ci`
+`node tools/sanlos-check-signature.mjs --expect none release-ci`
 
 ⇒ 「我们声明这一版未签名」不是**口头承诺**，而是**构建期事实**：
 产物若因为任何原因带上了签名（本地装了证书、环境里有 `WIN_CSC_LINK`……）⇒ **工作流失败，不发布**。

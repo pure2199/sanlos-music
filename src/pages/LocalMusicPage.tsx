@@ -69,7 +69,7 @@ export function LocalMusicPage({ onPlay, onGoToLogin }: LocalMusicPageProps): Re
     (song: Song) => (
       <button
         type="button"
-        className="fnm-localmusic__remove"
+        className="sanlos-localmusic__remove"
         aria-label={`移除 ${song.title}`}
         onClick={(event) => {
           event.stopPropagation()
@@ -90,24 +90,24 @@ export function LocalMusicPage({ onPlay, onGoToLogin }: LocalMusicPageProps): Re
       loadingText="正在扫描本地音乐…"
     >
       {!connected && (
-        <p className="fnm-localmusic__notice" role="status">
+        <p className="sanlos-localmusic__notice" role="status">
           未登录：现在只能播放本地音乐和已下载的曲目。登录 NAS 后还能用曲库、收藏与歌单。
           {onGoToLogin && (
-            <button type="button" className="fnm-localmusic__link" onClick={onGoToLogin}>
+            <button type="button" className="sanlos-localmusic__link" onClick={onGoToLogin}>
               去登录
             </button>
           )}
         </p>
       )}
 
-      <div className="fnm-localmusic__toolbar">
-        <button type="button" className="fnm-localmusic__button" onClick={() => void addFiles()}>
+      <div className="sanlos-localmusic__toolbar">
+        <button type="button" className="sanlos-localmusic__button" onClick={() => void addFiles()}>
           添加文件
         </button>
-        <button type="button" className="fnm-localmusic__button" onClick={() => void addFolder()}>
+        <button type="button" className="sanlos-localmusic__button" onClick={() => void addFolder()}>
           添加文件夹
         </button>
-        <span className="fnm-localmusic__hint">
+        <span className="sanlos-localmusic__hint">
           歌名与歌手优先读文件内标签，读不到才按文件名推断；移除只是从列表里去掉，不会删除磁盘上的文件。
         </span>
       </div>
@@ -115,13 +115,13 @@ export function LocalMusicPage({ onPlay, onGoToLogin }: LocalMusicPageProps): Re
       {pending > 0 && (
         // ⚠️ 用 `aria-live` 而不是 `role="status"`：页面里已经有另一个
         //    `status` 角色（未登录提示条）——**同页两个 status 会撞角色查询**。
-        <p className="fnm-localmusic__pending" aria-live="polite">
+        <p className="sanlos-localmusic__pending" aria-live="polite">
           正在读取标签，还剩 {pending} 首…
         </p>
       )}
 
-      <section className="fnm-localmusic__section" aria-label="本地文件">
-        <h2 className="fnm-localmusic__section-title">本地文件</h2>
+      <section className="sanlos-localmusic__section" aria-label="本地文件">
+        <h2 className="sanlos-localmusic__section-title">本地文件</h2>
         <SongList
           songs={localSongs}
           onPlay={onPlay ?? (() => undefined)}
@@ -132,8 +132,8 @@ export function LocalMusicPage({ onPlay, onGoToLogin }: LocalMusicPageProps): Re
         />
       </section>
 
-      <section className="fnm-localmusic__section" aria-label="已下载">
-        <h2 className="fnm-localmusic__section-title">已下载</h2>
+      <section className="sanlos-localmusic__section" aria-label="已下载">
+        <h2 className="sanlos-localmusic__section-title">已下载</h2>
         <SongList
           songs={downloadedSongs}
           onPlay={onPlay ?? (() => undefined)}

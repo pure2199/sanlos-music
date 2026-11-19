@@ -29,7 +29,7 @@ function blockOf(css: string, selector: string): string {
 
 describe('T77 桌面歌词：样式契约（透明 + 白字）', () => {
   const css = readCss('src', 'ui', 'lyrics', 'lyric-overlay.css')
-  const root = blockOf(css, '.fnm-lyricoverlay')
+  const root = blockOf(css, '.sanlos-lyricoverlay')
 
   it('**没有底板**（背景透明；也没有边框与圆角）', () => {
     // ⚠️ 窗口**本来就是**透明窗口（`transparent: true`）——
@@ -41,36 +41,36 @@ describe('T77 桌面歌词：样式契约（透明 + 白字）', () => {
   })
 
   it('文字**固定白字**（不跟主题走：浮层压在任意壁纸上）', () => {
-    expect(blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__line')).toMatch(
+    expect(blockOf(css, '.sanlos-lyricoverlay .sanlos-lyricview__line')).toMatch(
       /color:\s*var\(--lyric-float-text-dim\)/,
     )
-    expect(blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__line--active')).toMatch(
+    expect(blockOf(css, '.sanlos-lyricoverlay .sanlos-lyricview__line--active')).toMatch(
       /color:\s*var\(--lyric-float-text\)/,
     )
     // ⚠️ **双行模式没有「当前行」类名**（`LyricView` 把两行都渲染成 `active: false`）
     //    ⇒ 「正在唱的那一行」只能靠**它身上的卡拉OK 词**认（`:has()`）。
     //    ⚠️ 这条是**鉴别力**所在：少了它 ⇒ 当前行与下一行**一样暗**（看不出来正在唱哪句）。
     expect(
-      blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__line:has(.fnm-lyricview__word--karaoke)'),
+      blockOf(css, '.sanlos-lyricoverlay .sanlos-lyricview__line:has(.sanlos-lyricview__word--karaoke)'),
     ).toMatch(/color:\s*var\(--lyric-float-text\)/)
   })
 
   it('有**深色描边/阴影**（白字压在任意壁纸上都看得清）', () => {
-    const block = blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__line')
+    const block = blockOf(css, '.sanlos-lyricoverlay .sanlos-lyricview__line')
     expect(block).toMatch(/text-shadow:/)
     expect(block).toMatch(/var\(--lyric-float-shadow\)/)
   })
 
   it('着色层**不重复描边**（否则字发虚）', () => {
-    expect(blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__overlay')).toMatch(
+    expect(blockOf(css, '.sanlos-lyricoverlay .sanlos-lyricview__overlay')).toMatch(
       /text-shadow:\s*none/,
     )
   })
 
   it('**不再有**标题条 / 播放控制的样式（纯歌词）', () => {
-    expect(css).not.toMatch(/fnm-lyricoverlay__head/)
-    expect(css).not.toMatch(/fnm-lyricoverlay__controls/)
-    expect(css).not.toMatch(/fnm-lyricoverlay__button/)
+    expect(css).not.toMatch(/sanlos-lyricoverlay__head/)
+    expect(css).not.toMatch(/sanlos-lyricoverlay__controls/)
+    expect(css).not.toMatch(/sanlos-lyricoverlay__button/)
   })
 
   it('**不再有**拖动区（点穿透 ⇒ 窗口收不到鼠标，拖了也没用）', () => {
@@ -99,28 +99,28 @@ describe('T77 桌面歌词：样式契约（透明 + 白字）', () => {
 
   it('卡拉OK 扫光用**固定亮蓝**（真机上不该整行是主题蓝）', () => {
     // 已唱词：整词染色
-    expect(blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__word--sung')).toMatch(
+    expect(blockOf(css, '.sanlos-lyricoverlay .sanlos-lyricview__word--sung')).toMatch(
       /color:\s*var\(--lyric-float-accent\)/,
     )
     // 当前词：词内扫光渐变
-    const karaoke = blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__word--karaoke')
+    const karaoke = blockOf(css, '.sanlos-lyricoverlay .sanlos-lyricview__word--karaoke')
     expect(karaoke).toMatch(/background-image:\s*linear-gradient\(/)
     expect(karaoke).toContain('var(--lyric-float-accent)')
     // ⚠️ **鉴别力**：不许回退到主题色（真机实测过：整行主题蓝、白字几乎看不见）
     expect(karaoke).not.toContain('var(--accent)')
-    expect(blockOf(css, '.fnm-lyricoverlay .fnm-lyricview__word--sung')).not.toContain(
+    expect(blockOf(css, '.sanlos-lyricoverlay .sanlos-lyricview__word--sung')).not.toContain(
       'var(--accent)',
     )
   })
 
   it('**共享组件仍是主题色**（词岛 / 歌词舞台 / 主界面 —— T71「三处一致」）；T89-⑪ 起全屏页用「校正过的强调色」', () => {
     const shared = readCss('src', 'ui', 'lyrics', 'lyric-view.css')
-    const sung = blockOf(shared, '.fnm-lyricview__word--sung')
-    const karaoke = blockOf(shared, '.fnm-lyricview__word--karaoke')
+    const sung = blockOf(shared, '.sanlos-lyricview__word--sung')
+    const karaoke = blockOf(shared, '.sanlos-lyricview__word--karaoke')
     // ⚠ **T89-⑪：前提被推翻**（真机实测：强调色当文字色只有 **3.67** ⇒ 低于 AA 4.5）
     //    ⇒ 共享组件在**全屏播放页**里改用「按取色背景校正过」的强调色（回退到 `--accent`）。
     //    ⇒ **T77 的核心没变**：仍是**主题色**，绝不能变成浮层那个固定亮蓝。
-    expect(sung).toMatch(/color:\s*var\(--fnm-fullplayer__accent-text,\s*var\(--accent\)\)/)
+    expect(sung).toMatch(/color:\s*var\(--sanlos-fullplayer__accent-text,\s*var\(--accent\)\)/)
     expect(karaoke).toContain('var(--accent)')
     // ⚠ 加码：共享组件**不许**被换成浮层那个固定亮蓝（T77 的原意）。
     expect(sung).not.toContain('--lyric-float-accent')

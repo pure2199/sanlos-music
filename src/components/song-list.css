@@ -11,7 +11,7 @@
  */
 
 /* 列表外壳 */
-.fnm-songlist {
+.sanlos-songlist {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -19,7 +19,7 @@
 }
 
 /* 可视区（滚动容器） */
-.fnm-songlist__viewport {
+.sanlos-songlist__viewport {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -27,12 +27,12 @@
 }
 
 /* 虚拟滚动画布（高度 = 行数 × 行高，由组件内联给出） */
-.fnm-songlist__canvas {
+.sanlos-songlist__canvas {
   position: relative;
 }
 
 /* 歌曲行 */
-.fnm-songlist__row {
+.sanlos-songlist__row {
   position: absolute;
   left: 0;
   right: 0;
@@ -54,7 +54,7 @@
  * ⚠️ 与「选中态」**刻意不同**：悬停只是轻微抬升，
  *    选中是**强调色填充**（见下）——两者必须一眼可辨。
  */
-.fnm-songlist__row:hover {
+.sanlos-songlist__row:hover {
   background: var(--surface-raised);
 }
 
@@ -66,14 +66,14 @@
  *    现在选中态用 `--accent` 填充 + `--accent-text` 文字（都是既有语义令牌，
  *    **不是**新色值），悬停态保持 `--surface-raised`。
  */
-.fnm-songlist__row[aria-selected='true'] {
+.sanlos-songlist__row[aria-selected='true'] {
   background: var(--accent);
   color: var(--accent-text);
   box-shadow: inset 2px 0 0 var(--accent-hover);
 }
 
 /* 选中行的悬停：强调色加深一档（仍是既有令牌）。 */
-.fnm-songlist__row[aria-selected='true']:hover {
+.sanlos-songlist__row[aria-selected='true']:hover {
   background: var(--accent-hover);
 }
 
@@ -81,55 +81,55 @@
  * 选中行里的文字：跟着强调色填充走**反色**，
  * 否则深色文字压在强调色上会看不清。
  */
-.fnm-songlist__row[aria-selected='true'] .fnm-songlist__title,
-.fnm-songlist__row[aria-selected='true'] .fnm-songlist__artist,
-.fnm-songlist__row[aria-selected='true'] .fnm-songlist__album,
-.fnm-songlist__row[aria-selected='true'] .fnm-songlist__duration {
+.sanlos-songlist__row[aria-selected='true'] .sanlos-songlist__title,
+.sanlos-songlist__row[aria-selected='true'] .sanlos-songlist__artist,
+.sanlos-songlist__row[aria-selected='true'] .sanlos-songlist__album,
+.sanlos-songlist__row[aria-selected='true'] .sanlos-songlist__duration {
   color: var(--accent-text);
 }
 
 /* 键盘焦点环（`--focus-ring` 令牌） */
-.fnm-songlist__row:focus-visible {
+.sanlos-songlist__row:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
 /* 行内缩略图 */
-.fnm-songlist__cover {
+.sanlos-songlist__cover {
   flex: 0 0 auto;
 }
 
 /* 行内文本块（标题 / 歌手 / 专辑 / 时长） */
-.fnm-songlist__title,
-.fnm-songlist__artist,
-.fnm-songlist__album,
-.fnm-songlist__duration {
+.sanlos-songlist__title,
+.sanlos-songlist__artist,
+.sanlos-songlist__album,
+.sanlos-songlist__duration {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
 }
 
-.fnm-songlist__title {
+.sanlos-songlist__title {
   flex: 2 1 0;
   min-width: 0;
   color: var(--text-primary);
 }
 
-.fnm-songlist__artist,
-.fnm-songlist__album {
+.sanlos-songlist__artist,
+.sanlos-songlist__album {
   flex: 1 1 0;
   min-width: 0;
   color: var(--text-secondary);
 }
 
-.fnm-songlist__duration {
+.sanlos-songlist__duration {
   flex: 0 0 auto;
   color: var(--text-secondary);
 }
 
 /* 状态行（「已加载 N / 总共 M」） */
-.fnm-songlist__status {
+.sanlos-songlist__status {
   flex: 0 0 auto;
   margin: 0;
   padding: 6px 12px;
@@ -139,7 +139,7 @@
 }
 
 /* 空态 */
-.fnm-songlist__empty {
+.sanlos-songlist__empty {
   margin: 0;
   padding: 24px 12px;
   font-size: 13px;

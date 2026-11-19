@@ -8,7 +8,7 @@ import './connection-badge.css'
 // ---------------------------------------------------------------------------
 // 连接链路指示器（Task 10b）
 //
-// - 当前链路来自 `window.fn.connectionInfo()`（`ConnectionInfo | null`）；
+// - 当前链路来自 `window.sanlosAuth.connectionInfo()`（`ConnectionInfo | null`）；
 // - 展示文案按 `kind` 分三种：内网直连 / 公网直连 / 中继；
 // - 点击展开最近一次 `probe()` 的全部候选（缓存在 `sessionStore.candidates`）。
 //
@@ -45,44 +45,44 @@ export function ConnectionBadge(): ReactElement {
   const kindLabel = kind === null ? '未连接' : KIND_LABELS[kind]
 
   return (
-    <div className="fnm-badge">
+    <div className="sanlos-badge">
       <button
         type="button"
-        className="fnm-badge__trigger"
+        className="sanlos-badge__trigger"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >
-        <span className="fnm-badge__kind">{kindLabel}</span>
-        <span className="fnm-badge__caret" aria-hidden="true">
+        <span className="sanlos-badge__kind">{kindLabel}</span>
+        <span className="sanlos-badge__caret" aria-hidden="true">
           ▾
         </span>
       </button>
 
       {expanded && (
-        <div className="fnm-badge__panel">
-          {connection && <p className="fnm-badge__url">{connection.url}</p>}
+        <div className="sanlos-badge__panel">
+          {connection && <p className="sanlos-badge__url">{connection.url}</p>}
           {candidates.length === 0 ? (
-            <p className="fnm-badge__empty">暂无候选链路探测结果</p>
+            <p className="sanlos-badge__empty">暂无候选链路探测结果</p>
           ) : (
-            <ul className="fnm-badge__candidates">
+            <ul className="sanlos-badge__candidates">
               {candidates.map((candidate) => (
                 <li
                   key={candidate.address}
-                  className="fnm-badge__candidate"
+                  className="sanlos-badge__candidate"
                   data-status={
                     !candidate.ok ? 'unreachable' : candidate.error ? 'note' : 'ok'
                   }
                 >
-                  <span className="fnm-badge__candidate-label">{candidate.label}</span>
-                  <span className="fnm-badge__candidate-kind">
+                  <span className="sanlos-badge__candidate-label">{candidate.label}</span>
+                  <span className="sanlos-badge__candidate-kind">
                     {KIND_LABELS[candidate.kind]}
                   </span>
-                  <span className="fnm-badge__candidate-address">{candidate.address}</span>
-                  <span className="fnm-badge__candidate-status">
+                  <span className="sanlos-badge__candidate-address">{candidate.address}</span>
+                  <span className="sanlos-badge__candidate-status">
                     {candidate.ok ? '可达' : '不可达'}
                   </span>
                   {candidate.error && (
-                    <span className="fnm-badge__candidate-note">{candidate.error}</span>
+                    <span className="sanlos-badge__candidate-note">{candidate.error}</span>
                   )}
                 </li>
               ))}

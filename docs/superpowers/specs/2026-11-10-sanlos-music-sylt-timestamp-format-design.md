@@ -78,7 +78,7 @@ def __str__(self):
 | `electron/audioTags.ts` | `parseSylltFrame`：时间戳格式 `1` **或 `2`** 都按毫秒读；**其它值仍整帧放弃**（并把注释里的口径与证据写清） |
 | `test/embedded-lyric-tags.test.ts`（改） | 改写「格式 2 ⇒ 整帧放弃」那条（前提被推翻）⇒ 改成「格式 2 ⇒ 按毫秒读」；**新增**「格式 0 / 3 ⇒ 仍整帧放弃」（保住「不猜」的鉴别力） |
 | `test/embedded-lyric-real-samples.test.ts`（**新增**） | **真实文件**回归：样本存在时跑（真逐字 / 行级 / 无歌词三态）；**样本不在 ⇒ 整组 skip**（CI 不依赖网络） |
-| `tools/fn-fetch-embedded-lyric-samples.mjs`（**新增**） | 下载三个真实样本到 `release/samples/embedded-lyric/`（gitignored）；打印**来源 URL** 与**许可** |
+| `tools/sanlos-fetch-embedded-lyric-samples.mjs`（**新增**） | 下载三个真实样本到 `release/samples/embedded-lyric/`（gitignored）；打印**来源 URL** 与**许可** |
 | `docs/changelog.md`（改） | 「未发布」小节里补一条（行为对用户可见：以前读不出的歌词现在读得出） |
 | `docs/calibration.md`（改） | 追加「**四十六、T84**」（证据 / 决策 / 风险 / 实测结论 / 验收 / 遗留） |
 

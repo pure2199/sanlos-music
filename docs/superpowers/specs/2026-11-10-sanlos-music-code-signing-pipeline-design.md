@@ -40,8 +40,8 @@
 
 | 文件 | 作用 |
 |---|---|
-| `tools/fn-make-selfsigned-cert.mjs`（新） | 生成自签**代码签名**证书（RSA 3072 / SHA-256 / 3 年），导出 `.pfx` + `.cer` + 口令文件到 `release/certs/`（**gitignored**）；`--trust` 导入**当前用户**「受信任的根证书颁发机构」；**自检**（读回 .pfx 确认私钥在位、主体名一致） |
-| `tools/fn-check-signature.mjs`（新） | 读产物的 `Get-AuthenticodeSignature` ⇒ 打印 `Status` / 签名者 / 指纹；按 `--expect signed\|none` / `--expect-signer` / `--pfx` 判定，**不符合就非零退出** |
+| `tools/sanlos-make-selfsigned-cert.mjs`（新） | 生成自签**代码签名**证书（RSA 3072 / SHA-256 / 3 年），导出 `.pfx` + `.cer` + 口令文件到 `release/certs/`（**gitignored**）；`--trust` 导入**当前用户**「受信任的根证书颁发机构」；**自检**（读回 .pfx 确认私钥在位、主体名一致） |
+| `tools/sanlos-check-signature.mjs`（新） | 读产物的 `Get-AuthenticodeSignature` ⇒ 打印 `Status` / 签名者 / 指纹；按 `--expect signed\|none` / `--expect-signer` / `--pfx` 判定，**不符合就非零退出** |
 
 ### 3.2 打包后断言（`scripts/pack.cjs`）
 

@@ -116,12 +116,12 @@ export function BatchDownloadBar({
   const count = songs.length
 
   return (
-    <div className="fnm-batchdownload" data-testid="fnm-batch-download-bar">
+    <div className="sanlos-batchdownload" data-testid="sanlos-batch-download-bar">
       {count > 0 ? (
-        <span className="fnm-batchdownload__count">已选 {count} 首</span>
+        <span className="sanlos-batchdownload__count">已选 {count} 首</span>
       ) : (
         // ⚠️ 提示语里**不能**出现「已选 N 首」——否则 E2E / 单测会把它当成计数。
-        <span className="fnm-batchdownload__hint">Ctrl / Shift 多选后可批量下载</span>
+        <span className="sanlos-batchdownload__hint">Ctrl / Shift 多选后可批量下载</span>
       )}
       {/*
        * ⚠️ **额外的批量操作（可选插槽）必须挂在「已选 / 提示」之外**：
@@ -135,8 +135,8 @@ export function BatchDownloadBar({
         <>
           <button
             type="button"
-            className="fnm-batchdownload__action"
-            data-testid="fnm-batch-download-button"
+            className="sanlos-batchdownload__action"
+            data-testid="sanlos-batch-download-button"
             aria-label={`下载所选 ${count} 首`}
             disabled={busy}
             onClick={() => void handleDownload()}
@@ -146,7 +146,7 @@ export function BatchDownloadBar({
           {onClear && (
             <button
               type="button"
-              className="fnm-batchdownload__clear"
+              className="sanlos-batchdownload__clear"
               onClick={onClear}
               disabled={busy}
             >
@@ -156,7 +156,7 @@ export function BatchDownloadBar({
         </>
       )}
       {message && (
-        <p className="fnm-batchdownload__message" role="status">
+        <p className="sanlos-batchdownload__message" role="status">
           {message}
         </p>
       )}

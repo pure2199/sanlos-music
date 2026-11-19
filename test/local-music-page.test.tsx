@@ -49,9 +49,9 @@ function fakeBridge(overrides: Partial<Record<string, unknown>> = {}): PlayerBri
   } as unknown as PlayerBridge
 }
 
-/** 把假桥挂到 `globalThis.fnPlayer`（渲染层唯一的入口）。 */
+/** 把假桥挂到 `globalThis.sanlosPlayer`（渲染层唯一的入口）。 */
 function installBridge(bridge: PlayerBridge): void {
-  ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+  ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
 }
 
 beforeEach(() => {
@@ -70,7 +70,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete (globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
 })
 
 describe('T38 本地音乐页', () => {

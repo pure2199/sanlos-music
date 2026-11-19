@@ -11,17 +11,17 @@
  */
 
 /* 面板根容器 */
-.fnm-searchpanel {
+.sanlos-searchpanel {
   display: flex;
   flex-direction: column;
   gap: 12px;
   flex: 1 1 auto;
   /*
    * ⚠️ **`height: 100%` 不能省**（T22 真机实测）：
-   *    搜索面板的父级 `.fnm-searchpage` 原先是**高度 auto** 的块级盒子，
+   *    搜索面板的父级 `.sanlos-searchpage` 原先是**高度 auto** 的块级盒子，
    *    于是面板的百分比高度**解析不出来**（等价于 auto）→ 面板被内容顶高 →
    *    主区（`min-height: 0` 之后高度是固定的）装不下 → 内容**溢出到播放条上**。
-   *    父级 `.fnm-searchpage` 补上 `height: 100%` 之后，这里的百分比才有意义。
+   *    父级 `.sanlos-searchpage` 补上 `height: 100%` 之后，这里的百分比才有意义。
    */
   height: 100%;
   min-height: 0;
@@ -33,7 +33,7 @@
 }
 
 /* 搜索框一行 */
-.fnm-searchpanel__bar {
+.sanlos-searchpanel__bar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -41,14 +41,14 @@
 }
 
 /* 搜索框标签 */
-.fnm-searchpanel__label {
+.sanlos-searchpanel__label {
   flex: 0 0 auto;
   font-size: 13px;
   color: var(--text-secondary);
 }
 
 /* 搜索输入框 */
-.fnm-searchpanel__input {
+.sanlos-searchpanel__input {
   flex: 1 1 auto;
   min-width: 0;
   padding: 8px 10px;
@@ -60,27 +60,27 @@
 }
 
 /* 悬停：描边加深 */
-.fnm-searchpanel__input:hover {
+.sanlos-searchpanel__input:hover {
   border-color: var(--border-strong);
 }
 
 /* 键盘焦点环（`--focus-ring` 令牌） */
-.fnm-searchpanel__input:focus-visible {
+.sanlos-searchpanel__input:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
   border-color: var(--accent);
 }
 
 /* 状态 / 计数文案 */
-.fnm-searchpanel__status,
-.fnm-searchpanel__count {
+.sanlos-searchpanel__status,
+.sanlos-searchpanel__count {
   margin: 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
 
 /* 错误条 */
-.fnm-searchpanel__error {
+.sanlos-searchpanel__error {
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--danger);
@@ -91,7 +91,7 @@
 }
 
 /* 空态（「没有找到」） */
-.fnm-searchpanel__empty {
+.sanlos-searchpanel__empty {
   margin: 0;
   padding: 24px 12px;
   font-size: 13px;
@@ -99,7 +99,7 @@
 }
 
 /* 一段结果 */
-.fnm-searchpanel__section {
+.sanlos-searchpanel__section {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -108,7 +108,7 @@
 }
 
 /* 一段结果的头部（标题 + 命中总数） */
-.fnm-searchpanel__section-header {
+.sanlos-searchpanel__section-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -116,7 +116,7 @@
 }
 
 /* 一段结果的标题 */
-.fnm-searchpanel__section-title {
+.sanlos-searchpanel__section-title {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
@@ -124,7 +124,7 @@
 }
 
 /* 「加载更多」按钮 */
-.fnm-searchpanel__more {
+.sanlos-searchpanel__more {
   align-self: flex-start;
   padding: 6px 12px;
   border: 1px solid var(--border);
@@ -135,21 +135,21 @@
   cursor: pointer;
 }
 
-.fnm-searchpanel__more:hover {
+.sanlos-searchpanel__more:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-searchpanel__more:active {
+.sanlos-searchpanel__more:active {
   background: var(--surface-sunken);
 }
 
-.fnm-searchpanel__more:focus-visible {
+.sanlos-searchpanel__more:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.fnm-searchpanel__more:disabled {
+.sanlos-searchpanel__more:disabled {
   border-color: var(--border);
   background: var(--surface-sunken);
   color: var(--disabled);
@@ -157,7 +157,7 @@
 }
 
 /* 行内收藏按钮 */
-.fnm-searchpanel__favorite {
+.sanlos-searchpanel__favorite {
   flex: 0 0 auto;
   padding: 2px 8px;
   border: 1px solid var(--border);
@@ -169,33 +169,33 @@
   cursor: pointer;
 }
 
-.fnm-searchpanel__favorite:hover {
+.sanlos-searchpanel__favorite:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-searchpanel__favorite:active {
+.sanlos-searchpanel__favorite:active {
   background: var(--surface-sunken);
 }
 
-.fnm-searchpanel__favorite:focus-visible {
+.sanlos-searchpanel__favorite:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 已收藏 */
-.fnm-searchpanel__favorite[aria-pressed='true'] {
+.sanlos-searchpanel__favorite[aria-pressed='true'] {
   border-color: var(--accent);
   color: var(--accent);
 }
 
 /* 写回在途（乐观态已生效、服务端还没确认） */
-.fnm-searchpanel__favorite[data-pending='true'] {
+.sanlos-searchpanel__favorite[data-pending='true'] {
   border-color: var(--warning);
   color: var(--warning);
 }
 
-.fnm-searchpanel__favorite:disabled {
+.sanlos-searchpanel__favorite:disabled {
   border-color: var(--border);
   color: var(--disabled);
   cursor: not-allowed;

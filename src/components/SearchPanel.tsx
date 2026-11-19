@@ -507,7 +507,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
             favorite={entry.target}
             pending={entry.pending}
             disabled={!canWrite}
-            className="fnm-searchpanel__favorite"
+            className="sanlos-searchpanel__favorite"
             onToggle={() => writeback.toggle(song.id, base)}
           />
           {/* 下载入口（Task 11）：同样是行内操作，点击不冒泡到行上。 */}
@@ -536,14 +536,14 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
   // --- 渲染 ---------------------------------------------------------------
 
   return (
-    <div className="fnm-searchpanel">
-      <div className="fnm-searchpanel__bar">
-        <label className="fnm-searchpanel__label" htmlFor="fnm-search-input">
+    <div className="sanlos-searchpanel">
+      <div className="sanlos-searchpanel__bar">
+        <label className="sanlos-searchpanel__label" htmlFor="sanlos-search-input">
           搜索
         </label>
         <input
-          id="fnm-search-input"
-          className="fnm-searchpanel__input"
+          id="sanlos-search-input"
+          className="sanlos-searchpanel__input"
           type="search"
           placeholder="搜索歌曲、专辑、歌手"
           aria-label="搜索关键字"
@@ -553,31 +553,31 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
           onChange={(event) => setText(event.target.value)}
         />
         {busy && (
-          <span className="fnm-searchpanel__status" role="status">
+          <span className="sanlos-searchpanel__status" role="status">
             搜索中…
           </span>
         )}
       </div>
 
       {searchError && (
-        <p className="fnm-searchpanel__error" role="alert">
+        <p className="sanlos-searchpanel__error" role="alert">
           {`搜索失败：${searchError}`}
         </p>
       )}
 
       {favoriteError && (
-        <p className="fnm-searchpanel__error" role="alert">
+        <p className="sanlos-searchpanel__error" role="alert">
           {`收藏写回失败：${favoriteError}`}
         </p>
       )}
 
-      {showEmpty && <p className="fnm-searchpanel__empty">没有找到</p>}
+      {showEmpty && <p className="sanlos-searchpanel__empty">没有找到</p>}
 
       {/* --- 歌曲段 --- */}
-      <section className="fnm-searchpanel__section" aria-label="歌曲结果">
-        <header className="fnm-searchpanel__section-header">
-          <h2 className="fnm-searchpanel__section-title">歌曲</h2>
-          <span className="fnm-searchpanel__count" data-testid="fnm-search-count-tracks">
+      <section className="sanlos-searchpanel__section" aria-label="歌曲结果">
+        <header className="sanlos-searchpanel__section-header">
+          <h2 className="sanlos-searchpanel__section-title">歌曲</h2>
+          <span className="sanlos-searchpanel__count" data-testid="sanlos-search-count-tracks">
             {`命中 ${formatCount(tracksCount)} 首`}
           </span>
         </header>
@@ -594,8 +594,8 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
         {state.tracks.hasMore && (
           <button
             type="button"
-            className="fnm-searchpanel__more"
-            data-testid="fnm-load-more-tracks"
+            className="sanlos-searchpanel__more"
+            data-testid="sanlos-load-more-tracks"
             disabled={state.tracks.loading}
             onClick={() => handleLoadMore('tracks')}
           >
@@ -605,10 +605,10 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
       </section>
 
       {/* --- 专辑段 --- */}
-      <section className="fnm-searchpanel__section" aria-label="专辑结果">
-        <header className="fnm-searchpanel__section-header">
-          <h2 className="fnm-searchpanel__section-title">专辑</h2>
-          <span className="fnm-searchpanel__count" data-testid="fnm-search-count-albums">
+      <section className="sanlos-searchpanel__section" aria-label="专辑结果">
+        <header className="sanlos-searchpanel__section-header">
+          <h2 className="sanlos-searchpanel__section-title">专辑</h2>
+          <span className="sanlos-searchpanel__count" data-testid="sanlos-search-count-albums">
             {`命中 ${formatCount(albumsCount)} 张专辑`}
           </span>
         </header>
@@ -624,8 +624,8 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
         {state.albums.hasMore && (
           <button
             type="button"
-            className="fnm-searchpanel__more"
-            data-testid="fnm-load-more-albums"
+            className="sanlos-searchpanel__more"
+            data-testid="sanlos-load-more-albums"
             disabled={state.albums.loading}
             onClick={() => handleLoadMore('albums')}
           >
@@ -635,10 +635,10 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
       </section>
 
       {/* --- 歌手段 --- */}
-      <section className="fnm-searchpanel__section" aria-label="歌手结果">
-        <header className="fnm-searchpanel__section-header">
-          <h2 className="fnm-searchpanel__section-title">歌手</h2>
-          <span className="fnm-searchpanel__count" data-testid="fnm-search-count-artists">
+      <section className="sanlos-searchpanel__section" aria-label="歌手结果">
+        <header className="sanlos-searchpanel__section-header">
+          <h2 className="sanlos-searchpanel__section-title">歌手</h2>
+          <span className="sanlos-searchpanel__count" data-testid="sanlos-search-count-artists">
             {`命中 ${formatCount(artistsCount)} 位歌手`}
           </span>
         </header>
@@ -654,8 +654,8 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
         {state.artists.hasMore && (
           <button
             type="button"
-            className="fnm-searchpanel__more"
-            data-testid="fnm-load-more-artists"
+            className="sanlos-searchpanel__more"
+            data-testid="sanlos-load-more-artists"
             disabled={state.artists.loading}
             onClick={() => handleLoadMore('artists')}
           >

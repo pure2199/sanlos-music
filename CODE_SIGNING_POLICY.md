@@ -111,7 +111,7 @@ the `Submitter` role only; it can neither approve nor sign.
   (`release/certs/`), and the release workflow reads all credentials from GitHub Actions
   secrets/variables at run time.
 - Local self-signed certificates exist **only** as a developer aid for exercising the signing
-  code path (`tools/fn-make-selfsigned-cert.mjs`). They are untrusted by definition, are never
+  code path (`tools/sanlos-make-selfsigned-cert.mjs`). They are untrusted by definition, are never
   used by the release workflow, and are never published to a public release.
 
 ## 5. Manual approval per release

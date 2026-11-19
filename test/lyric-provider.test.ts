@@ -817,7 +817,7 @@ describe('registerLyricIpc', () => {
 
   /** 造一份偏好存储（落在临时目录，绝不写进仓库）。 */
   function makePrefs(prefs: Partial<AppPrefs> = {}): PrefsStore {
-    const dir = mkdtempSync(join(tmpdir(), 'fnmusic-lyric-ipc-'))
+    const dir = mkdtempSync(join(tmpdir(), 'sanlos-lyric-ipc-'))
     const store = new PrefsStore({ filePath: join(dir, 'prefs.json') })
     if (Object.keys(prefs).length > 0) store.write(prefs)
     return store

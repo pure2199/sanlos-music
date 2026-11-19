@@ -84,9 +84,9 @@ export function LyricOverlay(props: LyricOverlayProps): ReactElement {
   const safeLines = Array.isArray(lines) ? lines : []
 
   return (
-    <div className="fnm-lyricoverlay" data-testid="fnm-lyricoverlay">
+    <div className="sanlos-lyricoverlay" data-testid="sanlos-lyricoverlay">
       {/* 歌词区：⚠️ T77 **不给 `onSeek`** —— 纯歌词，点歌词**不跳转**。 */}
-      <div className="fnm-lyricoverlay__lyrics">
+      <div className="sanlos-lyricoverlay__lyrics">
         {/* ⚠️ T71：经典悬浮窗**也是卡拉OK**（当前词按词内连续比例从左到右染色）。
             ⚠️ **不显式传 `karaoke`** —— `LyricView` 的缺省已是**开**（T71）
                 ⇒ 行为只由**一处**决定，将来新增歌词页面自动一致，不会漏一处。

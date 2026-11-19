@@ -89,7 +89,7 @@ describe('T87.8 —— 打包配置的守卫', () => {
     expect(mutated).not.toBe(original)
     expect(mutated).toMatch(/^ {2}timeStampServer:/m)
 
-    const dir = mkdtempSync(join(tmpdir(), 'fnm-builder-config-'))
+    const dir = mkdtempSync(join(tmpdir(), 'sanlos-builder-config-'))
     const file = join(dir, 'electron-builder.yml')
     writeFileSync(file, mutated, 'utf8')
 

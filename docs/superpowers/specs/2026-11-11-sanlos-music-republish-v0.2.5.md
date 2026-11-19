@@ -98,7 +98,7 @@ with:
 2. 改 `docs/releases/v0.2.5.md` + `docs/changelog.md` → **commit 2**（实现）；
 3. **force 移动 tag** `v0.2.5` → 新 commit → `git push --force origin v0.2.5`；
 4. 触发 `Release` 工作流：`tag=v0.2.5`、`pack_only=false`、`sign=false`
-   （走**未签名分支**：`fn-check-signature.mjs --expect none` 断言产物确实没签名）；
+   （走**未签名分支**：`sanlos-check-signature.mjs --expect none` 断言产物确实没签名）；
 5. 核对产物与页面；
 6. 回填（若需要）→ commit 3 → push。**回填不动 tag**（tag 指向的是「被构建的那份代码」）。
 

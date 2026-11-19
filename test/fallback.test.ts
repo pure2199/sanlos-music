@@ -195,7 +195,7 @@ describe('FallbackTranscoder', () => {
     const transcode = overrides.transcode ?? vi.fn(async () => undefined)
     const transcoder = new FallbackTranscoder({
       lookupLocal: overrides.lookupLocal ?? (() => 'C:\\Music\\a.ape'),
-      tempDir: 'C:\\Temp\\fnm-fallback',
+      tempDir: 'C:\\Temp\\sanlos-fallback',
       detect: overrides.detect ?? (async () => ({ available: true, path: 'ffmpeg', version: '9.0.2' })),
       transcode,
       ensureDir: async () => undefined,
@@ -227,11 +227,11 @@ describe('FallbackTranscoder', () => {
     expect(transcode).not.toHaveBeenCalled()
   })
 
-  it('成功 → 给出 fnml:// 地址，产物落在临时目录里', async () => {
+  it('成功 → 给出 sanlos-media:// 地址，产物落在临时目录里', async () => {
     const { transcoder, transcode } = createTranscoder()
     const result = await transcoder.prepare('track_a')
     expect(result.reason).toBeNull()
-    expect(result.url).toBe('fnml://local/track/track_a')
+    expect(result.url).toBe('sanlos-media://local/track/track_a')
     expect(transcode).toHaveBeenCalledTimes(1)
     const [input, output, binary] = (transcode as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
@@ -239,7 +239,7 @@ describe('FallbackTranscoder', () => {
       string,
     ]
     expect(input).toBe('C:\\Music\\a.ape')
-    expect(output.startsWith('C:\\Temp\\fnm-fallback')).toBe(true)
+    expect(output.startsWith('C:\\Temp\\sanlos-fallback')).toBe(true)
     expect(output.endsWith('.opus')).toBe(true)
     expect(binary).toBe('ffmpeg')
   })
@@ -301,7 +301,7 @@ describe('FallbackTranscoder', () => {
     await transcoder.prepare('track_a')
     await transcoder.dispose()
     expect(removedFiles.length).toBeGreaterThan(0)
-    expect(removedDirs).toEqual(['C:\\Temp\\fnm-fallback'])
+    expect(removedDirs).toEqual(['C:\\Temp\\sanlos-fallback'])
   })
 })
 
@@ -331,11 +331,11 @@ describe('PlayerEngine：兜底解码', () => {
 
   it('转码成功 → 用产物地址起播，并标记 fallbackActive（有损如实告知）', async () => {
     const { engine, element } = createEngine({
-      prepareSource: async () => ({ url: 'fnml://local/track/a' }),
+      prepareSource: async () => ({ url: 'sanlos-media://local/track/a' }),
     })
     engine.play(song('a', 'APE'))
     await flush()
-    expect(element.src).toBe('fnml://local/track/a')
+    expect(element.src).toBe('sanlos-media://local/track/a')
     expect(element.playCalls).toBe(1)
     expect(engine.state.preparing).toBe(false)
     expect(engine.state.fallbackActive).toBe(true)
@@ -380,11 +380,11 @@ describe('PlayerEngine：兜底解码', () => {
 
     // 用户改主意了 → 播另一首（可解格式）。
     engine.play(song('b', 'FLAC'))
-    expect(element.src).toBe('fnm://srv/track/stream?guid=b')
+    expect(element.src).toBe('sanlos://srv/track/stream?guid=b')
     const srcAfterSwitch = element.src
 
     // A 的转码结果这时才回来 —— **必须被丢弃**。
-    gate.resolve({ url: 'fnml://local/track/a' })
+    gate.resolve({ url: 'sanlos-media://local/track/a' })
     await flush()
 
     expect(element.src).toBe(srcAfterSwitch)
@@ -403,7 +403,7 @@ describe('PlayerEngine：兜底解码', () => {
     engine.pause()
     expect(engine.state.preparing).toBe(false)
 
-    gate.resolve({ url: 'fnml://local/track/a' })
+    gate.resolve({ url: 'sanlos-media://local/track/a' })
     await flush()
     expect(element.playCalls).toBe(0)
     expect(engine.state.isPlaying).toBe(false)
@@ -416,10 +416,10 @@ describe('PlayerEngine：兜底解码', () => {
 
 describe('兜底的渲染层接线', () => {
   beforeEach(() => {
-    delete (globalThis as { fnPlayer?: PlayerBridge }).fnPlayer
+    delete (globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   })
   afterEach(() => {
-    delete (globalThis as { fnPlayer?: PlayerBridge }).fnPlayer
+    delete (globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   })
 
   it('没有桥 → 降级为「兜底不可用」（**不崩**）', async () => {
@@ -433,18 +433,18 @@ describe('兜底的渲染层接线', () => {
 
   it('有桥 → 请求兜底并把结果整形', async () => {
     const ffmpegFallback = vi.fn(async () => ({
-      url: 'fnml://local/track/a',
+      url: 'sanlos-media://local/track/a',
       reason: null,
       detail: null,
     }))
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       ffmpegStatus: async () => ({ available: true, path: 'ffmpeg', version: '9.0.2' }),
       ffmpegFallback,
     } as unknown as PlayerBridge
 
     expect(hasFfmpegSupport()).toBe(true)
     const result = await prepareFallbackSource(song('a', 'APE'), 'APE')
-    expect(result.url).toBe('fnml://local/track/a')
+    expect(result.url).toBe('sanlos-media://local/track/a')
     expect(ffmpegFallback).toHaveBeenCalledWith('a')
     const status = await detectFfmpegStatus()
     expect(status.available).toBe(true)
@@ -452,7 +452,7 @@ describe('兜底的渲染层接线', () => {
   })
 
   it('桥抛异常 → 降级为失败（**不崩、不静默**）', async () => {
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       ffmpegStatus: async () => ({ available: true, path: 'ffmpeg', version: '9.0.2' }),
       ffmpegFallback: async () => {
         throw new Error('boom')

@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 // 安全边界
 // ---------------------------------------------------------------------------
-// - `streamUrl` 只产出 `fnm://srv/...` 的**代理地址**：渲染进程**永不直连 NAS**，
+// - `streamUrl` 只产出 `sanlos://srv/...` 的**代理地址**：渲染进程**永不直连 NAS**，
 //   也**永不**自己拼 `authx` / `Cookie`——那是主进程代理（`electron/proxy.ts`）的职责；
 // - 本文件**不含任何凭证**，也不读取任何凭证；
 // - 只用浏览器 API，不 import Node 内置模块或 Electron API。
@@ -247,7 +247,7 @@ export function describeMediaError(code: number | null | undefined): MediaErrorI
 /**
  * 构造当前这一曲的音频流地址。
  *
- * 形状：`fnm://srv/track/stream?guid=<songGuid>`。
+ * 形状：`sanlos://srv/track/stream?guid=<songGuid>`。
  *
  * - `srv` 之后是**相对 API 基址**的路径，**不含** `/music/api/v1`（Task 8 定下的口径）；
  * - guid 用 `encodeURIComponent` 编码（真实 guid 形如 `track_<hex>`，但别假设只有 hex）；
@@ -255,5 +255,5 @@ export function describeMediaError(code: number | null | undefined): MediaErrorI
  *   渲染进程既不需要也不能拼。
  */
 export function streamUrl(songId: string): string {
-  return `fnm://srv/track/stream?guid=${encodeURIComponent(songId)}`
+  return `sanlos://srv/track/stream?guid=${encodeURIComponent(songId)}`
 }

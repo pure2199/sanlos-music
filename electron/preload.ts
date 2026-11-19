@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { FnBridge } from '../shared/bridge'
+import type { AuthBridge } from '../shared/bridge'
 import { toEmbeddedLyricText } from '../shared/embeddedLyric'
 import { sanitizeSpectrumBins } from '../shared/spectrum'
 import type {
@@ -15,10 +15,10 @@ const api = {
   platform: process.platform,
 }
 
-contextBridge.exposeInMainWorld('fnmusic', api)
+contextBridge.exposeInMainWorld('sanlos', api)
 
 // ---------------------------------------------------------------------------
-// `window.fn`：认证桥（Task 10）
+// `window.sanlosAuth`：认证桥（Task 10）
 // ---------------------------------------------------------------------------
 //
 // 七个方法与主进程的七个 `auth:*` IPC 通道一一对应。
@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld('fnmusic', api)
 // ⚠️ `shared/bridge.ts` 是**纯类型**文件（只有 `interface` / `type`），
 //    这里的 import 是**类型导入**：编译后不留任何运行时代码，
 //    不会把主进程逻辑打进渲染进程 bundle。
-const fn: FnBridge = {
+const sanlosAuth: AuthBridge = {
   serverInfo: (server) => ipcRenderer.invoke('auth:server-info', server),
   login: (args) => ipcRenderer.invoke('auth:login', args),
   restore: () => ipcRenderer.invoke('auth:restore'),
@@ -41,13 +41,13 @@ const fn: FnBridge = {
   connectionInfo: () => ipcRenderer.invoke('auth:connection-info'),
 }
 
-contextBridge.exposeInMainWorld('fn', fn)
+contextBridge.exposeInMainWorld('sanlosAuth', sanlosAuth)
 
 // ---------------------------------------------------------------------------
-// `window.fnPlayer`：播放器 / 窗口 / 偏好桥（Task 17）
+// `window.sanlosPlayer`：播放器 / 窗口 / 偏好桥（Task 17）
 // ---------------------------------------------------------------------------
 //
-// 与 `window.fn`（认证桥）**并列、互不重叠**：本桥里**没有任何一个方法能拿到凭证**
+// 与 `window.sanlosAuth`（认证桥）**并列、互不重叠**：本桥里**没有任何一个方法能拿到凭证**
 // （没有 token / 密码 / deviceId——偏好只有主题名、窗口位置、关闭窗口的行为）。
 //
 // ⚠️ `shared/playerBridge.ts` 是**纯类型**文件（只有 interface / type），
@@ -72,7 +72,7 @@ contextBridge.exposeInMainWorld('fn', fn)
 // ⚠️ `player:command` 是**双向**的（同一个通道名、两个方向、两套机制）：
 // 渲染进程发出去的命令由主进程**转发**回来执行（主进程是唯一的命令路由），
 // 渲染进程**只执行**从主进程收到的命令——不存在「发一次执行两遍」。
-const fnPlayer: PlayerBridge = {
+const sanlosPlayer: PlayerBridge = {
   pushState: (state) => ipcRenderer.send('player:state', state),
   sendCommand: (command) => ipcRenderer.send('player:command', command),
   onCommand: (handler) => {
@@ -256,4 +256,4 @@ const fnPlayer: PlayerBridge = {
   fetchCharts: () => ipcRenderer.invoke('discover:charts'),
 }
 
-contextBridge.exposeInMainWorld('fnPlayer', fnPlayer)
+contextBridge.exposeInMainWorld('sanlosPlayer', sanlosPlayer)

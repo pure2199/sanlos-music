@@ -102,7 +102,7 @@ describe('悬浮歌词：内容与交互（T77：纯歌词）', () => {
     expect(screen.queryByText('示例歌名')).toBeNull()
     expect(screen.queryByText('示例歌手')).toBeNull()
     // ⚠️ 「纯歌词」≠ 什么都不显示：**歌词仍在**。
-    expect(container.querySelector('.fnm-lyricview__line')).toBeTruthy()
+    expect(container.querySelector('.sanlos-lyricview__line')).toBeTruthy()
   })
 
   it('渲染**当前句 + 下一句**（T79：当前句按**行首时间戳** ⇒ 与全屏歌词舞台同源）', () => {
@@ -118,7 +118,7 @@ describe('悬浮歌词：内容与交互（T77：纯歌词）', () => {
     // ⚠️ T79：浮窗从 `double`（上一句 / 正在唱的句，换行按**行末时间**）
     //    换成 `current`（**当前句 / 下一句**，换行按**行首时间戳**）
     //    ⇒ 前提被用户指令**显式推翻** ⇒ 这里改写为新行为断言（**断言强度不减**）。
-    expect(view.className).toContain('fnm-lyricview--current')
+    expect(view.className).toContain('sanlos-lyricview--current')
     expect(screen.getByText('歌一')).toBeTruthy()
     expect(screen.getByText('歌二')).toBeTruthy()
   })
@@ -135,10 +135,10 @@ describe('悬浮歌词：内容与交互（T77：纯歌词）', () => {
         />,
       )
 
-      const karaoke = container.querySelector('.fnm-lyricview__word--karaoke')
+      const karaoke = container.querySelector('.sanlos-lyricview__word--karaoke')
       // ⚠️ LINES 第 0 行：'歌'(0~1s) + '一'(1~2s) ⇒ t=1.5 正在唱「一」。
       expect(karaoke?.textContent).toBe('一')
-      expect(karaoke?.className).not.toContain('fnm-lyricview__word--sung')
+      expect(karaoke?.className).not.toContain('sanlos-lyricview__word--sung')
       // 词内比例 = (1.5 - 1) / (2 - 1) = 50%
       expect(karaoke?.getAttribute('data-karaoke-progress')).toBe('50.0')
     },
@@ -154,7 +154,7 @@ describe('悬浮歌词：内容与交互（T77：纯歌词）', () => {
     )
 
     // ⚠️ `LyricView` 只有拿到 `onSeek` 才会把行渲染成 `<button>`（`--clickable`）。
-    expect(container.querySelector('.fnm-lyricview__line--clickable')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__line--clickable')).toBeNull()
     expect(container.querySelector('button')).toBeNull()
   })
 
@@ -167,10 +167,10 @@ describe('悬浮歌词：内容与交互（T77：纯歌词）', () => {
       />,
     )
 
-    expect(container.querySelector('.fnm-lyricoverlay__controls')).toBeNull()
-    expect(screen.queryByTestId('fnm-lyricoverlay-prev')).toBeNull()
-    expect(screen.queryByTestId('fnm-lyricoverlay-toggle')).toBeNull()
-    expect(screen.queryByTestId('fnm-lyricoverlay-next')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricoverlay__controls')).toBeNull()
+    expect(screen.queryByTestId('sanlos-lyricoverlay-prev')).toBeNull()
+    expect(screen.queryByTestId('sanlos-lyricoverlay-toggle')).toBeNull()
+    expect(screen.queryByTestId('sanlos-lyricoverlay-next')).toBeNull()
   })
 
   it('没有歌词时显示空态（不白屏、不崩）', () => {
@@ -188,7 +188,7 @@ describe('悬浮歌词：内容与交互（T77：纯歌词）', () => {
   it('没有曲目时显示占位文案（不白屏）', () => {
     render(<LyricOverlay track={null} lines={[]} position={0} />)
 
-    expect(screen.getByTestId('fnm-lyricoverlay')).toBeTruthy()
+    expect(screen.getByTestId('sanlos-lyricoverlay')).toBeTruthy()
     expect(screen.getByText('未在播放')).toBeTruthy()
   })
 })

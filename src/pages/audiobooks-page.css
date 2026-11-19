@@ -3,18 +3,18 @@
  * ⚠️ 颜色**只用 CSS 语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
  */
 
-.fnm-audiobooks {
+.sanlos-audiobooks {
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 16px;
   /*
-   * ⚠️ **T101**：这一层是**整页的滚动容器**（与「发现」页 `.fnm-discover` 同一套写法）。
+   * ⚠️ **T101**：这一层是**整页的滚动容器**（与「发现」页 `.sanlos-discover` 同一套写法）。
    *
-   * ⚠️ **为什么必须有**（E2E 实测踩到）：页面外壳 `.fnm-page` **没有** `overflow`
+   * ⚠️ **为什么必须有**（E2E 实测踩到）：页面外壳 `.sanlos-page` **没有** `overflow`
    *    ⇒ 这一层的内容比窗口高时**直接溢出**，**画到播放条上面**
    *    ⇒ 最下面那块「换一个文件夹」里的按钮**被播放条盖住、点不到**
-   *    （Playwright 报「`fnm-playerbar` 拦截了指针事件」）。
+   *    （Playwright 报「`sanlos-playerbar` 拦截了指针事件」）。
    *    ⇒ T101 把列表改成**封面卡片网格**（比原来的文字行高约 170px）
    *    ⇒ 内容更高 ⇒ 这个问题被**顶出来**了。
    *
@@ -26,14 +26,14 @@
   overflow-y: auto;
 }
 
-.fnm-audiobooks__toolbar {
+.sanlos-audiobooks__toolbar {
   display: flex;
   align-items: baseline;
   gap: 12px;
   flex-wrap: wrap;
 }
 
-.fnm-audiobooks__scan {
+.sanlos-audiobooks__scan {
   padding: 8px 16px;
   border-radius: var(--radius-field);
   border: 1px solid var(--border-strong);
@@ -43,26 +43,26 @@
   cursor: pointer;
 }
 
-.fnm-audiobooks__scan:disabled {
+.sanlos-audiobooks__scan:disabled {
   opacity: 0.6;
   cursor: default;
 }
 
 /* 次要按钮（「从头重扫」）：弱一档，但**仍是**语义色。 */
-.fnm-audiobooks__scan--secondary {
+.sanlos-audiobooks__scan--secondary {
   border-color: var(--border);
   font-size: 12px;
   padding: 6px 12px;
 }
 
-.fnm-audiobooks__hint {
+.sanlos-audiobooks__hint {
   margin: 0;
   font-size: 12px;
   opacity: 0.7;
   max-width: 60ch;
 }
 
-.fnm-audiobooks__empty {
+.sanlos-audiobooks__empty {
   margin: 0;
   opacity: 0.75;
 }
@@ -70,14 +70,14 @@
 /* ---- T101：作品卡片网格（与专辑页**同款**形态）-------------------------- */
 
 /*
- * ⚠️ 卡片本身用 `components/cards.css` 的 `.fnm-card`（封面 + 标题 + 副标题）
+ * ⚠️ 卡片本身用 `components/cards.css` 的 `.sanlos-card`（封面 + 标题 + 副标题）
  *    ⇒ 这里**只**管网格排布与两行额外信息，**不**另起一套卡片样式
  *    （否则两页会长得不一样 ⇒ 那就白改了）。
  */
 
 /* 主列表 / 秒搜结果 = 同一个网格。 */
-.fnm-audiobooks__list,
-.fnm-audiobooks__results {
+.sanlos-audiobooks__list,
+.sanlos-audiobooks__results {
   display: grid;
   /* ⚠️ 列宽下限与专辑页的虚拟网格一致（`CARD_GRID_MIN_COLUMN_WIDTH` = 180）。 */
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -88,18 +88,18 @@
 }
 
 /* 卡片根：封面 + 标题 + 副标题 +（可选）来源那一行。 */
-.fnm-audiobooks__item,
-.fnm-audiobooks__result {
+.sanlos-audiobooks__item,
+.sanlos-audiobooks__result {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
 
-/* 标题 / 副标题：沿用专辑页的 `.fnm-card__title` / `.fnm-card__subtitle` 表现。 */
-.fnm-audiobooks__title,
-.fnm-audiobooks__meta,
-.fnm-audiobooks__result-meta {
+/* 标题 / 副标题：沿用专辑页的 `.sanlos-card__title` / `.sanlos-card__subtitle` 表现。 */
+.sanlos-audiobooks__title,
+.sanlos-audiobooks__meta,
+.sanlos-audiobooks__result-meta {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -107,7 +107,7 @@
 }
 
 /* 「在哪个目录下面」/「你指定的」—— 告诉用户**它凭什么出现在这儿**。 */
-.fnm-audiobooks__source {
+.sanlos-audiobooks__source {
   margin: 0;
   font-size: 12px;
   color: var(--text-secondary);
@@ -115,7 +115,7 @@
 
 /* ---- v3：两个入口（作品名秒搜 / 目录关键字）------------------------------ */
 
-.fnm-audiobooks__panel {
+.sanlos-audiobooks__panel {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -124,25 +124,25 @@
   border-radius: var(--radius-card);
 }
 
-.fnm-audiobooks__panel-title {
+.sanlos-audiobooks__panel-title {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
 }
 
-.fnm-audiobooks__row {
+.sanlos-audiobooks__row {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.fnm-audiobooks__label {
+.sanlos-audiobooks__label {
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.fnm-audiobooks__input {
+.sanlos-audiobooks__input {
   flex: 1 1 220px;
   min-width: 160px;
   padding: 8px 10px;
@@ -153,7 +153,7 @@
   font: inherit;
 }
 
-.fnm-audiobooks__error {
+.sanlos-audiobooks__error {
   margin: 0;
   font-size: 12px;
   color: var(--danger);

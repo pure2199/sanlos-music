@@ -191,7 +191,7 @@ function state(overrides: Partial<PlayerStateSnapshot> = {}): PlayerStateSnapsho
 const tempDirs: string[] = []
 
 function tempFile(name = 'prefs.json'): string {
-  const dir = mkdtempSync(join(tmpdir(), 'fnmusic-tray-'))
+  const dir = mkdtempSync(join(tmpdir(), 'sanlos-tray-'))
   tempDirs.push(dir)
   return join(dir, name)
 }

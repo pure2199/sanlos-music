@@ -825,7 +825,7 @@ export function createMockServer(options?: MockServerOptions): MockServer {
   })
   // ⚠️ **T101（2026-11-17）**：**封面端点**（真实服务端有；mock 之前**没有**）。
   //
-  // ⚠️ **为什么必须补**：客户端的封面走 `fnm://srv/static/cover`（`electron/proxy.ts`
+  // ⚠️ **为什么必须补**：客户端的封面走 `sanlos://srv/static/cover`（`electron/proxy.ts`
   //    的二进制白名单里）⇒ mock 之前 404 ⇒ `CoverImage` 切成**占位块** ⇒
   //    E2E 根本**测不出**「卡片到底有没有封面」（有声页的封面网格就是靠这条测的）。
   //
@@ -1208,7 +1208,7 @@ export function createMockServer(options?: MockServerOptions): MockServer {
     // 免 token 端点：**外部音乐榜源**（T96）。
     //
     // ⚠️ 它**不是** NAS 接口：它扮演的是**外部公开榜源**（QQ 音乐）的形状
-    //    ⇒ E2E 用 `FNM_CHART_URL` 把它指到这里，主进程就能在**不联网**的
+    //    ⇒ E2E 用 `SANLOS_CHART_URL` 把它指到这里，主进程就能在**不联网**的
     //    情况下走完「抓榜 → 匹配曲库 → 播放」整条链路。
     if (method === 'GET' && path === '/mock-chart') {
       sendRawJson(res, buildMockChart(query.get('topid') ?? ''))

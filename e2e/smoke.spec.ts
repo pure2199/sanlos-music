@@ -29,8 +29,8 @@ const OTHER_SONG = SONGS.find((song) => song.guid !== SONG_WITHOUT_NAS_LYRIC.gui
 //
 // 覆盖**只有真实 Electron 才跑得通**的那条链路：
 //   登录（主进程 IPC → HTTP → mock NAS）
-//     → 曲库（`fnm://` 协议代理 → 主进程 → mock）
-//       → 播放（真实 `<audio>` ← `fnm://` 流 → mock 的 WAV）
+//     → 曲库（`sanlos://` 协议代理 → 主进程 → mock）
+//       → 播放（真实 `<audio>` ← `sanlos://` 流 → mock 的 WAV）
 //
 // ⚠️ 这些环节在 Vitest + jsdom 里**一个都不存在**（没有 Electron 主进程、
 //    没有自定义协议、没有真实媒体元素）——所以这组用例不是重复单测，
@@ -102,10 +102,10 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     // ⚠️ **必须先清空**：地址框**预填**了默认地址（`http://192.168.1.2:5666`）
     //    → 不清空的话，粘贴是**追加**在后面的（实测过一次）。
     await fixture.app.evaluate(({ clipboard }, text) => clipboard.writeText(text), '粘贴测试')
-    await fixture.window.locator('#fnm-address').fill('')
-    await fixture.window.locator('#fnm-address').click()
+    await fixture.window.locator('#sanlos-address').fill('')
+    await fixture.window.locator('#sanlos-address').click()
     await fixture.window.keyboard.press('Control+V')
-    await expect(fixture.window.locator('#fnm-address')).toHaveValue('粘贴测试')
+    await expect(fixture.window.locator('#sanlos-address')).toHaveValue('粘贴测试')
   })
 
   test('登录 mock NAS → 显示「已连接」', async () => {
@@ -115,7 +115,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     await expect(fixture.window.getByRole('heading', { name: '已连接' })).toBeVisible()
 
     // ⚠️ **口令绝不进 DOM**：登录成功后口令框被清空。
-    await expect(fixture.window.locator('#fnm-password')).toHaveValue('')
+    await expect(fixture.window.locator('#sanlos-password')).toHaveValue('')
   })
 
   // -------------------------------------------------------------------------
@@ -136,7 +136,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     await expect(fixture.window.getByRole('navigation', { name: '曲库导航' })).toBeVisible()
   })
 
-  test('曲库「歌曲」页 → 列出 mock 的歌（fnm:// 代理通）', async () => {
+  test('曲库「歌曲」页 → 列出 mock 的歌（sanlos:// 代理通）', async () => {
     await fixture.window.getByRole('button', { name: '歌曲' }).click()
 
     const list = fixture.window.getByRole('listbox', { name: '歌曲列表' })
@@ -148,17 +148,17 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     expect(await rows.count()).toBeGreaterThan(0)
   })
 
-  test('双击一行 → 播放条显示该歌（真实 <audio> + fnm:// 流通）', async () => {
+  test('双击一行 → 播放条显示该歌（真实 <audio> + sanlos:// 流通）', async () => {
     const list = fixture.window.getByRole('listbox', { name: '歌曲列表' })
     const firstRow = list.getByRole('option').first()
-    const title = (await firstRow.locator('.fnm-songlist__title').textContent())?.trim() ?? ''
+    const title = (await firstRow.locator('.sanlos-songlist__title').textContent())?.trim() ?? ''
     expect(title.length).toBeGreaterThan(0)
 
     // 双击 = 播放（单击只是选中）。
     await firstRow.dblclick()
 
     // 播放条显示同一首歌名 → 说明「双击 → onPlay → 引擎 → <audio>」整条链路通。
-    const playerTitle = fixture.window.locator('.fnm-playerbar__title')
+    const playerTitle = fixture.window.locator('.sanlos-playerbar__title')
     await expect(playerTitle).toHaveText(title)
 
     // 播放条**不能**报错误（媒体元素真的解码并起播了）。
@@ -173,13 +173,13 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
   //    1. 用户拖动进度条 → UI 预览 → 松手提交 → store.seek → 引擎.seek
   //       → **媒体元素的 currentTime 被真的写成目标位置**。
   //    2. 「媒体能否从该位置继续播」取决于**上游是否支持 Range** 且格式可随机访问
-  //       —— 那是**上游能力**，由真机探针 `tools/fn-range-probe.mjs` 回答，
+  //       —— 那是**上游能力**，由真机探针 `tools/sanlos-range-probe.mjs` 回答，
   //       不该在这里断言（mock 的 WAV 从中间字节开始返回时没有文件头，
   //       Chromium 的 WAV 解码器本来就解不了 → 那是**格式**限制，不是客户端缺陷）。
   //
   // ⚠️ **鉴别力**：只看「滑块的值变了」是**假绿**（UI 预览变了不代表媒体真的被定位）。
   //    必须观测**媒体元素的 currentTime 到底被写了什么**。
-  //    手法与 `tools/fn-fallback-playback-diag.mjs` 同款：
+  //    手法与 `tools/sanlos-fallback-playback-diag.mjs` 同款：
   //    **劫持 `HTMLMediaElement.prototype` 上的 accessor**——
   //    引擎的 `<audio>` 是 `document.createElement('audio')` 造的、**从不挂进 DOM**，
   //    `document.querySelector('audio')` 永远查不到，只能从原型上观测。
@@ -191,7 +191,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
       const desc = Object.getOwnPropertyDescriptor(proto, 'currentTime')
       if (!desc?.get || !desc.set) throw new Error('currentTime 不是可劫持的 accessor')
       const writes: number[] = []
-      ;(window as unknown as { __fnmSeekWrites?: number[] }).__fnmSeekWrites = writes
+      ;(window as unknown as { __sanlosSeekWrites?: number[] }).__sanlosSeekWrites = writes
       Object.defineProperty(proto, 'currentTime', {
         configurable: true,
         enumerable: desc.enumerable,
@@ -241,7 +241,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
       .poll(
         async () =>
           fixture.window.evaluate(
-            () => (window as unknown as { __fnmSeekWrites?: number[] }).__fnmSeekWrites ?? [],
+            () => (window as unknown as { __sanlosSeekWrites?: number[] }).__sanlosSeekWrites ?? [],
           ),
         { timeout: 10000 },
       )
@@ -250,7 +250,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     // ⚠️ 鉴别力补充：那个写入值必须**不是 0**（同曲重播会写 0），
     //    否则「只是重播了一下」也能满足上面的断言。
     const writes = await fixture.window.evaluate(
-      () => (window as unknown as { __fnmSeekWrites?: number[] }).__fnmSeekWrites ?? [],
+      () => (window as unknown as { __sanlosSeekWrites?: number[] }).__sanlosSeekWrites ?? [],
     )
     expect(writes.filter((v) => v > 1)).not.toHaveLength(0)
   })
@@ -280,8 +280,8 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     // 伪造「内容远超高」。（`!important` 盖得过 React 的内联高度。）
     await fixture.window.addStyleTag({
       content: `
-        .fnm-cardgrid__canvas { height: 40000px !important; }
-        .fnm-songlist__canvas { height: 40000px !important; }
+        .sanlos-cardgrid__canvas { height: 40000px !important; }
+        .sanlos-songlist__canvas { height: 40000px !important; }
       `,
     })
 
@@ -303,9 +303,9 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     // --- 专辑页（真机上就是这一页挂载了 1,050 张卡片） ---
     await fixture.window.getByRole('button', { name: '专辑' }).click()
     // ⚠️ 必须等**画布**出现：条目为空时网格渲染的是空态提示，没有画布。
-    await expect(fixture.window.locator('.fnm-cardgrid__canvas')).toBeVisible()
+    await expect(fixture.window.locator('.sanlos-cardgrid__canvas')).toBeVisible()
 
-    const grid = await measure('.fnm-cardgrid')
+    const grid = await measure('.sanlos-cardgrid')
     // ⚠️ **核心断言 1**：网格**自己内部滚动**（可视区 < 内容高度）
     //    ——被内容顶高时这两个数会**相等**，虚拟裁剪就等于没裁剪。
     expect(grid.clientHeight).toBeLessThan(grid.scrollHeight)
@@ -314,9 +314,9 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
 
     // --- 歌曲页（另一个虚拟列表：行内 28px 缩略图同样是封面请求） ---
     await fixture.window.getByRole('button', { name: '歌曲' }).click()
-    await expect(fixture.window.locator('.fnm-songlist__canvas')).toBeVisible()
+    await expect(fixture.window.locator('.sanlos-songlist__canvas')).toBeVisible()
 
-    const list = await measure('.fnm-songlist__viewport')
+    const list = await measure('.sanlos-songlist__viewport')
     expect(list.clientHeight).toBeLessThan(list.scrollHeight)
     expect(list.mainClientHeight).toBeLessThanOrEqual(list.windowHeight)
   })
@@ -371,10 +371,10 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     //    （fixture 刻意覆盖了 true/false 两种样本）→ 它的按钮本来就是「已收藏」。
     //    这里要测的是「**收藏**」这个动作 → 得挑一首**没被收藏**的。
     const row = list.getByRole('option').nth(1)
-    const title = (await row.locator('.fnm-songlist__title').textContent())?.trim() ?? ''
+    const title = (await row.locator('.sanlos-songlist__title').textContent())?.trim() ?? ''
     expect(title.length).toBeGreaterThan(0)
 
-    const favoriteButton = row.getByTestId('fnm-favorite-toggle')
+    const favoriteButton = row.getByTestId('sanlos-favorite-toggle')
     await expect(favoriteButton).toHaveAttribute('aria-pressed', 'false')
 
     await favoriteButton.click()
@@ -481,8 +481,8 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     const rows = list.getByRole('option')
     await expect(rows.first()).toBeVisible()
 
-    const firstTitle = (await rows.nth(0).locator('.fnm-songlist__title').textContent())?.trim() ?? ''
-    const secondTitle = (await rows.nth(1).locator('.fnm-songlist__title').textContent())?.trim() ?? ''
+    const firstTitle = (await rows.nth(0).locator('.sanlos-songlist__title').textContent())?.trim() ?? ''
+    const secondTitle = (await rows.nth(1).locator('.sanlos-songlist__title').textContent())?.trim() ?? ''
 
     // Ctrl + 单击 = 多选。
     await rows.nth(0).click({ modifiers: ['ControlOrMeta'] })
@@ -490,7 +490,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     await expect(fixture.window.getByText('已选 2 首')).toBeVisible()
 
     // 「加入歌单」→ 浮层面板展开 → 勾选歌单 → 加入。
-    await fixture.window.getByTestId('fnm-add-to-playlist-button').click()
+    await fixture.window.getByTestId('sanlos-add-to-playlist-button').click()
     const panel = fixture.window.getByRole('group', { name: '加入歌单' })
     await expect(panel).toBeVisible()
     // ⚠️ T30：面板从「单选下拉」改成「复选列表」→ 勾选而不是 selectOption。
@@ -533,12 +533,12 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     const list = fixture.window.getByRole('listbox', { name: '歌曲列表' })
     const rows = list.getByRole('option')
     await expect(rows.first()).toBeVisible()
-    const firstTitle = (await rows.nth(0).locator('.fnm-songlist__title').textContent())?.trim() ?? ''
+    const firstTitle = (await rows.nth(0).locator('.sanlos-songlist__title').textContent())?.trim() ?? ''
 
     await rows.nth(0).click({ modifiers: ['ControlOrMeta'] })
     await expect(fixture.window.getByText('已选 1 首')).toBeVisible()
 
-    await fixture.window.getByTestId('fnm-add-to-playlist-button').click()
+    await fixture.window.getByTestId('sanlos-add-to-playlist-button').click()
     const panel = fixture.window.getByRole('group', { name: '加入歌单' })
     await expect(panel).toBeVisible()
 
@@ -590,7 +590,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     const eq = fixture.window.getByRole('dialog', { name: '均衡器' })
     await expect(eq).toBeVisible()
     // ⚠️ **核心断言**：面板必须**在视口内**。
-    //    （原先 `.fnm-playerbar` 没有 `position: relative` → 面板的定位祖先
+    //    （原先 `.sanlos-playerbar` 没有 `position: relative` → 面板的定位祖先
     //      是**视口** → `bottom: 100%` 把它顶到屏幕上方之外 →
     //      DOM 里有面板、屏幕上却什么都看不见。）
     await expect(eq).toBeInViewport()
@@ -642,10 +642,10 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
 
     // 填更新服务器地址（mock 的回环地址：http 只允许回环）与预期签名者。
     await fixture.window
-      .locator('input[name="fnm-update-base-url"]')
+      .locator('input[name="sanlos-update-base-url"]')
       .fill(`${fixture.mock.url}/update`)
     await fixture.window
-      .locator('input[name="fnm-update-signer"]')
+      .locator('input[name="sanlos-update-signer"]')
       .fill('CN=Mock 占位签名者')
     // ⚠️ `name` 默认是**子串**匹配 → 「保存」会同时命中「保存目录」→ 必须 exact。
     await fixture.window.getByRole('button', { name: '保存', exact: true }).click()
@@ -715,7 +715,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     //
     // ⚠️ **必须等渲染完再判断**：一上来就 `count()` 有可能量到「还没渲染」的 0
     //    → 误判成「已登录」→ 后面点「歌曲」时列表永远不来。
-    const addressField = fixture.window.locator('#fnm-address')
+    const addressField = fixture.window.locator('#sanlos-address')
     const needLogin = await addressField
       .waitFor({ state: 'visible', timeout: 5000 })
       .then(() => true)
@@ -800,7 +800,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
   test('全屏播放页：所有歌词行都在场、当前行放大、随播放滚动（歌词舞台）', async () => {
     // ⚠️ **需要时才登录**：整组跑时前面那条用例已登录（会话还在）；
     //    单独跑这条（`-g`）时还没登录 → 登录表单在，才登录。
-    const addressField = fixture.window.locator('#fnm-address')
+    const addressField = fixture.window.locator('#sanlos-address')
     const needLogin = await addressField
       .waitFor({ state: 'visible', timeout: 5000 })
       .then(() => true)
@@ -865,11 +865,11 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     const otherRow = list.getByRole('option').filter({ hasText: OTHER_SONG.title }).first()
     await expect(otherRow).toBeVisible()
     await otherRow.dblclick()
-    await expect(fixture.window.locator('.fnm-playerbar__title')).toHaveText(OTHER_SONG.title)
+    await expect(fixture.window.locator('.sanlos-playerbar__title')).toHaveText(OTHER_SONG.title)
 
     // 现在播目标那首（**NAS 没有歌词** → 歌词只能靠外部源补齐）。
     await targetRow.dblclick()
-    await expect(fixture.window.locator('.fnm-playerbar__title')).toHaveText(
+    await expect(fixture.window.locator('.sanlos-playerbar__title')).toHaveText(
       SONG_WITHOUT_NAS_LYRIC.title,
     )
 
@@ -907,12 +907,12 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     const page = fixture.window.getByTestId('full-player')
     await expect(page).toBeVisible()
 
-    const stage = page.locator('.fnm-lyricview--all')
+    const stage = page.locator('.sanlos-lyricview--all')
     await expect(stage).toHaveCount(1)
 
     // --- 5. 断言 --------------------------------------------------------------
     // ⚠️ **所有 30 行都在场**（`single` 最多 7 行 / `double` 恰好 2 行）。
-    const lines = stage.locator('.fnm-lyricview__line')
+    const lines = stage.locator('.sanlos-lyricview__line')
     await expect(lines).toHaveCount(30)
 
     // 等「当前行」真的推进到靠后（seek 生效 + 播放推进要一点时间）。
@@ -929,11 +929,11 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     }
 
     // 当前行：字号更大（CSS 真的生效了）。
-    const active = stage.locator('.fnm-lyricview__line--active')
+    const active = stage.locator('.sanlos-lyricview__line--active')
     await expect(active).toHaveCount(1)
     const activeFont = await active.evaluate((el) => getComputedStyle(el).fontSize)
     const otherFont = await stage
-      .locator('.fnm-lyricview__line:not(.fnm-lyricview__line--active)')
+      .locator('.sanlos-lyricview__line:not(.sanlos-lyricview__line--active)')
       .first()
       .evaluate((el) => getComputedStyle(el).fontSize)
     expect(Number.parseFloat(activeFont)).toBeGreaterThan(Number.parseFloat(otherFont))
@@ -1068,7 +1068,7 @@ test.describe.serial('Sanlos Music 桌面端：E2E 冒烟', () => {
     })
     try {
       // ⚠️ **不用重新登录**：同一个 userData 目录里 `session.bin` 还有**有效的 token**
-      //    → 应用启动后**自动登录**，直接进主界面（根本没有 `#fnm-address` 输入框）。
+      //    → 应用启动后**自动登录**，直接进主界面（根本没有 `#sanlos-address` 输入框）。
       //    这也顺带说明「重启后自动续用会话」这条既有能力是好的。
       await expect(restarted.window.getByTestId('play-mode-button')).toHaveAttribute(
         'data-mode',

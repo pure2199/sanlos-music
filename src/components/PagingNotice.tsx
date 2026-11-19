@@ -51,15 +51,15 @@ export function PagingNotice({ kind, store }: PagingNoticeProps): ReactElement |
 
   return (
     <div
-      className="fnm-pagingnotice"
+      className="sanlos-pagingnotice"
       role="status"
-      data-testid={`fnm-paging-notice-${kind}`}
+      data-testid={`sanlos-paging-notice-${kind}`}
     >
-      <p className="fnm-pagingnotice__text">服务端反复返回同一批数据，已停止自动加载。</p>
+      <p className="sanlos-pagingnotice__text">服务端反复返回同一批数据，已停止自动加载。</p>
       <button
         type="button"
-        className="fnm-pagingnotice__button"
-        data-testid={`fnm-paging-resume-${kind}`}
+        className="sanlos-pagingnotice__button"
+        data-testid={`sanlos-paging-resume-${kind}`}
         disabled={collection.loading}
         onClick={() => {
           void resumePaging(kind)

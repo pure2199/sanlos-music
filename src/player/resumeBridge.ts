@@ -6,18 +6,23 @@
 // - 它是**运行状态**，不是偏好 ⇒ 不该进 `prefs.json`（见 `resume.ts` 的顶部说明）；
 // - 它也**不是凭证** ⇒ 不该进 `session.bin`（那是 DPAPI 加密的凭证文件）；
 // - 放主进程内存 ⇒ 主进程重启就没了，等于没实现。
-// - ⇒ `localStorage` 与 `fnmusic-local-history`（「本机播放记录」）**同族同源**。
+// - ⇒ `localStorage` 与 `sanlos-local-history`（「本机播放记录」）**同族同源**。
 //
 // ⚠️ **写不进去怎么办**：隐私模式 / 配额满 / 没有 `localStorage`
 //   ⇒ **静默降级**为「只在本次运行内有效」，**不崩、不静默假装成功**。
+//
+// ⚠️ **T115**：键名改过（旧键 `sanlos-resume`）⇒ 读的时候**新键没有就回落读旧键**；
+//   **「清空」必须两个键都删**（否则新键一消失，下次读就回落到旧键 ⇒ 记录「复活」）。
+//   （旧键只读、不删 ⇒ 详见 `shared/legacyStorageKeys.ts`。）
 //
 // 只用浏览器 API，不 import Node 内置模块或 Electron API。
 // ---------------------------------------------------------------------------
 
 import { normalizeResumeRecord, type ResumePort, type ResumeRecord } from './resume'
+import { LEGACY_RESUME_STORAGE_KEY } from '../../shared/legacyStorageKeys'
 
-/** `localStorage` 的键（与 `fnmusic-local-history` 同族命名）。 */
-export const RESUME_STORAGE_KEY = 'fnmusic-resume'
+/** `localStorage` 的键（与 `sanlos-local-history` 同族命名）。 */
+export const RESUME_STORAGE_KEY = 'sanlos-resume'
 
 /**
  * 最小化的存储接口（**便于单测注入**）。
@@ -53,7 +58,9 @@ export function createResumePort(storage: ResumeStorageLike | null): ResumePort 
     load: async (): Promise<ResumeRecord | null> => {
       if (!storage) return null
       try {
-        const raw = storage.getItem(RESUME_STORAGE_KEY)
+        // ⚠️ **T115：新键没有才回落读旧键**（旧键只读、不删）
+        //    ⇒ 老用户升级后「上次播到哪」**不丢**。
+        const raw = storage.getItem(RESUME_STORAGE_KEY) ?? storage.getItem(LEGACY_RESUME_STORAGE_KEY)
         if (!raw) return null
         // ⚠️ 损坏的 JSON / 陌生形状 ⇒ **整条丢弃**（不抛、不返回半截数据）。
         return normalizeResumeRecord(JSON.parse(raw))
@@ -75,6 +82,9 @@ export function createResumePort(storage: ResumeStorageLike | null): ResumePort 
       if (!storage) return
       try {
         storage.removeItem(RESUME_STORAGE_KEY)
+        // ⚠️ **T115：旧键也必须删** —— 只删新键的话，新键一消失，
+        //    下次读就会**回落到旧键** ⇒ 用户点了「清空」，记录却**复活**了。
+        storage.removeItem(LEGACY_RESUME_STORAGE_KEY)
       } catch {
         // ⚠️ 清不掉 ⇒ 静默降级（下次启动可能还会恢复一次；不崩）。
       }

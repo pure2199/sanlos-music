@@ -1583,7 +1583,7 @@ export interface LyricProviderOptions {
   /**
    * **允许进链的兜底源**（T108；**不传 = 不限制**）。
    *
-   * ⚠️ 只由**主进程**从**环境变量** `FNM_LYRIC_SOURCES` 读
+   * ⚠️ 只由**主进程**从**环境变量** `SANLOS_LYRIC_SOURCES` 读
    *    （见 {@link resolveAllowedLyricSources}）⇒ 用来让 **E2E 不打真实外网**；
    *    **渲染层碰不到它**（渲染层只发 IPC、只说「用哪个源名」）。
    * ⚠️ **首选源永远在链里**（用户的显式选择不被静默丢掉）。
@@ -1670,7 +1670,7 @@ export function buildSourceChain(
     if (chain.includes(candidate)) return
     // ⚠️ `custom` 没有模板 = 没法用 ⇒ 不进链（别去请求一个空地址）。
     if (candidate === 'custom' && template.trim() === '') return
-    // ⚠️ T108：白名单（`FNM_LYRIC_SOURCES`）只限制**兜底源**；
+    // ⚠️ T108：白名单（`SANLOS_LYRIC_SOURCES`）只限制**兜底源**；
     //    **首选源永远在链里**（用户的显式选择不被静默丢掉）。
     if (allowedSources !== undefined && candidate !== source && !allowedSources.includes(candidate)) {
       return
@@ -1683,14 +1683,14 @@ export function buildSourceChain(
 }
 
 /**
- * 解析**允许进链的兜底源**白名单（T108；从环境变量 `FNM_LYRIC_SOURCES` 读）。
+ * 解析**允许进链的兜底源**白名单（T108；从环境变量 `SANLOS_LYRIC_SOURCES` 读）。
  *
  * ⚠️ **为什么要有这个口子**：T108 改成「并发轮询**全部**源」之后，
  *    连 `custom` 源也会去问网易云 / lrclib / QQ / 酷狗 / 酷我 / 咪咕
  *    ⇒ **E2E 会真的打真实外网**（慢 + 不确定 + 可能被真实歌词顶掉）
  *    ⇒ 既有 E2E 的前提「**E2E 不许打真实外网**」就被破坏了。
  *    ⇒ 主进程读一个**环境变量**，把链限制到 mock 指的源
- *    （沿用 `FNM_CHART_URL` 的既有范式：**只由主进程从环境变量读**，
+ *    （沿用 `SANLOS_CHART_URL` 的既有范式：**只由主进程从环境变量读**，
  *    渲染层碰不到 ⇒ 不构成提权）。
  *
  * ⚠️ **只认合法的源名**（`PER_SONG_LYRIC_SOURCES` 白名单，不含 `off`）

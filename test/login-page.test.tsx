@@ -39,7 +39,7 @@ import type { ConnectionInfo } from '../shared/types'
 // 测试替身
 // ---------------------------------------------------------------------------
 
-/** `window.fn` 的七个方法的替身。 */
+/** `window.sanlosAuth` 的七个方法的替身。 */
 const bridge = {
   serverInfo: vi.fn(),
   login: vi.fn(),
@@ -101,7 +101,7 @@ beforeEach(() => {
     candidates: [],
     restored: false,
   })
-  Object.assign(window, { fn: bridge, fnmusic: { platform: 'win32' } })
+  Object.assign(window, { sanlosAuth: bridge, sanlos: { platform: 'win32' } })
 
   bridge.restore.mockResolvedValue(DISCONNECTED)
   bridge.serverInfo.mockResolvedValue({
@@ -580,13 +580,13 @@ describe('凭证边界', () => {
     //    垫片与 jsdom 对齐后 `localStorage.getItem()` 拿到的是**真存进去的字符串**；
     //    并且要先断言「偏好确实落盘了」——否则 `not.toContain` 是**空洞断言**
     //    （旧版垫片是普通对象字面量，JSON.stringify 只得到 {"length":N}）。
-    const persisted = window.localStorage.getItem('fnmusic-settings')
+    const persisted = window.localStorage.getItem('sanlos-settings')
     expect(persisted).not.toBeNull()
     expect(persisted).toContain('lastServer')
     expect(persisted).not.toContain(secret)
     // 整包序列化也必须看不到口令（垫片与 jsdom 一样暴露命名属性）
     const storageDump = JSON.stringify(window.localStorage)
-    expect(storageDump).toContain('fnmusic-settings')
+    expect(storageDump).toContain('sanlos-settings')
     expect(storageDump).not.toContain(secret)
 
     // store 里**没有任何**凭证类字段名
@@ -618,7 +618,7 @@ describe('凭证边界', () => {
     expect(bridge.serverInfo).toHaveBeenCalledWith('http://demo:pw@192.168.1.10:5666')
     // 但**落盘**的偏好里不能带 userinfo
     expect(useSettingsStore.getState().lastServer).toBe('http://192.168.1.10:5666')
-    const persisted = window.localStorage.getItem('fnmusic-settings')
+    const persisted = window.localStorage.getItem('sanlos-settings')
     expect(persisted).not.toBeNull()
     expect(persisted).not.toContain('pw@')
   })
@@ -639,7 +639,7 @@ describe('凭证边界', () => {
     expect(bridge.serverInfo).toHaveBeenCalledWith('demo:pw@192.168.1.10:5666')
     // 但**落盘**的偏好里绝不能带 userinfo
     expect(useSettingsStore.getState().lastServer).toBe('192.168.1.10:5666')
-    const persisted = window.localStorage.getItem('fnmusic-settings')
+    const persisted = window.localStorage.getItem('sanlos-settings')
     expect(persisted).not.toBeNull()
     expect(persisted).toContain('192.168.1.10:5666')
     expect(persisted).not.toContain('pw')
@@ -647,7 +647,7 @@ describe('凭证边界', () => {
     // 整包序列化必须能看到**真实内容**（垫片与 jsdom 对齐）——
     // 否则上面那些 not.toContain 就是空洞断言（复审 I-2 的老坑）。
     const dump = JSON.stringify(window.localStorage)
-    expect(dump).toContain('fnmusic-settings')
+    expect(dump).toContain('sanlos-settings')
     expect(dump).not.toContain('pw@')
   })
 })

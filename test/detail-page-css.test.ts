@@ -8,7 +8,7 @@
 //    ⇒ 这里把**每条关键声明**钉死，坏哪条一目了然。
 //
 // ⚠ **背景**（真机实测 2026-11-17，本机 + 该账号）：
-//    《极品家丁》1333 集的详情页里，`.fnm-songlist__viewport` 的
+//    《极品家丁》1333 集的详情页里，`.sanlos-songlist__viewport` 的
 //    `clientHeight` ＝ `scrollHeight` ＝ **63984** ⇒ 它**根本不是滚动容器**
 //    ⇒ 真正在滚的是**整个文档** ⇒ `SongList` 的虚拟窗口
 //    （靠**自己**的 `onScroll` → `setScrollTop`）**永不前移**
@@ -37,37 +37,37 @@ describe('详情页的 CSS 契约（T104：列表能滚到底）', () => {
   const css = readCss('src', 'pages', 'detail-page.css')
   const songListCss = readCss('src', 'components', 'song-list.css')
 
-  it('详情页根 `.fnm-detail` **有确定的高度**（`flex: 1 1 auto` + `min-height: 0`）', () => {
+  it('详情页根 `.sanlos-detail` **有确定的高度**（`flex: 1 1 auto` + `min-height: 0`）', () => {
     // ⚠ 少了 `min-height: 0` ⇒ flex item 的自动最小尺寸 = 内容高度
     //    ⇒ 被 1333 集的画布顶到 6 万多像素 ⇒ 里面的列表**没有负余量可压缩**。
-    const block = blockOf(css, '.fnm-detail')
+    const block = blockOf(css, '.sanlos-detail')
     expect(block).toMatch(/flex:\s*1 1 auto/)
     expect(block).toMatch(/min-height:\s*0/)
   })
 
-  it('区块 `.fnm-detail__section` 拿到的是**确定高度**（`flex: 1 1 0` ⇒ basis = 0）', () => {
+  it('区块 `.sanlos-detail__section` 拿到的是**确定高度**（`flex: 1 1 0` ⇒ basis = 0）', () => {
     // ⚠ `flex: 1 1 auto` 的 basis = **内容高度** ⇒ 多个区块会按内容高度**按比例**被压缩
     //    ⇒ 谁都拿不到能用的视口；`0 0 auto` ⇒ 区块被内容撑高 ⇒ 视口 = 内容高度。
     //    ⇒ 只有 `1 1 0`（basis = 0）⇒ 空间按 grow 均分 ⇒ 每个区块拿到**确定高度**。
-    const block = blockOf(css, '.fnm-detail__section')
+    const block = blockOf(css, '.sanlos-detail__section')
     expect(block).toMatch(/flex:\s*1 1 0/)
     expect(block).toMatch(/min-height:\s*0/)
   })
 
   it('头部 / 标题 / 说明行**不参与伸缩**（`flex: 0 0 auto`）', () => {
     for (const selector of [
-      '.fnm-detail__head',
-      '.fnm-detail__section-title',
-      '.fnm-detail__audiobook',
-      '.fnm-detail__audiobook-reasons',
+      '.sanlos-detail__head',
+      '.sanlos-detail__section-title',
+      '.sanlos-detail__audiobook',
+      '.sanlos-detail__audiobook-reasons',
     ]) {
       expect(blockOf(css, selector)).toMatch(/flex:\s*0 0 auto/)
     }
   })
 
-  it('列表的滚动容器 `.fnm-songlist__viewport` **自己能滚**（`overflow-y: auto`）', () => {
+  it('列表的滚动容器 `.sanlos-songlist__viewport` **自己能滚**（`overflow-y: auto`）', () => {
     // ⚠ 这一条是契约的另一半：视口是滚动容器，虚拟窗口才收得到 scroll 事件。
-    const block = blockOf(songListCss, '.fnm-songlist__viewport')
+    const block = blockOf(songListCss, '.sanlos-songlist__viewport')
     expect(block).toMatch(/overflow-y:\s*auto/)
     expect(block).toMatch(/min-height:\s*0/)
   })

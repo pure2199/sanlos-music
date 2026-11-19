@@ -712,7 +712,7 @@ export function createPlayerStore(engine: PlayerEngineLike, options?: PlayerStor
  */
 export const playerEngine = new PlayerEngine({
   // ⚠️ **本地优先播放**（Task 11）：解析器在「本地有副本且开关打开」时
-  //    返回 `fnml://local/track/<id>`，否则照旧返回 `fnm://srv/track/stream?guid=…`
+  //    返回 `sanlos-media://local/track/<id>`，否则照旧返回 `sanlos://srv/track/stream?guid=…`
   //    （**既有行为与既有断言一字不变**）。
   resolveSource: resolvePlaybackSource,
   // ⚠️ **兜底解码**（Task 12）：格式 Chromium 解不了时，请主进程把本地副本

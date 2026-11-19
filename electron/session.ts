@@ -1,7 +1,7 @@
 // 主进程会话、凭证存储与 token 续期。
 //
 // 本模块是**整个客户端的凭证中枢**：token 与密码只存在于主进程内存与 `session.bin` 里，
-// 渲染进程永远拿不到（渲染进程只拿到 `fnm://` 代理，凭证由 Task 8 的代理在主进程内附加）。
+// 渲染进程永远拿不到（渲染进程只拿到 `sanlos://` 代理，凭证由 Task 8 的代理在主进程内附加）。
 //
 // ---------------------------------------------------------------------------
 // 安全边界（不可放宽）
@@ -1085,7 +1085,7 @@ export class SessionManager {
       message,
       cause === undefined ? undefined : { cause },
     )
-    console.warn(`[fnmusic] 会话加载失败：${message}`)
+    console.warn(`[sanlos] 会话加载失败：${message}`)
   }
 
   /**

@@ -166,16 +166,16 @@ export function EqPanel(props: EqPanelProps): ReactElement {
     store.getState().resetEq()
   }, [store])
 
-  const rootClass = className ? `fnm-eqpanel ${className}` : 'fnm-eqpanel'
+  const rootClass = className ? `sanlos-eqpanel ${className}` : 'sanlos-eqpanel'
 
   return (
     <section className={rootClass} aria-label="均衡器">
-      <header className="fnm-eqpanel__header">
+      <header className="sanlos-eqpanel__header">
         {/* --- 预置曲线下拉（中文 label） --- */}
-        <label className="fnm-eqpanel__field">
-          <span className="fnm-eqpanel__field-label">预置</span>
+        <label className="sanlos-eqpanel__field">
+          <span className="sanlos-eqpanel__field-label">预置</span>
           <select
-            className="fnm-eqpanel__preset"
+            className="sanlos-eqpanel__preset"
             value={eqPresetKey}
             onChange={handlePresetChange}
             aria-label="预置曲线"
@@ -193,15 +193,15 @@ export function EqPanel(props: EqPanelProps): ReactElement {
         </label>
 
         {/* --- 段数切换 --- */}
-        <div className="fnm-eqpanel__field">
-          <span className="fnm-eqpanel__field-label">段数</span>
-          <div className="fnm-eqpanel__bands-toggle" role="group" aria-label="段数">
+        <div className="sanlos-eqpanel__field">
+          <span className="sanlos-eqpanel__field-label">段数</span>
+          <div className="sanlos-eqpanel__bands-toggle" role="group" aria-label="段数">
             {([10, 15] as EqBandCount[]).map((count) => (
               <button
                 key={count}
                 type="button"
-                className={`fnm-eqpanel__band-count${
-                  eqBandCount === count ? ' fnm-eqpanel__band-count--active' : ''
+                className={`sanlos-eqpanel__band-count${
+                  eqBandCount === count ? ' sanlos-eqpanel__band-count--active' : ''
                 }`}
                 aria-pressed={eqBandCount === count}
                 onClick={() => handleBandCount(count)}
@@ -213,37 +213,37 @@ export function EqPanel(props: EqPanelProps): ReactElement {
         </div>
 
         {/* --- 旁路开关 --- */}
-        <label className="fnm-eqpanel__field fnm-eqpanel__bypass">
+        <label className="sanlos-eqpanel__field sanlos-eqpanel__bypass">
           <input
             type="checkbox"
-            className="fnm-eqpanel__bypass-input"
+            className="sanlos-eqpanel__bypass-input"
             aria-label="启用 EQ"
             checked={eqEnabled}
             onChange={handleEnabledChange}
           />
-          <span className="fnm-eqpanel__field-label">启用 EQ</span>
-          <span className="fnm-eqpanel__hint">关闭即旁路</span>
+          <span className="sanlos-eqpanel__field-label">启用 EQ</span>
+          <span className="sanlos-eqpanel__hint">关闭即旁路</span>
         </label>
 
         {/* --- 复位 --- */}
-        <button type="button" className="fnm-eqpanel__reset" onClick={handleReset}>
+        <button type="button" className="sanlos-eqpanel__reset" onClick={handleReset}>
           复位
         </button>
       </header>
 
       {/* --- 各段 --- */}
-      <div className="fnm-eqpanel__bands">
+      <div className="sanlos-eqpanel__bands">
         {frequencies.map((frequency, index) => {
           const baseline = eqPresetBaseline[index] ?? 0
           const offset = eqManualOffset[index] ?? 0
           const effective = eqGains[index] ?? 0
           const label = formatEqFrequency(frequency)
           return (
-            <div className="fnm-eqpanel__band" key={frequency}>
-              <span className="fnm-eqpanel__freq">{label}</span>
+            <div className="sanlos-eqpanel__band" key={frequency}>
+              <span className="sanlos-eqpanel__freq">{label}</span>
               <input
                 type="range"
-                className="fnm-eqpanel__slider"
+                className="sanlos-eqpanel__slider"
                 min={-EQ_GAIN_LIMIT}
                 max={EQ_GAIN_LIMIT}
                 step={0.5}
@@ -251,10 +251,10 @@ export function EqPanel(props: EqPanelProps): ReactElement {
                 aria-label={`${label} 增益偏移`}
                 onChange={(event) => handleBandGain(index, event.target.value)}
               />
-              <div className="fnm-eqpanel__values">
-                <span className="fnm-eqpanel__baseline">{`基线 ${formatEqGain(baseline)}`}</span>
-                <span className="fnm-eqpanel__offset">{`偏移 ${formatEqGain(offset)}`}</span>
-                <span className="fnm-eqpanel__effective">{`实际 ${formatEqGain(effective)}`}</span>
+              <div className="sanlos-eqpanel__values">
+                <span className="sanlos-eqpanel__baseline">{`基线 ${formatEqGain(baseline)}`}</span>
+                <span className="sanlos-eqpanel__offset">{`偏移 ${formatEqGain(offset)}`}</span>
+                <span className="sanlos-eqpanel__effective">{`实际 ${formatEqGain(effective)}`}</span>
               </div>
             </div>
           )

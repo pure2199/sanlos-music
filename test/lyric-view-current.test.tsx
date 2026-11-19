@@ -74,7 +74,7 @@ const LINES: LyricLine[] = [
 
 /** 取渲染出来的行元素（按行在 DOM 里的顺序）。 */
 function renderedLines(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll('.fnm-lyricview__line')) as HTMLElement[]
+  return Array.from(container.querySelectorAll('.sanlos-lyricview__line')) as HTMLElement[]
 }
 
 /** 取某个歌词视图的「当前行下标」属性。 */
@@ -133,17 +133,17 @@ describe('T79 `mode="current"`：当前句 + 下一句', () => {
     const current = renderedLines(container)[0]
     const next = renderedLines(container)[1]
     // 当前句：正在唱 ⇒ 有卡拉OK 当前词
-    expect(current?.querySelector('.fnm-lyricview__word--karaoke')?.textContent).toBe('乙')
+    expect(current?.querySelector('.sanlos-lyricview__word--karaoke')?.textContent).toBe('乙')
     // ⚠️ **鉴别力**：下一句**不许**开扫（否则桌面上两行同时在动）
-    expect(next?.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
-    expect(next?.querySelector('.fnm-lyricview__word--sung')).toBeNull()
+    expect(next?.querySelector('.sanlos-lyricview__word--karaoke')).toBeNull()
+    expect(next?.querySelector('.sanlos-lyricview__word--sung')).toBeNull()
   })
 
   it('当前句挂 `--active`（浮窗里它是**纯白**，下一句是暗白）', () => {
     const { container } = render(<LyricView lines={LINES} currentTime={22} mode="current" />)
 
-    expect(renderedLines(container)[0]?.className).toContain('fnm-lyricview__line--active')
-    expect(renderedLines(container)[1]?.className).not.toContain('fnm-lyricview__line--active')
+    expect(renderedLines(container)[0]?.className).toContain('sanlos-lyricview__line--active')
+    expect(renderedLines(container)[1]?.className).not.toContain('sanlos-lyricview__line--active')
   })
 
   it('**行首时间一到就换行**（不再等「整页走完」）', () => {
@@ -166,7 +166,7 @@ describe('T79 `mode="current"`：当前句 + 下一句', () => {
     expect(lines).toHaveLength(1)
     expect(lines[0]?.getAttribute('data-index')).toBe('0')
     // 没有当前句 ⇒ 没有任何行在扫光
-    expect(container.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__word--karaoke')).toBeNull()
   })
 
   it('**只渲染两行**（不把整份歌词塞进 DOM）', () => {
@@ -203,12 +203,12 @@ describe('T79 `mode="current"`：样式契约', () => {
 
   it('`--current` 与 `--double` **同款排版**（两行等大、等粗、间距一致）', () => {
     // 容器规则：两档写在**同一条**选择器里 ⇒ 样式天然一致
-    expect(css).toMatch(/\.fnm-lyricview--double,\s*\.fnm-lyricview--current\s*\{/)
+    expect(css).toMatch(/\.sanlos-lyricview--double,\s*\.sanlos-lyricview--current\s*\{/)
     // 行规则：两档同款（字号 / 行高 / 字重）
     expect(css).toMatch(
-      /\.fnm-lyricview--double \.fnm-lyricview__line,\s*\.fnm-lyricview--current \.fnm-lyricview__line\s*\{/,
+      /\.sanlos-lyricview--double \.sanlos-lyricview__line,\s*\.sanlos-lyricview--current \.sanlos-lyricview__line\s*\{/,
     )
-    const block = /\.fnm-lyricview--current \.fnm-lyricview__line\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
+    const block = /\.sanlos-lyricview--current \.sanlos-lyricview__line\s*\{([^}]*)\}/.exec(css)?.[1] ?? ''
     expect(block).toMatch(/font-size:\s*20px/)
     expect(block).toMatch(/line-height:\s*32px/)
     expect(block).toMatch(/font-weight:\s*600/)

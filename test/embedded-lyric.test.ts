@@ -376,7 +376,7 @@ describe('T83 跨进程契约：IPC 载荷 → 桥 → 渲染层', () => {
 
   /** 造一份临时偏好文件（`PrefsStore` 需要一个真实路径）。 */
   function tempPrefs(): PrefsStore {
-    const dir = mkdtempSync(join(tmpdir(), 'fnm-t83-'))
+    const dir = mkdtempSync(join(tmpdir(), 'sanlos-t83-'))
     tempDirs.push(dir)
     return new PrefsStore({ filePath: join(dir, 'prefs.json') })
   }
@@ -414,15 +414,15 @@ describe('T83 跨进程契约：IPC 载荷 → 桥 → 渲染层', () => {
 
       // ③ 渲染层取法（真函数 + 真桥）⇒ 仍是那串歌词。
       const scope = globalThis as unknown as {
-        fnPlayer?: { readEmbeddedLyric?: (id: string) => Promise<string> }
+        sanlosPlayer?: { readEmbeddedLyric?: (id: string) => Promise<string> }
       }
-      scope.fnPlayer = { readEmbeddedLyric: async () => bridged }
+      scope.sanlosPlayer = { readEmbeddedLyric: async () => bridged }
       try {
         const fetcher = defaultEmbeddedLyricFetcher()
         expect(fetcher).not.toBeNull()
         await expect(fetcher?.('song-1')).resolves.toBe(EMBEDDED_LYRIC_LRC)
       } finally {
-        delete scope.fnPlayer
+        delete scope.sanlosPlayer
       }
     } finally {
       await mock.close()

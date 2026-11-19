@@ -69,19 +69,19 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     //    ⇒ 下面三条断言**改写为新行为**（不弱化：一条换成更强的反向断言）。
     //
     // ⭐ **不用点任何按钮** ⇒ 列表自己出来（自动扫完成 ⇒ 状态行有「上次扫描」）。
-    await expect(fixture.window.locator('.fnm-page__status')).toContainText('上次扫描')
+    await expect(fixture.window.locator('.sanlos-page__status')).toContainText('上次扫描')
 
     // 命中列表里**只有**那部有声专辑（普通专辑不在这个目录 ⇒ 不该出现）。
-    const items = fixture.window.locator('.fnm-audiobooks__item')
+    const items = fixture.window.locator('.sanlos-audiobooks__item')
     await expect(items).toHaveCount(1)
-    await expect(items.first().locator('.fnm-audiobooks__title')).toHaveText('示例有声作品')
+    await expect(items.first().locator('.sanlos-audiobooks__title')).toHaveText('示例有声作品')
 
     // ⚠️ 还得说清楚它**凭什么**在这儿（用户指的位置）。
-    await expect(items.first().locator('.fnm-audiobooks__source')).toContainText('有声小说')
+    await expect(items.first().locator('.sanlos-audiobooks__source')).toContainText('有声小说')
 
     // ⚠️ **判定分不再显示**（位置已定 ⇒ 那个文件夹里的都是有声 ⇒ 打分当主信息会自相矛盾）。
     //    这条断言**改写为反向断言**（更强：确保它不再出现），不是删掉。
-    const meta = items.first().locator('.fnm-audiobooks__meta')
+    const meta = items.first().locator('.sanlos-audiobooks__meta')
     await expect(meta).not.toContainText('判定分')
     await expect(meta).toContainText('12 集')
     await expect(meta).toContainText('单集均长 25 分')
@@ -92,26 +92,26 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     //    详情页**（卡片要做成专辑页那样的**封面网格** ⇒ 不能再背这行长句）。
     //    ⇒ 这里是**反向断言**（卡片上**不该**再有那行）—— 比原来更强；
     //    「依据一条都不少」的正面断言**搬到下面第 ② 条**（进详情页后逐条验）。
-    await expect(items.first().locator('.fnm-audiobooks__reasons')).toHaveCount(0)
+    await expect(items.first().locator('.sanlos-audiobooks__reasons')).toHaveCount(0)
     await expect(items.first()).not.toContainText('单集均长 ≥ 8 分钟')
   })
 
   test('点进有声专辑 ⇒ 曲目**按集序排**（输入是乱序）且显示「第 N 集」', async () => {
-    await fixture.window.locator('.fnm-audiobooks__title').click()
+    await fixture.window.locator('.sanlos-audiobooks__title').click()
 
     // 头部徽标：真的排成集序了（形态不一致时会如实说「没识别到集号」）。
-    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
+    await expect(fixture.window.locator('.sanlos-detail__audiobook-note')).toHaveText('已按集序排列')
 
     // ⚠️ **T101**：结构信号（判定依据）在**详情页**里逐条给出来 —— 信息**一点没丢**，
     //    只是从列表卡片换到了详情页。
-    const reasons = fixture.window.locator('.fnm-detail__audiobook-reasons')
+    const reasons = fixture.window.locator('.sanlos-detail__audiobook-reasons')
     await expect(reasons).toContainText('单集均长 ≥ 8 分钟')
     await expect(reasons).toContainText('单集均长 ≥ 20 分钟')
     await expect(reasons).toContainText('标题形态一致（可解析集号）')
     await expect(reasons).toContainText('集数 ≥ 8')
     await expect(reasons).toContainText('曲目集中在同一作品目录')
 
-    const rows = fixture.window.locator('.fnm-songlist__row')
+    const rows = fixture.window.locator('.sanlos-songlist__row')
     // ⚠️ **T104（2026-11-17）把「验 DOM 行数」换成「滚着收齐」**：
     //    列表**真的能滚**了 ⇒ 虚拟裁剪生效 ⇒ DOM 里只有「可视区那一屏」，
     //    「DOM 里有 12 行」只在**滚不动**（旧缺陷）时成立 ⇒ 那是**缺陷的副产品**。
@@ -121,38 +121,38 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     expect(all).toHaveLength(12)
 
     // ⭐ mock 给的是**乱序**（第 1 首是「07- 第7集」）⇒ 排对了才是真的排对了。
-    await expect(rows.nth(0).locator('.fnm-songlist__title')).toHaveText('01- 第1集')
+    await expect(rows.nth(0).locator('.sanlos-songlist__title')).toHaveText('01- 第1集')
     expect(all[11]?.title).toBe('12- 第12集')
 
     // 集号标签逐行递增（1…12）。
-    await expect(rows.nth(0).locator('.fnm-detail__episode')).toHaveText('第 1 集')
+    await expect(rows.nth(0).locator('.sanlos-detail__episode')).toHaveText('第 1 集')
     expect(all[11]?.episode).toBe('第 12 集')
     expect(all.map((row) => row.episode)).toEqual(
       Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 集`),
     )
 
     // 全量都拉下来了（不是只显示第一页）。
-    await expect(fixture.window.locator('.fnm-songlist__status')).toHaveText('已加载 12 / 12')
+    await expect(fixture.window.locator('.sanlos-songlist__status')).toHaveText('已加载 12 / 12')
   })
 
   test('「这不是有声」⇒ 不再按集序排（回到原序），且不再出现在「有声」页', async () => {
     await fixture.window.getByRole('button', { name: '这不是有声' }).click()
 
     // 徽标与集号标签都消失 ⇒ 不再按集序排。
-    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveCount(0)
-    await expect(fixture.window.locator('.fnm-detail__episode')).toHaveCount(0)
+    await expect(fixture.window.locator('.sanlos-detail__audiobook-note')).toHaveCount(0)
+    await expect(fixture.window.locator('.sanlos-detail__episode')).toHaveCount(0)
 
     // 回到 **mock 给的乱序**（第 1 首 = 第 7 集）⇒ 证明确实「不再排」。
-    const rows = fixture.window.locator('.fnm-songlist__row')
-    await expect(rows.nth(0).locator('.fnm-songlist__title')).toHaveText('07- 第7集')
+    const rows = fixture.window.locator('.sanlos-songlist__row')
+    await expect(rows.nth(0).locator('.sanlos-songlist__title')).toHaveText('07- 第7集')
 
     // 底部换成了「这是有声读物」（可以反悔改回来）。
     await expect(fixture.window.getByRole('button', { name: '这是有声读物' })).toBeVisible()
 
     // 回「有声」页 ⇒ 改判**优先于**自动判定 ⇒ 不再列出。
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
-    await expect(fixture.window.locator('.fnm-audiobooks__item')).toHaveCount(0)
-    await expect(fixture.window.locator('.fnm-audiobooks__empty')).toContainText(
+    await expect(fixture.window.locator('.sanlos-audiobooks__item')).toHaveCount(0)
+    await expect(fixture.window.locator('.sanlos-audiobooks__empty')).toContainText(
       '当前曲库里没有识别到有声读物',
     )
   })
@@ -162,25 +162,25 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     await fixture.window.getByRole('button', { name: '搜作品' }).click()
 
     // 搜到的作品列出来（**没扫曲库**也能搜到）。
-    const results = fixture.window.locator('.fnm-audiobooks__result')
+    const results = fixture.window.locator('.sanlos-audiobooks__result')
     await expect(results).toHaveCount(1)
-    await expect(results.first().locator('.fnm-audiobooks__title')).toHaveText('示例有声作品')
+    await expect(results.first().locator('.sanlos-audiobooks__title')).toHaveText('示例有声作品')
 
     // 点开 ⇒ 用户**指认**了它 ⇒ 详情页按集序排。
-    await results.first().locator('.fnm-audiobooks__title').click()
-    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
+    await results.first().locator('.sanlos-audiobooks__title').click()
+    await expect(fixture.window.locator('.sanlos-detail__audiobook-note')).toHaveText('已按集序排列')
     // ⚠️ **T104（2026-11-17）**：同上 —— 「DOM 行数」换成「滚着收齐」
     //    （收齐 12 行 = **能滚到底**；而「DOM 里有 12 行」只在**滚不动**时成立）。
-    const rows = fixture.window.locator('.fnm-songlist__row')
+    const rows = fixture.window.locator('.sanlos-songlist__row')
     const all = await collectSongListRows(fixture.window)
     expect(all).toHaveLength(12)
-    await expect(rows.nth(0).locator('.fnm-songlist__title')).toHaveText('01- 第1集')
-    await expect(rows.nth(0).locator('.fnm-detail__episode')).toHaveText('第 1 集')
+    await expect(rows.nth(0).locator('.sanlos-songlist__title')).toHaveText('01- 第1集')
+    await expect(rows.nth(0).locator('.sanlos-detail__episode')).toHaveText('第 1 集')
 
     // 回「有声」页 ⇒ 它**也在**列表里（前面扫过就在这个目录 ⇒ 来源显示目录）。
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
-    await expect(fixture.window.locator('.fnm-audiobooks__item')).toHaveCount(1)
-    await expect(fixture.window.locator('.fnm-audiobooks__source')).toContainText('有声小说')
+    await expect(fixture.window.locator('.sanlos-audiobooks__item')).toHaveCount(1)
+    await expect(fixture.window.locator('.sanlos-audiobooks__source')).toContainText('有声小说')
   })
 
   test('v3② 改目录关键字 ⇒ 重新扫描 ⇒ 目录命中**跟着换**', async () => {
@@ -191,17 +191,17 @@ test.describe.serial('T98「有声读物」识别 + 按集序排列', () => {
     await fixture.window.getByRole('button', { name: '扫描这个目录' }).click()
 
     // 目录命中换成了那三张普通专辑（按集数降序）。
-    const items = fixture.window.locator('.fnm-audiobooks__item')
+    const items = fixture.window.locator('.sanlos-audiobooks__item')
     await expect(items).toHaveCount(4)
-    await expect(items.nth(0).locator('.fnm-audiobooks__title')).toHaveText('示例专辑一')
-    await expect(items.nth(2).locator('.fnm-audiobooks__title')).toHaveText('示例专辑三')
+    await expect(items.nth(0).locator('.sanlos-audiobooks__title')).toHaveText('示例专辑一')
+    await expect(items.nth(2).locator('.sanlos-audiobooks__title')).toHaveText('示例专辑三')
     // ⚠ 目录命中里**不再有**「有声小说」那个目录 ⇒ 扫描确实跟着关键字换了。
     await expect(
-      fixture.window.locator('.fnm-audiobooks__source', { hasText: '有声小说' }),
+      fixture.window.locator('.sanlos-audiobooks__source', { hasText: '有声小说' }),
     ).toHaveCount(0)
     // ⚠ 那部作品因为**用户指认过**而留着，来源要说清楚是「你指定的」。
-    await expect(items.nth(3).locator('.fnm-audiobooks__source')).toHaveText('你指定的')
+    await expect(items.nth(3).locator('.sanlos-audiobooks__source')).toHaveText('你指定的')
     // 状态行记住扫的是哪个目录。
-    await expect(fixture.window.locator('.fnm-page__status')).toContainText('music')
+    await expect(fixture.window.locator('.sanlos-page__status')).toContainText('music')
   })
 })

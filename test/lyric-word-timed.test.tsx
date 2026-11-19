@@ -156,15 +156,15 @@ describe('T81：呈现分流 —— 伪逐字不假装逐字、真逐字一字�
     const { container } = render(<LyricView lines={PLAIN_LINES} currentTime={12} mode="single" />)
 
     expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
-    expect(container.querySelector('.fnm-lyricview__overlay')).toBeNull()
-    expect(container.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__overlay')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__word--karaoke')).toBeNull()
   })
 
   it('伪逐字 ⇒ 当前行**整行**强调色（`--whole`），其余行没有', () => {
     const { container } = render(<LyricView lines={PLAIN_LINES} currentTime={12} mode="all" />)
 
-    expect(lineAt(container, 0).className).toContain('fnm-lyricview__line--whole')
-    expect(lineAt(container, 1).className).not.toContain('fnm-lyricview__line--whole')
+    expect(lineAt(container, 0).className).toContain('sanlos-lyricview__line--whole')
+    expect(lineAt(container, 1).className).not.toContain('sanlos-lyricview__line--whole')
   })
 
   it('伪逐字 ⇒ 行文本**一字不少**（不白屏、不丢字）', () => {
@@ -176,12 +176,12 @@ describe('T81：呈现分流 —— 伪逐字不假装逐字、真逐字一字�
     const { container } = render(<LyricView lines={WORD_TIMED_LINES} currentTime={13} mode="all" />)
 
     const active = lineAt(container, 0)
-    const karaoke = active.querySelectorAll('.fnm-lyricview__word--karaoke')
+    const karaoke = active.querySelectorAll('.sanlos-lyricview__word--karaoke')
     expect(karaoke).toHaveLength(1)
     // (13-10)/(15-10) = 60%
     expect(karaoke[0]!.getAttribute('data-karaoke-progress')).toBe('60.0')
     // ⚠️ 真逐字**不走**整行强调色那条路（两套机制互斥）。
-    expect(active.className).not.toContain('fnm-lyricview__line--whole')
+    expect(active.className).not.toContain('sanlos-lyricview__line--whole')
   })
 })
 
@@ -199,7 +199,7 @@ describe('T81：三个页面一致', () => {
       />,
     )
     expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
-    expect(container.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__word--karaoke')).toBeNull()
   })
 
   it('经典悬浮窗（`LyricOverlay`）⇒ 真逐字**照旧**有卡拉OK', () => {
@@ -210,13 +210,13 @@ describe('T81：三个页面一致', () => {
         position={13}
       />,
     )
-    expect(container.querySelector('.fnm-lyricview__word--karaoke')).not.toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__word--karaoke')).not.toBeNull()
   })
 
   it('全屏歌词舞台（`mode="all"`）⇒ 伪逐字**没有**卡拉OK', () => {
     const { container } = render(<LyricView lines={PLAIN_LINES} currentTime={12} mode="all" />)
     expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
-    expect(container.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__word--karaoke')).toBeNull()
   })
 
   it('灵动态词岛（`mode="single"` + 半径 0，与 `IslandApp` 同款）⇒ 伪逐字**没有**卡拉OK', () => {
@@ -224,7 +224,7 @@ describe('T81：三个页面一致', () => {
       <LyricView lines={PLAIN_LINES} currentTime={12} mode="single" windowRadius={0} />,
     )
     expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
-    expect(container.querySelector('.fnm-lyricview__word--karaoke')).toBeNull()
+    expect(container.querySelector('.sanlos-lyricview__word--karaoke')).toBeNull()
   })
 })
 
@@ -243,7 +243,7 @@ describe('T81：真逐字下既有行为**一字不变**', () => {
     const words = Array.from(previous.querySelectorAll('[data-word]'))
     expect(words.length).toBeGreaterThan(0)
     for (const word of words) {
-      expect(word.className).toMatch(/fnm-lyricview__word--sung/)
+      expect(word.className).toMatch(/sanlos-lyricview__word--sung/)
     }
   })
 
@@ -256,6 +256,6 @@ describe('T81：真逐字下既有行为**一字不变**', () => {
     const next = lineAt(container, 1)
     const words = Array.from(next.querySelectorAll('[data-word]'))
     expect(words.length).toBeGreaterThan(0)
-    expect(words.some((word) => word.className.match(/fnm-lyricview__word--sung/))).toBe(true)
+    expect(words.some((word) => word.className.match(/sanlos-lyricview__word--sung/))).toBe(true)
   })
 })

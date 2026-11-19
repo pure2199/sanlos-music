@@ -4,7 +4,7 @@
 //
 // 覆盖**只有真实 Electron 才跑得通**的那条链路：
 //   登录（主进程 IPC → HTTP → mock NAS）
-//     → 歌单页 → 抽样（`fnm://` 协议代理 → mock 的 `/track/list` 分页）
+//     → 歌单页 → 抽样（`sanlos://` 协议代理 → mock 的 `/track/list` 分页）
 //       → 列出这一批 →「播放全部」（走既有播放路径）
 //         →「存为歌单」（`playlist/create` + `playlist/add-track`）
 //           → **歌单列表里真的多了一个歌单**
@@ -39,16 +39,16 @@ test.describe.serial('T97「随机 20 首」组一个歌单', () => {
    *    下一条用例开始时面板可能已经开着 ⇒ 这时不能再点一次（那是「关闭」）。
    */
   async function openPanel(): Promise<void> {
-    const panel = fixture.window.locator('.fnm-random')
+    const panel = fixture.window.locator('.sanlos-random')
     if ((await panel.count()) === 0) {
-      await fixture.window.locator('.fnm-playlists__random-button').click()
+      await fixture.window.locator('.sanlos-playlists__random-button').click()
     }
     await expect(panel).toBeVisible()
   }
 
   /** 点面板里的主按钮（第一次是「随机 20 首」，之后是「换一批」）。 */
   async function pressPrimary(): Promise<void> {
-    await fixture.window.locator('.fnm-random__actions button').first().click()
+    await fixture.window.locator('.sanlos-random__actions button').first().click()
   }
 
   test('随机一批 ⇒ 能播 ⇒ 能存回 NAS（歌单列表里真的多了一个）', async () => {
@@ -65,7 +65,7 @@ test.describe.serial('T97「随机 20 首」组一个歌单', () => {
 
     // 「播放全部」⇒ 走既有播放路径（播放条出现真歌名）。
     await fixture.window.getByRole('button', { name: '播放全部' }).click()
-    await expect(fixture.window.locator('.fnm-playerbar__title')).toHaveText(/示例曲目 \d/)
+    await expect(fixture.window.locator('.sanlos-playerbar__title')).toHaveText(/示例曲目 \d/)
 
     // 「存为歌单」⇒ 真的建了一个歌单（**成功提示**如实出现）。
     await fixture.window.getByRole('button', { name: '存为歌单' }).click()
@@ -100,6 +100,6 @@ test.describe.serial('T97「随机 20 首」组一个歌单', () => {
     // ⚠️ mock 只有 8 首 ⇒ 换批后**集合**必然还是这 8 首（顺序会变，但断言顺序会 flaky）
     //    ⇒ 这里只断言「列表还在、行数对」；「换一批真的重新抽样」由组件测试
     //    （抽样调用次数 +1）钉住。
-    await expect(fixture.window.locator('.fnm-songlist__row')).toHaveCount(8)
+    await expect(fixture.window.locator('.sanlos-songlist__row')).toHaveCount(8)
   })
 })

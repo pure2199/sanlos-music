@@ -8,7 +8,7 @@
 // - **组件**（`src/island/IslandCover.tsx`）：有封面 → `<img>`；没有 / 加载失败 → 占位块；
 // - **词岛集成**（`src/island/IslandApp.tsx`）：左端是封面、**不再有频谱柱**；右端频谱柱**保持不变**；
 // - **数据链路**（`src/player/lyricOverlay.ts` → `electron/ipc.ts`）：`coverId` 一路透传；
-// - **护栏**：封面地址**只**由 `coverUrl()` 拼（词岛源码里不许出现 `fnm://` 字面量）。
+// - **护栏**：封面地址**只**由 `coverUrl()` 拼（词岛源码里不许出现 `sanlos://` 字面量）。
 //
 // ⚠️ 测试数据一律用占位值，不写真实歌曲名 / FN ID。
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ import type { LyricOverlayMessage, PlayerBridge } from '../shared/playerBridge'
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 afterEach(() => {
-  delete (globalThis as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   vi.restoreAllMocks()
 })
 
@@ -39,51 +39,51 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('T76 词岛封面：组件', () => {
-  it('有封面 id → 渲染 `<img>`，地址由 `coverUrl()` 拼（`fnm://` 协议代理）', () => {
+  it('有封面 id → 渲染 `<img>`，地址由 `coverUrl()` 拼（`sanlos://` 协议代理）', () => {
     render(<IslandCover coverId="album_abc123" />)
 
-    const img = screen.getByTestId('fnm-island-cover')
+    const img = screen.getByTestId('sanlos-island-cover')
     const src = img.getAttribute('src') ?? ''
-    expect(src).toContain('fnm://srv/static/cover')
+    expect(src).toContain('sanlos://srv/static/cover')
     expect(src).toContain('coverId=album_abc123')
     expect(src).toContain(`size=${ISLAND_COVER_SIZE}`)
-    expect(screen.queryByTestId('fnm-island-cover-placeholder')).toBeNull()
+    expect(screen.queryByTestId('sanlos-island-cover-placeholder')).toBeNull()
   })
 
   it('没有封面 → 渲染**占位块**，不渲染 `<img>`（不留浏览器默认破图）', () => {
     render(<IslandCover coverId="" />)
 
-    expect(screen.getByTestId('fnm-island-cover-placeholder')).toBeTruthy()
-    expect(screen.queryByTestId('fnm-island-cover')).toBeNull()
+    expect(screen.getByTestId('sanlos-island-cover-placeholder')).toBeTruthy()
+    expect(screen.queryByTestId('sanlos-island-cover')).toBeNull()
   })
 
   it('封面 id 是 `undefined` / `null` → 同样是占位块', () => {
     const { unmount } = render(<IslandCover coverId={undefined} />)
-    expect(screen.getByTestId('fnm-island-cover-placeholder')).toBeTruthy()
+    expect(screen.getByTestId('sanlos-island-cover-placeholder')).toBeTruthy()
     unmount()
 
     render(<IslandCover coverId={null} />)
-    expect(screen.getByTestId('fnm-island-cover-placeholder')).toBeTruthy()
+    expect(screen.getByTestId('sanlos-island-cover-placeholder')).toBeTruthy()
   })
 
   it('封面加载失败 → 切成占位块（不留破图）', () => {
     render(<IslandCover coverId="album_abc123" />)
 
-    fireEvent.error(screen.getByTestId('fnm-island-cover'))
+    fireEvent.error(screen.getByTestId('sanlos-island-cover'))
 
-    expect(screen.getByTestId('fnm-island-cover-placeholder')).toBeTruthy()
-    expect(screen.queryByTestId('fnm-island-cover')).toBeNull()
+    expect(screen.getByTestId('sanlos-island-cover-placeholder')).toBeTruthy()
+    expect(screen.queryByTestId('sanlos-island-cover')).toBeNull()
   })
 
   it('换了封面 id → **重置**失败状态（上一张的失败不该连累下一张）', () => {
     const { rerender } = render(<IslandCover coverId="album_abc123" />)
-    fireEvent.error(screen.getByTestId('fnm-island-cover'))
-    expect(screen.getByTestId('fnm-island-cover-placeholder')).toBeTruthy()
+    fireEvent.error(screen.getByTestId('sanlos-island-cover'))
+    expect(screen.getByTestId('sanlos-island-cover-placeholder')).toBeTruthy()
 
     rerender(<IslandCover coverId="album_def456" />)
 
-    expect(screen.getByTestId('fnm-island-cover')).toBeTruthy()
-    expect(screen.getByTestId('fnm-island-cover').getAttribute('src')).toContain('coverId=album_def456')
+    expect(screen.getByTestId('sanlos-island-cover')).toBeTruthy()
+    expect(screen.getByTestId('sanlos-island-cover').getAttribute('src')).toContain('coverId=album_def456')
   })
 })
 
@@ -118,7 +118,7 @@ function fakeBridge(): {
 describe('T76 词岛封面：集成', () => {
   it('收到带 `coverId` 的曲目 → 左端渲染**专辑封面**', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     render(<IslandApp />)
     act(() => {
@@ -129,13 +129,13 @@ describe('T76 词岛封面：集成', () => {
       })
     })
 
-    const img = screen.getByTestId('fnm-island-cover')
+    const img = screen.getByTestId('sanlos-island-cover')
     expect(img.getAttribute('src')).toContain('coverId=album_abc123')
   })
 
   it('左端**不再是频谱柱**（用户指令：左边换成专辑封面）', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
     act(() => {
@@ -147,25 +147,25 @@ describe('T76 词岛封面：集成', () => {
     })
 
     // ⚠️ 胶囊里**只剩右端**一组频谱柱（8 根）——左端没有柱子了。
-    const spectra = Array.from(container.querySelectorAll('.fnm-island__spectrum'))
+    const spectra = Array.from(container.querySelectorAll('.sanlos-island__spectrum'))
     expect(spectra).toHaveLength(1)
-    expect(spectra[0]?.className).toContain('fnm-island__spectrum--right')
-    expect(container.querySelector('.fnm-island__spectrum--left')).toBeNull()
+    expect(spectra[0]?.className).toContain('sanlos-island__spectrum--right')
+    expect(container.querySelector('.sanlos-island__spectrum--left')).toBeNull()
   })
 
   it('右端频谱柱**保持不变**（指令只说「左边」）', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const { container } = render(<IslandApp />)
 
-    const bars = container.querySelectorAll('.fnm-island__spectrum--right .fnm-island__bar')
+    const bars = container.querySelectorAll('.sanlos-island__spectrum--right .sanlos-island__bar')
     expect(bars).toHaveLength(8)
   })
 
   it('曲目**没有封面** → 左端是占位块，不渲染 `<img>`', () => {
     const fake = fakeBridge()
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     render(<IslandApp />)
     act(() => {
@@ -176,8 +176,8 @@ describe('T76 词岛封面：集成', () => {
       })
     })
 
-    expect(screen.getByTestId('fnm-island-cover-placeholder')).toBeTruthy()
-    expect(screen.queryByTestId('fnm-island-cover')).toBeNull()
+    expect(screen.getByTestId('sanlos-island-cover-placeholder')).toBeTruthy()
+    expect(screen.queryByTestId('sanlos-island-cover')).toBeNull()
   })
 })
 

@@ -377,10 +377,10 @@ describe('封面 URL 收敛点', () => {
     expect(coverUrl('track_abc', Number.NaN)).toContain(`size=${COVER_SIZE_DEFAULT}`)
   })
 
-  it('URL 形如 fnm://srv/... 且带 coverId 与 size 查询参数', () => {
+  it('URL 形如 sanlos://srv/... 且带 coverId 与 size 查询参数', () => {
     const url = coverUrl('track_abc123')
     expect(url).not.toBeNull()
-    expect(url?.startsWith('fnm://srv/')).toBe(true)
+    expect(url?.startsWith('sanlos://srv/')).toBe(true)
     expect(url).toContain('coverId=track_abc123')
     expect(url).toContain('size=')
   })
@@ -574,8 +574,8 @@ describe('曲库页面', () => {
 
     const { container } = render(<AlbumsPage store={store} />)
 
-    await waitFor(() => expect(container.querySelectorAll('[data-testid="fnm-card"]').length).toBeGreaterThan(0))
-    expect(container.querySelectorAll('[data-testid="fnm-card"]').length).toBeLessThan(100)
+    await waitFor(() => expect(container.querySelectorAll('[data-testid="sanlos-card"]').length).toBeGreaterThan(0))
+    expect(container.querySelectorAll('[data-testid="sanlos-card"]').length).toBeLessThan(100)
   })
 
   it('ArtistsPage / GenresPage / PlaylistsPage：能独立挂载并渲染各自的数据', async () => {

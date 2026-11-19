@@ -399,19 +399,19 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
     [store],
   )
 
-  const classes = className ? `fnm-playerbar ${className}` : 'fnm-playerbar'
+  const classes = className ? `sanlos-playerbar ${className}` : 'sanlos-playerbar'
 
   return (
     <div className={classes} role="region" aria-label="播放条">
       {/* --- 封面 / 歌名 / 歌手 / 音质 --- */}
-      <div className="fnm-playerbar__info">
+      <div className="sanlos-playerbar__info">
         <CoverImage coverId={current?.coverId ?? ''} alt="" boxSize={44} />
-        <span className="fnm-playerbar__meta">
-          <span className="fnm-playerbar__title">{current?.title ?? '未在播放'}</span>
-          <span className="fnm-playerbar__artist">{current?.artist ?? ''}</span>
+        <span className="sanlos-playerbar__meta">
+          <span className="sanlos-playerbar__title">{current?.title ?? '未在播放'}</span>
+          <span className="sanlos-playerbar__artist">{current?.artist ?? ''}</span>
           {noticeText.length > 0 ? (
             <span
-              className="fnm-playerbar__notice"
+              className="sanlos-playerbar__notice"
               data-testid="player-notice"
               role={errorText.length > 0 ? 'alert' : 'status'}
             >
@@ -421,7 +421,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         </span>
         {quality && (
           <span
-            className={`fnm-playerbar__quality fnm-playerbar__quality--${quality}`}
+            className={`sanlos-playerbar__quality sanlos-playerbar__quality--${quality}`}
             data-testid="player-quality"
           >
             {QUALITY_LABELS[quality]}
@@ -430,10 +430,10 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
       </div>
 
       {/* --- 上一首 / 播放暂停 / 下一首 --- */}
-      <div className="fnm-playerbar__controls">
+      <div className="sanlos-playerbar__controls">
         <button
           type="button"
-          className="fnm-playerbar__button"
+          className="sanlos-playerbar__button"
           onClick={handlePrev}
           disabled={!current}
           aria-label="上一首"
@@ -442,7 +442,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         </button>
         <button
           type="button"
-          className="fnm-playerbar__button fnm-playerbar__button--primary"
+          className="sanlos-playerbar__button sanlos-playerbar__button--primary"
           onClick={handleTogglePlay}
           disabled={!current}
           aria-label={isPlaying ? '暂停' : '播放'}
@@ -452,7 +452,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         </button>
         <button
           type="button"
-          className="fnm-playerbar__button"
+          className="sanlos-playerbar__button"
           onClick={handleNext}
           disabled={!current}
           aria-label="下一首"
@@ -462,16 +462,16 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
       </div>
 
       {/* --- 进度条 --- */}
-      <div className="fnm-playerbar__progress">
+      <div className="sanlos-playerbar__progress">
         <span
-          className={`fnm-playerbar__time${previewing ? ' fnm-playerbar__time--preview' : ''}`}
+          className={`sanlos-playerbar__time${previewing ? ' sanlos-playerbar__time--preview' : ''}`}
           data-testid="player-position"
         >
           {formatTime(shown)}
         </span>
         <input
           type="range"
-          className="fnm-playerbar__slider"
+          className="sanlos-playerbar__slider"
           min={0}
           max={max}
           step={0.1}
@@ -484,14 +484,14 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
           onPointerUp={commitSeek}
           onKeyUp={commitSeek}
         />
-        <span className="fnm-playerbar__time">{formatTime(total)}</span>
+        <span className="sanlos-playerbar__time">{formatTime(total)}</span>
       </div>
 
       {/* --- 音量 --- */}
-      <div className="fnm-playerbar__volume">
+      <div className="sanlos-playerbar__volume">
         <button
           type="button"
-          className="fnm-playerbar__button"
+          className="sanlos-playerbar__button"
           disabled
           aria-label={muted ? '已静音' : '静音'}
           aria-pressed={Boolean(muted)}
@@ -501,7 +501,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         </button>
         <input
           type="range"
-          className="fnm-playerbar__slider"
+          className="sanlos-playerbar__slider"
           min={0}
           max={1}
           step={0.01}
@@ -512,13 +512,13 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
       </div>
 
       {/* --- 队列 / EQ / 全屏 --- */}
-      <div className="fnm-playerbar__actions">
+      <div className="sanlos-playerbar__actions">
         {/* 播放模式（Task 24）：点一下切到下一个模式。
             ⚠️ 按钮文字就是**当前模式**（不是「模式」两个字）——
                用户一眼要能看出现在是随机还是顺序。 */}
         <button
           type="button"
-          className="fnm-playerbar__button fnm-playerbar__button--mode"
+          className="sanlos-playerbar__button sanlos-playerbar__button--mode"
           onClick={handleCycleMode}
           data-testid="play-mode-button"
           data-mode={mode}
@@ -529,7 +529,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         </button>
         <button
           type="button"
-          className="fnm-playerbar__button"
+          className="sanlos-playerbar__button"
           onClick={() => {
             // 队列与 EQ 两个弹层**互斥**（叠在一起会互相遮挡）。
             setEqOpen(false)
@@ -542,7 +542,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         </button>
         <button
           type="button"
-          className="fnm-playerbar__button"
+          className="sanlos-playerbar__button"
           onClick={() => {
             setQueueOpen(false)
             setEqOpen((open) => !open)
@@ -554,7 +554,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
         {onOpenFullPlayer && (
           <button
             type="button"
-            className="fnm-playerbar__button"
+            className="sanlos-playerbar__button"
             onClick={onOpenFullPlayer}
             aria-label="全屏播放页"
           >
@@ -564,30 +564,30 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
       </div>
 
       {queueOpen && (
-        <div className="fnm-playerbar__queue" role="dialog" aria-label="播放队列">
-          <p className="fnm-playerbar__queue-title">{`队列（${queue.length} 首）`}</p>
+        <div className="sanlos-playerbar__queue" role="dialog" aria-label="播放队列">
+          <p className="sanlos-playerbar__queue-title">{`队列（${queue.length} 首）`}</p>
           {queue.length === 0 ? (
-            <p className="fnm-playerbar__queue-title">队列为空</p>
+            <p className="sanlos-playerbar__queue-title">队列为空</p>
           ) : (
             <>
               {/* 队列只剩一首歌 → 移除按钮禁用 + 给出可读提示（不静默无反应）。 */}
               {queue.length === 1 && (
-                <p className="fnm-playerbar__queue-title">{QUEUE_ONLY_ONE_HINT}</p>
+                <p className="sanlos-playerbar__queue-title">{QUEUE_ONLY_ONE_HINT}</p>
               )}
               {queue.map((song) => (
-                <div key={song.id} className="fnm-playerbar__queue-row">
+                <div key={song.id} className="sanlos-playerbar__queue-row">
                   <button
                     type="button"
-                    className={`fnm-playerbar__queue-item${
-                      song.id === current?.id ? ' fnm-playerbar__queue-item--current' : ''
+                    className={`sanlos-playerbar__queue-item${
+                      song.id === current?.id ? ' sanlos-playerbar__queue-item--current' : ''
                     }`}
                     onClick={() => store.getState().playTrack(song, queue)}
                   >
-                    <span className="fnm-playerbar__queue-name">{`${song.title} · ${song.artist}`}</span>
+                    <span className="sanlos-playerbar__queue-name">{`${song.title} · ${song.artist}`}</span>
                   </button>
                   <button
                     type="button"
-                    className="fnm-playerbar__queue-remove"
+                    className="sanlos-playerbar__queue-remove"
                     aria-label={`从队列移除 ${song.title}`}
                     title={canRemove ? `从队列移除 ${song.title}` : QUEUE_ONLY_ONE_HINT}
                     disabled={!canRemove}
@@ -608,7 +608,7 @@ export function PlayerBar(props: PlayerBarProps): ReactElement {
            所以打开一个就把另一个关掉。
       */}
       {eqOpen && (
-        <div className="fnm-playerbar__eq" role="dialog" aria-label="均衡器">
+        <div className="sanlos-playerbar__eq" role="dialog" aria-label="均衡器">
           <EqPanel store={store} />
         </div>
       )}

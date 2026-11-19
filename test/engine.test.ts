@@ -266,13 +266,13 @@ describe('PlayerEngine：懒创建与流地址', () => {
     engine.play(song('b'))
     expect(factory).toHaveBeenCalledTimes(1)
     expect(context.sourceCalls).toBe(1)
-    expect(element.src).toBe('fnm://srv/track/stream?guid=b')
+    expect(element.src).toBe('sanlos://srv/track/stream?guid=b')
   })
 
-  it('音频地址走 fnm:// 代理，且不含凭据', () => {
+  it('音频地址走 sanlos:// 代理，且不含凭据', () => {
     const { engine, element } = createEngine()
     engine.play(song('a'))
-    expect(element.src.startsWith('fnm://srv/track/stream?guid=')).toBe(true)
+    expect(element.src.startsWith('sanlos://srv/track/stream?guid=')).toBe(true)
     expect(element.src.toLowerCase()).not.toContain('authx')
     expect(element.src.toLowerCase()).not.toContain('cookie')
   })

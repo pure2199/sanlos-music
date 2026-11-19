@@ -390,17 +390,17 @@ export function SongList(props: SongListProps): ReactElement {
   // 空态**也要**渲染状态行：组件必须始终暴露「已加载 / 总共」（要求 E）。
   if (songs.length === 0) {
     return (
-      <div className="fnm-songlist" style={rootStyle}>
-        <p className="fnm-songlist__empty">{emptyLabel}</p>
-        <p className="fnm-songlist__status">{statusText}</p>
+      <div className="sanlos-songlist" style={rootStyle}>
+        <p className="sanlos-songlist__empty">{emptyLabel}</p>
+        <p className="sanlos-songlist__status">{statusText}</p>
       </div>
     )
   }
 
   return (
-    <div className="fnm-songlist" style={rootStyle}>
+    <div className="sanlos-songlist" style={rootStyle}>
       <div
-        className="fnm-songlist__viewport"
+        className="sanlos-songlist__viewport"
         role="listbox"
         aria-label={ariaLabel}
         aria-multiselectable="true"
@@ -411,7 +411,7 @@ export function SongList(props: SongListProps): ReactElement {
         onKeyDown={handleKeyDown}
       >
         <div
-          className="fnm-songlist__canvas"
+          className="sanlos-songlist__canvas"
           style={{ height: songs.length * rowHeight }}
         >
           {rows.map((song, offset) => {
@@ -424,7 +424,7 @@ export function SongList(props: SongListProps): ReactElement {
                 aria-selected={isSelected}
                 data-index={index}
                 data-selected={isSelected ? 'true' : 'false'}
-                className="fnm-songlist__row"
+                className="sanlos-songlist__row"
                 tabIndex={-1}
                 ref={(element) => {
                   if (element) rowRefs.current.set(index, element)
@@ -434,14 +434,14 @@ export function SongList(props: SongListProps): ReactElement {
                 onDoubleClick={() => handleRowDoubleClick(index)}
                 style={{ top: index * rowHeight }}
               >
-                <span className="fnm-songlist__cover">
+                <span className="sanlos-songlist__cover">
                   <CoverImage coverId={song.coverId} alt="" boxSize={SONG_COVER_SIZE} />
                 </span>
-                <span className="fnm-songlist__title">{song.title}</span>
+                <span className="sanlos-songlist__title">{song.title}</span>
                 {/* ⚠️ 可选的行首序号（T98「有声读物」用它显示**集号**）。 */}
                 {renderIndex ? renderIndex(song, index) : null}
-                <span className="fnm-songlist__artist">{song.artist}</span>
-                <span className="fnm-songlist__album">{song.album}</span>
+                <span className="sanlos-songlist__artist">{song.artist}</span>
+                <span className="sanlos-songlist__album">{song.album}</span>
                 {/*
                   ⚠️ **这里原来有个 ♥ 徽标**（按服务端 `song.favorite` 字段渲染）。
                   T25 把它**去掉**了 —— 每一行现在都有**行内收藏按钮**，
@@ -451,14 +451,14 @@ export function SongList(props: SongListProps): ReactElement {
                 */}
                 {/* ⚠️ 可选的行内操作（Task 16）：不传时**不产生任何 DOM 节点**。 */}
                 {renderRowActions ? renderRowActions(song, index) : null}
-                <span className="fnm-songlist__duration">{formatDuration(song.duration)}</span>
+                <span className="sanlos-songlist__duration">{formatDuration(song.duration)}</span>
               </div>
             )
           })}
         </div>
       </div>
 
-      <p className="fnm-songlist__status">{statusText}</p>
+      <p className="sanlos-songlist__status">{statusText}</p>
     </div>
   )
 }

@@ -287,7 +287,7 @@ if (userDataMigration.status === 'migrated') {
 
 // 1. **在 `app.whenReady()` 之前**注册**全部**自定义 scheme 的特权——
 //    Electron 的 `registerSchemesAsPrivileged()` **整个进程只能调用一次**，
-//    第二次会**静默覆盖**第一次的注册结果 → 所以 `fnm` 与 `fnml`
+//    第二次会**静默覆盖**第一次的注册结果 → 所以 `sanlos` 与 `sanlos-media`
 //    **必须合并成一次**注册（见 `electron/schemes.ts` 的详细说明）。
 registerAppSchemes()
 
@@ -330,7 +330,7 @@ if (!isPrimaryInstance) {
 
       const session = new SessionManager({ http })
 
-      // 5. `fnm://` 协议代理（渲染进程唯一的出网出口）。
+      // 5. `sanlos://` 协议代理（渲染进程唯一的出网出口）。
       registerProxy(session, { http })
 
       // 6. NAS 账号 OAuth（Task 11）：授权窗口 + 静默续期。
@@ -348,7 +348,7 @@ if (!isPrimaryInstance) {
       //    静默续期（Task 7 的 `setNasRelogin` 契约）：返回新 token，空串 = 失败。
       session.setNasRelogin(nasReloginHandler)
 
-      // 7. 认证 IPC（渲染进程的登录页通过 `window.fn` 调用）。
+      // 7. 认证 IPC（渲染进程的登录页通过 `window.sanlosAuth` 调用）。
       registerAuthIpc(session, { trusted, http, nasLoginHandler })
 
       // 8. 证书放行：**只**对 `trusted` 里的 host 放行自签 / 非受信证书。
@@ -443,7 +443,7 @@ if (!isPrimaryInstance) {
       win.on('move', () => reanchorIsland())
 
       win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-        console.error(`[fnmusic] 页面加载失败: ${errorCode} ${errorDescription} (${validatedURL})`)
+        console.error(`[sanlos] 页面加载失败: ${errorCode} ${errorDescription} (${validatedURL})`)
       })
 
       // 11. **关闭窗口 = 隐藏，播放继续**（Task 17 的核心用户体验）。
@@ -464,13 +464,13 @@ if (!isPrimaryInstance) {
 
       if (devServerUrl) {
         win.loadURL(devServerUrl).catch((err: unknown) => {
-          console.error(`[fnmusic] dev server 加载失败 (${devServerUrl}):`, err)
+          console.error(`[sanlos] dev server 加载失败 (${devServerUrl}):`, err)
         })
       } else {
         // __dirname = resources/app/dist-electron，故 ../dist/index.html 即随包发布的渲染进程入口
         const indexPath = path.join(__dirname, '../dist/index.html')
         win.loadFile(indexPath).catch((err: unknown) => {
-          console.error(`[fnmusic] 生产页面加载失败 (${indexPath}):`, err)
+          console.error(`[sanlos] 生产页面加载失败 (${indexPath}):`, err)
         })
       }
 
@@ -617,20 +617,20 @@ if (!isPrimaryInstance) {
         },
       })
 
-      // `fnml://` 协议：把已下载的文件交给渲染进程的 `<audio>` 播放。
+      // `sanlos-media://` 协议：把已下载的文件交给渲染进程的 `<audio>` 播放。
       // ⚠️ 路径**只**来自下载索引（已落盘的记录），渲染进程碰不到文件系统。
       //
       // 11c. FFmpeg 兜底解码（Task 12）。
       //
       //     不可解格式（APE / ALAC / DSF …）→ 用本机的 FFmpeg 把**本地副本**
       //     转码成 Opus，再交给渲染进程播。
-      //     ⚠️ 产物走**同一个** `fnml://local/track/<id>` 路由（**不新增路由种类**）：
+      //     ⚠️ 产物走**同一个** `sanlos-media://local/track/<id>` 路由（**不新增路由种类**）：
       //        lookup 改成「**临时产物优先 → 下载索引**」。
       //     ⚠️ 产物在**临时目录**里、**单槽**、**不进**下载索引、**不污染**下载目录；
       //        退出应用时清掉整个临时目录。
       // 11d. 本地曲目登记表（T38）。
       //
-      //     ⚠️ **用户自己加进来的本地文件**也走**同一条** `fnml://` 路由——
+      //     ⚠️ **用户自己加进来的本地文件**也走**同一条** `sanlos-media://` 路由——
       //        渲染进程**只能给一个 id**（`local:<hash>`），路径**只**来自登记表
       //        → **不新增路由种类 = 不放宽任何安全边界**。
       //
@@ -765,12 +765,12 @@ if (!isPrimaryInstance) {
         if (devServerUrl) {
           const url = `${devServerUrl.replace(/\/$/, '')}/lyric.html`
           win.loadURL(url).catch((err: unknown) => {
-            console.error(`[fnmusic] 悬浮歌词页面加载失败 (${url}):`, err)
+            console.error(`[sanlos] 悬浮歌词页面加载失败 (${url}):`, err)
           })
         } else {
           const lyricPath = path.join(__dirname, '../dist/lyric.html')
           win.loadFile(lyricPath).catch((err: unknown) => {
-            console.error(`[fnmusic] 悬浮歌词页面加载失败 (${lyricPath}):`, err)
+            console.error(`[sanlos] 悬浮歌词页面加载失败 (${lyricPath}):`, err)
           })
         }
         return win
@@ -846,12 +846,12 @@ if (!isPrimaryInstance) {
         if (devServerUrl) {
           const url = `${devServerUrl.replace(/\/$/, '')}/island.html`
           win.loadURL(url).catch((err: unknown) => {
-            console.error(`[fnmusic] 词岛页面加载失败 (${url}):`, err)
+            console.error(`[sanlos] 词岛页面加载失败 (${url}):`, err)
           })
         } else {
           const islandPath = path.join(__dirname, '../dist/island.html')
           win.loadFile(islandPath).catch((err: unknown) => {
-            console.error(`[fnmusic] 词岛页面加载失败 (${islandPath}):`, err)
+            console.error(`[sanlos] 词岛页面加载失败 (${islandPath}):`, err)
           })
         }
         return win
@@ -1069,12 +1069,12 @@ if (!isPrimaryInstance) {
       //     → 该分区对它的证书走 Chromium 默认校验（自签**不会**被放行）。
       //     ⚠️ **渲染层不碰网络**：检查 / 下载 / 启动全在主进程。
       //
-      // 14a. **更新目录**（T89-③）：默认 `%TEMP%\fnmusic-update`。
-      //      ⚠️ `FNM_UPDATE_DIR` 可以改写它 —— **E2E 用它做隔离**：
+      // 14a. **更新目录**（T89-③）：默认 `%TEMP%\sanlos-update`。
+      //      ⚠️ `SANLOS_UPDATE_DIR` 可以改写它 —— **E2E 用它做隔离**：
       //      E2E 只隔离了 `--user-data-dir`（userData），**没隔离 `%TEMP%`**
       //      ⇒ 不隔离的话，E2E 会往用户真实的 `%TEMP%` 里写假安装包，
       //      而且每次启动都会**清掉用户待装的安装包**。
-      const updateDir = process.env.FNM_UPDATE_DIR ?? path.join(app.getPath('temp'), 'fnmusic-update')
+      const updateDir = process.env.SANLOS_UPDATE_DIR ?? path.join(app.getPath('temp'), 'sanlos-update')
       //
       // 14b. **启动时清空更新目录**（T89-③）。
       //      ⚠️ 为什么可以放心清：更新状态（`download` / `status`）是**内存态**
@@ -1117,10 +1117,10 @@ if (!isPrimaryInstance) {
           //    ⇒ E2E 必须能把链限制到 mock 指的源，否则会打真实外网。
           //    ⚠️ 只由**主进程**从**环境变量**读（渲染层碰不到 ⇒ 不是提权）；
           //    没设这个环境变量 ⇒ `undefined` ⇒ **行为一字不变**。
-          allowedSources: resolveAllowedLyricSources(process.env.FNM_LYRIC_SOURCES),
+          allowedSources: resolveAllowedLyricSources(process.env.SANLOS_LYRIC_SOURCES),
         }),
         // ⚠️ **T83：音频内嵌歌词**。
-        //    查找链与 `fnml://` 一致（下载索引 → 本地登记表）——
+        //    查找链与 `sanlos-media://` 一致（下载索引 → 本地登记表）——
         //    下载过的曲目拿到的是**原文件**（标签最完整）。
         embedded: {
           resolveTrackPath: (id) => downloads.localPath(id) ?? localLibrary.localPath(id),
@@ -1142,9 +1142,9 @@ if (!isPrimaryInstance) {
       //     ⚠️ **主进程只负责抓榜**：曲库在**用户自己的 NAS** 里，
       //        匹配与推荐在渲染层做（那里才有当前账号的曲库访问权）。
       //     ⚠️ **渲染层不碰网络、也不能指定地址**（与歌词源同一条纪律）。
-      //     ⚠️ **地址可覆盖**（`FNM_CHART_URL`）：E2E / 自建镜像用；
+      //     ⚠️ **地址可覆盖**（`SANLOS_CHART_URL`）：E2E / 自建镜像用；
       //        只接受 https 或回环地址（`resolveChartBaseUrl` 把关）。
-      const chartBaseUrl = resolveChartBaseUrl(process.env['FNM_CHART_URL'])
+      const chartBaseUrl = resolveChartBaseUrl(process.env['SANLOS_CHART_URL'])
       //
       //     ⚠️ **两条通道**：
       //     - **默认榜源（QQ，https）走 Chromium 分区栈**（`http.fetch`）：
@@ -1177,7 +1177,7 @@ if (!isPrimaryInstance) {
       })
     })
     .catch((err: unknown) => {
-      console.error('[fnmusic] 应用启动失败:', err)
+      console.error('[sanlos] 应用启动失败:', err)
       app.quit()
     })
 }

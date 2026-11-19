@@ -102,11 +102,11 @@ function fakeBridge(failSongIds: string[] = []): {
 
 /** 装上假桥。 */
 function install(bridge: PlayerBridge): void {
-  ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+  ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
 }
 
 beforeEach(() => {
-  delete (globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   useDownloadStore.setState({
     entries: {},
     tasks: {},
@@ -217,28 +217,28 @@ describe('批量下载：工具条', () => {
     // ⚠️ **必须常驻**：工具条在「第一次单击」时冒出来会把列表往下推
     //    → 用户的第二击落在别的行上 → 浏览器不再派发 `dblclick`
     //    → **双击播放直接失效**（E2E 实测踩过这个坑）。
-    expect(screen.getByTestId('fnm-batch-download-bar')).toBeTruthy()
+    expect(screen.getByTestId('sanlos-batch-download-bar')).toBeTruthy()
     expect(screen.getByText('Ctrl / Shift 多选后可批量下载')).toBeTruthy()
     // 没选中时**没有**下载按钮（点了也没意义）。
-    expect(screen.queryByTestId('fnm-batch-download-button')).toBeNull()
+    expect(screen.queryByTestId('sanlos-batch-download-button')).toBeNull()
     expect(screen.queryByText('已选 1 首')).toBeNull()
   })
 
   it('样式：**高度写死一行**（不让列表位移）', () => {
     const { container } = render(<BatchDownloadBar songs={[]} />)
-    const bar = container.querySelector('.fnm-batchdownload') as HTMLElement
+    const bar = container.querySelector('.sanlos-batchdownload') as HTMLElement
     // ⚠️ 契约测试要**剥注释再匹配**（否则匹配到注释正文 = 空断言）。
     const css = readFileSync(
       join(__dirname, '..', 'src', 'components', 'batch-download-bar.css'),
       'utf8',
     ).replace(/\/\*[\s\S]*?\*\//g, '')
-    expect(css).toMatch(/\.fnm-batchdownload\s*\{[^}]*height:\s*36px/)
-    expect(css).toMatch(/\.fnm-batchdownload\s*\{[^}]*flex-wrap:\s*nowrap/)
+    expect(css).toMatch(/\.sanlos-batchdownload\s*\{[^}]*height:\s*36px/)
+    expect(css).toMatch(/\.sanlos-batchdownload\s*\{[^}]*flex-wrap:\s*nowrap/)
     // ⚠️ **必须 `flex: 0 0 auto`**：页面外壳是纵向 flex 容器，
     //    默认 `flex-shrink: 1` 会把工具条**压扁**（实测 36px → 2.45px），
     //    按钮被裁掉 → 点不到。
-    expect(css).toMatch(/\.fnm-batchdownload\s*\{[^}]*flex:\s*0 0 auto/)
-    expect(bar.className).toContain('fnm-batchdownload')
+    expect(css).toMatch(/\.sanlos-batchdownload\s*\{[^}]*flex:\s*0 0 auto/)
+    expect(bar.className).toContain('sanlos-batchdownload')
   })
 
   it('选中了 → 显示「已选 N 首」和「下载所选」', () => {

@@ -35,7 +35,7 @@ function fakeStorage(opts: { available?: boolean; failDecrypt?: boolean } = {}):
 const tempDirs: string[] = []
 
 function tempFile(name = 'session.bin'): string {
-  const dir = mkdtempSync(join(tmpdir(), 'fnmusic-session-'))
+  const dir = mkdtempSync(join(tmpdir(), 'sanlos-session-'))
   tempDirs.push(dir)
   return join(dir, name)
 }
@@ -441,7 +441,7 @@ describe('token 失效的续期与重试', () => {
   })
 
   // ⚠️ **下面两条钉的是「真服务端的真实形状」**（T19-1 用
-  //    `tools/fn-token-expiry-probe.mjs` 在真实 NAS 上实测出来的）。
+  //    `tools/sanlos-token-expiry-probe.mjs` 在真实 NAS 上实测出来的）。
   //    原本的单测一律用「HTTP 200 + body 里的 99999」来模拟，
   //    于是**恰好漏掉了真实服务端的两面**：
   //      ① token 失效时服务端回的是 **HTTP 401**（不是 200）；

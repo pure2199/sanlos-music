@@ -175,7 +175,7 @@ Get-AuthenticodeSignature '.\SanlosMusic-Setup-0.2.9.exe' |
 
 ## 五、本地开发用的自签证书（**别拿来发版**）
 
-`tools/fn-make-selfsigned-cert.mjs` 能生成一张本地自签代码签名证书，用来把
+`tools/sanlos-make-selfsigned-cert.mjs` 能生成一张本地自签代码签名证书，用来把
 「打包 → 断言 → 客户端校验」这条链路在本机跑通。
 
 ⚠️ **自签证书不受信任** ⇒ 对外发布时 Windows 仍提示「未知发布者 / 不受信任的证书」
@@ -208,5 +208,5 @@ Get-AuthenticodeSignature '.\SanlosMusic-Setup-0.2.9.exe' |
 | [`.signpath/artifact-configurations/default.xml`](../.signpath/artifact-configurations/default.xml) | 告诉 SignPath「签哪个文件、怎么签」 |
 | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | 发版工作流（打包 → 送签 → 审批 → 校验 → 发布） |
 | `scripts/check-signpath-config.mjs` | 配置**快速失败**检查 |
-| `tools/fn-check-signature.mjs` | 签名**断言**（Valid / 时间戳 / CN） |
+| `tools/sanlos-check-signature.mjs` | 签名**断言**（Valid / 时间戳 / CN） |
 | `shared/update.ts` | 客户端与工具**共用**的签名者匹配口径 |

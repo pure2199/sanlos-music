@@ -66,7 +66,7 @@ export interface DiscoverDeps {
   albumSongs: (albumId: string) => Promise<Song[]>
 }
 
-/** 生产用的实现（走渲染层既有的 `fnm://srv` 通道 ⇒ 自动带当前账号的凭证）。 */
+/** 生产用的实现（走渲染层既有的 `sanlos://srv` 通道 ⇒ 自动带当前账号的凭证）。 */
 export const defaultDiscoverDeps: DiscoverDeps = {
   searchArtists: async (name) => (await searchApi.artists(name, { size: 5 })).list,
   artistSongs: async (artistId) =>

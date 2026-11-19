@@ -90,7 +90,7 @@ describe('EqPanel：两层数值与实际增益一致', () => {
     fireEvent.change(screen.getByLabelText('预置曲线'), { target: { value: 'bass-boost' } })
 
     // 31.5 Hz（第一段）：基线 +6、偏移 0、实际 +6
-    const firstBand = container.querySelectorAll('.fnm-eqpanel__band')[0]
+    const firstBand = container.querySelectorAll('.sanlos-eqpanel__band')[0]
     expect(firstBand?.textContent).toContain('基线 +6.0')
     expect(firstBand?.textContent).toContain('偏移 0.0')
     expect(firstBand?.textContent).toContain('实际 +6.0')
@@ -124,7 +124,7 @@ describe('EqPanel：两层数值与实际增益一致', () => {
     fireEvent.change(screen.getByLabelText('1k 增益偏移'), { target: { value: '-4' } })
 
     // 面板上逐段显示的「实际」必须与 store 的生效增益**逐项相等**
-    const shown = Array.from(container.querySelectorAll('.fnm-eqpanel__effective')).map(
+    const shown = Array.from(container.querySelectorAll('.sanlos-eqpanel__effective')).map(
       (node) => node.textContent,
     )
     const expected = store.getState().eqGains.map((gain) => `实际 ${formatEqGain(gain)}`)

@@ -62,8 +62,8 @@ export interface FavoriteButtonProps {
   /**
    * 附加类名。
    *
-   * ⚠️ 搜索页沿用它自己的样式钩子（`fnm-searchpanel__favorite`），
-   *    其余页面用默认的 `fnm-favorite`。
+   * ⚠️ 搜索页沿用它自己的样式钩子（`sanlos-searchpanel__favorite`），
+   *    其余页面用默认的 `sanlos-favorite`。
    */
   className?: string
 }
@@ -94,8 +94,8 @@ export function FavoriteButton({
   return (
     <button
       type="button"
-      className={className ?? 'fnm-favorite'}
-      data-testid="fnm-favorite-toggle"
+      className={className ?? 'sanlos-favorite'}
+      data-testid="sanlos-favorite-toggle"
       data-song-id={song.id}
       data-favorite={favorite ? 'true' : 'false'}
       data-pending={pending ? 'true' : 'false'}

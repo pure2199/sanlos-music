@@ -109,7 +109,7 @@ export async function launchApp(opts?: LaunchAppOptions): Promise<AppFixture> {
   const ownsMock = !opts?.mock
   const mock = opts?.mock ?? createMockServer()
   const ownsUserDataDir = !opts?.userDataDir
-  const userDataDir = opts?.userDataDir ?? mkdtempSync(join(tmpdir(), 'fnmusic-e2e-'))
+  const userDataDir = opts?.userDataDir ?? mkdtempSync(join(tmpdir(), 'sanlos-e2e-'))
 
   // ⚠️ **下载目录预置到临时目录**（T27 批量下载会真的下文件）。
   //    默认的下载目录是「我的音乐\Sanlos music」—— 那是**用户真实的数据目录**，
@@ -148,26 +148,26 @@ export async function launchApp(opts?: LaunchAppOptions): Promise<AppFixture> {
       args: [APP_ROOT, `--user-data-dir=${userDataDir}`],
       // ⚠️ T89-③：**更新目录也要隔离** —— E2E 只隔离了 userData，
       //    **没隔离 `%TEMP%`** ⇒ E2E 的自动更新用例会往用户真实的
-      //    `%TEMP%\fnmusic-update` 写一个假安装包，
+      //    `%TEMP%\sanlos-update` 写一个假安装包，
       //    而且应用启动时（清空更新目录）会**清掉用户待装的安装包**。
       //    ⇒ 指向 userData 临时目录下的一个子目录：随 userData 一起用完即删。
       //
       // ⚠️ T96：**榜源也指到 mock** —— 「发现」页的榜单来自**外部公开榜源**
       //    （默认是 QQ 音乐）。E2E **不许打真实外网**（不确定 + 会被限流）
-      //    ⇒ 用 `FNM_CHART_URL` 把榜源指到 mock 的 `/mock-chart`
+      //    ⇒ 用 `SANLOS_CHART_URL` 把榜源指到 mock 的 `/mock-chart`
       //    （主进程只接受 https 或**回环** http ⇒ mock 的 127.0.0.1 合法）。
       env: {
         ...stringEnv(process.env),
-        FNM_UPDATE_DIR: join(userDataDir, 'update'),
-        FNM_CHART_URL: `${mock.url}/mock-chart`,
-        // ⚠️ **T108：E2E 不许打真实外网**（同 `FNM_CHART_URL` 的既有纪律）。
+        SANLOS_UPDATE_DIR: join(userDataDir, 'update'),
+        SANLOS_CHART_URL: `${mock.url}/mock-chart`,
+        // ⚠️ **T108：E2E 不许打真实外网**（同 `SANLOS_CHART_URL` 的既有纪律）。
         //    T108 改成「**并发轮询全部源**」之后，连 `custom` 源也会去问
         //    网易云 / lrclib / QQ / 酷狗 / 酷我 / 咪咕 ⇒ E2E 会真的访问公网
         //    （慢 + 不确定 + 可能被真实歌词顶掉）。
         //    ⇒ 把**兜底源**限制到 mock 指的 `custom` ⇒ 链 = `[custom]`
         //    ⇒ **既有 E2E 行为一字不变**，且一个真实外网请求都不发。
         //    ⚠️ 只由**主进程**从**环境变量**读（渲染层碰不到）。
-        FNM_LYRIC_SOURCES: 'custom',
+        SANLOS_LYRIC_SOURCES: 'custom',
       },
     })
   } catch (err) {
@@ -228,8 +228,8 @@ async function quitApp(app: ElectronApplication): Promise<void> {
  * @param server 服务器地址（形如 `http://127.0.0.1:12345`）。
  */
 export async function login(window: Page, server: string): Promise<void> {
-  await window.fill('#fnm-address', server)
-  await window.fill('#fnm-username', MOCK_USERNAME)
-  await window.fill('#fnm-password', MOCK_PASSWORD)
+  await window.fill('#sanlos-address', server)
+  await window.fill('#sanlos-username', MOCK_USERNAME)
+  await window.fill('#sanlos-password', MOCK_PASSWORD)
   await window.click('button[type="submit"]')
 }

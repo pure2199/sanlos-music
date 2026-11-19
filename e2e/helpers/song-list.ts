@@ -34,10 +34,10 @@ export interface SongListRow {
 /** 读当前 DOM 里那一屏的行。 */
 async function readVisibleRows(page: Page): Promise<SongListRow[]> {
   return page.evaluate(() =>
-    [...document.querySelectorAll('.fnm-songlist__row')].map((el) => ({
+    [...document.querySelectorAll('.sanlos-songlist__row')].map((el) => ({
       index: Number(el.getAttribute('data-index') ?? '-1'),
-      title: el.querySelector('.fnm-songlist__title')?.textContent ?? '',
-      episode: el.querySelector('.fnm-detail__episode')?.textContent ?? null,
+      title: el.querySelector('.sanlos-songlist__title')?.textContent ?? '',
+      episode: el.querySelector('.sanlos-detail__episode')?.textContent ?? null,
     })),
   )
 }
@@ -48,7 +48,7 @@ async function waitForWindowMove(page: Page, previous: number): Promise<void> {
     .waitForFunction(
       (prev) =>
         Number(
-          document.querySelector('.fnm-songlist__viewport')?.getAttribute('data-scroll-top') ?? '0',
+          document.querySelector('.sanlos-songlist__viewport')?.getAttribute('data-scroll-top') ?? '0',
         ) !== prev,
       previous,
       { timeout: 5_000, polling: 50 },
@@ -59,10 +59,10 @@ async function waitForWindowMove(page: Page, previous: number): Promise<void> {
 /** 把列表滚回顶部（并等虚拟窗口回到顶）。 */
 export async function scrollSongListToTop(page: Page): Promise<void> {
   const previous = await page.evaluate(() =>
-    Number(document.querySelector('.fnm-songlist__viewport')?.getAttribute('data-scroll-top') ?? '0'),
+    Number(document.querySelector('.sanlos-songlist__viewport')?.getAttribute('data-scroll-top') ?? '0'),
   )
   await page.evaluate(() => {
-    const v = document.querySelector('.fnm-songlist__viewport')
+    const v = document.querySelector('.sanlos-songlist__viewport')
     if (v) v.scrollTop = 0
   })
   await waitForWindowMove(page, previous)
@@ -71,10 +71,10 @@ export async function scrollSongListToTop(page: Page): Promise<void> {
 /** 把列表滚到底（并等虚拟窗口追上来）。 */
 export async function scrollSongListToBottom(page: Page): Promise<void> {
   const previous = await page.evaluate(() =>
-    Number(document.querySelector('.fnm-songlist__viewport')?.getAttribute('data-scroll-top') ?? '0'),
+    Number(document.querySelector('.sanlos-songlist__viewport')?.getAttribute('data-scroll-top') ?? '0'),
   )
   await page.evaluate(() => {
-    const v = document.querySelector('.fnm-songlist__viewport')
+    const v = document.querySelector('.sanlos-songlist__viewport')
     if (v) v.scrollTop = v.scrollHeight - v.clientHeight
   })
   await waitForWindowMove(page, previous)
@@ -103,10 +103,10 @@ export async function collectSongListRows(page: Page): Promise<SongListRow[]> {
   // 一屏一屏往下滚（每步滚「一个视口高」⇒ 不会跳过整屏）。
   for (let step = 0; step < 200; step += 1) {
     const previous = await page.evaluate(() =>
-      Number(document.querySelector('.fnm-songlist__viewport')?.getAttribute('data-scroll-top') ?? '0'),
+      Number(document.querySelector('.sanlos-songlist__viewport')?.getAttribute('data-scroll-top') ?? '0'),
     )
     const moved = await page.evaluate(() => {
-      const v = document.querySelector('.fnm-songlist__viewport')
+      const v = document.querySelector('.sanlos-songlist__viewport')
       if (!v) return false
       const max = v.scrollHeight - v.clientHeight
       if (v.scrollTop >= max - 1) return false

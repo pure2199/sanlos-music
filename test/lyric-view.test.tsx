@@ -87,7 +87,7 @@ function lineAt(container: HTMLElement, index: number): HTMLElement {
 
 /** 去掉「上一行 / 下一行」槽位修饰符后的类名（用来比较两行的样式是否一致）。 */
 function withoutSlot(className: string): string {
-  return className.replace(/\bfnm-lyricview__line--(previous|next)\b/g, '').trim()
+  return className.replace(/\bsanlos-lyricview__line--(previous|next)\b/g, '').trim()
 }
 
 /** 仓库根目录（源码断言用）。 */
@@ -235,7 +235,7 @@ describe('LyricView：双行模式', () => {
     // ⚠️ 鉴别力：伪逐字 ⇒ **一个词元素都没有**（不假装逐字）。
     expect(previous.querySelectorAll('[data-word]')).toHaveLength(0)
     // ⚠️ 鉴别力：已走满的那一行**整行**是强调色。
-    expect(previous.className).toContain('fnm-lyricview__line--whole')
+    expect(previous.className).toContain('sanlos-lyricview__line--whole')
   })
 
   // ⚠️ **前提已被推翻**（T81）→ 本断言改写为**新行为**。
@@ -248,9 +248,9 @@ describe('LyricView：双行模式', () => {
     const previous = lineAt(container, 0)
     const next = lineAt(container, 1)
     // 正在唱的那一行：整行强调色
-    expect(previous.className).toContain('fnm-lyricview__line--whole')
+    expect(previous.className).toContain('sanlos-lyricview__line--whole')
     // 还没唱的那一行：**没有** `--whole`
-    expect(next.className).not.toContain('fnm-lyricview__line--whole')
+    expect(next.className).not.toContain('sanlos-lyricview__line--whole')
     // ⚠️ 两行都**没有**词元素（不假装逐字）。
     expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
   })
@@ -321,14 +321,14 @@ describe('LyricView：当前词高亮钩子（T46）', () => {
         lines={WORD_TIMED_THREE_LINES}
         currentTime={25}
         mode="double"
-        activeWordClassName="fnm-lyricview__word--active"
+        activeWordClassName="sanlos-lyricview__word--active"
       />,
     )
 
     // t=25 时乙行（20~30s）正在唱 → 它的「当前词」该带钩子类名。
     const next = lineAt(container, 1)
     const words = Array.from(next.querySelectorAll('[data-word]'))
-    const active = words.filter((word) => word.className.includes('fnm-lyricview__word--active'))
+    const active = words.filter((word) => word.className.includes('sanlos-lyricview__word--active'))
     expect(active).toHaveLength(1)
     // ⚠️ 鉴别力：当前词确实是**正在唱的那一个**（行@25s），不是别的词。
     expect(active[0]!.textContent).toBe('行')
@@ -343,7 +343,7 @@ describe('LyricView：当前词高亮钩子（T46）', () => {
     const words = Array.from(next.querySelectorAll('[data-word]'))
     // ⚠️ 鉴别力：词元素**确实存在**（真逐字）⇒ 「没加钩子」不是因为「没东西可加」。
     expect(words.length).toBeGreaterThan(0)
-    expect(words.some((word) => /fnm-lyricview__word--active/.test(word.className))).toBe(false)
+    expect(words.some((word) => /sanlos-lyricview__word--active/.test(word.className))).toBe(false)
   })
 
   it('该行已走满 → **不给**当前词加钩子（整行都是唱过的状态）', () => {
@@ -352,7 +352,7 @@ describe('LyricView：当前词高亮钩子（T46）', () => {
         lines={WORD_TIMED_THREE_LINES}
         currentTime={25}
         mode="double"
-        activeWordClassName="fnm-lyricview__word--active"
+        activeWordClassName="sanlos-lyricview__word--active"
       />,
     )
 
@@ -361,7 +361,7 @@ describe('LyricView：当前词高亮钩子（T46）', () => {
     const words = Array.from(previous.querySelectorAll('[data-word]'))
     // ⚠️ 鉴别力：词元素**确实存在**（真逐字）⇒ 「没加钩子」不是因为「没东西可加」。
     expect(words.length).toBeGreaterThan(0)
-    expect(words.some((word) => /fnm-lyricview__word--active/.test(word.className))).toBe(false)
+    expect(words.some((word) => /sanlos-lyricview__word--active/.test(word.className))).toBe(false)
   })
 })
 
@@ -389,7 +389,7 @@ const KARAOKE_LINE: LyricLine = {
   ],
 }
 
-/** 取某个词（`.fnm-lyricview__word`，带 `data-word`）。 */
+/** 取某个词（`.sanlos-lyricview__word`，带 `data-word`）。 */
 function wordAt(container: HTMLElement, wordIndex: number): HTMLElement {
   const element = container.querySelector(`[data-word="${wordIndex}"]`)
   expect(element).not.toBeNull()
@@ -405,9 +405,9 @@ describe('LyricView：卡拉OK 渐进填色（T48）', () => {
     // t=3 → 当前词是「乙」（2~4s）
     const current = wordAt(container, 1)
     expect(current.textContent).toBe('乙')
-    expect(current.className).toContain('fnm-lyricview__word--karaoke')
+    expect(current.className).toContain('sanlos-lyricview__word--karaoke')
     // ⚠️ **不许**再整词上色：整词已是强调色 → 词内填色就看不见了。
-    expect(current.className).not.toContain('fnm-lyricview__word--sung')
+    expect(current.className).not.toContain('sanlos-lyricview__word--sung')
   })
 
   it('**已唱过的词照旧整词上色**，**没唱到的词不上色**', () => {
@@ -415,10 +415,10 @@ describe('LyricView：卡拉OK 渐进填色（T48）', () => {
       <LyricView lines={[KARAOKE_LINE]} currentTime={3} mode="single" karaoke />,
     )
 
-    expect(wordAt(container, 0).className).toContain('fnm-lyricview__word--sung')
+    expect(wordAt(container, 0).className).toContain('sanlos-lyricview__word--sung')
     const after = wordAt(container, 2)
-    expect(after.className).not.toContain('fnm-lyricview__word--sung')
-    expect(after.className).not.toContain('fnm-lyricview__word--karaoke')
+    expect(after.className).not.toContain('sanlos-lyricview__word--sung')
+    expect(after.className).not.toContain('sanlos-lyricview__word--karaoke')
   })
 
   it('填充比例 = **词内连续比例**（t=3 时正好 50%）', () => {
@@ -453,8 +453,8 @@ describe('LyricView：卡拉OK 渐进填色（T48）', () => {
 
     const words = Array.from(container.querySelectorAll('[data-word]'))
     expect(words).toHaveLength(3)
-    expect(words.some((word) => /fnm-lyricview__word--karaoke/.test(word.className))).toBe(false)
-    expect(words.every((word) => /fnm-lyricview__word--sung/.test(word.className))).toBe(true)
+    expect(words.some((word) => /sanlos-lyricview__word--karaoke/.test(word.className))).toBe(false)
+    expect(words.every((word) => /sanlos-lyricview__word--sung/.test(word.className))).toBe(true)
   })
 
   it('**显式** `karaoke={false}` → 行为**一字不变**（当前词照旧整词上色，没有填色钩子）', () => {
@@ -463,8 +463,8 @@ describe('LyricView：卡拉OK 渐进填色（T48）', () => {
     )
 
     const current = wordAt(container, 1)
-    expect(current.className).toContain('fnm-lyricview__word--sung')
-    expect(current.className).not.toContain('fnm-lyricview__word--karaoke')
+    expect(current.className).toContain('sanlos-lyricview__word--sung')
+    expect(current.className).not.toContain('sanlos-lyricview__word--karaoke')
     expect(current.getAttribute('data-karaoke-progress')).toBeNull()
   })
 
@@ -477,8 +477,8 @@ describe('LyricView：卡拉OK 渐进填色（T48）', () => {
     )
 
     const current = wordAt(container, 1)
-    expect(current.className).toContain('fnm-lyricview__word--karaoke')
-    expect(current.className).not.toContain('fnm-lyricview__word--sung')
+    expect(current.className).toContain('sanlos-lyricview__word--karaoke')
+    expect(current.className).not.toContain('sanlos-lyricview__word--sung')
     expect(current.getAttribute('data-karaoke-progress')).toBe('50.0')
   })
 })
@@ -1073,7 +1073,7 @@ describe('FullPlayerPage：封面取色（要求 F / N）', () => {
     await waitFor(() => {
       const style =
         document.querySelector('[data-testid="full-player"]')?.getAttribute('style') ?? ''
-      expect(style).toContain('--fnm-fullplayer__tint')
+      expect(style).toContain('--sanlos-fullplayer__tint')
     })
     expect(getCachedCoverColor('track_abc')).toBe('#0a141e')
   })
@@ -1123,24 +1123,24 @@ describe('FullPlayerPage：封面取色（要求 F / N）', () => {
     expect(getCachedCoverColor('track_abc')).toBeUndefined()
     const style =
       document.querySelector('[data-testid="full-player"]')?.getAttribute('style') ?? ''
-    expect(style).not.toContain('--fnm-fullplayer__tint')
+    expect(style).not.toContain('--sanlos-fullplayer__tint')
   })
 
   it('extractCoverColor：图片加载失败时解析成 null（回退默认背景）', async () => {
     stubImage(true)
-    await expect(extractCoverColor('fnm://srv/cover-test')).resolves.toBeNull()
+    await expect(extractCoverColor('sanlos://srv/cover-test')).resolves.toBeNull()
   })
 
   it('extractCoverColor：取到像素时给出代表色', async () => {
     stubImage(false)
-    await expect(extractCoverColor('fnm://srv/cover-test')).resolves.toBe('#0a141e')
+    await expect(extractCoverColor('sanlos://srv/cover-test')).resolves.toBe('#0a141e')
   })
 
   it('取色时给封面图片设 crossOrigin=anonymous（**在设 src 之前**）→ canvas 不会被污染', async () => {
-    // 封面走 `fnm://` 代理，与页面**跨源** → 不设 crossOrigin 时 canvas 会被污染、
+    // 封面走 `sanlos://` 代理，与页面**跨源** → 不设 crossOrigin 时 canvas 会被污染、
     // `getImageData` 抛安全错误 → 取色永远失败。
     stubImage(false)
-    await expect(extractCoverColor('fnm://srv/cover-test')).resolves.toBe('#0a141e')
+    await expect(extractCoverColor('sanlos://srv/cover-test')).resolves.toBe('#0a141e')
 
     expect(crossOriginAtSrc).toEqual(['anonymous'])
   })
@@ -1148,7 +1148,7 @@ describe('FullPlayerPage：封面取色（要求 F / N）', () => {
   it('取色失败时仍然**优雅降级**（解析成 null → 回退 CSS 变量兜底背景）', async () => {
     // 图片加载失败（onerror）→ null
     stubImage(true)
-    await expect(extractCoverColor('fnm://srv/cover-test')).resolves.toBeNull()
+    await expect(extractCoverColor('sanlos://srv/cover-test')).resolves.toBeNull()
     // 依然带着 crossOrigin（说明失败不是「没设 crossOrigin」导致的）
     expect(crossOriginAtSrc).toEqual(['anonymous'])
   })
@@ -1201,12 +1201,12 @@ describe('FullPlayerPage：队列移除', () => {
 /**
  * 取行元素的**直接文本节点**（= 底层整行原文）。
  *
- * ⚠️ overlay 层（`.fnm-lyricview__overlay`）是 aria-hidden 的**着色副本**，
- *    空白在它内部是独立的 `.fnm-lyricview__space` 片段（**不带** `data-word`）
+ * ⚠️ overlay 层（`.sanlos-lyricview__overlay`）是 aria-hidden 的**着色副本**，
+ *    空白在它内部是独立的 `.sanlos-lyricview__space` 片段（**不带** `data-word`）
  *    ⇒ 只拼 `[data-word]` 的文本会**丢空格**，那不是缺陷、也不是回归。
  */
 function baseText(container: HTMLElement): string {
-  const line = container.querySelector('.fnm-lyricview__line')
+  const line = container.querySelector('.sanlos-lyricview__line')
   let text = ''
   for (const node of Array.from(line?.childNodes ?? [])) {
     if (node.nodeType === 3) text += node.textContent ?? ''
@@ -1245,7 +1245,7 @@ describe('LyricView：真逐字填充的词/文本对齐（T68）', () => {
     // 三个片段同属 yrc 的**同一个**词（wordIndex 0）⇒ 一起染色
     expect(words.map((w) => w.getAttribute('data-word'))).toEqual(['0', '0', '0'])
     // 空白被还原成独立片段（**不是**塞进词里）
-    const spaces = Array.from(container.querySelectorAll('.fnm-lyricview__space'))
+    const spaces = Array.from(container.querySelectorAll('.sanlos-lyricview__space'))
     expect(spaces.map((s) => s.textContent)).toEqual([' ', ' '])
     // 底层整行原文与 `line.text` 一致
     expect(baseText(container)).toBe('Some text here')
@@ -1269,7 +1269,7 @@ describe('LyricView：真逐字填充的词/文本对齐（T68）', () => {
     const words = Array.from(container.querySelectorAll('[data-word]'))
     expect(words.length).toBe(2)
     expect(words.map((w) => w.getAttribute('data-word'))).toEqual(['0', '1'])
-    const spaces = Array.from(container.querySelectorAll('.fnm-lyricview__space'))
+    const spaces = Array.from(container.querySelectorAll('.sanlos-lyricview__space'))
     expect(spaces.map((s) => s.textContent)).toEqual([' '])
     expect(baseText(container)).toBe('Hello world')
   })
@@ -1299,10 +1299,10 @@ describe('LyricView：真逐字填充的词/文本对齐（T68）', () => {
 
     // ⚠️ 鉴别力：**零**词元素、零空格片段 ⇒ DOM 里根本没有词级钩子。
     expect(container.querySelectorAll('[data-word]')).toHaveLength(0)
-    expect(container.querySelectorAll('.fnm-lyricview__space')).toHaveLength(0)
+    expect(container.querySelectorAll('.sanlos-lyricview__space')).toHaveLength(0)
     // ⚠️ 鉴别力：**行文本照旧完整显示**（不白屏、不丢字）。
     expect(baseText(container)).toBe('甲 乙')
     // ⚠️ 当前行**整行**强调色（不假装逐字）。
-    expect(lineAt(container, 0).className).toContain('fnm-lyricview__line--whole')
+    expect(lineAt(container, 0).className).toContain('sanlos-lyricview__line--whole')
   })
 })

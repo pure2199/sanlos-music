@@ -31,7 +31,7 @@ import { launchApp, login, type AppFixture } from './helpers/app'
 //    ⇒ 自己起一台回环 HTTP 服务器（主进程只接受 https 或**回环** http）。
 //
 // ⚠️ 全程**不碰真实外网**：外部源 = 本文件自己的回环服务器；
-//    兜底源由夹具的 `FNM_LYRIC_SOURCES=custom` 限死（见 `e2e/helpers/app.ts`）。
+//    兜底源由夹具的 `SANLOS_LYRIC_SOURCES=custom` 限死（见 `e2e/helpers/app.ts`）。
 // ---------------------------------------------------------------------------
 
 /** 假外部源给的那份 LRC（**两行正文各不相同** ⇒ 精确匹配不歧义）。 */
@@ -167,19 +167,19 @@ async function markAudiobookBySearch(window: Page): Promise<void> {
   await window.getByPlaceholder('输入作品名，例如：牧神记').fill(AUDIOBOOK_ALBUM_NAME)
   await window.getByRole('button', { name: '搜作品' }).click()
 
-  const results = window.locator('.fnm-audiobooks__result')
+  const results = window.locator('.sanlos-audiobooks__result')
   await expect(results).toHaveCount(1)
-  await results.first().locator('.fnm-audiobooks__title').click()
+  await results.first().locator('.sanlos-audiobooks__title').click()
   // ⚠️ 详情页按**集序**排 ⇒ 第一行就是第 1 集（证明「有声」已经生效）。
-  await expect(window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
+  await expect(window.locator('.sanlos-detail__audiobook-note')).toHaveText('已按集序排列')
 }
 
 /** 在**专辑详情页**里播第 1 集（有声读物的自然路径）。 */
 async function playFirstEpisodeFromDetail(window: Page): Promise<void> {
-  const rows = window.locator('.fnm-songlist__row')
-  await expect(rows.first().locator('.fnm-songlist__title')).toHaveText(EPISODE_TITLE)
+  const rows = window.locator('.sanlos-songlist__row')
+  await expect(rows.first().locator('.sanlos-songlist__title')).toHaveText(EPISODE_TITLE)
   await rows.first().dblclick()
-  await expect(window.locator('.fnm-playerbar__title')).toHaveText(EPISODE_TITLE)
+  await expect(window.locator('.sanlos-playerbar__title')).toHaveText(EPISODE_TITLE)
 }
 
 /** 播普通歌（对照组）。 */
@@ -188,14 +188,14 @@ async function playNormalSong(window: Page): Promise<void> {
   const list = window.getByRole('listbox', { name: '歌曲列表' })
   await expect(list).toBeVisible()
   await list.getByRole('option').filter({ hasText: NORMAL_SONG_TITLE }).first().dblclick()
-  await expect(window.locator('.fnm-playerbar__title')).toHaveText(NORMAL_SONG_TITLE)
+  await expect(window.locator('.sanlos-playerbar__title')).toHaveText(NORMAL_SONG_TITLE)
 }
 
 /** 登录（没连上服务器时点「连接」打开登录页 —— 与 t83 / t107 同一套稳健写法）。 */
 async function ensureLoggedIn(fixture: AppFixture): Promise<void> {
   const window = fixture.window
   // ⚠️ **必须等应用起来**：重启后它**多半自动登录**（`session.bin` 还在）
-  //    ⇒ 登录表单**存在但不可见** ⇒ 一看见 `#fnm-address` 就去填 ⇒ **必然超时**
+  //    ⇒ 登录表单**存在但不可见** ⇒ 一看见 `#sanlos-address` 就去填 ⇒ **必然超时**
   //    （第一轮就踩了这个坑：断言没跑到，栽在 `page.fill` 上）。
   let state = 'booting'
   const start = Date.now()
@@ -204,7 +204,7 @@ async function ensureLoggedIn(fixture: AppFixture): Promise<void> {
       state = 'ready'
       break
     }
-    if (await window.locator('#fnm-address').isVisible().catch(() => false)) {
+    if (await window.locator('#sanlos-address').isVisible().catch(() => false)) {
       state = 'login'
       break
     }
@@ -222,8 +222,8 @@ async function openAudiobookDetail(window: Page): Promise<void> {
     .getByRole('navigation', { name: '曲库导航' })
     .getByRole('button', { name: '专辑' })
     .click()
-  await window.locator('.fnm-card__button').filter({ hasText: AUDIOBOOK_ALBUM_NAME }).click()
-  await window.waitForSelector('.fnm-songlist__row')
+  await window.locator('.sanlos-card__button').filter({ hasText: AUDIOBOOK_ALBUM_NAME }).click()
+  await window.waitForSelector('.sanlos-songlist__row')
 }
 
 test.describe.serial('T112：有声读物 ⇒ 桌面歌词不显示、也不查词', () => {
@@ -326,7 +326,7 @@ test.describe.serial('T112：有声读物 ⇒ 桌面歌词不显示、也不查�
       // ⚠️ **不进「有声」页**：只进「专辑」页 ⇒ 详情页要靠**落盘判定**才知道是「有声」。
       await openAudiobookDetail(window)
       // ⚠️ 详情页**按集序排** ⇒ 证明启动时确实恢复了「这是有声」的判定。
-      await expect(window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
+      await expect(window.locator('.sanlos-detail__audiobook-note')).toHaveText('已按集序排列')
 
       source.reset()
       await playFirstEpisodeFromDetail(window)

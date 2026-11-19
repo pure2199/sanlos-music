@@ -5,7 +5,7 @@
 // 职责
 // - 维护一张「本地曲目登记表」（`<userData>/local-library.json`）：
 //   用户通过对话框挑进来的本地音频文件，登记在案；
-// - 提供 `fnml://` 的 lookup（`localPath(id)`）——渲染进程**只能给 id**，
+// - 提供 `sanlos-media://` 的 lookup（`localPath(id)`）——渲染进程**只能给 id**，
 //   **给不出路径**；
 // - 弹文件 / 文件夹选择对话框，递归扫描目录。
 //

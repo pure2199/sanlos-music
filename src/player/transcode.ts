@@ -126,7 +126,7 @@ export class TranscodeError extends Error {
 export interface TranscodeSession {
   /** 服务端任务 id（删除产物时要用）。 */
   readonly downloadId: string
-  /** 产物地址（`fnm://srv/download/track/transcode/file?downloadId=…`）。 */
+  /** 产物地址（`sanlos://srv/download/track/transcode/file?downloadId=…`）。 */
   readonly url: string
   /** 删掉服务端产物（切歌 / 播完后调用；**失败不抛**）。 */
   dispose(): Promise<void>
@@ -235,9 +235,9 @@ export function normalizeStreamQuality(value: unknown): StreamQuality {
   return value === 'standard' ? 'standard' : DEFAULT_STREAM_QUALITY
 }
 
-/** 构造转码产物的地址（`fnm://` 代理地址，**绝不**含凭证）。 */
+/** 构造转码产物的地址（`sanlos://` 代理地址，**绝不**含凭证）。 */
 export function transcodeFileUrl(downloadId: string): string {
-  return `fnm://srv/${FILE_PATH}?downloadId=${encodeURIComponent(downloadId)}`
+  return `sanlos://srv/${FILE_PATH}?downloadId=${encodeURIComponent(downloadId)}`
 }
 
 /**
@@ -248,7 +248,7 @@ export function transcodeFileUrl(downloadId: string): string {
 export async function deleteTranscode(downloadId: string): Promise<void> {
   if (downloadId.length === 0) return
   try {
-    await requestJson(`fnm://srv/${DELETE_PATH}`, {
+    await requestJson(`sanlos://srv/${DELETE_PATH}`, {
       method: 'POST',
       body: { downloadId },
       timeoutMs: REQUEST_TIMEOUT_MS,
@@ -336,7 +336,7 @@ export async function prepareTranscode(
 
   // --- 1. 准备 --------------------------------------------------------------
   const prepared = asRecord(
-    await requestJson(`fnm://srv/${PREPARE_PATH}`, {
+    await requestJson(`sanlos://srv/${PREPARE_PATH}`, {
       method: 'POST',
       body: { trackGUID: songId, quality },
       timeoutMs: REQUEST_TIMEOUT_MS,
@@ -365,7 +365,7 @@ export async function prepareTranscode(
     // ⚠️ **只看 `percent`**：`status` 词实测不可信（第一次就报 `ready`）。
     const statusEnvelope = asRecord(
       await requestJson(
-        `fnm://srv/${STATUS_PATH}?downloadId=${encodeURIComponent(downloadId)}`,
+        `sanlos://srv/${STATUS_PATH}?downloadId=${encodeURIComponent(downloadId)}`,
         { method: 'GET', timeoutMs: REQUEST_TIMEOUT_MS },
       ),
     )

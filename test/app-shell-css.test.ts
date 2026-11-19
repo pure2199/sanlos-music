@@ -116,7 +116,7 @@ describe('品牌名的排版契约（T50）', () => {
 // ---------------------------------------------------------------------------
 //
 // ⚠️ **为什么**：面板原来是 `position: static`（普通流内的块级元素），
-//    它是 `.fnm-badge`（纵向 flex）的第二个子元素 → 把徽标从 69px 撑到 **306px 宽**
+//    它是 `.sanlos-badge`（纵向 flex）的第二个子元素 → 把徽标从 69px 撑到 **306px 宽**
 //    → 顶栏第一行放不下 → 徽标**整块换行到第二行** → 顶栏 **58px → 175px**
 //    → 面板还横在左边**盖住主区内容**
 //    ⇒ **点一下「中继」，整个界面就不对称了**（真机实测）。
@@ -126,7 +126,7 @@ describe('品牌名的排版契约（T50）', () => {
 
 describe('连接徽标的候选面板是浮层（T52）', () => {
   const badgeCss = readCss('src', 'components', 'connection-badge.css')
-  const panel = blockOf(badgeCss, '.fnm-badge__panel')
+  const panel = blockOf(badgeCss, '.sanlos-badge__panel')
 
   it('面板**绝对定位**（不占顶栏布局 → 顶栏恒为 58px 单行）', () => {
     expect(panel).toMatch(/position:\s*absolute/)
@@ -140,7 +140,7 @@ describe('连接徽标的候选面板是浮层（T52）', () => {
   })
 
   it('徽标本体是**定位参照系**（`position: relative`）', () => {
-    expect(blockOf(badgeCss, '.fnm-badge')).toMatch(/position:\s*relative/)
+    expect(blockOf(badgeCss, '.sanlos-badge')).toMatch(/position:\s*relative/)
   })
 
   it('面板宽度**含 padding**（`box-sizing: border-box`，不然实际宽度会多出 26px）', () => {

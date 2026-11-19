@@ -163,7 +163,7 @@ async function mergeSearchResults(list: readonly Album[]): Promise<SearchGroup[]
 /**
  * 「有声」页的**作品卡片**（T101：与专辑页**同款**形态 —— 封面 + 标题 + 副标题）。
  *
- * ⚠️ **类名沿用旧版**（`.fnm-audiobooks__item` / `__title` / `__meta` / `__source`）
+ * ⚠️ **类名沿用旧版**（`.sanlos-audiobooks__item` / `__title` / `__meta` / `__source`）
  *    ⇒ 既有的 E2E / 单测断言**一条都不用改**（只有「结构信号」那行搬去了详情页）。
  * ⚠️ **卡片只做下钻**：「不是有声」挪到详情页（那里已有「这不是有声」）⇒ 卡片更干净。
  */
@@ -193,16 +193,16 @@ function AudiobookCard({
   metaClassName,
   onOpen,
 }: AudiobookCardProps): ReactElement {
-  const rootClass = itemClassName ? `fnm-card ${itemClassName}` : 'fnm-card'
-  const metaClass = metaClassName ? `fnm-card__subtitle ${metaClassName}` : 'fnm-card__subtitle'
+  const rootClass = itemClassName ? `sanlos-card ${itemClassName}` : 'sanlos-card'
+  const metaClass = metaClassName ? `sanlos-card__subtitle ${metaClassName}` : 'sanlos-card__subtitle'
   return (
-    <article className={rootClass} data-testid="fnm-card">
-      <button type="button" className="fnm-card__button" onClick={onOpen}>
+    <article className={rootClass} data-testid="sanlos-card">
+      <button type="button" className="sanlos-card__button" onClick={onOpen}>
         <CoverImage coverId={coverId} alt={title} />
-        <span className="fnm-card__title fnm-audiobooks__title">{title}</span>
+        <span className="sanlos-card__title sanlos-audiobooks__title">{title}</span>
         <span className={metaClass}>{subtitle}</span>
       </button>
-      {source ? <span className="fnm-audiobooks__source">{source}</span> : null}
+      {source ? <span className="sanlos-audiobooks__source">{source}</span> : null}
     </article>
   )
 }
@@ -397,11 +397,11 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
       loading={false}
       loadingText=""
     >
-      <div className="fnm-audiobooks">
+      <div className="sanlos-audiobooks">
         {/* ---- 主入口：那个文件夹里的作品（**第一屏**，一本一条）---------------- */}
-        <section className="fnm-audiobooks__panel">
-          <h2 className="fnm-audiobooks__panel-title">那个文件夹里的作品</h2>
-          <p className="fnm-audiobooks__hint">
+        <section className="sanlos-audiobooks__panel">
+          <h2 className="sanlos-audiobooks__panel-title">那个文件夹里的作品</h2>
+          <p className="sanlos-audiobooks__hint">
             「{keyword}」文件夹里的全都是有声小说，这里一本小说一条。
             点开就是全书（按集序排；服务端把一部作品拆成几张专辑时会自动合并）。
             ⚠️ <strong>文件要放在曲库主目录下的「{keyword}」文件夹里</strong>
@@ -409,12 +409,12 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
             放在别处的，列表里不会出现。
           </p>
           {items.length === 0 ? (
-            <p className="fnm-audiobooks__empty">{emptyText}</p>
+            <p className="sanlos-audiobooks__empty">{emptyText}</p>
           ) : (
-            /* ⚠️ **T101**：与专辑页**同款**的封面卡片网格（`.fnm-card` 结构）。
+            /* ⚠️ **T101**：与专辑页**同款**的封面卡片网格（`.sanlos-card` 结构）。
                ⚠️ 用**普通 CSS 网格**（不是虚拟网格）⇒ 整个页面一起滚动
                   ⇒ 不出现「网格里滚、页面里也滚」的嵌套滚动。 */
-            <div className="fnm-audiobooks__list">
+            <div className="sanlos-audiobooks__list">
               {items.map((hit) => {
                 const manual = hit.reasons.includes('user')
                 return (
@@ -425,8 +425,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
                     coverId={hit.albumCoverId ?? null}
                     subtitle={listMeta(hit)}
                     source={manual ? '你指定的' : `在「${keyword}」目录下`}
-                    itemClassName="fnm-audiobooks__item"
-                    metaClassName="fnm-audiobooks__meta"
+                    itemClassName="sanlos-audiobooks__item"
+                    metaClassName="sanlos-audiobooks__meta"
                     onOpen={() => onOpenAlbum(toAlbum(hit))}
                   />
                 )
@@ -436,11 +436,11 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
         </section>
 
         {/* ---- 加速器：按作品名秒搜（**不是**前置步骤）-------------------------- */}
-        <section className="fnm-audiobooks__panel">
-          <h2 className="fnm-audiobooks__panel-title">直接找一部作品</h2>
-          <div className="fnm-audiobooks__row">
+        <section className="sanlos-audiobooks__panel">
+          <h2 className="sanlos-audiobooks__panel-title">直接找一部作品</h2>
+          <div className="sanlos-audiobooks__row">
             <input
-              className="fnm-audiobooks__input"
+              className="sanlos-audiobooks__input"
               type="text"
               value={query}
               placeholder="输入作品名，例如：牧神记"
@@ -451,24 +451,24 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
             />
             <button
               type="button"
-              className="fnm-audiobooks__scan"
+              className="sanlos-audiobooks__scan"
               onClick={() => void handleSearch()}
               disabled={searching}
             >
               {searching ? '正在搜…' : '搜作品'}
             </button>
           </div>
-          <p className="fnm-audiobooks__hint">
+          <p className="sanlos-audiobooks__hint">
             这条路不用扫曲库，搜到就出（实测约 0.1 秒）。搜到的结果一本小说一条
             （同名同目录的已合并）；点开就是全书，并记成「有声」（随时可以在详情页反悔）。
             搜索只能当线索，同名作品可能搜不全；找不全就用上面那个文件夹。
           </p>
           {searchError ? (
-            <p className="fnm-audiobooks__error">搜索失败：{searchError}</p>
+            <p className="sanlos-audiobooks__error">搜索失败：{searchError}</p>
           ) : null}
           {searchResults.length > 0 ? (
             /* ⚠️ **T101**：与主列表**同一套**卡片（封面 + 标题 + 副标题）。 */
-            <div className="fnm-audiobooks__results">
+            <div className="sanlos-audiobooks__results">
               {searchResults.map((group) => (
                 <AudiobookCard
                   key={group.albumId}
@@ -477,8 +477,8 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
                   //    ⇒ 与主列表（扫描路径）**逐字一致**。
                   coverId={group.coverId}
                   subtitle={searchMeta(group)}
-                  itemClassName="fnm-audiobooks__result"
-                  metaClassName="fnm-audiobooks__result-meta"
+                  itemClassName="sanlos-audiobooks__result"
+                  metaClassName="sanlos-audiobooks__result-meta"
                   onOpen={() => handleOpenSearchResult(group)}
                 />
               ))}
@@ -487,15 +487,15 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
         </section>
 
         {/* ---- 兜底：换目录名 / 从头重扫 --------------------------------------- */}
-        <section className="fnm-audiobooks__panel">
-          <h2 className="fnm-audiobooks__panel-title">换一个文件夹</h2>
-          <div className="fnm-audiobooks__row">
-            <label className="fnm-audiobooks__label" htmlFor="fnm-audiobooks-keyword">
+        <section className="sanlos-audiobooks__panel">
+          <h2 className="sanlos-audiobooks__panel-title">换一个文件夹</h2>
+          <div className="sanlos-audiobooks__row">
+            <label className="sanlos-audiobooks__label" htmlFor="sanlos-audiobooks-keyword">
               目录名
             </label>
             <input
-              id="fnm-audiobooks-keyword"
-              className="fnm-audiobooks__input"
+              id="sanlos-audiobooks-keyword"
+              className="sanlos-audiobooks__input"
               type="text"
               value={keywordInput}
               placeholder={keyword || DEFAULT_FOLDER_KEYWORD}
@@ -503,7 +503,7 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
             />
             <button
               type="button"
-              className="fnm-audiobooks__scan"
+              className="sanlos-audiobooks__scan"
               onClick={handleScan}
               disabled={scanning}
             >
@@ -511,14 +511,14 @@ export function AudiobooksPage(props: AudiobooksPageProps): ReactElement {
             </button>
             <button
               type="button"
-              className="fnm-audiobooks__scan fnm-audiobooks__scan--secondary"
+              className="sanlos-audiobooks__scan sanlos-audiobooks__scan--secondary"
               onClick={handleFullScan}
               disabled={scanning}
             >
               从头重扫
             </button>
           </div>
-          <p className="fnm-audiobooks__hint">
+          <p className="sanlos-audiobooks__hint">
             服务端没有浏览目录的能力（实测 20 个候选端点都不通），
             所以要先扫一遍曲库，再按目录名挑出这个文件夹里的作品。
             实测 17.3 万首要扫 87 页，并发扫大约 1 分钟；扫一次记在本机，下次进来直接看。

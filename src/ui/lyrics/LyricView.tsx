@@ -23,12 +23,12 @@
 // - 内联 style 表达不了 `:hover` / `:active` / `:focus-visible` / 伪元素 / `@media`；
 // - 仓库约定组件样式一律用 `var(--token)` 引用语义变量（`src/styles/tokens.css`）。
 //
-// 组件上发出稳定的 BEM 类名（`fnm-lyricview__*`），供样式表命中，
+// 组件上发出稳定的 BEM 类名（`sanlos-lyricview__*`），供样式表命中，
 // 也方便 Task 18/19 做主题覆写。
 //
 // 真正动态、**CSS 表达不了**的少数几个值走 CSS 自定义属性（内联）：
-// - `--fnm-lyricview__canvas-height`：画布总高度（随歌词行数变化）；
-// - `--fnm-lyricview__line-top`：单行 / 全量模式下某一行的纵向位置（随行号变化）。
+// - `--sanlos-lyricview__canvas-height`：画布总高度（随歌词行数变化）；
+// - `--sanlos-lyricview__line-top`：单行 / 全量模式下某一行的纵向位置（随行号变化）。
 // ---------------------------------------------------------------------------
 
 import {
@@ -67,7 +67,7 @@ export const LYRIC_FALLBACK_VIEWPORT_HEIGHT = 400
  *    → 当前行往前推进时**整份列表不会上下跳**。
  *    （若当前行更高、后面的行就得下移 → 长歌每唱一句整屏都抖一下。）
  *
- * ⚠️ 这个值**必须与 `lyric-view.css` 里 `.fnm-lyricview--all` 的槽位一致**
+ * ⚠️ 这个值**必须与 `lyric-view.css` 里 `.sanlos-lyricview--all` 的槽位一致**
  *    —— 与 `LYRIC_LINE_HEIGHT` / CSS 的 `line-height` 是同一套纪律。
  */
 export const LYRIC_ALL_LINE_HEIGHT = 60
@@ -310,12 +310,12 @@ export function LyricView(props: LyricViewProps): ReactElement {
     element.scrollTop = targetScrollTop
   }, [targetScrollTop])
 
-  const classes = className ? `fnm-lyricview ${className}` : 'fnm-lyricview'
+  const classes = className ? `sanlos-lyricview ${className}` : 'sanlos-lyricview'
 
   if (safeLines.length === 0) {
     return (
-      <div className={`${classes} fnm-lyricview--empty`} data-testid="lyric-view">
-        <p className="fnm-lyricview__empty">{emptyLabel}</p>
+      <div className={`${classes} sanlos-lyricview--empty`} data-testid="lyric-view">
+        <p className="sanlos-lyricview__empty">{emptyLabel}</p>
       </div>
     )
   }
@@ -346,14 +346,14 @@ export function LyricView(props: LyricViewProps): ReactElement {
           onSeek,
           activeWordClassName,
           karaoke,
-          style: { '--fnm-lyricview__line-top': `${top}px` },
+          style: { '--sanlos-lyricview__line-top': `${top}px` },
         }),
       )
     }
 
     return (
       <div
-        className={`${classes} fnm-lyricview--single`}
+        className={`${classes} sanlos-lyricview--single`}
         data-testid="lyric-view"
         role="list"
         aria-label="歌词"
@@ -361,8 +361,8 @@ export function LyricView(props: LyricViewProps): ReactElement {
         data-scroll-top={targetScrollTop}
       >
         <div
-          className="fnm-lyricview__canvas"
-          style={{ '--fnm-lyricview__canvas-height': `${total}px` } as CssVars}
+          className="sanlos-lyricview__canvas"
+          style={{ '--sanlos-lyricview__canvas-height': `${total}px` } as CssVars}
         >
           {windowLines}
         </div>
@@ -414,7 +414,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
 
     return (
       <div
-        className={`${classes} fnm-lyricview--all`}
+        className={`${classes} sanlos-lyricview--all`}
         data-testid="lyric-view"
         data-active-index={activeIndex}
         role="list"
@@ -423,10 +423,10 @@ export function LyricView(props: LyricViewProps): ReactElement {
         data-scroll-top={targetScrollTop}
       >
         <div
-          className="fnm-lyricview__canvas"
+          className="sanlos-lyricview__canvas"
           style={
             {
-              '--fnm-lyricview__canvas-height': `${safeLines.length * LYRIC_ALL_LINE_HEIGHT}px`,
+              '--sanlos-lyricview__canvas-height': `${safeLines.length * LYRIC_ALL_LINE_HEIGHT}px`,
             } as CssVars
           }
         >
@@ -462,7 +462,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
 
     return (
       <div
-        className={`${classes} fnm-lyricview--current`}
+        className={`${classes} sanlos-lyricview--current`}
         data-testid="lyric-view"
         // ⚠️ **换行信号**：当前句的下标变了 = 换行了（与 `all` 的 `data-active-index` 同源）。
         data-current-index={currentIndex}
@@ -512,7 +512,7 @@ export function LyricView(props: LyricViewProps): ReactElement {
   //    ⚠️ `data-phase` 在跨越点上**不变**（它在「上一行走满」时就翻转了）→ **别用它判换行**。
   return (
     <div
-      className={`${classes} fnm-lyricview--double`}
+      className={`${classes} sanlos-lyricview--double`}
       data-testid="lyric-view"
       data-phase={state.phase}
       data-page-index={state.previousIndex}
@@ -592,8 +592,8 @@ interface RenderLineOptions {
  * DOM 结构（两层）：
  * - **底层**：整行原文，作为行元素的**直接文本节点**
  *   （整行文本只有一个来源，无障碍与测试都能直接取到整行）；
- * - **上层**（`.fnm-lyricview__overlay`，`aria-hidden`）：同一段文字的逐字着色副本，
- *   已唱到的词用 `.fnm-lyricview__word--sung`。
+ * - **上层**（`.sanlos-lyricview__overlay`，`aria-hidden`）：同一段文字的逐字着色副本，
+ *   已唱到的词用 `.sanlos-lyricview__word--sung`。
  *
  * 两层的字号字重完全一致 → 着色层与底层的字形严丝合缝。
  *
@@ -633,7 +633,7 @@ function renderLine(options: RenderLineOptions): ReactElement {
   segments.forEach((segment, position) => {
     if (!segment.isWord) {
       overlayContent.push(
-        <span key={`space-${position}`} className="fnm-lyricview__space">
+        <span key={`space-${position}`} className="sanlos-lyricview__space">
           {segment.text}
         </span>,
       )
@@ -658,7 +658,7 @@ function renderLine(options: RenderLineOptions): ReactElement {
     //    → 颜色边界**连续推进**（不是整词跳变）→ 才顺滑。
     const karaokeWord = Boolean(options.karaoke) && isCurrentWord
     const showSung = karaokeWord ? false : sung
-    const karaokeClass = karaokeWord ? ' fnm-lyricview__word--karaoke' : ''
+    const karaokeClass = karaokeWord ? ' sanlos-lyricview__word--karaoke' : ''
     // ⚠️ **同时给一份 `data-` 钩子**：jsdom 的 CSSOM 对**自定义属性**不可靠
     //    （`style.getPropertyValue('--x')` 未必读得到）→ 单测一律读 data 属性
     //    （与 `data-scroll-top` 同一套纪律）。
@@ -666,11 +666,11 @@ function renderLine(options: RenderLineOptions): ReactElement {
     const karaokeStyle =
       karaokePercent === null
         ? undefined
-        : ({ '--fnm-lyricview__karaoke-progress': `${karaokePercent}%` } as CssVars)
+        : ({ '--sanlos-lyricview__karaoke-progress': `${karaokePercent}%` } as CssVars)
     overlayContent.push(
       <span
         key={`word-${position}`}
-        className={`fnm-lyricview__word${showSung ? ' fnm-lyricview__word--sung' : ''}${karaokeClass}${activeClass}`}
+        className={`sanlos-lyricview__word${showSung ? ' sanlos-lyricview__word--sung' : ''}${karaokeClass}${activeClass}`}
         data-word={segment.wordIndex}
         data-karaoke-progress={karaokePercent ?? undefined}
         style={karaokeStyle}
@@ -680,12 +680,12 @@ function renderLine(options: RenderLineOptions): ReactElement {
     )
   })
 
-  const classNames = ['fnm-lyricview__line']
-  if (active) classNames.push('fnm-lyricview__line--active')
-  if (slot) classNames.push(`fnm-lyricview__line--${slot}`)
-  if (onSeek) classNames.push('fnm-lyricview__line--clickable')
+  const classNames = ['sanlos-lyricview__line']
+  if (active) classNames.push('sanlos-lyricview__line--active')
+  if (slot) classNames.push(`sanlos-lyricview__line--${slot}`)
+  if (onSeek) classNames.push('sanlos-lyricview__line--clickable')
   // ⚠️ **T81**：伪逐字 ⇒ 当前行 / 已唱行**整行**强调色（不假装逐字）。
-  if (wholeLine) classNames.push('fnm-lyricview__line--whole')
+  if (wholeLine) classNames.push('sanlos-lyricview__line--whole')
 
   // 翻译：有才渲染（**不渲染空的第二行**）。
   const showTranslation = options.showTranslation ?? true
@@ -693,7 +693,7 @@ function renderLine(options: RenderLineOptions): ReactElement {
   const translationNode = showTranslation && translation ? (
     // ⚠️ **必须有 `key`**（F15-04）：翻译节点是「行元素」的**数组子节点**，
     //    没有 key → React 报 "Each child in a list should have a unique key prop"。
-    <span key="translation" className="fnm-lyricview__translation" data-testid="lyric-translation">
+    <span key="translation" className="sanlos-lyricview__translation" data-testid="lyric-translation">
       {translation}
     </span>
   ) : null
@@ -708,7 +708,7 @@ function renderLine(options: RenderLineOptions): ReactElement {
   const romanizationNode = showRomanization && romanization ? (
     <span
       key="romanization"
-      className="fnm-lyricview__romanization"
+      className="sanlos-lyricview__romanization"
       data-testid="lyric-romanization"
     >
       {romanization}
@@ -735,8 +735,8 @@ function renderLine(options: RenderLineOptions): ReactElement {
   //    ⇒ DOM 里没有 `[data-word]` 元素 ⇒ 没有任何词级钩子 ⇒ **假扫光不可能出现**。
   if (wordTimed) {
     body.push(
-      <span key="overlay" className="fnm-lyricview__overlay" aria-hidden="true">
-        <span className="fnm-lyricview__overlay-inner">{overlayContent}</span>
+      <span key="overlay" className="sanlos-lyricview__overlay" aria-hidden="true">
+        <span className="sanlos-lyricview__overlay-inner">{overlayContent}</span>
       </span>,
     )
   }
@@ -795,6 +795,6 @@ const AllLyricLine = memo(function AllLyricLine(props: {
     showTranslation: props.showTranslation,
     activeWordClassName: props.activeWordClassName,
     karaoke: props.karaoke,
-    style: { '--fnm-lyricview__line-top': `${props.index * LYRIC_ALL_LINE_HEIGHT}px` },
+    style: { '--sanlos-lyricview__line-top': `${props.index * LYRIC_ALL_LINE_HEIGHT}px` },
   })
 })

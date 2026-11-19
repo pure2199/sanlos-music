@@ -77,10 +77,10 @@ describe('defaultExternalLyricFetcher：源要**并进查询对象**', () => {
   it('桥的方法**只收一个参数** ⇒ 源必须并进查询（当第二个实参传会被丢掉）', async () => {
     const received: unknown[] = []
     const scope = globalThis as unknown as {
-      fnPlayer?: { fetchExternalLyric?: (query: unknown) => Promise<never> }
+      sanlosPlayer?: { fetchExternalLyric?: (query: unknown) => Promise<never> }
     }
-    const previous = scope.fnPlayer
-    scope.fnPlayer = {
+    const previous = scope.sanlosPlayer
+    scope.sanlosPlayer = {
       fetchExternalLyric: async (query: unknown) => {
         received.push(query)
         return { status: 'not-found' } as never
@@ -93,17 +93,17 @@ describe('defaultExternalLyricFetcher：源要**并进查询对象**', () => {
       expect(received).toHaveLength(1)
       expect(received[0]).toMatchObject({ title: '占位歌名', source: 'migu' })
     } finally {
-      scope.fnPlayer = previous
+      scope.sanlosPlayer = previous
     }
   })
 
   it('没指定源 ⇒ 查询里**不带** `source` 字段（不多传无用的键）', async () => {
     const received: unknown[] = []
     const scope = globalThis as unknown as {
-      fnPlayer?: { fetchExternalLyric?: (query: unknown) => Promise<never> }
+      sanlosPlayer?: { fetchExternalLyric?: (query: unknown) => Promise<never> }
     }
-    const previous = scope.fnPlayer
-    scope.fnPlayer = {
+    const previous = scope.sanlosPlayer
+    scope.sanlosPlayer = {
       fetchExternalLyric: async (query: unknown) => {
         received.push(query)
         return { status: 'not-found' } as never
@@ -114,7 +114,7 @@ describe('defaultExternalLyricFetcher：源要**并进查询对象**', () => {
       await fetcher?.(TARGET)
       expect(received[0]).not.toHaveProperty('source')
     } finally {
-      scope.fnPlayer = previous
+      scope.sanlosPlayer = previous
     }
   })
 })
@@ -146,7 +146,7 @@ describe('registerLyricIpc：渲染层指定的源要过白名单', () => {
 
   /** 造一份偏好存储（落在临时目录，绝不写进仓库）。 */
   function makePrefs(source: 'off' | 'netease' | 'custom'): PrefsStore {
-    const dir = mkdtempSync(join(tmpdir(), 'fnmusic-t107-ipc-'))
+    const dir = mkdtempSync(join(tmpdir(), 'sanlos-t107-ipc-'))
     const store = new PrefsStore({ filePath: join(dir, 'prefs.json') })
     store.write({
       lyric:

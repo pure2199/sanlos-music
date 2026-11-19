@@ -6,9 +6,9 @@
  *
  * ---------------------------------------------------------------------------
  * 动态值（CSS 表达不了的少数几个）走 CSS 自定义属性，由组件用内联 style 写：
- * - `--fnm-lyricview__canvas-height`：画布总高度（随歌词行数变化）；
- * - `--fnm-lyricview__line-top`：单行模式下某一行的纵向位置（随行号变化）；
- * - `--fnm-lyricview__karaoke-progress`：卡拉OK 模式下**当前词**的词内填充比例（T48）。
+ * - `--sanlos-lyricview__canvas-height`：画布总高度（随歌词行数变化）；
+ * - `--sanlos-lyricview__line-top`：单行模式下某一行的纵向位置（随行号变化）；
+ * - `--sanlos-lyricview__karaoke-progress`：卡拉OK 模式下**当前词**的词内填充比例（T48）。
  *
  * 其余几何（行高、字号、间距、圆角、颜色）全部在本文件里。
  */
@@ -17,7 +17,7 @@
  * 容器
  * -------------------------------------------------------------------------- */
 
-.fnm-lyricview {
+.sanlos-lyricview {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
@@ -32,13 +32,13 @@
    *    长句换行时折行点相同 → 高亮色块与文字严丝合缝。
    *    （绝对定位的 overlay 相对**padding box**定位，不加这份内边距就会比底层宽 24px。）
    */
-  --fnm-lyricview__line-pad: 12px;
+  --sanlos-lyricview__line-pad: 12px;
 }
 
-.fnm-lyricview__canvas {
+.sanlos-lyricview__canvas {
   position: relative;
   width: 100%;
-  height: var(--fnm-lyricview__canvas-height, auto);
+  height: var(--sanlos-lyricview__canvas-height, auto);
 }
 
 /*
@@ -48,8 +48,8 @@
  *    （当前句在上、下一句在下），排版必须与既有两行观感**一致**
  *    ⇒ 两行字号相同、等粗、居中、间距相同。
  */
-.fnm-lyricview--double,
-.fnm-lyricview--current {
+.sanlos-lyricview--double,
+.sanlos-lyricview--current {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -60,11 +60,11 @@
  * 歌词行
  * -------------------------------------------------------------------------- */
 
-.fnm-lyricview__line {
+.sanlos-lyricview__line {
   position: relative;
   display: block;
   box-sizing: border-box;
-  padding: 0 var(--fnm-lyricview__line-pad);
+  padding: 0 var(--sanlos-lyricview__line-pad);
   text-align: center;
   color: var(--text-secondary);
   white-space: pre-wrap;
@@ -73,15 +73,15 @@
 }
 
 /* 单行模式：行是绝对定位的，纵向位置由组件用 CSS 变量给。 */
-.fnm-lyricview--single .fnm-lyricview__line {
+.sanlos-lyricview--single .sanlos-lyricview__line {
   position: absolute;
   left: 0;
   right: 0;
-  top: var(--fnm-lyricview__line-top, 0px);
+  top: var(--sanlos-lyricview__line-top, 0px);
 }
 
 /* 当前行：居中放大。 */
-.fnm-lyricview__line--active {
+.sanlos-lyricview__line--active {
   height: 44px;
   font-size: 20px;
   line-height: 44px;
@@ -102,15 +102,15 @@
  * ⚠️ **只用语义变量**（`--accent`）⇒ 两套主题自动一致。
  * ⚠️ **T89-⑪**：全屏播放页里这行**压在取色渐变背景上** ⇒ 强调色与背景同源、
  *    真机实测只有 3.67 ⇒ 改用「按取色背景校正过」的强调色
- *    （`--fnm-fullplayer__accent-text`）；**不在全屏页里时回退到 `--accent`**。
+ *    （`--sanlos-fullplayer__accent-text`）；**不在全屏页里时回退到 `--accent`**。
  */
-.fnm-lyricview__line--whole {
-  color: var(--fnm-fullplayer__accent-text, var(--accent));
+.sanlos-lyricview__line--whole {
+  color: var(--sanlos-fullplayer__accent-text, var(--accent));
 }
 
 /* 双行模式：两行字号一致、等粗（不把上一行降级成更弱的样子）。 */
-.fnm-lyricview--double .fnm-lyricview__line,
-.fnm-lyricview--current .fnm-lyricview__line {
+.sanlos-lyricview--double .sanlos-lyricview__line,
+.sanlos-lyricview--current .sanlos-lyricview__line {
   height: auto;
   font-size: 20px;
   line-height: 32px;
@@ -126,11 +126,11 @@
  *    → 当前行推进时**整份列表不跳动**（否则长歌每唱一句整屏都抖一下）。
  *    槽位值必须与 `LYRIC_ALL_LINE_HEIGHT` 一致。
  */
-.fnm-lyricview--all .fnm-lyricview__line {
+.sanlos-lyricview--all .sanlos-lyricview__line {
   position: absolute;
   left: 0;
   right: 0;
-  top: var(--fnm-lyricview__line-top, 0px);
+  top: var(--sanlos-lyricview__line-top, 0px);
   height: 60px;
   line-height: 40px;
   font-size: 15px;
@@ -140,7 +140,7 @@
  * 当前行：放大 + 加粗。
  * ⚠️ **槽位高度不变**（仍是 60px）—— 变的是**字号**，不是**行占的位置**。
  */
-.fnm-lyricview--all .fnm-lyricview__line--active {
+.sanlos-lyricview--all .sanlos-lyricview__line--active {
   height: 60px;
   line-height: 40px;
   font-size: 20px;
@@ -151,19 +151,19 @@
  * **比可视区高**时贴顶（`safe` 关键字：普通 `center` 会让溢出内容的顶部**够不着**）。
  * ⚠️ 不支持 `safe` 的引擎会整条丢弃这条声明 → 退回 `normal`（贴顶）→ 仍然正确。
  */
-.fnm-lyricview--all {
+.sanlos-lyricview--all {
   display: flex;
   flex-direction: column;
   justify-content: safe center;
 }
 
 /* ⚠️ 别让 flex 把画布**压扁**（会毁掉行内绝对定位）。 */
-.fnm-lyricview--all .fnm-lyricview__canvas {
+.sanlos-lyricview--all .sanlos-lyricview__canvas {
   flex: 0 0 auto;
 }
 
 /* 可点的歌词行（给了 onSeek 才是 <button>）。 */
-.fnm-lyricview__line--clickable {
+.sanlos-lyricview__line--clickable {
   width: 100%;
   border: none;
   background: transparent;
@@ -171,11 +171,11 @@
   cursor: pointer;
 }
 
-.fnm-lyricview__line--clickable:hover {
+.sanlos-lyricview__line--clickable:hover {
   color: var(--text-primary);
 }
 
-.fnm-lyricview__line--clickable:focus-visible {
+.sanlos-lyricview__line--clickable:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
@@ -195,32 +195,32 @@
  *    （早先这里写的是 `width: 100%` 且没有内边距 → 比底层宽 24px →
  *      长句换行时两层折行点不同 → 高亮色块与文字错位。）
  */
-.fnm-lyricview__overlay {
+.sanlos-lyricview__overlay {
   position: absolute;
   left: 0;
   right: 0;
   top: 0;
   box-sizing: border-box;
-  padding: 0 var(--fnm-lyricview__line-pad);
+  padding: 0 var(--sanlos-lyricview__line-pad);
   overflow: hidden;
   pointer-events: none;
   color: inherit;
 }
 
-.fnm-lyricview__overlay-inner {
+.sanlos-lyricview__overlay-inner {
   display: block;
   width: 100%;
 }
 
-.fnm-lyricview__word {
+.sanlos-lyricview__word {
   display: inline;
   white-space: pre;
 }
 
 /* 已经唱到的词。 */
 /* ⚠️ **T89-⑪**：同 `--whole` ⇒ 全屏页里用「按取色背景校正过」的强调色。 */
-.fnm-lyricview__word--sung {
-  color: var(--fnm-fullplayer__accent-text, var(--accent));
+.sanlos-lyricview__word--sung {
+  color: var(--sanlos-fullplayer__accent-text, var(--accent));
 }
 
 /*
@@ -241,13 +241,13 @@
  *    万一 `background-clip` 不生效 → 最多是「当前词没有填色」，
  *    **不会**变成「当前词看不见」（底层原文还在）。
  */
-.fnm-lyricview__word--karaoke {
+.sanlos-lyricview__word--karaoke {
   color: transparent;
   /* ⚠️ **T89-⑪**：同 `--whole` ⇒ 全屏页里用「按取色背景校正过」的强调色。
    *    ⚠️ **必须写在一行**：`test/lyric-view-css.test.ts` 的 T48 契约钉着
    *    `linear-gradient(90deg` 这个**连续**片段（换行就会红）。 */
-  background-image: linear-gradient(90deg, var(--fnm-fullplayer__accent-text, var(--accent)) 0%, var(--fnm-fullplayer__accent-text, var(--accent)) 100%);
-  background-size: var(--fnm-lyricview__karaoke-progress, 100%) 100%;
+  background-image: linear-gradient(90deg, var(--sanlos-fullplayer__accent-text, var(--accent)) 0%, var(--sanlos-fullplayer__accent-text, var(--accent)) 100%);
+  background-size: var(--sanlos-lyricview__karaoke-progress, 100%) 100%;
   background-repeat: no-repeat;
   background-position: 0 0;
   -webkit-background-clip: text;
@@ -258,7 +258,7 @@
  * 翻译（副行）与空态
  * -------------------------------------------------------------------------- */
 
-.fnm-lyricview__translation {
+.sanlos-lyricview__translation {
   display: block;
   font-size: 13px;
   line-height: 18px;
@@ -275,7 +275,7 @@
  * ⚠️ 字号比翻译**再小一号**（12px vs 13px）⇒ 三行时不至于喧宾夺主。
  * ⚠️ 颜色只用**语义变量**（与翻译同一个色，不新增 token）。
  */
-.fnm-lyricview__romanization {
+.sanlos-lyricview__romanization {
   display: block;
   font-size: 12px;
   line-height: 16px;
@@ -283,7 +283,7 @@
   white-space: pre-wrap;
 }
 
-.fnm-lyricview__empty {
+.sanlos-lyricview__empty {
   margin: 0;
   padding: 24px 12px;
   font-size: 13px;

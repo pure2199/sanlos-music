@@ -17,7 +17,7 @@
  * 音频扩展名白名单。
  *
  * ⚠️ 与 `electron/localMedia.ts` 的 `MIME_BY_EXT` **保持一致**——
- *    能登记的扩展名，必须也是 `fnml://` 认得的容器。
+ *    能登记的扩展名，必须也是 `sanlos-media://` 认得的容器。
  */
 export const AUDIO_EXTENSIONS: readonly string[] = [
   'mp3',

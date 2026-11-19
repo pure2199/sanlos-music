@@ -8,7 +8,7 @@
  */
 
 /* 详情页整体：纵向排列各区块 */
-.fnm-detail {
+.sanlos-detail {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -17,7 +17,7 @@
    * ⚠️ **T104**：这一层必须**长满页面**，否则里面的虚拟列表**滚不动**。
    *
    * 症状（真机实测 2026-11-17，本机 + 该账号）：
-   *   《极品家丁》1333 集的详情页里，`.fnm-songlist__viewport`
+   *   《极品家丁》1333 集的详情页里，`.sanlos-songlist__viewport`
    *   （**唯一**带 `overflow-y: auto` 的元素）的
    *   `clientHeight` ＝ `scrollHeight` ＝ **63984**
    *   ⇒ 它**根本不是滚动容器**（自身高度 = 内容高度）
@@ -31,10 +31,10 @@
    *     「可分配的高度」可分（去掉它 ⇒ 区块拿到 0 ⇒ 列表是空的）—— **承重**。
    *   - `min-height: 0` ⇒ 解除 flex 项「自动最小尺寸 = 内容 min-content 高度」
    *     的**默认下限**。⚠️ 实测它**不是承重项**（里面的滚动容器已把 min-content
-   *     传导截断 ⇒ 去掉它几何不变）⇒ 它是**兜底**：与 `.fnm-audiobooks` /
-   *     `.fnm-discover` / `.fnm-settings` **保持同一套写法**，防将来改动。
+   *     传导截断 ⇒ 去掉它几何不变）⇒ 它是**兜底**：与 `.sanlos-audiobooks` /
+   *     `.sanlos-discover` / `.sanlos-settings` **保持同一套写法**，防将来改动。
    *
-   * ⚠️ 真正**承重**的还有下面 `.fnm-detail__section` 的 `flex: 1 1 0`
+   * ⚠️ 真正**承重**的还有下面 `.sanlos-detail__section` 的 `flex: 1 1 0`
    *    （basis = 0 ⇒ 区块的「假设尺寸」= 0 ⇒ 内容高度不再往上顶）。
    */
   flex: 1 1 auto;
@@ -42,7 +42,7 @@
 }
 
 /* 头部：返回按钮 + 封面 + 副标题 */
-.fnm-detail__head {
+.sanlos-detail__head {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -51,7 +51,7 @@
 }
 
 /* 返回上一级 */
-.fnm-detail__back {
+.sanlos-detail__back {
   padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -61,25 +61,25 @@
   cursor: pointer;
 }
 
-.fnm-detail__back:hover {
+.sanlos-detail__back:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-detail__back:focus-visible {
+.sanlos-detail__back:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 副标题（歌手名 / 曲目数等） */
-.fnm-detail__subtitle {
+.sanlos-detail__subtitle {
   margin: 0;
   font-size: 13px;
   color: var(--text-secondary);
 }
 
 /* 区块（如「专辑」「曲目」） */
-.fnm-detail__section {
+.sanlos-detail__section {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -100,7 +100,7 @@
 }
 
 /* 区块标题 */
-.fnm-detail__section-title {
+.sanlos-detail__section-title {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
@@ -110,7 +110,7 @@
 }
 
 /* T98: 有声读物（按集序排列 + 集号徽标 + 改判按钮）。 */
-.fnm-detail__audiobook {
+.sanlos-detail__audiobook {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -119,12 +119,12 @@
   flex: 0 0 auto;
 }
 
-.fnm-detail__audiobook-note {
+.sanlos-detail__audiobook-note {
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.fnm-detail__audiobook-btn {
+.sanlos-detail__audiobook-btn {
   padding: 3px 10px;
   border-radius: var(--radius-control);
   border: 1px solid var(--border);
@@ -136,7 +136,7 @@
 }
 
 /* T101：判定依据（结构信号）—— 从列表卡片搬到详情页（信息不丢）。 */
-.fnm-detail__audiobook-reasons {
+.sanlos-detail__audiobook-reasons {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--text-secondary);
@@ -145,7 +145,7 @@
   flex: 0 0 auto;
 }
 
-.fnm-detail__episode {
+.sanlos-detail__episode {
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;

@@ -72,7 +72,7 @@ const tempDirs: string[] = []
 
 /** 造一个临时目录（测试结束会删）。 */
 function makeTempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'fnm-update-test-'))
+  const dir = mkdtempSync(join(tmpdir(), 'sanlos-update-test-'))
   tempDirs.push(dir)
   return dir
 }
@@ -90,7 +90,7 @@ afterEach(() => {
 
 describe('更新服务器地址校验（T23）', () => {
   it('https 地址合法', () => {
-    expect(validateUpdateBaseUrl('https://updates.example.com/fnmusic')).not.toBeNull()
+    expect(validateUpdateBaseUrl('https://updates.example.com/sanlos')).not.toBeNull()
   })
 
   it('http 只允许回环主机（公网 http 一律拒绝）', () => {
@@ -115,12 +115,12 @@ describe('更新服务器地址校验（T23）', () => {
   })
 
   it('清单地址 = <base>/latest.json', () => {
-    expect(resolveManifestUrl('https://updates.example.com/fnmusic')).toBe(
-      'https://updates.example.com/fnmusic/latest.json',
+    expect(resolveManifestUrl('https://updates.example.com/sanlos')).toBe(
+      'https://updates.example.com/sanlos/latest.json',
     )
     // 末尾多余的斜杠不能拼出「//latest.json」
-    expect(resolveManifestUrl('https://updates.example.com/fnmusic/')).toBe(
-      'https://updates.example.com/fnmusic/latest.json',
+    expect(resolveManifestUrl('https://updates.example.com/sanlos/')).toBe(
+      'https://updates.example.com/sanlos/latest.json',
     )
   })
 })
@@ -590,7 +590,7 @@ describe('启动安装器（T23）', () => {
 describe('未签名安装包（T82）', () => {
   /** 造一个真的临时安装包（`sha512File` 要读盘）。 */
   function makeInstaller(content: string): { path: string; sha512: string } {
-    const dir = mkdtempSync(join(tmpdir(), 'fnm-update-test-'))
+    const dir = mkdtempSync(join(tmpdir(), 'sanlos-update-test-'))
     tempDirs.push(dir)
     const path = join(dir, 'FN-Music-Setup-9.9.9.exe')
     writeFileSync(path, content)
@@ -725,7 +725,7 @@ describe('未签名安装包（T82）', () => {
 describe('签名闸判定矩阵（T85）', () => {
   /** 造一个真的临时安装包（`sha512File` 要读盘）。 */
   function makeInstaller(content: string): { path: string; sha512: string } {
-    const dir = mkdtempSync(join(tmpdir(), 'fnm-update-matrix-'))
+    const dir = mkdtempSync(join(tmpdir(), 'sanlos-update-matrix-'))
     tempDirs.push(dir)
     const path = join(dir, 'FN-Music-Setup-9.9.9.exe')
     writeFileSync(path, content)

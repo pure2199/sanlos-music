@@ -35,7 +35,7 @@ export type FfmpegFallbackFailure =
 /** 兜底转码的结果。 */
 export interface FfmpegFallbackResult {
   /**
-   * 转码产物的可播放地址（`fnml://local/track/<id>`）。
+   * 转码产物的可播放地址（`sanlos-media://local/track/<id>`）。
    *
    * ⚠️ 成功时是**本地**地址（不经过 NAS、不带任何凭证）。
    */

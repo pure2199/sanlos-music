@@ -57,7 +57,7 @@ import './styles/tokens.css'
 // - 「搜索」→ `SearchPage`（搜索 + 收藏写回 + 歌单写回）。
 //
 // ⚠️ 入口按钮的样式住在**应用外壳**的样式文件里（`src/styles/app-shell.css`，
-//    类名 `fnm-app__nav*`）——这两颗按钮是外壳的元素，样式也归外壳；
+//    类名 `sanlos-app__nav*`）——这两颗按钮是外壳的元素，样式也归外壳；
 //    将来即便改成代码分割（`React.lazy`），样式也不会丢。
 //
 // ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ function NavButton({ label, active, onSelect }: NavButtonProps): ReactElement {
   return (
     <button
       type="button"
-      className="fnm-app__nav-button"
+      className="sanlos-app__nav-button"
       aria-pressed={active}
       onClick={onSelect}
     >
@@ -460,7 +460,7 @@ export default function App() {
       <header className="app-shell__topbar">
         <span className="app-shell__brand">Sanlos Music</span>
         <div className="app-shell__navs">
-          <nav className="fnm-app__nav" aria-label="主导航">
+          <nav className="sanlos-app__nav" aria-label="主导航">
             <NavButton
               label="连接"
               active={view === 'connect'}
@@ -501,7 +501,7 @@ export default function App() {
            *    → 未登录时**整组不渲染**（点进去只会一路请求失败）。
            */}
           {connected && (
-            <nav className="fnm-app__nav fnm-app__nav--library" aria-label="曲库导航">
+            <nav className="sanlos-app__nav sanlos-app__nav--library" aria-label="曲库导航">
             <NavButton
               label="歌曲"
               active={view === 'songs'}
@@ -553,7 +553,7 @@ export default function App() {
         <div className="app-shell__settings">
           <button
             type="button"
-            className="fnm-app__nav-button"
+            className="sanlos-app__nav-button"
             // ⚠️ T35：设置页是**主区里的一个视图** → 这颗按钮变成「进入 / 退出设置页」。
             onClick={() => (view === 'settings' ? closeSettings() : openSettings())}
             aria-expanded={view === 'settings'}

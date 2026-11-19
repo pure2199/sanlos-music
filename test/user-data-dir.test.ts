@@ -67,7 +67,7 @@ const tempDirs: string[] = []
 
 /** 造一个临时的 appData 根目录。 */
 function tempAppData(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'fnm-t89-2-'))
+  const dir = mkdtempSync(join(tmpdir(), 'sanlos-t89-2-'))
   tempDirs.push(dir)
   return dir
 }
@@ -95,13 +95,19 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('userData 目录名的来源（T89-②）', () => {
-  it('目录名 = `package.json` 的 `productName`；`name` 保持不变（它就是旧目录名的由来）', () => {
+  it('目录名 = `package.json` 的 `productName`；`name` **不是**目录名（T115 起 `name` 也改了名）', () => {
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as {
       name?: string
       productName?: string
     }
     expect(pkg.productName).toBe(USER_DATA_DIR_NAME)
-    expect(pkg.name).toBe(LEGACY_USER_DATA_DIR_NAME)
+    // ⚠️ **T115**：`name` 由 `fnmusic-desktop` 改成了 `sanlos-music`
+    //    （前提被用户的新要求**显式推翻**）⇒ 断言**改写为新值**
+    //    （**一条不删、一条不放宽**）。
+    //    要钉的**不变量没变**：目录名取自 `productName`，**`name` 不是目录名**
+    //    —— 这条才是 T89-② 的真正结论（否则有人改成 `app.setPath` 不会被发现）。
+    expect(pkg.name).toBe('sanlos-music')
+    expect(pkg.name).not.toBe(USER_DATA_DIR_NAME)
   })
 
   it('新旧目录名**不是同一个**（否则这次改名等于没做）', () => {
@@ -220,7 +226,7 @@ describe('迁移守卫（T89-②）', () => {
     const appData = tempAppData()
     const legacy = seedLegacy(appData)
     // ⚠️ E2E 就是这么干的（`--user-data-dir` 指向临时目录）。
-    const isolated = mkdtempSync(join(tmpdir(), 'fnm-t89-2-e2e-'))
+    const isolated = mkdtempSync(join(tmpdir(), 'sanlos-t89-2-e2e-'))
     tempDirs.push(isolated)
 
     const report = migrateLegacyUserData({ userDataDir: isolated, appDataDir: appData })

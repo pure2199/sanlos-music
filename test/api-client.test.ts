@@ -31,7 +31,7 @@ import { createMockServer, type MockServer } from '../mock-server/server'
 //
 // 本文件分两段：
 // - 单元段：桩掉 `fetch`，钉死「URL / 方法 / 请求体 / 响应解析 / 映射规则」；
-// - 集成段：真的起一个 mock server，用 fetch 包装器把 `fnm://srv/...` 翻译成
+// - 集成段：真的起一个 mock server，用 fetch 包装器把 `sanlos://srv/...` 翻译成
 //   `<mock>/music/api/v1/...` 并补上服务端要求的凭据，走真实 HTTP。
 //
 // ⚠️ 字段形状以**规格 §15.7（真实 NAS 实测）**为准：
@@ -113,7 +113,7 @@ function stubSequenceFetch(payloads: unknown[]): FetchCall[] {
 const realFetch = globalThis.fetch.bind(globalThis) as typeof fetch
 
 /**
- * 集成段的 fetch 包装器：把 `fnm://srv<rest>` 翻译成 `<mock>/music/api/v1<rest>`，
+ * 集成段的 fetch 包装器：把 `sanlos://srv<rest>` 翻译成 `<mock>/music/api/v1<rest>`，
  * 并补上服务端要求的凭据头（**模拟主进程协议代理的职责**）。
  *
  * 包装器**只记录客户端自己发出的请求头**（补凭据之前的那一份），
@@ -125,8 +125,8 @@ function installBridge(mockUrl: string, credential: string, seen: FetchCall[]): 
       typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     const snap = snapshot(init)
     seen.push({ url, ...snap })
-    if (!url.startsWith('fnm://srv')) return realFetch(input, init)
-    const rest = url.slice('fnm://srv'.length)
+    if (!url.startsWith('sanlos://srv')) return realFetch(input, init)
+    const rest = url.slice('sanlos://srv'.length)
     const headers = new Headers(snap.headers)
     headers.set('cookie', `music-token=${credential}`)
     return realFetch(`${mockUrl}/music/api/v1${rest}`, { ...init, headers })
@@ -153,10 +153,10 @@ describe('apiCall', () => {
     await expect(apiCall('/album/list')).rejects.toThrow(/invalid arguments/)
   })
 
-  it('走 fnm:// 协议前缀', async () => {
+  it('走 sanlos:// 协议前缀', async () => {
     const calls = stubEnvelopeFetch({ code: 0, msg: '', data: {} })
     await apiCall('/album/list')
-    expect(String(calls[0]?.url)).toContain('fnm://srv')
+    expect(String(calls[0]?.url)).toContain('sanlos://srv')
   })
 
   it('业务错误抛的是 ApiError，带上服务端 msg 与 code', async () => {
@@ -223,7 +223,7 @@ describe('apiCall', () => {
   it('查询串跳过 undefined 并保留数字', async () => {
     const calls = stubEnvelopeFetch({ code: 0, msg: '', data: {} })
     await apiCall('/album/list', { query: { page: 2, size: 30, sort: undefined } })
-    expect(calls[0]?.url).toBe('fnm://srv/album/list?page=2&size=30')
+    expect(calls[0]?.url).toBe('sanlos://srv/album/list?page=2&size=30')
   })
 
   it('POST 时把 body 序列化成 JSON 并声明 content-type', async () => {
@@ -281,11 +281,11 @@ describe('分页参数归一', () => {
   it('业务模块在入口就归一（不会把 page=0 / size=NaN 发出去）', async () => {
     const calls = stubEnvelopeFetch({ code: 0, msg: '', data: { list: [], total: 0 } })
     await libraryApi.songs(0, 0)
-    expect(calls[0]?.url).toBe('fnm://srv/track/list?page=1&size=50')
+    expect(calls[0]?.url).toBe('sanlos://srv/track/list?page=1&size=50')
     await libraryApi.songs(Number.NaN, -5)
-    expect(calls[1]?.url).toBe('fnm://srv/track/list?page=1&size=50')
+    expect(calls[1]?.url).toBe('sanlos://srv/track/list?page=1&size=50')
     await libraryApi.songs(2.7, 5000)
-    expect(calls[2]?.url).toBe('fnm://srv/track/list?page=2&size=2000')
+    expect(calls[2]?.url).toBe('sanlos://srv/track/list?page=2&size=2000')
   })
 })
 
@@ -549,135 +549,135 @@ describe('各 API 方法的端点与参数', () => {
     {
       name: 'libraryApi.albums',
       call: () => libraryApi.albums(2, 30, 'newTrackAddedAt,desc'),
-      urls: ['fnm://srv/album/list?page=2&size=30&sort=newTrackAddedAt%2Cdesc'],
+      urls: ['sanlos://srv/album/list?page=2&size=30&sort=newTrackAddedAt%2Cdesc'],
       method: 'GET',
     },
     {
       name: 'libraryApi.album',
       call: () => libraryApi.album('al1'),
       // ⚠️ T18-3：真实服务端的参数名是 `guid`（用 `albumGUID` 会返回 code=100002）。
-      urls: ['fnm://srv/album/detail?guid=al1'],
+      urls: ['sanlos://srv/album/detail?guid=al1'],
       method: 'GET',
     },
     {
       name: 'libraryApi.albumSongs',
       call: () => libraryApi.albumSongs('al1', 1, 20),
-      urls: ['fnm://srv/track/album-detail/list?albumGUID=al1&page=1&size=20'],
+      urls: ['sanlos://srv/track/album-detail/list?albumGUID=al1&page=1&size=20'],
       method: 'GET',
     },
     {
       name: 'libraryApi.artistAlbums',
       call: () => libraryApi.artistAlbums('a1', 1, 20),
-      urls: ['fnm://srv/album/artist-detail/list?artistGUID=a1&page=1&size=20'],
+      urls: ['sanlos://srv/album/artist-detail/list?artistGUID=a1&page=1&size=20'],
       method: 'GET',
     },
     {
       name: 'libraryApi.songs',
       call: () => libraryApi.songs(3, 10),
-      urls: ['fnm://srv/track/list?page=3&size=10'],
+      urls: ['sanlos://srv/track/list?page=3&size=10'],
       method: 'GET',
     },
     {
       name: 'libraryApi.artistSongs',
       call: () => libraryApi.artistSongs('a1', 1, 10),
-      urls: ['fnm://srv/track/artist-detail/list?artistGUID=a1&page=1&size=10'],
+      urls: ['sanlos://srv/track/artist-detail/list?artistGUID=a1&page=1&size=10'],
       method: 'GET',
     },
     {
       name: 'libraryApi.genreSongs（没有 name 参数，服务端只认 guid）',
       call: () => libraryApi.genreSongs('g1', 1, 10),
-      urls: ['fnm://srv/track/genre-detail/list?genreGUID=g1&page=1&size=10'],
+      urls: ['sanlos://srv/track/genre-detail/list?genreGUID=g1&page=1&size=10'],
       method: 'GET',
     },
     {
       name: 'libraryApi.artists',
       call: () => libraryApi.artists(),
-      urls: ['fnm://srv/artist/list?page=1&size=50'],
+      urls: ['sanlos://srv/artist/list?page=1&size=50'],
       method: 'GET',
     },
     {
       name: 'libraryApi.genres',
       call: () => libraryApi.genres(),
-      urls: ['fnm://srv/genre/list?page=1&size=50'],
+      urls: ['sanlos://srv/genre/list?page=1&size=50'],
       method: 'GET',
     },
     {
       name: 'favoriteApi.list（分页循环取全，第一页 size=200）',
       call: () => favoriteApi.list(),
-      urls: ['fnm://srv/favorite-track/list?page=1&size=200'],
+      urls: ['sanlos://srv/favorite-track/list?page=1&size=200'],
       method: 'GET',
     },
     {
       name: 'favoriteApi.set(true)',
       call: () => favoriteApi.set('t1', true),
-      urls: ['fnm://srv/favorite-track/create'],
+      urls: ['sanlos://srv/favorite-track/create'],
       method: 'POST',
       body: { trackGUID: 't1' },
     },
     {
       name: 'favoriteApi.set(false)',
       call: () => favoriteApi.set('t1', false),
-      urls: ['fnm://srv/favorite-track/delete'],
+      urls: ['sanlos://srv/favorite-track/delete'],
       method: 'POST',
       body: { trackGUID: 't1' },
     },
     {
       name: 'playlistApi.list（分页循环取全，第一页 size=200）',
       call: () => playlistApi.list(),
-      urls: ['fnm://srv/playlist/list?page=1&size=200'],
+      urls: ['sanlos://srv/playlist/list?page=1&size=200'],
       method: 'GET',
     },
     {
       name: 'playlistApi.songs',
       call: () => playlistApi.songs('p1', 1, 20),
-      urls: ['fnm://srv/track/playlist-detail/list?playlistGUID=p1&page=1&size=20'],
+      urls: ['sanlos://srv/track/playlist-detail/list?playlistGUID=p1&page=1&size=20'],
       method: 'GET',
     },
     {
       name: 'playlistApi.create',
       call: () => playlistApi.create('歌单'),
-      urls: ['fnm://srv/playlist/create'],
+      urls: ['sanlos://srv/playlist/create'],
       method: 'POST',
       body: { name: '歌单' },
     },
     {
       name: 'playlistApi.rename',
       call: () => playlistApi.rename('p1', '新名'),
-      urls: ['fnm://srv/playlist/update'],
+      urls: ['sanlos://srv/playlist/update'],
       method: 'POST',
       body: { guid: 'p1', name: '新名' },
     },
     {
       name: 'playlistApi.remove',
       call: () => playlistApi.remove('p1'),
-      urls: ['fnm://srv/playlist/delete'],
+      urls: ['sanlos://srv/playlist/delete'],
       method: 'POST',
       body: { guid: 'p1' },
     },
     {
       name: 'playlistApi.addTracks',
       call: () => playlistApi.addTracks('p1', ['t1', 't2']),
-      urls: ['fnm://srv/playlist/add-track'],
+      urls: ['sanlos://srv/playlist/add-track'],
       method: 'POST',
       body: { guid: 'p1', trackGUIDs: ['t1', 't2'] },
     },
     {
       name: 'playlistApi.removeTracks',
       call: () => playlistApi.removeTracks('p1', ['t1']),
-      urls: ['fnm://srv/playlist/remove-track'],
+      urls: ['sanlos://srv/playlist/remove-track'],
       method: 'POST',
       body: { guid: 'p1', trackGUIDs: ['t1'] },
     },
     {
       name: 'lyricApi.raw',
       call: () => lyricApi.raw('t1'),
-      urls: ['fnm://srv/lyric/list?trackGUID=t1'],
+      urls: ['sanlos://srv/lyric/list?trackGUID=t1'],
       method: 'GET',
     },
     {
       name: 'historyApi.list',
       call: () => historyApi.list(2, 5),
-      urls: ['fnm://srv/play-history/list?page=2&size=5'],
+      urls: ['sanlos://srv/play-history/list?page=2&size=5'],
       method: 'GET',
     },
   ]
@@ -698,9 +698,9 @@ describe('各 API 方法的端点与参数', () => {
     const calls = stubEnvelopeFetch(listPayload)
     await searchApi.query('示例', { page: 2, size: 30 })
     expect(calls.map((call) => call.url).sort()).toEqual([
-      'fnm://srv/search/album?q=%E7%A4%BA%E4%BE%8B&page=2&size=30',
-      'fnm://srv/search/artist?q=%E7%A4%BA%E4%BE%8B&page=2&size=30',
-      'fnm://srv/search/track?q=%E7%A4%BA%E4%BE%8B&page=2&size=30',
+      'sanlos://srv/search/album?q=%E7%A4%BA%E4%BE%8B&page=2&size=30',
+      'sanlos://srv/search/artist?q=%E7%A4%BA%E4%BE%8B&page=2&size=30',
+      'sanlos://srv/search/track?q=%E7%A4%BA%E4%BE%8B&page=2&size=30',
     ])
   })
 
@@ -755,8 +755,8 @@ describe('收藏 / 歌单的分页循环取全', () => {
     const favorites = await favoriteApi.list()
     expect(favorites).toHaveLength(250)
     expect(calls).toHaveLength(2)
-    expect(calls[0]?.url).toBe('fnm://srv/favorite-track/list?page=1&size=200')
-    expect(calls[1]?.url).toBe('fnm://srv/favorite-track/list?page=2&size=200')
+    expect(calls[0]?.url).toBe('sanlos://srv/favorite-track/list?page=1&size=200')
+    expect(calls[1]?.url).toBe('sanlos://srv/favorite-track/list?page=2&size=200')
   })
 
   it('歌单列表同样按 total 翻页取全', async () => {

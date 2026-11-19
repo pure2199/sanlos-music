@@ -91,7 +91,7 @@ T57 轮全面复验后，仓库与工作区里散落着**用户私有的标识**
 | --- | --- | --- |
 | `src/lib/address.ts` | LF | 文件头注释与 `isIpLiteral()` 注释里的私有域名换占位（**仅注释**） |
 | `docs/calibration.md` | **CRLF** | 11 处私有值换占位；**须用脚本改并保持 CRLF** |
-| `docs/superpowers/specs/2026-11-05-fnmusic-domain-port-design.md` | LF | 6 处；其中「不能把私有域名硬编码进白名单」那条论断改为不含原值的表述 |
+| `docs/superpowers/specs/2026-11-05-sanlos-music-domain-port-design.md` | LF | 6 处；其中「不能把私有域名硬编码进白名单」那条论断改为不含原值的表述 |
 | `docs/superpowers/specs/2026-11-05-sanlos-music-stream-quality-ready-design.md` | LF | 5 处 |
 | `docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md` | LF | 2 处（IP + media 的 `src` 改相对路径） |
 | `docs/superpowers/specs/2026-11-06-sanlos-music-redaction-design.md` | LF | **新**：本规格 |

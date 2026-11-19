@@ -69,7 +69,7 @@
 .app-shell__main {
   /*
    * ⚠️ **必须是 flex 容器**（T22 真机实测 + E2E 复现）：
-   *    主区里装的是**页面外壳**（`.fnm-page`），页面外壳里才是虚拟网格，
+   *    主区里装的是**页面外壳**（`.sanlos-page`），页面外壳里才是虚拟网格，
    *    而网格的**画布高度 = 行数 × 行高**（条目越多越高）。
    *
    *    只写 `min-height: 0` **不够**：主区自己虽然不再被内容顶高，
@@ -102,14 +102,14 @@
  * 顶栏主导航（Task 16 修复轮次 1 · M-9）
  *
  * ⚠️ 这组按钮的**标记在应用外壳层**（`src/App.tsx`）→ 样式也必须住在**外壳**的
- *    样式文件里（原来放在 `src/pages/search-page.css`，类名却是 `fnm-searchpage__*`：
+ *    样式文件里（原来放在 `src/pages/search-page.css`，类名却是 `sanlos-searchpage__*`：
  *    归属失真，且一旦改成代码分割，连接页上的这两颗按钮会完全失去样式）。
  *
  * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
  */
 
 /* 入口按钮组 */
-.fnm-app__nav {
+.sanlos-app__nav {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -132,7 +132,7 @@
 }
 
 /* 曲库导航组：与主导航之间加一条细分隔线。 */
-.fnm-app__nav--library {
+.sanlos-app__nav--library {
   padding-left: 14px;
   border-left: 1px solid var(--border);
 }
@@ -150,7 +150,7 @@
 }
 
 /* 入口按钮 */
-.fnm-app__nav-button {
+.sanlos-app__nav-button {
   padding: 4px 12px;
   border: 1px solid var(--border);
   /* ⚠️ 圆角走**令牌**（Task 6）：Apple 风是胶囊形，Fluent 风是方正的 4px。 */
@@ -161,22 +161,22 @@
   cursor: pointer;
 }
 
-.fnm-app__nav-button:hover {
+.sanlos-app__nav-button:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-app__nav-button:active {
+.sanlos-app__nav-button:active {
   background: var(--surface-sunken);
 }
 
-.fnm-app__nav-button:focus-visible {
+.sanlos-app__nav-button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 当前所在的入口 */
-.fnm-app__nav-button[aria-pressed='true'] {
+.sanlos-app__nav-button[aria-pressed='true'] {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-text);
@@ -188,13 +188,13 @@
  * ⚠️ 设置按钮不是 `aria-pressed` 型（它不是「切换」而是「进入某视图」），
  *    所以用 `aria-expanded` 表示「设置页开着」→ 高亮样式单独写一条。
  */
-.fnm-app__nav-button[aria-expanded='true'] {
+.sanlos-app__nav-button[aria-expanded='true'] {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-text);
 }
 
-.fnm-app__nav-button:disabled {
+.sanlos-app__nav-button:disabled {
   border-color: var(--border);
   color: var(--disabled);
   cursor: not-allowed;

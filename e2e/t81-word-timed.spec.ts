@@ -9,7 +9,7 @@ import { LYRICS, SONGS } from '../mock-server/fixtures'
 //
 // ⚠️ **为什么这条用例必须是 E2E（而不是 Vitest + jsdom）**：
 //    本任务承诺的是**观感** —— 「只有行级时间戳的歌词**不假装逐字**，当前行**整行**强调色」。
-//    其中「整行强调色」是**纯 CSS 的事**（`.fnm-lyricview__line--whole { color: var(--accent) }`）
+//    其中「整行强调色」是**纯 CSS 的事**（`.sanlos-lyricview__line--whole { color: var(--accent) }`）
 //    ⇒ jsdom 的 `getComputedStyle` **恒为空** ⇒ 单测只能钉**声明**（CSS 契约），
 //    钉不到「**真的**渲染成那个颜色」。
 //    ⇒ 这里在**真实 Chromium** 里比对「当前行的实际颜色」与「`--accent` 的实际颜色」。
@@ -79,11 +79,11 @@ async function seekTo(window: Page, seconds: number): Promise<void> {
  *    ① 探针**必须与被测元素同作用域** ⇒ 挂在**面板里**（全屏页把「按封面取色校正过的
  *       强调色」写在**自己的根元素**上 ⇒ 挂在 `body` 上读到的不是同一个值）；
  *    ② 探针的颜色表达式**必须与 CSS 里那一行一字不差**：
- *       `.fnm-lyricview__line--whole { color: var(--fnm-fullplayer__accent-text, var(--accent)); }`
+ *       `.sanlos-lyricview__line--whole { color: var(--sanlos-fullplayer__accent-text, var(--accent)); }`
  *       （T89-⑪：全屏页里这行压在取色渐变背景上 ⇒ 用**校正过**的强调色；
  *        **不在全屏页里时回退到 `--accent`**）。
  *    ⚠️ **为什么以前也是绿的**：mock 以前**没有** `/static/cover` 端点 ⇒ 封面 404
- *       ⇒ 取色失败 ⇒ `--fnm-fullplayer__accent-text` **从来不生效**
+ *       ⇒ 取色失败 ⇒ `--sanlos-fullplayer__accent-text` **从来不生效**
  *       ⇒ 两边碰巧都等于 `--accent` ⇒ 断言**看起来**在验「整行强调色」，
  *       实际上**没验到**「校正过的强调色」这一层。
  */
@@ -99,19 +99,19 @@ async function snapshotWholeLine(panel: Locator): Promise<{
 }> {
   return panel.evaluate((root) => {
     const lines = Array.from(root.querySelectorAll('[data-index]'))
-    const whole = lines.filter((line) => line.className.includes('fnm-lyricview__line--whole'))
-    const others = lines.filter((line) => !line.className.includes('fnm-lyricview__line--whole'))
+    const whole = lines.filter((line) => line.className.includes('sanlos-lyricview__line--whole'))
+    const others = lines.filter((line) => !line.className.includes('sanlos-lyricview__line--whole'))
     const probe = document.createElement('span')
     // ⚠️ **必须与 `lyric-view.css` 里那一行一字不差**（且**同作用域**）。
-    probe.style.color = 'var(--fnm-fullplayer__accent-text, var(--accent))'
+    probe.style.color = 'var(--sanlos-fullplayer__accent-text, var(--accent))'
     root.appendChild(probe)
     const accentColor = getComputedStyle(probe).color
     probe.remove()
     return {
       wholeCount: whole.length,
       wordCount: root.querySelectorAll('[data-word]').length,
-      karaokeCount: root.querySelectorAll('.fnm-lyricview__word--karaoke').length,
-      overlayCount: root.querySelectorAll('.fnm-lyricview__overlay').length,
+      karaokeCount: root.querySelectorAll('.sanlos-lyricview__word--karaoke').length,
+      overlayCount: root.querySelectorAll('.sanlos-lyricview__overlay').length,
       lineColor: whole[0] ? getComputedStyle(whole[0]).color : '',
       accentColor,
       wholeIndexes: whole.map((line) => line.getAttribute('data-index') ?? ''),
@@ -151,7 +151,7 @@ test.describe.serial('T81：真逐字才卡拉OK，否则整行显示（真实 E
     await expect(list).toBeVisible()
 
     await list.getByRole('option').filter({ hasText: songTitle }).first().dblclick()
-    await expect(window.locator('.fnm-playerbar__title')).toHaveText(songTitle)
+    await expect(window.locator('.sanlos-playerbar__title')).toHaveText(songTitle)
 
     // --- 暂停 + 精确定位：位置冻结 ⇒ 断言才可复现 ---------------------------
     await window.getByRole('button', { name: '暂停', exact: true }).click()
@@ -159,7 +159,7 @@ test.describe.serial('T81：真逐字才卡拉OK，否则整行显示（真实 E
     await seekTo(window, TARGET_SECONDS)
 
     await window.getByRole('button', { name: '全屏播放页', exact: true }).click()
-    const stage = window.getByTestId('full-player').locator('.fnm-lyricview--all')
+    const stage = window.getByTestId('full-player').locator('.sanlos-lyricview--all')
     await expect(stage).toBeVisible()
     return stage
   }
@@ -182,7 +182,7 @@ test.describe.serial('T81：真逐字才卡拉OK，否则整行显示（真实 E
 
     // --- 鉴别力 3：当前行的**实际颜色** == **它自己那个作用域里**的强调色 -------
     // ⚠️ 这一条 jsdom 验不了（`getComputedStyle` 恒为空）⇒ 必须真实 Chromium。
-    // ⚠️ **T101 修正**：比的是「**当前行用的那个**强调色」（`--fnm-fullplayer__accent-text`，
+    // ⚠️ **T101 修正**：比的是「**当前行用的那个**强调色」（`--sanlos-fullplayer__accent-text`，
     //    回退 `--accent`）⇒ 探针必须**同作用域 + 同表达式**（见 `snapshotWholeLine`）。
     expect(snapshot.lineColor).not.toBe('')
     expect(snapshot.lineColor).toBe(snapshot.accentColor)

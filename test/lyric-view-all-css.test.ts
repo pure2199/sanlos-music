@@ -36,21 +36,21 @@ describe('全量模式（歌词舞台）的 CSS 契约（T34）', () => {
   const css = readCss('src', 'ui', 'lyrics', 'lyric-view.css')
 
   it('所有行**绝对定位**在固定槽位上（否则行会叠在一起）', () => {
-    const block = blockOf(css, '.fnm-lyricview--all .fnm-lyricview__line')
+    const block = blockOf(css, '.sanlos-lyricview--all .sanlos-lyricview__line')
     expect(block).toMatch(/position:\s*absolute/)
-    // 纵向位置由组件用 CSS 变量给（`--fnm-lyricview__line-top`）。
-    expect(block).toMatch(/top:\s*var\(--fnm-lyricview__line-top/)
+    // 纵向位置由组件用 CSS 变量给（`--sanlos-lyricview__line-top`）。
+    expect(block).toMatch(/top:\s*var\(--sanlos-lyricview__line-top/)
     expect(block).toMatch(/left:\s*0/)
     expect(block).toMatch(/right:\s*0/)
   })
 
   it('槽位高度**等于 TS 常量**（CSS 与代码不许各写一份数字）', () => {
-    const block = blockOf(css, '.fnm-lyricview--all .fnm-lyricview__line')
+    const block = blockOf(css, '.sanlos-lyricview--all .sanlos-lyricview__line')
     expect(block).toMatch(new RegExp(`height:\\s*${LYRIC_ALL_LINE_HEIGHT}px`))
   })
 
   it('当前行**只放大字号、不改槽位**（否则换行时整份列表上下跳）', () => {
-    const block = blockOf(css, '.fnm-lyricview--all .fnm-lyricview__line--active')
+    const block = blockOf(css, '.sanlos-lyricview--all .sanlos-lyricview__line--active')
     // ⚠️ 槽位**必须与普通行一致** —— 这是「列表不跳动」的前提。
     expect(block).toMatch(new RegExp(`height:\\s*${LYRIC_ALL_LINE_HEIGHT}px`))
     // 变的是字号。
@@ -58,7 +58,7 @@ describe('全量模式（歌词舞台）的 CSS 契约（T34）', () => {
   })
 
   it('歌词比可视区矮时**居中**、比可视区高时**贴顶**（`safe center`）', () => {
-    const block = blockOf(css, '.fnm-lyricview--all')
+    const block = blockOf(css, '.sanlos-lyricview--all')
     expect(block).toMatch(/display:\s*flex/)
     expect(block).toMatch(/flex-direction:\s*column/)
     // ⚠️ **必须是 `safe center`**：普通 `center` 在内容溢出时会让**顶部够不着**
@@ -67,7 +67,7 @@ describe('全量模式（歌词舞台）的 CSS 契约（T34）', () => {
   })
 
   it('画布**不被 flex 压扁**（`flex: 0 0 auto`）', () => {
-    const block = blockOf(css, '.fnm-lyricview--all .fnm-lyricview__canvas')
+    const block = blockOf(css, '.sanlos-lyricview--all .sanlos-lyricview__canvas')
     expect(block).toMatch(/flex:\s*0 0 auto/)
   })
 })

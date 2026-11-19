@@ -187,22 +187,22 @@ test.describe.serial('T100「那个文件夹里的都是有声小说」', () => 
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
 
     // ⭐ **不点**「扫描这个目录」⇒ 列表也得自己出来（自动开扫）。
-    const items = fixture.window.locator('.fnm-audiobooks__item')
+    const items = fixture.window.locator('.sanlos-audiobooks__item')
     await expect(items).toHaveCount(1)
-    await expect(items.first().locator('.fnm-audiobooks__title')).toHaveText(WORK_NAME)
+    await expect(items.first().locator('.sanlos-audiobooks__title')).toHaveText(WORK_NAME)
 
     // 一本小说 = **一条**（服务端是两张同名专辑 ⇒ 合成一条 + 如实说明）。
-    const meta = items.first().locator('.fnm-audiobooks__meta')
+    const meta = items.first().locator('.sanlos-audiobooks__meta')
     await expect(meta).toContainText('13 集')
     await expect(meta).toContainText('合并了 2 张专辑')
 
     // 来源说得清楚（用户指的位置）。
-    await expect(items.first().locator('.fnm-audiobooks__source')).toContainText(FOLDER)
+    await expect(items.first().locator('.sanlos-audiobooks__source')).toContainText(FOLDER)
   })
 
   test('② 列表在**第一屏**（搜索框在列表下面）⇒ 不用先想「要不要搜」', async () => {
     const order = await fixture.window.evaluate(() => {
-      const list = document.querySelector('.fnm-audiobooks__list')
+      const list = document.querySelector('.sanlos-audiobooks__list')
       const search = Array.from(document.querySelectorAll('button')).find((b) =>
         (b.textContent ?? '').includes('搜作品'),
       )
@@ -216,8 +216,8 @@ test.describe.serial('T100「那个文件夹里的都是有声小说」', () => 
   })
 
   test('③ 列表项**不再**出现「判定分」「结构信号弱」⇒ 与「位置即判定」一致', async () => {
-    const item = fixture.window.locator('.fnm-audiobooks__item').first()
-    await expect(item.locator('.fnm-audiobooks__meta')).not.toContainText('判定分')
+    const item = fixture.window.locator('.sanlos-audiobooks__item').first()
+    await expect(item.locator('.sanlos-audiobooks__meta')).not.toContainText('判定分')
     await expect(item).not.toContainText('结构信号弱')
   })
 
@@ -225,25 +225,25 @@ test.describe.serial('T100「那个文件夹里的都是有声小说」', () => 
     await fixture.window.getByPlaceholder('输入作品名，例如：牧神记').fill(WORK_NAME)
     await fixture.window.getByRole('button', { name: '搜作品' }).click()
 
-    const results = fixture.window.locator('.fnm-audiobooks__result')
+    const results = fixture.window.locator('.sanlos-audiobooks__result')
     // ⭐ 服务端是**两张**同名专辑 ⇒ 界面**只给一条**（= 一本小说）。
     await expect(results).toHaveCount(1)
-    await expect(results.first().locator('.fnm-audiobooks__title')).toHaveText(WORK_NAME)
-    await expect(results.first().locator('.fnm-audiobooks__result-meta')).toHaveText(
+    await expect(results.first().locator('.sanlos-audiobooks__title')).toHaveText(WORK_NAME)
+    await expect(results.first().locator('.sanlos-audiobooks__result-meta')).toHaveText(
       '13 集 · 合并了 2 张专辑',
     )
 
     // 点它 ⇒ 进的是**整组**（13 集）⇒ **第 02 集在场**（以前从搜索进去会丢）。
-    await results.first().locator('.fnm-audiobooks__title').click()
-    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
-    const rows = fixture.window.locator('.fnm-songlist__row')
+    await results.first().locator('.sanlos-audiobooks__title').click()
+    await expect(fixture.window.locator('.sanlos-detail__audiobook-note')).toHaveText('已按集序排列')
+    const rows = fixture.window.locator('.sanlos-songlist__row')
     // ⚠️ **T104（2026-11-17）**：「DOM 里有 13 行」只在**滚不动**（旧缺陷）时成立
     //    ⇒ 改成**滚着收齐**（按 `data-index` 去重）：**收齐 13 行 = 能滚到底**。
     const all = await collectSongListRows(fixture.window)
     expect(all).toHaveLength(13)
-    await expect(rows.nth(1).locator('.fnm-detail__episode')).toHaveText('第 2 集')
-    await expect(rows.nth(1).locator('.fnm-songlist__title')).toHaveText(`${WORK_NAME} 02 承上`)
-    await expect(fixture.window.locator('.fnm-songlist__status')).toHaveText('已加载 13 / 13')
+    await expect(rows.nth(1).locator('.sanlos-detail__episode')).toHaveText('第 2 集')
+    await expect(rows.nth(1).locator('.sanlos-songlist__title')).toHaveText(`${WORK_NAME} 02 承上`)
+    await expect(fixture.window.locator('.sanlos-songlist__status')).toHaveText('已加载 13 / 13')
   })
 
   test('⑤ ⭐ 扫不到的作品（不在那个目录里）⇒ 从秒搜进去**仍是整组**（只有临时组能救）', async () => {
@@ -254,20 +254,20 @@ test.describe.serial('T100「那个文件夹里的都是有声小说」', () => 
     await fixture.window.getByPlaceholder('输入作品名，例如：牧神记').fill(SIDE_NAME)
     await fixture.window.getByRole('button', { name: '搜作品' }).click()
 
-    const results = fixture.window.locator('.fnm-audiobooks__result')
+    const results = fixture.window.locator('.sanlos-audiobooks__result')
     await expect(results).toHaveCount(1)
-    await expect(results.first().locator('.fnm-audiobooks__result-meta')).toHaveText(
+    await expect(results.first().locator('.sanlos-audiobooks__result-meta')).toHaveText(
       '13 集 · 合并了 2 张专辑',
     )
 
-    await results.first().locator('.fnm-audiobooks__title').click()
-    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
-    const rows = fixture.window.locator('.fnm-songlist__row')
+    await results.first().locator('.sanlos-audiobooks__title').click()
+    await expect(fixture.window.locator('.sanlos-detail__audiobook-note')).toHaveText('已按集序排列')
+    const rows = fixture.window.locator('.sanlos-songlist__row')
     // ⭐ **13 集**（12 + 1）⇒ 不认临时组的话这里只有 12 集（**第 02 集会丢**）。
     // ⚠️ T104：「DOM 行数」→「滚着收齐」（收齐 13 行 = 能滚到底）。
     const all = await collectSongListRows(fixture.window)
     expect(all).toHaveLength(13)
-    await expect(rows.nth(1).locator('.fnm-detail__episode')).toHaveText('第 2 集')
-    await expect(rows.nth(1).locator('.fnm-songlist__title')).toHaveText(`${SIDE_NAME} 02 承上`)
+    await expect(rows.nth(1).locator('.sanlos-detail__episode')).toHaveText('第 2 集')
+    await expect(rows.nth(1).locator('.sanlos-songlist__title')).toHaveText(`${SIDE_NAME} 02 承上`)
   })
 })

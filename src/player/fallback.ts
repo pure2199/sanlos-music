@@ -23,8 +23,8 @@ import type { FallbackPreparation } from './engine'
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。 */
 function playerBridge(): PlayerBridge | null {
-  const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
-  return scope.fnPlayer ?? null
+  const scope = globalThis as unknown as { sanlosPlayer?: PlayerBridge }
+  return scope.sanlosPlayer ?? null
 }
 
 /** 兜底不可用时的统一结果（**没有桥** / **请求失败**）。 */

@@ -4,9 +4,9 @@
 // 这个测试防的是什么
 // ---------------------------------------------------------------------------
 // 真机联调（Step D）实测到一个**单测与 HTTP 探针都发现不了**的缺陷：
-// `index.html` / `lyric.html` 的 CSP 里 `media-src` 只放行了 `fnm:`，
-// **漏了 `fnml:`**（本地媒体 scheme）→ Chromium 的 URL 安全检查直接拒绝
-// `<audio src="fnml://local/track/…">`（MediaError code 4
+// `index.html` / `lyric.html` 的 CSP 里 `media-src` 只放行了 `sanlos:`，
+// **漏了 `sanlos-media:`**（本地媒体 scheme）→ Chromium 的 URL 安全检查直接拒绝
+// `<audio src="sanlos-media://local/track/…">`（MediaError code 4
 // 「Media load rejected by URL safety check」）→ 对外表现成
 // 「该音频无法播放：当前内核不支持该格式」。
 //
@@ -26,7 +26,7 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
-import { FNM_SCHEME, FNML_SCHEME } from '../electron/schemes'
+import { SANLOS_SCHEME, SANLOS_MEDIA_SCHEME } from '../electron/schemes'
 
 // ---------------------------------------------------------------------------
 // 工具
@@ -95,21 +95,21 @@ describe('CSP 与自定义 scheme 的一致性', () => {
     expect(sourceList(csp, 'media-src').length).toBeGreaterThan(0)
   })
 
-  it.each(PAGES)('$name 的 media-src 放行 fnm:（NAS 代理）', (page) => {
+  it.each(PAGES)('$name 的 media-src 放行 sanlos:（NAS 代理）', (page) => {
     const csp = readCsp(page.path)
-    expect(sourceList(csp, 'media-src')).toContain(`${FNM_SCHEME}:`)
+    expect(sourceList(csp, 'media-src')).toContain(`${SANLOS_SCHEME}:`)
   })
 
-  it.each(PAGES)('$name 的 media-src 放行 fnml:（本地媒体）', (page) => {
+  it.each(PAGES)('$name 的 media-src 放行 sanlos-media:（本地媒体）', (page) => {
     const csp = readCsp(page.path)
-    // ⚠️ 这条就是回归点：漏掉 `fnml:` → 本地播放与兜底产物全部播不了。
-    expect(sourceList(csp, 'media-src')).toContain(`${FNML_SCHEME}:`)
+    // ⚠️ 这条就是回归点：漏掉 `sanlos-media:` → 本地播放与兜底产物全部播不了。
+    expect(sourceList(csp, 'media-src')).toContain(`${SANLOS_MEDIA_SCHEME}:`)
   })
 
   it.each(PAGES)('$name 的 media-src 放行**全部**已注册的应用 scheme', (page) => {
     const csp = readCsp(page.path)
     const allowed = sourceList(csp, 'media-src')
-    for (const scheme of [FNM_SCHEME, FNML_SCHEME]) {
+    for (const scheme of [SANLOS_SCHEME, SANLOS_MEDIA_SCHEME]) {
       expect(allowed).toContain(`${scheme}:`)
     }
   })
@@ -124,10 +124,10 @@ describe('CSP 与自定义 scheme 的一致性', () => {
     )
   })
 
-  it('NAS 代理仍是渲染层唯一的出网出口（connect-src 放行 fnm:）', () => {
+  it('NAS 代理仍是渲染层唯一的出网出口（connect-src 放行 sanlos:）', () => {
     for (const page of PAGES) {
       const csp = readCsp(page.path)
-      expect(sourceList(csp, 'connect-src')).toContain(`${FNM_SCHEME}:`)
+      expect(sourceList(csp, 'connect-src')).toContain(`${SANLOS_SCHEME}:`)
     }
   })
 })

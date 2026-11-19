@@ -157,12 +157,12 @@ describe('设置页：「关于」分类（T41）', () => {
   /** 装一个假的播放器桥（只关心 `openExternal`）。 */
   function stubBridge(): { openExternal: ReturnType<typeof vi.fn> } {
     const openExternal = vi.fn().mockResolvedValue(true)
-    ;(globalThis as unknown as { fnPlayer?: unknown }).fnPlayer = { openExternal }
+    ;(globalThis as unknown as { sanlosPlayer?: unknown }).sanlosPlayer = { openExternal }
     return { openExternal }
   }
 
   afterEach(() => {
-    delete (globalThis as unknown as { fnPlayer?: unknown }).fnPlayer
+    delete (globalThis as unknown as { sanlosPlayer?: unknown }).sanlosPlayer
   })
 
   it('点「关于」→ 显示开发者 / 公司 / 官网 / 备案号', () => {
@@ -270,7 +270,7 @@ describe('设置页：版本号 / 项目地址 / 更新源（T82）', () => {
     const openExternal = vi.fn().mockResolvedValue(true)
     const getAppVersion = vi.fn().mockResolvedValue('0.2.1')
     const setPrefs = vi.fn().mockResolvedValue({})
-    ;(globalThis as unknown as { fnPlayer?: unknown }).fnPlayer = {
+    ;(globalThis as unknown as { sanlosPlayer?: unknown }).sanlosPlayer = {
       openExternal,
       getAppVersion,
       getPrefs: vi.fn().mockResolvedValue({}),
@@ -280,7 +280,7 @@ describe('设置页：版本号 / 项目地址 / 更新源（T82）', () => {
   }
 
   afterEach(() => {
-    delete (globalThis as unknown as { fnPlayer?: unknown }).fnPlayer
+    delete (globalThis as unknown as { sanlosPlayer?: unknown }).sanlosPlayer
   })
 
   it('「关于」→ 显示**版本号**（主进程给的）', async () => {
@@ -488,7 +488,7 @@ describe('设置页：自动更新的签名闸（T85）', () => {
 
   /** 假桥（`getPrefs` 按给定偏好返回）。 */
   function stubPrefs(allowUnsigned: boolean): void {
-    ;(globalThis as unknown as { fnPlayer?: unknown }).fnPlayer = {
+    ;(globalThis as unknown as { sanlosPlayer?: unknown }).sanlosPlayer = {
       getAppVersion: vi.fn().mockResolvedValue('0.2.1'),
       getPrefs: vi.fn().mockResolvedValue({ update: { allowUnsigned } }),
       setPrefs: vi.fn().mockResolvedValue({}),
@@ -507,7 +507,7 @@ describe('设置页：自动更新的签名闸（T85）', () => {
   })
 
   afterEach(() => {
-    delete (globalThis as unknown as { fnPlayer?: unknown }).fnPlayer
+    delete (globalThis as unknown as { sanlosPlayer?: unknown }).sanlosPlayer
   })
 
   it('未签名包 + **已保存**了授权 → 「启动安装」**可点**（T85 的核心）', async () => {

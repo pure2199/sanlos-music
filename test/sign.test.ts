@@ -13,7 +13,7 @@ describe('authx', () => {
     )
   })
   it('GET 签名保留空值参数（上游语义，实测修正 M9）', () => {
-    // 简报原文此处断言 `?q=a&z=` ≡ `?q=a`，与上游参考实现（tools/fn-probe.mjs:43 保留空值）
+    // 简报原文此处断言 `?q=a&z=` ≡ `?q=a`，与上游参考实现（tools/sanlos-probe.mjs:43 保留空值）
     // 矛盾，判为**用例写错**：上游只丢弃字面量 'undefined' / 'null'，空值参数必须保留。
     const a = signPayload('GET', 'http://n/music/api/v1/x?q=a&z=')
     const b = signPayload('GET', 'http://n/music/api/v1/x?q=a')
@@ -48,7 +48,7 @@ describe('authx', () => {
 // ---------------------------------------------------------------------------
 // 与实测探针交叉验证
 //
-// tools/fn-probe.mjs 里的 authx / pathnameOf 已在真实 fnOS NAS 上跑通登录与全部只读接口，
+// tools/sanlos-probe.mjs 里的 authx / pathnameOf 已在真实 fnOS NAS 上跑通登录与全部只读接口，
 // 是当前唯一经过实测的签名实现。此处直接加载该文件的源码做交叉验证，
 // 保证客户端与探针工具在相同输入下产出逐字节相同的 authx 字符串。
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ type ProbeApi = {
 }
 
 /**
- * 从 tools/fn-probe.mjs 源码中切出算法部分并执行。
+ * 从 tools/sanlos-probe.mjs 源码中切出算法部分并执行。
  *
  * 探针文件顶层会直接跑 main()，因此只取「文件开头 ~ 读取命令行参数之前」这一段，
  * 其中包含 md5 / sha256 / nonce / ts / pathnameOf / authx 的真实源码。
@@ -75,13 +75,13 @@ type ProbeApi = {
  */
 function loadProbeApi(): ProbeApi {
   const here = dirname(fileURLToPath(import.meta.url))
-  const probeFile = join(here, '..', 'tools', 'fn-probe.mjs')
+  const probeFile = join(here, '..', 'tools', 'sanlos-probe.mjs')
   const src = readFileSync(probeFile, 'utf8')
   const marker = 'const args = process.argv.slice(2)'
   const cut = src.indexOf(marker)
   if (cut < 0) {
     throw new Error(
-      `tools/fn-probe.mjs 结构已变化：找不到 "${marker}"，无法加载实测通过的 authx 做交叉验证`,
+      `tools/sanlos-probe.mjs 结构已变化：找不到 "${marker}"，无法加载实测通过的 authx 做交叉验证`,
     )
   }
   // 去掉 ESM import 语句与 shebang，改为注入 createHash 参数后用 new Function 执行。
@@ -90,7 +90,7 @@ function loadProbeApi(): ProbeApi {
     .replace(/^#![^\n]*\n/, '')
     .replace(/^import[^\n]*from\s+['"]node:crypto['"];?$/m, '')
   if (/^\s*import\s/m.test(head)) {
-    throw new Error('tools/fn-probe.mjs 头部存在未处理的 import 语句，无法加载做交叉验证')
+    throw new Error('tools/sanlos-probe.mjs 头部存在未处理的 import 语句，无法加载做交叉验证')
   }
   const factory = new Function(
     'createHash',
@@ -147,7 +147,7 @@ const CROSS_CASES: Array<{
   },
 ]
 
-describe('与实测探针 tools/fn-probe.mjs 交叉验证', () => {
+describe('与实测探针 tools/sanlos-probe.mjs 交叉验证', () => {
   const probe = loadProbeApi()
 
   for (const c of CROSS_CASES) {
@@ -176,7 +176,7 @@ describe('与实测探针 tools/fn-probe.mjs 交叉验证', () => {
 // ---------------------------------------------------------------------------
 // golden 向量
 //
-// 期望值取自上游参考实现 tools/fn-probe.mjs 的实测跑通输出（nonce=123456、ts=1700000000000），
+// 期望值取自上游参考实现 tools/sanlos-probe.mjs 的实测跑通输出（nonce=123456、ts=1700000000000），
 // 写死成字面量。这样即使 sign.ts 与探针被同时改坏，用例依然会红。
 // ---------------------------------------------------------------------------
 

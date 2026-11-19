@@ -4,19 +4,19 @@
  * ⚠️ **只允许引用语义变量**（`src/styles/tokens.css`），不得出现硬编码色值。
  *    两套主题（Apple 风 / Windows 11 风）**自动跟随**令牌切换。
  *
- * ⚠️ 页面根容器复用**曲库页外壳**的 `.fnm-page`（`library-page-shell.css`），
+ * ⚠️ 页面根容器复用**曲库页外壳**的 `.sanlos-page`（`library-page-shell.css`），
  *    这里只写「发现」页**自己**的部分。
  */
 
 /* Tab 按钮组 */
-.fnm-discover__tabs {
+.sanlos-discover__tabs {
   display: flex;
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
 }
 
-.fnm-discover__tab {
+.sanlos-discover__tab {
   padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -26,24 +26,24 @@
   cursor: pointer;
 }
 
-.fnm-discover__tab:hover {
+.sanlos-discover__tab:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-discover__tab[aria-selected='true'] {
+.sanlos-discover__tab[aria-selected='true'] {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-text);
 }
 
-.fnm-discover__tab:focus-visible {
+.sanlos-discover__tab:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* Tab 面板 */
-.fnm-discover__panel {
+.sanlos-discover__panel {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -53,15 +53,15 @@
 }
 
 /* 提示 / 通知 / 错误 / 空态 */
-.fnm-discover__hint,
-.fnm-discover__notice,
-.fnm-discover__empty {
+.sanlos-discover__hint,
+.sanlos-discover__notice,
+.sanlos-discover__empty {
   margin: 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.fnm-discover__error {
+.sanlos-discover__error {
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--danger);
@@ -72,7 +72,7 @@
 }
 
 /* 重试按钮 */
-.fnm-discover__retry {
+.sanlos-discover__retry {
   align-self: flex-start;
   padding: 4px 12px;
   border: 1px solid var(--border);
@@ -83,18 +83,18 @@
   cursor: pointer;
 }
 
-.fnm-discover__retry:hover {
+.sanlos-discover__retry:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-discover__retry:focus-visible {
+.sanlos-discover__retry:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 榜单区：左边榜单列表 + 右边条目 */
-.fnm-discover__boards {
+.sanlos-discover__boards {
   display: flex;
   gap: 12px;
   flex: 1 1 auto;
@@ -102,7 +102,7 @@
   align-items: flex-start;
 }
 
-.fnm-discover__boardlist {
+.sanlos-discover__boardlist {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -110,7 +110,7 @@
   max-width: 180px;
 }
 
-.fnm-discover__board {
+.sanlos-discover__board {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -125,33 +125,33 @@
   cursor: pointer;
 }
 
-.fnm-discover__board:hover {
+.sanlos-discover__board:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-discover__board[aria-current='true'] {
+.sanlos-discover__board[aria-current='true'] {
   border-color: var(--accent);
   background: var(--surface-raised);
   color: var(--text-primary);
 }
 
-.fnm-discover__board:focus-visible {
+.sanlos-discover__board:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.fnm-discover__boardname {
+.sanlos-discover__boardname {
   font-weight: 600;
 }
 
-.fnm-discover__boardcount {
+.sanlos-discover__boardcount {
   font-size: 11px;
   color: var(--text-secondary);
 }
 
 /* 条目列表 */
-.fnm-discover__entries {
+.sanlos-discover__entries {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -159,13 +159,13 @@
   gap: 2px;
 }
 
-.fnm-discover__hitrate {
+.sanlos-discover__hitrate {
   margin: 0 0 4px;
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.fnm-discover__entry {
+.sanlos-discover__entry {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -174,23 +174,23 @@
   font-size: 13px;
 }
 
-.fnm-discover__entry:hover {
+.sanlos-discover__entry:hover {
   background: var(--surface-sunken);
 }
 
 /* ⚠️ **不在曲库**的条目：灰显（但**仍要看得见**它在榜上）。 */
-.fnm-discover__entry[data-in-library='false'] {
+.sanlos-discover__entry[data-in-library='false'] {
   color: var(--disabled);
 }
 
-.fnm-discover__rank {
+.sanlos-discover__rank {
   flex: 0 0 auto;
   min-width: 28px;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
 }
 
-.fnm-discover__entrytitle {
+.sanlos-discover__entrytitle {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -198,7 +198,7 @@
   white-space: nowrap;
 }
 
-.fnm-discover__artist {
+.sanlos-discover__artist {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -208,14 +208,14 @@
   font-size: 12px;
 }
 
-.fnm-discover__duration {
+.sanlos-discover__duration {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
   font-size: 12px;
 }
 
-.fnm-discover__badge {
+.sanlos-discover__badge {
   flex: 0 0 auto;
   padding: 1px 8px;
   border: 1px solid var(--border);
@@ -224,7 +224,7 @@
   font-size: 11px;
 }
 
-.fnm-discover__reason {
+.sanlos-discover__reason {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -234,7 +234,7 @@
   font-size: 12px;
 }
 
-.fnm-discover__play {
+.sanlos-discover__play {
   flex: 0 0 auto;
   padding: 2px 10px;
   border: 1px solid var(--border);
@@ -245,25 +245,25 @@
   cursor: pointer;
 }
 
-.fnm-discover__play:hover {
+.sanlos-discover__play:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-discover__play:focus-visible {
+.sanlos-discover__play:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 推荐块 */
-.fnm-discover__block {
+.sanlos-discover__block {
   display: flex;
   flex-direction: column;
   gap: 2px;
   margin-bottom: 10px;
 }
 
-.fnm-discover__blocktitle {
+.sanlos-discover__blocktitle {
   margin: 0 0 4px;
   font-size: 14px;
   font-weight: 600;

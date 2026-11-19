@@ -14,7 +14,7 @@
  * 面板根容器
  * -------------------------------------------------------------------------- */
 
-.fnm-eqpanel {
+.sanlos-eqpanel {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -30,7 +30,7 @@
  * 头部一行
  * -------------------------------------------------------------------------- */
 
-.fnm-eqpanel__header {
+.sanlos-eqpanel__header {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -39,7 +39,7 @@
 }
 
 /* 一个字段（标签 + 控件）。 */
-.fnm-eqpanel__field {
+.sanlos-eqpanel__field {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -47,14 +47,14 @@
 }
 
 /* 字段标签。 */
-.fnm-eqpanel__field-label {
+.sanlos-eqpanel__field-label {
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
 }
 
 /* 字段旁的补充说明。 */
-.fnm-eqpanel__hint {
+.sanlos-eqpanel__hint {
   font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -64,7 +64,7 @@
  * 预置曲线下拉
  * -------------------------------------------------------------------------- */
 
-.fnm-eqpanel__preset {
+.sanlos-eqpanel__preset {
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -75,11 +75,11 @@
   cursor: pointer;
 }
 
-.fnm-eqpanel__preset:hover {
+.sanlos-eqpanel__preset:hover {
   border-color: var(--border-strong);
 }
 
-.fnm-eqpanel__preset:focus-visible {
+.sanlos-eqpanel__preset:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
   border-color: var(--accent);
@@ -89,14 +89,14 @@
  * 段数切换
  * -------------------------------------------------------------------------- */
 
-.fnm-eqpanel__bands-toggle {
+.sanlos-eqpanel__bands-toggle {
   display: inline-flex;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   overflow: hidden;
 }
 
-.fnm-eqpanel__band-count {
+.sanlos-eqpanel__band-count {
   padding: 5px 10px;
   border: none;
   background: transparent;
@@ -106,23 +106,23 @@
   cursor: pointer;
 }
 
-.fnm-eqpanel__band-count:hover {
+.sanlos-eqpanel__band-count:hover {
   background: var(--surface-sunken);
   color: var(--accent);
 }
 
-.fnm-eqpanel__band-count:focus-visible {
+.sanlos-eqpanel__band-count:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
 /* 当前选中的段数。 */
-.fnm-eqpanel__band-count--active {
+.sanlos-eqpanel__band-count--active {
   background: var(--accent);
   color: var(--accent-text);
 }
 
-.fnm-eqpanel__band-count--active:hover {
+.sanlos-eqpanel__band-count--active:hover {
   background: var(--accent-hover);
   color: var(--accent-text);
 }
@@ -131,21 +131,21 @@
  * 旁路开关与复位
  * -------------------------------------------------------------------------- */
 
-.fnm-eqpanel__bypass {
+.sanlos-eqpanel__bypass {
   cursor: pointer;
 }
 
-.fnm-eqpanel__bypass-input {
+.sanlos-eqpanel__bypass-input {
   accent-color: var(--accent);
   cursor: pointer;
 }
 
-.fnm-eqpanel__bypass-input:focus-visible {
+.sanlos-eqpanel__bypass-input:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
-.fnm-eqpanel__reset {
+.sanlos-eqpanel__reset {
   margin-left: auto;
   padding: 5px 12px;
   border: 1px solid var(--border);
@@ -157,16 +157,16 @@
   cursor: pointer;
 }
 
-.fnm-eqpanel__reset:hover {
+.sanlos-eqpanel__reset:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-eqpanel__reset:active {
+.sanlos-eqpanel__reset:active {
   background: var(--surface-sunken);
 }
 
-.fnm-eqpanel__reset:focus-visible {
+.sanlos-eqpanel__reset:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
@@ -175,7 +175,7 @@
  * 各段
  * -------------------------------------------------------------------------- */
 
-.fnm-eqpanel__bands {
+.sanlos-eqpanel__bands {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 10px;
@@ -184,7 +184,7 @@
 }
 
 /* 一段。 */
-.fnm-eqpanel__band {
+.sanlos-eqpanel__band {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -197,7 +197,7 @@
 }
 
 /* 频点标签。 */
-.fnm-eqpanel__freq {
+.sanlos-eqpanel__freq {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
@@ -205,7 +205,7 @@
 }
 
 /* 增益滑块（**填充色走变量**）。 */
-.fnm-eqpanel__slider {
+.sanlos-eqpanel__slider {
   width: 100%;
   height: 18px;
   margin: 0;
@@ -213,15 +213,15 @@
   cursor: pointer;
 }
 
-.fnm-eqpanel__slider:hover:not(:disabled) {
+.sanlos-eqpanel__slider:hover:not(:disabled) {
   accent-color: var(--accent-hover);
 }
 
-.fnm-eqpanel__slider:active:not(:disabled) {
+.sanlos-eqpanel__slider:active:not(:disabled) {
   accent-color: var(--accent-hover);
 }
 
-.fnm-eqpanel__slider:focus-visible {
+.sanlos-eqpanel__slider:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -230,7 +230,7 @@
  * 两层数值（基线 / 偏移 / 实际）
  * -------------------------------------------------------------------------- */
 
-.fnm-eqpanel__values {
+.sanlos-eqpanel__values {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -241,17 +241,17 @@
 }
 
 /* 预置基线。 */
-.fnm-eqpanel__baseline {
+.sanlos-eqpanel__baseline {
   color: var(--text-secondary);
 }
 
 /* 手动偏移。 */
-.fnm-eqpanel__offset {
+.sanlos-eqpanel__offset {
   color: var(--text-secondary);
 }
 
 /* 实际生效的增益（= 真正送进滤波器的值）。 */
-.fnm-eqpanel__effective {
+.sanlos-eqpanel__effective {
   color: var(--accent);
   font-weight: 600;
 }

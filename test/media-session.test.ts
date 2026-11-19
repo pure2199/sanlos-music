@@ -10,10 +10,10 @@
 // - `dispose()` 把**全部** handler 卸掉（`setActionHandler(action, null)`）。
 //
 // ⚠️ **T21 改写了「封面」这一条的前提**（不是削弱断言，是换了被钉住的行为）：
-//    旧行为 = 直接把 `fnm://…` 塞进 `metadata.artwork`；
+//    旧行为 = 直接把 `sanlos://…` 塞进 `metadata.artwork`；
 //    新行为 = **artwork 的 src 必须是 Chromium 认得的 `data:` URL**
 //    （Chromium 的媒体会话图片加载器只认 http/https/data/blob，
-//      `fnm://` 会被拒 → Windows 侧不显示专辑图）。
+//      `sanlos://` 会被拒 → Windows 侧不显示专辑图）。
 //    ⇒ 下面「封面 URL 仍由 coverUrl() 拼装」这条**继续成立**（唯一拼装点不变），
 //      但拼出来的地址是**去取字节**用的，不是 artwork 的 src。
 //
@@ -230,7 +230,7 @@ function fakeBridge(): {
 }
 
 afterEach(() => {
-  delete (globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   usePlayerStore.setState({
     current: null,
     queue: [],
@@ -266,7 +266,7 @@ describe('bytesToDataUrl / dataUrlMime', () => {
 
   it('dataUrlMime：从 data: URL 取 MIME；不是 data: 就 undefined', () => {
     expect(dataUrlMime('data:image/webp;base64,AAA')).toBe('image/webp')
-    expect(dataUrlMime('fnm://srv/static/cover?coverId=x')).toBeUndefined()
+    expect(dataUrlMime('sanlos://srv/static/cover?coverId=x')).toBeUndefined()
     expect(dataUrlMime('data:image/png')).toBeUndefined()
   })
 })
@@ -286,16 +286,16 @@ describe('fetchArtworkDataUrl（默认实现：渲染层自取）', () => {
     }
   }
 
-  it('把封面字节转成 data: URL（**不是**把 fnm:// 原样交出去）', async () => {
+  it('把封面字节转成 data: URL（**不是**把 sanlos:// 原样交出去）', async () => {
     await withFetch(
       async () => ({
         ok: true,
         blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }),
       }),
       async () => {
-        const url = await fetchArtworkDataUrl('fnm://srv/static/cover?coverId=x')
+        const url = await fetchArtworkDataUrl('sanlos://srv/static/cover?coverId=x')
         expect(url?.startsWith('data:image/jpeg;base64,')).toBe(true)
-        expect(url?.startsWith('fnm://')).toBe(false)
+        expect(url?.startsWith('sanlos://')).toBe(false)
       },
     )
   })
@@ -304,7 +304,7 @@ describe('fetchArtworkDataUrl（默认实现：渲染层自取）', () => {
     await withFetch(
       async () => ({ ok: false, blob: async () => new Blob([]) }),
       async () => {
-        expect(await fetchArtworkDataUrl('fnm://srv/static/cover?coverId=x')).toBeNull()
+        expect(await fetchArtworkDataUrl('sanlos://srv/static/cover?coverId=x')).toBeNull()
       },
     )
   })
@@ -315,7 +315,7 @@ describe('fetchArtworkDataUrl（默认实现：渲染层自取）', () => {
         throw new Error('网络炸了')
       },
       async () => {
-        expect(await fetchArtworkDataUrl('fnm://srv/static/cover?coverId=x')).toBeNull()
+        expect(await fetchArtworkDataUrl('sanlos://srv/static/cover?coverId=x')).toBeNull()
       },
     )
   })
@@ -327,7 +327,7 @@ describe('fetchArtworkDataUrl（默认实现：渲染层自取）', () => {
         blob: async () => new Blob([], { type: 'image/jpeg' }),
       }),
       async () => {
-        expect(await fetchArtworkDataUrl('fnm://srv/static/cover?coverId=x')).toBeNull()
+        expect(await fetchArtworkDataUrl('sanlos://srv/static/cover?coverId=x')).toBeNull()
       },
     )
   })
@@ -352,7 +352,7 @@ describe('createMediaSession 元数据', () => {
     expect(session.metadata).toBe(meta)
   })
 
-  it('封面 URL 仍由 coverUrl() 拼装，但**不直接**塞进 artwork（Chromium 不认 fnm://）', async () => {
+  it('封面 URL 仍由 coverUrl() 拼装，但**不直接**塞进 artwork（Chromium 不认 sanlos://）', async () => {
     const session = fakeMediaSession()
     const recorder = metadataRecorder()
     /** 被请求过的封面 URL（用来验证「唯一拼装点」没被绕过）。 */
@@ -371,22 +371,22 @@ describe('createMediaSession 元数据', () => {
 
     // ① 封面 URL 仍然走 `coverUrl()`（**全项目唯一拼装点**不变）。
     expect(requested.length).toBe(1)
-    expect(requested[0]?.startsWith('fnm://srv/')).toBe(true)
+    expect(requested[0]?.startsWith('sanlos://srv/')).toBe(true)
     expect(requested[0]).toContain('coverId=track_abc')
     expect(requested[0]).toContain(`size=${MEDIA_ARTWORK_SIZE}`)
 
-    // ② artwork 的 src 是 **data: URL**，**不是** `fnm://`
+    // ② artwork 的 src 是 **data: URL**，**不是** `sanlos://`
     //    （Chromium 的媒体会话图片加载器只认 http/https/data/blob）。
     const artwork = recorder.made[recorder.made.length - 1]?.artwork ?? []
     expect(artwork.length).toBe(1)
     expect(artwork[0]?.src.startsWith('data:image/')).toBe(true)
-    expect(artwork[0]?.src.startsWith('fnm://')).toBe(false)
+    expect(artwork[0]?.src.startsWith('sanlos://')).toBe(false)
     expect(artwork[0]?.type).toBe('image/jpeg')
 
-    // ③ **任何一版**元数据都不得出现过 `fnm://` 的 artwork。
+    // ③ **任何一版**元数据都不得出现过 `sanlos://` 的 artwork。
     for (const made of recorder.made) {
       for (const item of made.artwork ?? []) {
-        expect(item.src.startsWith('fnm://')).toBe(false)
+        expect(item.src.startsWith('sanlos://')).toBe(false)
       }
     }
   })
@@ -795,7 +795,7 @@ describe('toSnapshot', () => {
 describe('installMediaSession', () => {
   it('安装时把当前状态推给主进程', () => {
     const fake = fakeBridge()
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const installed = installMediaSession()
 
@@ -806,7 +806,7 @@ describe('installMediaSession', () => {
 
   it('store 状态变化时继续推送', () => {
     const fake = fakeBridge()
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const installed = installMediaSession()
     fake.pushed.length = 0
@@ -820,7 +820,7 @@ describe('installMediaSession', () => {
 
   it('主进程下发的命令在渲染进程执行', () => {
     const fake = fakeBridge()
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const installed = installMediaSession()
     usePlayerStore.setState({ position: 0, duration: 100 })
@@ -833,7 +833,7 @@ describe('installMediaSession', () => {
 
   it('dispose 后不再推送、也不再接收命令', () => {
     const fake = fakeBridge()
-    ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = fake.bridge
+    ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = fake.bridge
 
     const installed = installMediaSession()
     installed.dispose()
@@ -846,7 +846,7 @@ describe('installMediaSession', () => {
   })
 
   it('没有桥时（纯浏览器预览）不崩', () => {
-    delete (globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer
+    delete (globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
     const installed = installMediaSession()
     expect(() => usePlayerStore.setState({ position: 1 })).not.toThrow()
     installed.dispose()

@@ -80,8 +80,8 @@ export function DownloadButton({ song }: DownloadButtonProps): ReactElement {
     return (
       <button
         type="button"
-        className="fnm-download fnm-download--done"
-        data-testid="fnm-download-button"
+        className="sanlos-download sanlos-download--done"
+        data-testid="sanlos-download-button"
         data-song-id={song.id}
         data-status="done"
         aria-label="已下载到本地"
@@ -102,8 +102,8 @@ export function DownloadButton({ song }: DownloadButtonProps): ReactElement {
     return (
       <button
         type="button"
-        className="fnm-download fnm-download--running"
-        data-testid="fnm-download-button"
+        className="sanlos-download sanlos-download--running"
+        data-testid="sanlos-download-button"
         data-song-id={song.id}
         data-status="running"
         aria-label={`下载中 ${label}，点击取消`}
@@ -120,8 +120,8 @@ export function DownloadButton({ song }: DownloadButtonProps): ReactElement {
     return (
       <button
         type="button"
-        className="fnm-download fnm-download--pending"
-        data-testid="fnm-download-button"
+        className="sanlos-download sanlos-download--pending"
+        data-testid="sanlos-download-button"
         data-song-id={song.id}
         data-status="pending"
         aria-label="排队中，点击取消"
@@ -138,8 +138,8 @@ export function DownloadButton({ song }: DownloadButtonProps): ReactElement {
     return (
       <button
         type="button"
-        className="fnm-download fnm-download--error"
-        data-testid="fnm-download-button"
+        className="sanlos-download sanlos-download--error"
+        data-testid="sanlos-download-button"
         data-song-id={song.id}
         data-status="error"
         aria-label="下载失败，点击重试"
@@ -155,8 +155,8 @@ export function DownloadButton({ song }: DownloadButtonProps): ReactElement {
   return (
     <button
       type="button"
-      className="fnm-download"
-      data-testid="fnm-download-button"
+      className="sanlos-download"
+      data-testid="sanlos-download-button"
       data-song-id={song.id}
       data-status="idle"
       aria-label="下载到本地"

@@ -11,15 +11,15 @@
 // ---------------------------------------------------------------------------
 // 真实踩坑（本项目原本就中招了）
 // ---------------------------------------------------------------------------
-// 主进程原本注册了**两次**：先 `fnm`（NAS 代理），再 `fnml`（本地媒体）——
-// 于是 `fnm` 的特权被 `fnml` **覆盖掉**。后果极其隐蔽：
+// 主进程原本注册了**两次**：先 `sanlos`（NAS 代理），再 `sanlos-media`（本地媒体）——
+// 于是 `sanlos` 的特权被 `sanlos-media` **覆盖掉**。后果极其隐蔽：
 //
 // - **主进程照常工作**：`protocol.handle()` 是**显式**注册，与特权无关 →
-//   `net.fetch('fnm://…')` 正常返回 200；
-// - **渲染进程里坏了**：Blink 的 scheme 白名单里**没有** `fnm`
-//   → `fetch('fnm://…')` 直接抛 `TypeError: Failed to fetch`
-//     + 控制台 `URL scheme "fnm" is not supported`；
-// - ⇒ **整个曲库都拉不出来**（登录能成，因为登录走主进程 IPC，不走 `fnm://`）；
+//   `net.fetch('sanlos://…')` 正常返回 200；
+// - **渲染进程里坏了**：Blink 的 scheme 白名单里**没有** `sanlos`
+//   → `fetch('sanlos://…')` 直接抛 `TypeError: Failed to fetch`
+//     + 控制台 `URL scheme "sanlos" is not supported`；
+// - ⇒ **整个曲库都拉不出来**（登录能成，因为登录走主进程 IPC，不走 `sanlos://`）；
 // - ⇒ 而**单元测试全绿**（jsdom 没有自定义协议，替身也不模拟「只能注册一次」），
 //   单测**根本够不到**这一层——只有真起一个 Electron 进程才会暴露。
 //
@@ -28,7 +28,7 @@
 // ---------------------------------------------------------------------------
 // 安全边界
 // ---------------------------------------------------------------------------
-// - 两个 scheme 都**不出网**：`fnm` 由主进程代理转发到 NAS，`fnml` 只读本地磁盘；
+// - 两个 scheme 都**不出网**：`sanlos` 由主进程代理转发到 NAS，`sanlos-media` 只读本地磁盘；
 // - 特权**不放宽**：`standard` + `secure` + `supportFetchAPI` + `stream` + `corsEnabled`
 //   ——`corsEnabled` 是**必须**的（CVE-2026-70604：`supportFetchAPI` 不配
 //   `corsEnabled` 会让远程页面跨源读本地资源）；
@@ -74,10 +74,10 @@ export interface ProtocolLike {
 // ---------------------------------------------------------------------------
 
 /** NAS 代理 scheme（渲染进程唯一的出网出口）。 */
-export const FNM_SCHEME = 'fnm'
+export const SANLOS_SCHEME = 'sanlos'
 
 /** 本地媒体 scheme（已下载的音频文件）。 */
-export const FNML_SCHEME = 'fnml'
+export const SANLOS_MEDIA_SCHEME = 'sanlos-media'
 
 /**
  * 两个自定义 scheme 共用的特权。
@@ -161,8 +161,8 @@ export function registerSchemePrivileges(
 export function registerAppSchemes(protocol?: ProtocolLike): void {
   registerSchemePrivileges(
     [
-      { scheme: FNM_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } },
-      { scheme: FNML_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } },
+      { scheme: SANLOS_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } },
+      { scheme: SANLOS_MEDIA_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } },
     ],
     protocol,
   )

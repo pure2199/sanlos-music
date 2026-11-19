@@ -275,7 +275,7 @@ export function SearchPage(props: SearchPageProps): ReactElement {
       loading={playlistsLoading}
       loadingText="正在加载歌单…"
     >
-      <div className="fnm-searchpage">
+      <div className="sanlos-searchpage">
         <SearchPanel
           api={api}
           onPlay={onPlay}
@@ -293,23 +293,23 @@ export function SearchPage(props: SearchPageProps): ReactElement {
         <BatchDownloadBar songs={selectedSongs} />
 
         {/* --- 歌单写回 --- */}
-        <section className="fnm-searchpage__playlists" aria-label="歌单写回">
-          <header className="fnm-searchpage__section-header">
-            <h2 className="fnm-searchpage__section-title">歌单</h2>
-            <span className="fnm-searchpage__status">{`已选中 ${selectedIds.length} 首歌曲`}</span>
+        <section className="sanlos-searchpage__playlists" aria-label="歌单写回">
+          <header className="sanlos-searchpage__section-header">
+            <h2 className="sanlos-searchpage__section-title">歌单</h2>
+            <span className="sanlos-searchpage__status">{`已选中 ${selectedIds.length} 首歌曲`}</span>
           </header>
 
           {playlists.length === 0 && !playlistsLoading && (
-            <p className="fnm-searchpage__empty" data-testid="fnm-playlists-empty">
+            <p className="sanlos-searchpage__empty" data-testid="sanlos-playlists-empty">
               暂无歌单
             </p>
           )}
 
           {playlists.length > 0 && (
-            <label className="fnm-searchpage__field">
-              <span className="fnm-searchpage__label">选择歌单</span>
+            <label className="sanlos-searchpage__field">
+              <span className="sanlos-searchpage__label">选择歌单</span>
               <select
-                className="fnm-searchpage__select"
+                className="sanlos-searchpage__select"
                 value={selectedPlaylistId ?? ''}
                 onChange={(event) => setSelectedPlaylistId(event.target.value || null)}
               >
@@ -322,9 +322,9 @@ export function SearchPage(props: SearchPageProps): ReactElement {
             </label>
           )}
 
-          <div className="fnm-searchpage__new">
+          <div className="sanlos-searchpage__new">
             <input
-              className="fnm-searchpage__input"
+              className="sanlos-searchpage__input"
               type="text"
               aria-label="新歌单名称"
               placeholder="新歌单名称"
@@ -335,7 +335,7 @@ export function SearchPage(props: SearchPageProps): ReactElement {
             />
             <button
               type="button"
-              className="fnm-searchpage__button"
+              className="sanlos-searchpage__button"
               disabled={busy || newName.trim().length === 0}
               onClick={() => void handleCreate()}
             >
@@ -343,11 +343,11 @@ export function SearchPage(props: SearchPageProps): ReactElement {
             </button>
           </div>
 
-          <div className="fnm-searchpage__actions">
+          <div className="sanlos-searchpage__actions">
             <button
               type="button"
-              className="fnm-searchpage__button"
-              data-testid="fnm-add-to-playlist"
+              className="sanlos-searchpage__button"
+              data-testid="sanlos-add-to-playlist"
               disabled={!canWritePlaylist}
               onClick={() => void handleAdd()}
             >
@@ -355,8 +355,8 @@ export function SearchPage(props: SearchPageProps): ReactElement {
             </button>
             <button
               type="button"
-              className="fnm-searchpage__button fnm-searchpage__button--secondary"
-              data-testid="fnm-remove-from-playlist"
+              className="sanlos-searchpage__button sanlos-searchpage__button--secondary"
+              data-testid="sanlos-remove-from-playlist"
               disabled={!canWritePlaylist}
               onClick={() => void handleRemove()}
             >
@@ -365,12 +365,12 @@ export function SearchPage(props: SearchPageProps): ReactElement {
           </div>
 
           {message && (
-            <p className="fnm-searchpage__message" role="status">
+            <p className="sanlos-searchpage__message" role="status">
               {message}
             </p>
           )}
           {error && (
-            <p className="fnm-searchpage__error" role="alert">
+            <p className="sanlos-searchpage__error" role="alert">
               {error}
             </p>
           )}

@@ -40,11 +40,11 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const APP_ROOT = resolve(HERE, '..')
 // ⚠️ **T87 / CI：输出目录与 `scripts/pack.cjs` 共用同一个变量**。
-//    CI 里产物在 `release-ci/`（`FNM_PACK_OUTPUT=release-ci`），
+//    CI 里产物在 `release-ci/`（`SANLOS_PACK_OUTPUT=release-ci`），
 //    而清单必须基于**同一个目录**里的安装包算 SHA-512
 //    ⇒ 两边指同一个目录，否则会拿**旧包**算哈希（客户端一更新就失败）。
-const RELEASE_DIR = process.env.FNM_PACK_OUTPUT
-  ? resolve(APP_ROOT, process.env.FNM_PACK_OUTPUT)
+const RELEASE_DIR = process.env.SANLOS_PACK_OUTPUT
+  ? resolve(APP_ROOT, process.env.SANLOS_PACK_OUTPUT)
   : join(APP_ROOT, 'release')
 const MANIFEST_NAME = 'latest.json'
 

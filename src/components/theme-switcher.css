@@ -5,14 +5,14 @@
  *    圆角也走令牌（`--radius-pill`）——两套主题的形状差异由令牌体现。
  */
 
-.fnm-theme {
+.sanlos-theme {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 /* 切换按钮 */
-.fnm-theme__button {
+.sanlos-theme__button {
   padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -23,18 +23,18 @@
   white-space: nowrap;
 }
 
-.fnm-theme__button:hover {
+.sanlos-theme__button:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-theme__button:focus-visible {
+.sanlos-theme__button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 切换失败提示 */
-.fnm-theme__error {
+.sanlos-theme__error {
   margin: 0;
   font-size: 12px;
   color: var(--danger);

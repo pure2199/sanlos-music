@@ -6,7 +6,7 @@
 //    ⇒ 用户 2026-11-10 拍板：**只留探针脚本 + 下载 URL**）。
 //    ⇒ 样本**没下载**时**整组 skip**（CI 不依赖网络）。
 //
-// 拉样本：`node tools/fn-fetch-embedded-lyric-samples.mjs`
+// 拉样本：`node tools/sanlos-fetch-embedded-lyric-samples.mjs`
 //        （落到 `release/samples/embedded-lyric/`，**gitignored**）
 //
 // ⚠️ **为什么非要真实文件**：自造夹具只能证明「我们读得懂自己写的东西」；
@@ -56,7 +56,7 @@ const fsImpl: TagFileSystem = {
 /** 读一个样本的内嵌歌词（**没标签 ⇒ 空串**）。 */
 async function readLyrics(file: string): Promise<string> {
   const path = join(SAMPLE_DIR, file)
-  if (!existsSync(path)) throw new Error(`样本没下载：${file}（先跑 tools/fn-fetch-embedded-lyric-samples.mjs）`)
+  if (!existsSync(path)) throw new Error(`样本没下载：${file}（先跑 tools/sanlos-fetch-embedded-lyric-samples.mjs）`)
   const tags = await readFileTags(fsImpl, path)
   return tags?.lyrics ?? ''
 }

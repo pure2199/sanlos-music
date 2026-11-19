@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// T20：`fnm://` 代理 × 真实 mock 的 Range / 206 端到端
+// T20：`sanlos://` 代理 × 真实 mock 的 Range / 206 端到端
 // ---------------------------------------------------------------------------
 //
 // ⚠️ 为什么这一组**不能**省（审计 P3-9 的真正含义）：
@@ -7,7 +7,7 @@
 //    **假上游**测过了（上游是手搓的 `Response`）——但那是「代理对着自己编的东西」，
 //    **从来没有真的打过一个会分段应答的服务器**。
 //    这一组让代理**真的**打 mock server：
-//      渲染进程的 `fnm://` 请求（带 Range）
+//      渲染进程的 `sanlos://` 请求（带 Range）
 //        → 代理构造上游请求（Range 头透传 + 签名 + Cookie）
 //          → 真实 HTTP 打到 mock（mock 真的按 Range 分段应答 206）
 //            → 代理把 206 / content-range / accept-ranges 原样带回
@@ -21,7 +21,7 @@
 //    mock 的音频是 WAV，WAV 从中间字节开始返回时**没有文件头**，
 //    Chromium 的 WAV 解码器解不了 → 浏览器层面的「拖动定位」验证
 //    改由 `e2e/smoke.spec.ts` 用 `currentTime` setter 劫持做（验客户端契约），
-//    「上游到底支不支持 Range」由真机探针 `tools/fn-range-probe.mjs` 回答。
+//    「上游到底支不支持 Range」由真机探针 `tools/sanlos-range-probe.mjs` 回答。
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect } from 'vitest'
@@ -39,7 +39,7 @@ function fakeProtocol(): { proto: ProtocolLike; call: (request: Request) => Prom
   let handler: ((request: Request) => Promise<Response> | Response) | null = null
   const proto: ProtocolLike = {
     handle(scheme: string, h: (request: Request) => Promise<Response> | Response) {
-      if (scheme === 'fnm') handler = h
+      if (scheme === 'sanlos') handler = h
     },
     registerSchemesAsPrivileged() {
       // 本组用例不关心 scheme 特权。
@@ -85,7 +85,7 @@ function sessionFor(s: MockServer, token: string): SessionManager {
 // 用例
 // ---------------------------------------------------------------------------
 
-describe('fnm:// 代理 × 真实 mock：Range / 206 端到端', () => {
+describe('sanlos:// 代理 × 真实 mock：Range / 206 端到端', () => {
   it('带 Range → 上游 206，content-range 原样带回，**body 字节就是对应的切片**', async () => {
     const mock = createMockServer()
     const token = await loginMock(mock)
@@ -99,9 +99,9 @@ describe('fnm:// 代理 × 真实 mock：Range / 206 端到端', () => {
     const whole = Buffer.from(await wholeRes.arrayBuffer())
     expect(whole.length).toBeGreaterThan(1000)
 
-    // 走代理：渲染进程发起带 Range 的 `fnm://` 请求。
+    // 走代理：渲染进程发起带 Range 的 `sanlos://` 请求。
     const res = await fake.call(
-      new Request('fnm://srv/track/stream?guid=t1', { headers: { range: 'bytes=1000-1999' } }),
+      new Request('sanlos://srv/track/stream?guid=t1', { headers: { range: 'bytes=1000-1999' } }),
     )
 
     expect(res.status).toBe(206)
@@ -125,7 +125,7 @@ describe('fnm:// 代理 × 真实 mock：Range / 206 端到端', () => {
     const fake = fakeProtocol()
     registerProxy(sessionFor(mock, token), { protocol: fake.proto })
 
-    const res = await fake.call(new Request('fnm://srv/track/stream?guid=t1'))
+    const res = await fake.call(new Request('sanlos://srv/track/stream?guid=t1'))
 
     expect(res.status).toBe(200)
     expect(res.headers.get('accept-ranges')).toBe('bytes')
@@ -148,7 +148,7 @@ describe('fnm:// 代理 × 真实 mock：Range / 206 端到端', () => {
     const whole = Buffer.from(await wholeRes.arrayBuffer())
 
     const res = await fake.call(
-      new Request('fnm://srv/track/stream?guid=t1', {
+      new Request('sanlos://srv/track/stream?guid=t1', {
         headers: { range: `bytes=${whole.length + 10}-` },
       }),
     )

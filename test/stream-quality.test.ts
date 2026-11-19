@@ -58,7 +58,7 @@ const SONG: Song = {
 
 /** 每次用例一个独立的偏好文件（系统临时目录，不入库）。 */
 function tempFile(): string {
-  return join(tmpdir(), `fnm-t54-prefs-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
+  return join(tmpdir(), `sanlos-t54-prefs-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
 }
 
 // ---------------------------------------------------------------------------
@@ -209,9 +209,9 @@ afterEach(() => {
 })
 
 describe('T54 服务端转码协议', () => {
-  it('产物地址是 `fnm://` 代理地址（**不含凭证**）', () => {
+  it('产物地址是 `sanlos://` 代理地址（**不含凭证**）', () => {
     const url = transcodeFileUrl(DOWNLOAD_ID)
-    expect(url).toBe(`fnm://srv/download/track/transcode/file?downloadId=${DOWNLOAD_ID}`)
+    expect(url).toBe(`sanlos://srv/download/track/transcode/file?downloadId=${DOWNLOAD_ID}`)
     expect(url).not.toContain('token')
     expect(url).not.toContain('Cookie')
   })
@@ -500,7 +500,7 @@ function createEngine(options: {
     now: () => 0,
     requestFrame: () => 1,
     cancelFrame: () => undefined,
-    resolveSource: options.resolve ?? ((song) => `fnm://srv/track/stream?guid=${song.id}`),
+    resolveSource: options.resolve ?? ((song) => `sanlos://srv/track/stream?guid=${song.id}`),
     prepareStandardSource: options.prepare,
     streamQuality: () => options.quality,
   })
@@ -536,7 +536,7 @@ describe('T54 引擎的标准音质路径', () => {
     engine.play(SONG)
     await flush()
     // 回落到了**既有**的流式地址（音乐照常播）
-    expect(element.src).toBe(`fnm://srv/track/stream?guid=${SONG_ID}`)
+    expect(element.src).toBe(`sanlos://srv/track/stream?guid=${SONG_ID}`)
     // 说明写进了状态（**不是**错误）
     const last = states[states.length - 1]
     expect(last?.qualityNote).toContain('标准音质不可用')
@@ -554,7 +554,7 @@ describe('T54 引擎的标准音质路径', () => {
     engine.onStateChange((state) => states.push({ qualityNote: state.qualityNote }))
     engine.play(SONG)
     await flush()
-    expect(element.src).toBe(`fnm://srv/track/stream?guid=${SONG_ID}`)
+    expect(element.src).toBe(`sanlos://srv/track/stream?guid=${SONG_ID}`)
     expect(states[states.length - 1]?.qualityNote ?? null).toBeNull()
     engine.dispose()
   })
@@ -571,7 +571,7 @@ describe('T54 引擎的标准音质路径', () => {
     engine.play(SONG)
     await flush()
     expect(called).toBe(false)
-    expect(element.src).toBe(`fnm://srv/track/stream?guid=${SONG_ID}`)
+    expect(element.src).toBe(`sanlos://srv/track/stream?guid=${SONG_ID}`)
     engine.dispose()
   })
 

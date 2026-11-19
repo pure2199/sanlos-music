@@ -32,56 +32,56 @@ describe('设置页（整页）的 CSS 契约（T35）', () => {
   const css = readCss('src', 'components', 'settings-panel.css')
 
   it('根容器**撑满主区**（不是浮层 → 高度跟着主区走）', () => {
-    const block = blockOf(css, '.fnm-settings')
+    const block = blockOf(css, '.sanlos-settings')
     expect(block).toMatch(/flex:\s*1 1 auto/)
     expect(block).toMatch(/min-height:\s*0/)
     expect(block).toMatch(/height:\s*100%/)
   })
 
   it('**不再是绝对定位的浮层**（旧浮层会盖住顶栏）', () => {
-    const block = blockOf(css, '.fnm-settings')
+    const block = blockOf(css, '.sanlos-settings')
     expect(block).not.toMatch(/position:\s*absolute/)
     expect(block).not.toMatch(/position:\s*fixed/)
   })
 
   it('根容器是**横向两栏**（左导航 + 右内容，不是竖排）', () => {
-    const block = blockOf(css, '.fnm-settings')
+    const block = blockOf(css, '.sanlos-settings')
     expect(block).toMatch(/display:\s*flex/)
     // ⚠️ 竖排会把左导航压到内容上方 → 分类导航就废了。
     expect(block).not.toMatch(/flex-direction:\s*column/)
   })
 
   it('左侧分类导航是**固定宽度的一栏**', () => {
-    const block = blockOf(css, '.fnm-settings__nav')
+    const block = blockOf(css, '.sanlos-settings__nav')
     expect(block).toMatch(/flex:\s*0 0 190px/)
     expect(block).toMatch(/display:\s*flex/)
     expect(block).toMatch(/flex-direction:\s*column/)
   })
 
   it('右侧内容区**自己滚动**，且不被内容顶高', () => {
-    const block = blockOf(css, '.fnm-settings__content')
+    const block = blockOf(css, '.sanlos-settings__content')
     expect(block).toMatch(/flex:\s*1 1 auto/)
     expect(block).toMatch(/min-width:\s*0/)
     expect(block).toMatch(/overflow-y:\s*auto/)
   })
 
   it('内容列**限宽 900px**（宽到说明文字一行放得下，又不无限拉长）', () => {
-    expect(blockOf(css, '.fnm-settings__group')).toMatch(/max-width:\s*900px/)
-    expect(blockOf(css, '.fnm-settings__hint')).toMatch(/max-width:\s*860px/)
+    expect(blockOf(css, '.sanlos-settings__group')).toMatch(/max-width:\s*900px/)
+    expect(blockOf(css, '.sanlos-settings__hint')).toMatch(/max-width:\s*860px/)
   })
 
   it('输入框**限宽 560px**（旧浮层里示例 URL 被截断 → 现在不许再被截断）', () => {
-    expect(blockOf(css, '.fnm-settings__option--stack')).toMatch(/max-width:\s*560px/)
+    expect(blockOf(css, '.sanlos-settings__option--stack')).toMatch(/max-width:\s*560px/)
   })
 
   it('组标题是**加粗小标题 + 下分隔线**（不再是灰色小字）', () => {
-    const block = blockOf(css, '.fnm-settings__legend')
+    const block = blockOf(css, '.sanlos-settings__legend')
     expect(block).toMatch(/font-weight:\s*600/)
     expect(block).toMatch(/border-bottom:\s*1px solid var\(--border\)/)
   })
 
   it('当前分类有**独立的选中样式**（`aria-current`）', () => {
-    const block = blockOf(css, ".fnm-settings__nav-item[aria-current='page']")
+    const block = blockOf(css, ".sanlos-settings__nav-item[aria-current='page']")
     expect(block).toMatch(/background:\s*var\(--accent\)/)
     expect(block).toMatch(/font-weight:\s*600/)
   })

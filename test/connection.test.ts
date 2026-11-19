@@ -274,7 +274,7 @@ describe('buildCandidates 中继语义（实测修正 M1）', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 与上游参考实现 tools/fn-probe.mjs 的 buildCandidates 交叉验证
+// 与上游参考实现 tools/sanlos-probe.mjs 的 buildCandidates 交叉验证
 //
 // 探针的 buildCandidates 已在真实 NAS 上跑通，是当前唯一经过实测的候选构造实现。
 // 这里直接加载该文件源码做交叉验证，保证客户端与探针工具产出逐字节相同的候选列表。
@@ -288,7 +288,7 @@ describe('buildCandidates 中继语义（实测修正 M1）', () => {
 type ProbeCandidate = { address: string; label: string; kind: string; isRelay: boolean }
 
 /**
- * 从 tools/fn-probe.mjs 源码中切出 buildCandidates 并执行。
+ * 从 tools/sanlos-probe.mjs 源码中切出 buildCandidates 并执行。
  *
  * 探针的 buildCandidates 依赖模块级的 `fnId`（来自命令行参数）作为中继回退值，
  * 因此这里把 `fnId` 作为工厂函数的参数注入。
@@ -296,7 +296,7 @@ type ProbeCandidate = { address: string; label: string; kind: string; isRelay: b
  */
 function loadProbeBuildCandidates(): (fnId: string, params: unknown) => ProbeCandidate[] {
   const here = dirname(fileURLToPath(import.meta.url))
-  const probeFile = join(here, '..', 'tools', 'fn-probe.mjs')
+  const probeFile = join(here, '..', 'tools', 'sanlos-probe.mjs')
   const src = readFileSync(probeFile, 'utf8')
   const startMarker = 'function buildCandidates(params) {'
   const endMarker = 'async function probe(candidate)'
@@ -304,7 +304,7 @@ function loadProbeBuildCandidates(): (fnId: string, params: unknown) => ProbeCan
   const end = src.indexOf(endMarker)
   if (start < 0 || end < 0 || end <= start) {
     throw new Error(
-      'tools/fn-probe.mjs 结构已变化：切不出 buildCandidates，无法与实测通过的探针做交叉验证',
+      'tools/sanlos-probe.mjs 结构已变化：切不出 buildCandidates，无法与实测通过的探针做交叉验证',
     )
   }
   const factory = new Function(
@@ -315,7 +315,7 @@ function loadProbeBuildCandidates(): (fnId: string, params: unknown) => ProbeCan
   return factory
 }
 
-describe('与实测探针 tools/fn-probe.mjs 交叉验证', () => {
+describe('与实测探针 tools/sanlos-probe.mjs 交叉验证', () => {
   const probe = loadProbeBuildCandidates()
 
   const CASES: Array<{ name: string; fnId: string; payload: unknown }> = [

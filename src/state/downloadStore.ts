@@ -20,8 +20,8 @@
 // ---------------------------------------------------------------------------
 // - **store 里不放任何凭证**（token / 密码 / Cookie）——那些只存在于主进程；
 // - 「本地优先」**默认开启**（`prefs.localFirst` 没写 = 开）；
-// - 播放地址的解析见 `resolvePlaybackSource`：**命中本地且开关打开** → `fnml://`，
-//   否则照旧走 `fnm://srv/track/stream?guid=…`（**既有行为一字不变**）。
+// - 播放地址的解析见 `resolvePlaybackSource`：**命中本地且开关打开** → `sanlos-media://`，
+//   否则照旧走 `sanlos://srv/track/stream?guid=…`（**既有行为一字不变**）。
 
 import { create } from 'zustand'
 
@@ -40,8 +40,8 @@ import { prepareTranscode } from '../player/transcode'
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。 */
 function playerBridge(): PlayerBridge | null {
-  const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
-  return scope.fnPlayer ?? null
+  const scope = globalThis as unknown as { sanlosPlayer?: PlayerBridge }
+  return scope.sanlosPlayer ?? null
 }
 
 /** 任务数组 → `songId → 任务` 的表。 */
@@ -358,12 +358,12 @@ export function downloadEntryToSong(entry: DownloadEntry): Song {
 /**
  * 解析这一曲的**播放地址**（Task 11 的「本地优先播放」）。
  *
- * - 本地有副本 **且** 开关打开 → `fnml://local/track/<id>`（不再走 NAS）；
- * - 否则 → `fnm://srv/track/stream?guid=…`（**与之前完全一致**）。
+ * - 本地有副本 **且** 开关打开 → `sanlos-media://local/track/<id>`（不再走 NAS）；
+ * - 否则 → `sanlos://srv/track/stream?guid=…`（**与之前完全一致**）。
  *
  * ⚠️ 只看**已下载完成**的条目（`entries`）：正在下载的半成品**绝不能**拿去播。
  *
- * ⚠️ **T38：本地曲目（用户自己加进来的文件）直接走 `fnml://`**——
+ * ⚠️ **T38：本地曲目（用户自己加进来的文件）直接走 `sanlos-media://`**——
  *    它**不在下载索引里**（那是 NAS 曲目的副本），也**不该**走 NAS
  *    （本地文件在 NAS 上根本不存在）。⇒ 与「本地优先」开关**无关**。
  */

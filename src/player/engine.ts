@@ -31,7 +31,7 @@
 // ---------------------------------------------------------------------------
 // 安全边界
 // ---------------------------------------------------------------------------
-// - 音频流地址一律 `fnm://srv/track/stream?guid=…`（见 `format.ts`）：
+// - 音频流地址一律 `sanlos://srv/track/stream?guid=…`（见 `format.ts`）：
 //   渲染进程**永不直连 NAS**，也**不碰任何凭证**；
 // - 错误文案**不含** token / Cookie / authx；
 // - 只用浏览器 API，不 import Node 内置模块或 Electron API。
@@ -326,7 +326,7 @@ function defaultCreateAudioElement(): MediaElementLike {
   }
   const element = document.createElement('audio') as unknown as MediaElementLike
   element.preload = 'auto'
-  // ⚠️ **不设置 crossOrigin**：音频走同源代理（`fnm://`），简报既定如此。
+  // ⚠️ **不设置 crossOrigin**：音频走同源代理（`sanlos://`），简报既定如此。
   return element
 }
 
@@ -480,7 +480,7 @@ export interface PlayerEngineOptions {
    * 解析这一曲的**播放地址**（Task 11 的「本地优先播放」接缝）。
    *
    * ⚠️ **不给就用默认的 `streamUrl(song.id)`**——既有行为与既有断言**一字不变**。
-   *    给了就可以在本地有副本时改用 `fnml://local/track/<id>`。
+   *    给了就可以在本地有副本时改用 `sanlos-media://local/track/<id>`。
    * ⚠️ 解析器**抛异常或返回空串**时一律**退回流式地址**（不崩、不黑屏）。
    */
   resolveSource?: (song: Song) => string
@@ -747,7 +747,7 @@ export class PlayerEngine implements PlayerEngineLike {
    * 解析这一曲的播放地址。
    *
    * ⚠️ **默认行为一字不变**：没注入 `resolveSource` 时就是 `streamUrl(song.id)`。
-   *    注入后（Task 11 的「本地优先播放」）可以在本地有副本时改用 `fnml://`。
+   *    注入后（Task 11 的「本地优先播放」）可以在本地有副本时改用 `sanlos-media://`。
    * ⚠️ 解析器**抛异常或返回空串** → 一律**退回流式地址**（不崩、不黑屏）。
    */
   private resolveSource(song: Song): string {
@@ -789,7 +789,7 @@ export class PlayerEngine implements PlayerEngineLike {
    *    - **有兜底接缝**（Task 12）→ 走 `playViaFallback`（转码后再播）；
    *    - 没有 → 写可读错误、**不播放**（不静默失败）；
    * 3. 懒创建音频元素与 `AudioContext`（第一次真正播放时才建）；
-   * 4. 把 `audio.src` 指到 `fnm://srv/track/stream?guid=…`；
+   * 4. 把 `audio.src` 指到 `sanlos://srv/track/stream?guid=…`；
    * 5. 起播并推进进度。
    */
   play(song: Song, options?: PlayOptions): void {
@@ -941,7 +941,7 @@ export class PlayerEngine implements PlayerEngineLike {
    * 真正起播（**地址已经定下来**之后走这里）。
    *
    * @param song         要播的曲目。
-   * @param url          播放地址（普通路径 = `fnm://` / `fnml://`；兜底路径 = 转码产物地址）。
+   * @param url          播放地址（普通路径 = `sanlos://` / `sanlos-media://`；兜底路径 = 转码产物地址）。
    * @param viaFallback  是不是兜底产物（决定界面要不要注明「音质有损」）。
    * @param options      起播选项（**淡入**请求；不给 = 不淡入）。
    */

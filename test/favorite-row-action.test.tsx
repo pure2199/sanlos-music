@@ -104,7 +104,7 @@ function makeReadOnlyApi(): LibraryApi {
 /** 取某个曲目 id 的收藏按钮。 */
 function favoriteButtonOf(songId: string): HTMLElement {
   const button = document.querySelector(
-    `[data-testid="fnm-favorite-toggle"][data-song-id="${songId}"]`,
+    `[data-testid="sanlos-favorite-toggle"][data-song-id="${songId}"]`,
   )
   if (!(button instanceof HTMLElement)) throw new Error(`找不到 ${songId} 的收藏按钮`)
   return button

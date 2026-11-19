@@ -6,7 +6,7 @@
  *    这样 Task 18/19 换主题时只换变量、不重写组件。
  */
 
-.fnm-login {
+.sanlos-login {
   display: flex;
   justify-content: center;
   /*
@@ -28,7 +28,7 @@
   padding: 32px 16px;
 }
 
-.fnm-login__card {
+.sanlos-login__card {
   width: 100%;
   max-width: 460px;
   padding: 24px;
@@ -38,14 +38,14 @@
   box-shadow: 0 8px 24px var(--shadow);
 }
 
-.fnm-login__title {
+.sanlos-login__title {
   margin: 0 0 20px;
   font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.fnm-login__connected {
+.sanlos-login__connected {
   margin-bottom: 20px;
   padding: 16px;
   border: 1px solid var(--success);
@@ -53,20 +53,20 @@
   background: var(--success-surface);
 }
 
-.fnm-login__connected-title {
+.sanlos-login__connected-title {
   margin: 0 0 12px;
   font-size: 16px;
   font-weight: 600;
   color: var(--success);
 }
 
-.fnm-login__modes {
+.sanlos-login__modes {
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
 }
 
-.fnm-login__mode {
+.sanlos-login__mode {
   flex: 1;
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -77,25 +77,25 @@
   cursor: pointer;
 }
 
-.fnm-login__mode[aria-pressed='true'] {
+.sanlos-login__mode[aria-pressed='true'] {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-text);
 }
 
-.fnm-login__field {
+.sanlos-login__field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-bottom: 16px;
 }
 
-.fnm-login__label {
+.sanlos-login__label {
   font-size: 13px;
   color: var(--text-secondary);
 }
 
-.fnm-login__input {
+.sanlos-login__input {
   padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-field);
@@ -104,18 +104,18 @@
   font-size: 14px;
 }
 
-.fnm-login__input:focus {
+.sanlos-login__input:focus {
   outline: 2px solid var(--focus-ring);
   border-color: var(--accent);
 }
 
-.fnm-login__hint {
+.sanlos-login__hint {
   margin: 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.fnm-login__button {
+.sanlos-login__button {
   width: 100%;
   padding: 10px 14px;
   border: 1px solid var(--accent);
@@ -126,44 +126,44 @@
   cursor: pointer;
 }
 
-.fnm-login__button:hover:not(:disabled) {
+.sanlos-login__button:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
-.fnm-login__button:disabled {
+.sanlos-login__button:disabled {
   border-color: var(--disabled);
   background: var(--disabled);
   cursor: default;
 }
 
-.fnm-login__button--secondary {
+.sanlos-login__button--secondary {
   width: auto;
   border-color: var(--border-strong);
   background: var(--surface-sunken);
   color: var(--text-primary);
 }
 
-.fnm-login__button--ghost {
+.sanlos-login__button--ghost {
   width: auto;
   border-color: var(--success);
   background: var(--surface-raised);
   color: var(--success);
 }
 
-.fnm-login__fieldset {
+.sanlos-login__fieldset {
   margin: 0 0 16px;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-field);
 }
 
-.fnm-login__legend {
+.sanlos-login__legend {
   padding: 0 4px;
   font-size: 13px;
   color: var(--text-secondary);
 }
 
-.fnm-login__radio {
+.sanlos-login__radio {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -173,35 +173,35 @@
   cursor: pointer;
 }
 
-.fnm-login__credentials {
+.sanlos-login__credentials {
   display: flex;
   flex-direction: column;
 }
 
-.fnm-login__facts {
+.sanlos-login__facts {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin: 8px 0 0;
 }
 
-.fnm-login__fact {
+.sanlos-login__fact {
   display: flex;
   gap: 8px;
   font-size: 13px;
 }
 
-.fnm-login__fact dt {
+.sanlos-login__fact dt {
   min-width: 72px;
   color: var(--text-secondary);
 }
 
-.fnm-login__fact dd {
+.sanlos-login__fact dd {
   margin: 0;
   color: var(--text-primary);
 }
 
-.fnm-login__candidates {
+.sanlos-login__candidates {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -210,7 +210,7 @@
   list-style: none;
 }
 
-.fnm-login__candidate-button {
+.sanlos-login__candidate-button {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -226,40 +226,40 @@
   cursor: pointer;
 }
 
-.fnm-login__candidate-button[aria-pressed='true'] {
+.sanlos-login__candidate-button[aria-pressed='true'] {
   border-color: var(--accent);
   background: var(--surface-sunken);
 }
 
-.fnm-login__candidate-label {
+.sanlos-login__candidate-label {
   font-weight: 600;
 }
 
-.fnm-login__candidate-kind,
-.fnm-login__candidate-status {
+.sanlos-login__candidate-kind,
+.sanlos-login__candidate-status {
   color: var(--text-secondary);
 }
 
-.fnm-login__candidate-address {
+.sanlos-login__candidate-address {
   color: var(--text-secondary);
   word-break: break-all;
 }
 
-.fnm-login__candidate-note {
+.sanlos-login__candidate-note {
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--text-secondary);
 }
 
-.fnm-login__candidate-note[data-status='unreachable'] {
+.sanlos-login__candidate-note[data-status='unreachable'] {
   color: var(--danger);
 }
 
-.fnm-login__candidate-note[data-status='note'] {
+.sanlos-login__candidate-note[data-status='note'] {
   color: var(--warning);
 }
 
-.fnm-login__error {
+.sanlos-login__error {
   margin: 0 0 16px;
   padding: 10px 12px;
   border: 1px solid var(--danger);
@@ -270,7 +270,7 @@
 }
 
 /* 「会话已失效」这类**说明**（不是错误）：用警告色，和表单错误区分开。 */
-.fnm-login__notice {
+.sanlos-login__notice {
   margin: 0 0 16px;
   padding: 10px 12px;
   border: 1px solid var(--warning);

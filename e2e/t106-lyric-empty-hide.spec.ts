@@ -94,7 +94,7 @@ async function playSong(window: Page, title: string): Promise<void> {
   const list = window.getByRole('listbox', { name: '歌曲列表' })
   await expect(list).toBeVisible()
   await list.getByRole('option').filter({ hasText: title }).first().dblclick()
-  await expect(window.locator('.fnm-playerbar__title')).toHaveText(title)
+  await expect(window.locator('.sanlos-playerbar__title')).toHaveText(title)
 }
 
 /** 等到「那个歌词窗口」出现（最多 15 秒）。 */

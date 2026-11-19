@@ -29,7 +29,7 @@ import type { AppPrefs, PlayerBridge } from '../shared/playerBridge'
 const tempDirs: string[] = []
 
 function tempFile(name = 'prefs.json'): string {
-  const dir = mkdtempSync(join(tmpdir(), 'fnmusic-eq-'))
+  const dir = mkdtempSync(join(tmpdir(), 'sanlos-eq-'))
   tempDirs.push(dir)
   return join(dir, name)
 }
@@ -114,14 +114,14 @@ function validEq(): {
 
 describe('渲染进程的 EQ 偏好端口', () => {
   afterEach(() => {
-    delete (globalThis as { fnPlayer?: PlayerBridge }).fnPlayer
+    delete (globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
   })
 
   it('有桥时：读走 prefs:get 的 eq，写走 prefs:set 的 eq', async () => {
     const eq = validEq()
     const getPrefs = vi.fn(async () => ({ eq }))
     const setPrefs = vi.fn(async (_patch: Partial<AppPrefs>) => ({}))
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       getPrefs,
       setPrefs,
     } as unknown as PlayerBridge
@@ -135,7 +135,7 @@ describe('渲染进程的 EQ 偏好端口', () => {
   })
 
   it('没有桥时降级：读回 null、写也不抛（不崩、不静默写盘）', async () => {
-    delete (globalThis as { fnPlayer?: PlayerBridge }).fnPlayer
+    delete (globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
 
     await expect(eqPrefsPort.load()).resolves.toBeNull()
     await expect(eqPrefsPort.save(validEq())).resolves.toBeUndefined()
@@ -151,7 +151,7 @@ describe('渲染进程的 EQ 偏好端口', () => {
     // ⚠️ 这是审计报表 P0-2「store 未传端口」的**直接防线**：
     //    生产 store（模块级单例）必须**真的**把 EQ 设置写到主进程去。
     const setPrefs = vi.fn(async (_patch: Partial<AppPrefs>) => ({}))
-    ;(globalThis as { fnPlayer?: PlayerBridge }).fnPlayer = {
+    ;(globalThis as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = {
       getPrefs: vi.fn(async () => ({})),
       setPrefs,
     } as unknown as PlayerBridge

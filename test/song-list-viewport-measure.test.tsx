@@ -76,7 +76,7 @@ function mockMeasuredHeight(height: number): void {
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
     this: Element,
   ) {
-    const measured = this.classList?.contains('fnm-songlist__viewport') ? height : 0
+    const measured = this.classList?.contains('sanlos-songlist__viewport') ? height : 0
     return {
       height: measured,
       width: 1200,
@@ -110,7 +110,7 @@ describe('SongList 的可视区量高（T109）', () => {
 
     // ⚠ 初始为空 ⇒ 走空态分支 ⇒ **没有视口节点**（这正是缺陷的触发条件）。
     const { container, rerender } = render(<SongList songs={[]} onPlay={vi.fn()} />)
-    expect(container.querySelector('.fnm-songlist__viewport')).toBeNull()
+    expect(container.querySelector('.sanlos-songlist__viewport')).toBeNull()
 
     // 数据到达 ⇒ 视口节点挂上。
     rerender(<SongList songs={MANY} onPlay={vi.fn()} />)

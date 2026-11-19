@@ -1,5 +1,5 @@
 {
-  "name": "fnmusic-desktop",
+  "name": "sanlos-music",
   "productName": "Sanlos Music",
   "version": "0.4.1",
   "private": true,
@@ -22,7 +22,7 @@
     "e2e": "npm run build && playwright test",
     "e2e:only": "playwright test",
     "pack": "npm run build && node scripts/pack.cjs",
-    "pack:probe": "cross-env FNM_PACK_OUTPUT=release-probe node scripts/pack.cjs",
+    "pack:probe": "cross-env SANLOS_PACK_OUTPUT=release-probe node scripts/pack.cjs",
     "publish:manifest": "node scripts/publish-manifest.mjs",
     "dist": "npm run pack"
   },

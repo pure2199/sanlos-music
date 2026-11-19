@@ -13,7 +13,7 @@ import {
 //
 // 覆盖：
 // - 简报 Step 1 的原始用例（逐字保留其意图）；
-// - 控制器追加要求 A（走 fnm:// 代理）/ D（不可解集合、大小写、ext 为空仍判 codec）
+// - 控制器追加要求 A（走 sanlos:// 代理）/ D（不可解集合、大小写、ext 为空仍判 codec）
 //   / I（streamUrl 新建、guid 编码、不带凭据）。
 //
 // ⚠️ 全部数据都是**虚构占位**（'a' / 'b' / 'track_x'），不含任何真实 FN ID / 账号 / 密码。
@@ -105,13 +105,13 @@ describe('describeMediaError', () => {
 })
 
 describe('streamUrl', () => {
-  it('产出 fnm:// 代理地址，且不含 /music/api/v1 前缀', () => {
-    expect(streamUrl('track_abc')).toBe('fnm://srv/track/stream?guid=track_abc')
+  it('产出 sanlos:// 代理地址，且不含 /music/api/v1 前缀', () => {
+    expect(streamUrl('track_abc')).toBe('sanlos://srv/track/stream?guid=track_abc')
   })
 
   it('guid 里的特殊字符会被编码', () => {
-    expect(streamUrl('a b&c')).toBe('fnm://srv/track/stream?guid=a%20b%26c')
-    expect(streamUrl('a/b?c')).toBe('fnm://srv/track/stream?guid=a%2Fb%3Fc')
+    expect(streamUrl('a b&c')).toBe('sanlos://srv/track/stream?guid=a%20b%26c')
+    expect(streamUrl('a/b?c')).toBe('sanlos://srv/track/stream?guid=a%2Fb%3Fc')
   })
 
   it('绝不夹带任何凭据（authx / Cookie / token）', () => {

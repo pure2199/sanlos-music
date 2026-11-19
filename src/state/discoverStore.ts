@@ -31,8 +31,8 @@ import { useLocalHistory } from './historyStore'
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。 */
 function playerBridge(): PlayerBridge | null {
-  const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
-  return scope.fnPlayer ?? null
+  const scope = globalThis as unknown as { sanlosPlayer?: PlayerBridge }
+  return scope.sanlosPlayer ?? null
 }
 
 /** 服务端历史的取多少条（**只当曲目池**：顺序不可信、没有次数）。 */

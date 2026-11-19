@@ -135,7 +135,7 @@ npm run pack       # 2. 打包
 3. `release/win-unpacked/Sanlos Music.exe`（或 `electron.exe`）能双击启动，
    打开登录页、连上 NAS、播放一首；
 4. `release/verify/*.log` 记录本次验证的实际输出（**不是空文件**）；
-5. **签名状态**：`node tools/fn-check-signature.mjs release`
+5. **签名状态**：`node tools/sanlos-check-signature.mjs release`
    ⇒ 打印每个产物的 `Status` / 签名者 / 指纹
    （配了证书却没签上 ⇒ **打包本身就会失败**，这一步是**独立复核**）。
 
@@ -158,7 +158,7 @@ npm run pack       # 2. 打包
 这一版多了「读音频文件内嵌标签」的功能 ⇒ 验收它需要**真的带标签的音频文件**：
 
 ```bash
-node tools/fn-fetch-embedded-lyric-samples.mjs   # 落到 release/samples/embedded-lyric/（gitignored）
+node tools/sanlos-fetch-embedded-lyric-samples.mjs   # 落到 release/samples/embedded-lyric/（gitignored）
 node node_modules/vitest/vitest.mjs run test/embedded-lyric-real-samples.test.ts
 ```
 
@@ -298,7 +298,7 @@ npm run pack
 ```
 
 - 没设这两个变量 ⇒ **自动跳过签名**（不报错）⇒ 产物就是未签名的；
-- ⚠️ **打包后有断言**（`scripts/pack.cjs` → `tools/fn-check-signature.mjs`）：
+- ⚠️ **打包后有断言**（`scripts/pack.cjs` → `tools/sanlos-check-signature.mjs`）：
   配了证书却没签上 ⇒ **打包直接失败**（electron-builder 本身可能只警告 ⇒ 不能信「打包成功」）。
   没配证书 ⇒ 只打印一行「产物未签名（预期行为）」，**不**失败；
 - ⚠️ **口令绝不入库**：走环境变量 / CI Secret，**不要**写进 `electron-builder.yml`。
@@ -327,7 +327,7 @@ npm run pack
 
 ```powershell
 # 生成一张自签「代码签名」证书（.pfx / .cer / 口令 ⇒ 都在 release/certs/，gitignored）
-node tools/fn-make-selfsigned-cert.mjs --trust
+node tools/sanlos-make-selfsigned-cert.mjs --trust
 
 # 用它打一个带签名的包（验证用产物 ⇒ 不碰 release/）
 $env:WIN_CSC_LINK=(Resolve-Path 'release\certs\sanlos-code-signing.pfx').Path
@@ -335,7 +335,7 @@ $env:WIN_CSC_KEY_PASSWORD=(Get-Content -Raw 'release\certs\pfx-password.txt').Tr
 npm run pack:probe
 
 # 随时单独查一次产物的签名状态
-node tools/fn-check-signature.mjs release-probe
+node tools/sanlos-check-signature.mjs release-probe
 ```
 
 ⚠️ **自签证书不可信** ⇒ 对外发布时 Windows 仍提示「未知发布者 / 不受信任的证书」
@@ -393,7 +393,7 @@ node tools/fn-check-signature.mjs release-probe
 | `.github/workflows/release.yml` | 打包 → 送签 → 等审批 → 取回 → **校验** → 发 Release |
 | `.signpath/artifact-configurations/default.xml` | 告诉 SignPath **签哪个文件**（两个 exe） |
 | `scripts/check-signpath-config.mjs` | 配置**快速失败**（缺一项就停，绝不「跳过签名照样发布」） |
-| `tools/fn-check-signature.mjs` | 签名断言：`--expect valid` + `--require-timestamp` + `--expect-cn` |
+| `tools/sanlos-check-signature.mjs` | 签名断言：`--expect valid` + `--require-timestamp` + `--expect-cn` |
 | `CODE_SIGNING_POLICY.md` | 交给 SignPath 审核的**代码签名政策** |
 | `docs/signing.md` | 面向维护者/用户的完整说明（申请、配置、发版、故障排查） |
 

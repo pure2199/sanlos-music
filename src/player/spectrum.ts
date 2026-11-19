@@ -38,7 +38,7 @@
 // ---------------------------------------------------------------------------
 // 模块约束
 // ---------------------------------------------------------------------------
-// - 不 import Electron；桥通过 `window.fnPlayer` 拿（单测可注入替身）；
+// - 不 import Electron；桥通过 `window.sanlosPlayer` 拿（单测可注入替身）；
 // - 全部依赖**可注入** → 单测不需要真的 `AudioContext`。
 
 import type { AppPrefs, PlayerBridge } from '../../shared/playerBridge'
@@ -231,8 +231,8 @@ export function createSpectrumSampler(options: SpectrumSamplerOptions): Spectrum
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览 / 单测里为 `null`）。 */
 function defaultBridge(): SpectrumBridge | null {
-  const scope = globalThis as { fnPlayer?: PlayerBridge }
-  const bridge = scope.fnPlayer
+  const scope = globalThis as { sanlosPlayer?: PlayerBridge }
+  const bridge = scope.sanlosPlayer
   if (!bridge) return null
   return {
     pushSpectrum: (bins) => bridge.pushSpectrum(bins),
@@ -320,7 +320,7 @@ function defaultWatch(bridge: SpectrumBridge): SpectrumWatch {
 
 /** `installSpectrum` 的参数（全部可注入，便于单测）。 */
 export interface SpectrumInstallOptions {
-  /** 桥；不传则取 `window.fnPlayer`（没有则整个模块**不装**）。 */
+  /** 桥；不传则取 `window.sanlosPlayer`（没有则整个模块**不装**）。 */
   bridge?: SpectrumBridge | null
   /** 取频谱源；不传则从引擎取。 */
   getSource?: () => SpectrumSource | null

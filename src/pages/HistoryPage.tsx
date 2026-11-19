@@ -105,10 +105,10 @@ export function HistoryPage({
           />
         }
       />
-      <div className="fnm-history">
-        <section className="fnm-history__section">
-          <h2 className="fnm-history__section-title">本机播放记录</h2>
-          <p className="fnm-history__hint">这台电脑上播过的歌（只保存在本机，不会写回 NAS）</p>
+      <div className="sanlos-history">
+        <section className="sanlos-history__section">
+          <h2 className="sanlos-history__section-title">本机播放记录</h2>
+          <p className="sanlos-history__hint">这台电脑上播过的歌（只保存在本机，不会写回 NAS）</p>
           <SongList
             songs={localItems}
             onPlay={onPlay ?? (() => undefined)}
@@ -121,9 +121,9 @@ export function HistoryPage({
           />
         </section>
 
-        <section className="fnm-history__section">
-          <h2 className="fnm-history__section-title">NAS 播放历史</h2>
-          <p className="fnm-history__hint">
+        <section className="sanlos-history__section">
+          <h2 className="sanlos-history__section-title">NAS 播放历史</h2>
+          <p className="sanlos-history__hint">
             fnOS 音乐服务记录的播放历史（服务端未开放写入接口，客户端只能读取）
           </p>
           <SongList

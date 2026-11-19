@@ -8,7 +8,7 @@
  * - `[data-pending='true']` → 写回在途（乐观态已生效、服务端还没确认）。
  * ------------------------------------------------------------------------ */
 
-.fnm-favorite {
+.sanlos-favorite {
   flex: 0 0 auto;
   padding: 2px 8px;
   border: 1px solid var(--border);
@@ -20,33 +20,33 @@
   cursor: pointer;
 }
 
-.fnm-favorite:hover:not(:disabled) {
+.sanlos-favorite:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-favorite:active:not(:disabled) {
+.sanlos-favorite:active:not(:disabled) {
   background: var(--surface-sunken);
 }
 
-.fnm-favorite:focus-visible {
+.sanlos-favorite:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 已收藏 */
-.fnm-favorite[aria-pressed='true'] {
+.sanlos-favorite[aria-pressed='true'] {
   border-color: var(--accent);
   color: var(--accent);
 }
 
 /* 写回在途（乐观态已生效、服务端还没确认） */
-.fnm-favorite[data-pending='true'] {
+.sanlos-favorite[data-pending='true'] {
   border-color: var(--warning);
   color: var(--warning);
 }
 
-.fnm-favorite:disabled {
+.sanlos-favorite:disabled {
   border-color: var(--border);
   color: var(--disabled);
   cursor: not-allowed;

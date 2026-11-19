@@ -75,7 +75,7 @@ GitHub 的 Windows runner **默认 shell 是 pwsh 7（PowerShell 7）**，runner
 
 | # | 改哪 | 做什么 | 为什么 |
 |---|---|---|---|
-| **A** | `tools/fn-check-signature.mjs` → `runPowerShell` | 给子进程的 `PSModulePath` **前置** Windows PowerShell 5.1 自己的系统模块目录（`%SystemRoot%\system32\WindowsPowerShell\v1.0\Modules`） | 让 5.1 **先找到自己那份**模块 ⇒ 自动加载直接成功 |
+| **A** | `tools/sanlos-check-signature.mjs` → `runPowerShell` | 给子进程的 `PSModulePath` **前置** Windows PowerShell 5.1 自己的系统模块目录（`%SystemRoot%\system32\WindowsPowerShell\v1.0\Modules`） | 让 5.1 **先找到自己那份**模块 ⇒ 自动加载直接成功 |
 | **B** | 同上 → `probeSignature` 的脚本 | 脚本开头**按 `$PSHOME` 的绝对路径**显式 `Import-Module` `Microsoft.PowerShell.Security.psd1`（失败则退回自动加载） | **绕开 `PSModulePath` 的搜索顺序** ⇒ 即使 A 被谁改掉也还能用 |
 | **C** | 同上 → `evaluateSignature` + `main` | 新增 `probeFailed` 标记：**探测失败**单独报，**不再**按状态判「有签名」；其余按状态的判定**跳过**（状态未知，判了是瞎判） | 报错口径不许说反；闸门仍**失败**（fail-closed 不变） |
 
@@ -94,8 +94,8 @@ GitHub 的 Windows runner **默认 shell 是 pwsh 7（PowerShell 7）**，runner
 
 | 文件 | 改什么 |
 |---|---|
-| `tools/fn-check-signature.mjs` | A + B + C（含错误信息降噪：不再把整条 base64 命令行塞进报错） |
-| `tools/fn-check-signature.d.mts` | `SignatureProbeInfo` 加 `probeFailed?: boolean` |
+| `tools/sanlos-check-signature.mjs` | A + B + C（含错误信息降噪：不再把整条 base64 命令行塞进报错） |
+| `tools/sanlos-check-signature.d.mts` | `SignatureProbeInfo` 加 `probeFailed?: boolean` |
 | `.github/workflows/release.yml` | 发布说明行尾归一（`[char]10`） |
 | `test/t87-signing-assertion.test.ts` | 追加断言（结构守卫 + 探测失败语义） |
 | `docs/superpowers/specs/2026-11-11-sanlos-music-signature-probe-ci-fix.md` | 本规格 |
@@ -106,7 +106,7 @@ GitHub 的 Windows runner **默认 shell 是 pwsh 7（PowerShell 7）**，runner
 
 ## 六、验收点
 
-1. `node tools/fn-check-signature.mjs --expect none release-probe` 在本机**仍然**按老语义工作
+1. `node tools/sanlos-check-signature.mjs --expect none release-probe` 在本机**仍然**按老语义工作
    （认得本机自签的 0.2.3 包、放过未签名的包）；
 2. 工具源码**必须**含：$PSHOME 绝对路径导入安全模块 + 前置 5.1 系统模块目录；
 3. `evaluateSignature({ probeFailed: true, … })` ⇒ 报「探测失败」，**且不出现**「有签名」；

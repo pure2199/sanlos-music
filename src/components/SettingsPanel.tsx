@@ -307,8 +307,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
   //    （`app.getVersion()`，与安装包的 `FileVersion` 同源）。
   const [appVersion, setAppVersion] = useState('')
   useEffect(() => {
-    const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
-    const bridge = scope.fnPlayer
+    const scope = globalThis as unknown as { sanlosPlayer?: PlayerBridge }
+    const bridge = scope.sanlosPlayer
     // ⚠️ **桥可能没有这个方法**（浏览器预览 / 旧单测替身）→ 不炸、不显示假版本。
     if (!bridge || typeof bridge.getAppVersion !== 'function') return
     let alive = true
@@ -373,8 +373,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
    */
   const handleOpenWebsite = useCallback((event: ReactMouseEvent<HTMLAnchorElement>): void => {
     event.preventDefault()
-    const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
-    void scope.fnPlayer?.openExternal(APP_INFO.website)
+    const scope = globalThis as unknown as { sanlosPlayer?: PlayerBridge }
+    void scope.sanlosPlayer?.openExternal(APP_INFO.website)
   }, [])
 
   /**
@@ -385,8 +385,8 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
    */
   const handleOpenRepository = useCallback((event: ReactMouseEvent<HTMLAnchorElement>): void => {
     event.preventDefault()
-    const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
-    void scope.fnPlayer?.openExternal(APP_INFO.repository)
+    const scope = globalThis as unknown as { sanlosPlayer?: PlayerBridge }
+    void scope.sanlosPlayer?.openExternal(APP_INFO.repository)
   }, [])
 
   const updateBusy =
@@ -413,18 +413,18 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
       allowUnsigned,
     }).allowed
 
-  const rootClass = className ? `fnm-settings ${className}` : 'fnm-settings'
+  const rootClass = className ? `sanlos-settings ${className}` : 'sanlos-settings'
 
   return (
     <section className={rootClass} role="region" aria-label="设置">
       {/* --- 左侧：分类导航 --------------------------------------------- */}
-      <nav className="fnm-settings__nav" aria-label="设置分类">
-        <h1 className="fnm-settings__title">设置</h1>
+      <nav className="sanlos-settings__nav" aria-label="设置分类">
+        <h1 className="sanlos-settings__title">设置</h1>
         {CATEGORIES.map((item) => (
           <button
             key={item.id}
             type="button"
-            className="fnm-settings__nav-item"
+            className="sanlos-settings__nav-item"
             // ⚠️ `aria-current="page"` 标明「当前这一档」——屏幕阅读器靠它播报。
             aria-current={category === item.id ? 'page' : undefined}
             onClick={() => setCategory(item.id)}
@@ -433,40 +433,40 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
           </button>
         ))}
         {onClose && (
-          <button type="button" className="fnm-settings__close" onClick={onClose}>
+          <button type="button" className="sanlos-settings__close" onClick={onClose}>
             关闭设置
           </button>
         )}
       </nav>
 
       {/* --- 右侧：当前分类的内容 --------------------------------------- */}
-      <div className="fnm-settings__content">
+      <div className="sanlos-settings__content">
         {/* ⚠️ **偏好的错误横幅永远在最上面**：某一类设置写回失败时，
             用户可能正停在别的分类上 → 错误不能被藏起来。 */}
         {error && (
-          <p className="fnm-settings__error" role="alert">
+          <p className="sanlos-settings__error" role="alert">
             {error}
           </p>
         )}
 
         {category === 'general' && (
           <>
-            <fieldset className="fnm-settings__group">
-              <legend className="fnm-settings__legend">关闭窗口时</legend>
-              <label className="fnm-settings__option">
+            <fieldset className="sanlos-settings__group">
+              <legend className="sanlos-settings__legend">关闭窗口时</legend>
+              <label className="sanlos-settings__option">
                 <input
                   type="radio"
-                  name="fnm-close-behavior"
+                  name="sanlos-close-behavior"
                   value="hide"
                   checked={closeBehavior === 'hide'}
                   onChange={() => handleChange('hide')}
                 />
                 <span>隐藏窗口（播放继续）</span>
               </label>
-              <label className="fnm-settings__option">
+              <label className="sanlos-settings__option">
                 <input
                   type="radio"
-                  name="fnm-close-behavior"
+                  name="sanlos-close-behavior"
                   value="quit"
                   checked={closeBehavior === 'quit'}
                   onChange={() => handleChange('quit')}
@@ -474,14 +474,14 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 <span>直接退出应用</span>
               </label>
             </fieldset>
-            <p className="fnm-settings__hint">窗口位置与尺寸会自动记住，下次启动时恢复。</p>
+            <p className="sanlos-settings__hint">窗口位置与尺寸会自动记住，下次启动时恢复。</p>
 
-            <fieldset className="fnm-settings__group">
-              <legend className="fnm-settings__legend">启动时自动播放</legend>
-              <label className="fnm-settings__option">
+            <fieldset className="sanlos-settings__group">
+              <legend className="sanlos-settings__legend">启动时自动播放</legend>
+              <label className="sanlos-settings__option">
                 <input
                   type="checkbox"
-                  name="fnm-autoplay"
+                  name="sanlos-autoplay"
                   checked={autoplay}
                   onChange={(event) => {
                     void setAutoplay(event.target.checked)
@@ -489,29 +489,29 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 />
                 <span>打开软件时自动继续播放上次那首</span>
               </label>
-              <p className="fnm-settings__hint">
+              <p className="sanlos-settings__hint">
                 只有「上次那首**还没播完**」时才会自动出声；没有记录、或上次已经播到结尾，
                 都不会自动播放。关掉这个开关**不会**停止记录播放进度。
               </p>
             </fieldset>
 
-            <fieldset className="fnm-settings__group">
-              <legend className="fnm-settings__legend">上次播放</legend>
+            <fieldset className="sanlos-settings__group">
+              <legend className="sanlos-settings__legend">上次播放</legend>
               {lastResume ? (
                 <>
-                  <p className="fnm-settings__hint" data-testid="last-resume">
+                  <p className="sanlos-settings__hint" data-testid="last-resume">
                     {`${lastResume.title} · ${lastResume.artist} —— 已播到 ${formatSeconds(
                       lastResume.positionSec,
                     )}（全长 ${formatSeconds(lastResume.duration)}）`}
                   </p>
-                  <div className="fnm-settings__row">
-                    <button type="button" className="fnm-settings__button" onClick={handleClearResume}>
+                  <div className="sanlos-settings__row">
+                    <button type="button" className="sanlos-settings__button" onClick={handleClearResume}>
                       清除上次播放记录
                     </button>
                   </div>
                 </>
               ) : (
-                <p className="fnm-settings__hint" data-testid="last-resume">
+                <p className="sanlos-settings__hint" data-testid="last-resume">
                   还没有播放记录。
                 </p>
               )}
@@ -521,12 +521,12 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
 
         {category === 'lyrics' && (
           <>
-            <fieldset className="fnm-settings__group">
-              <legend className="fnm-settings__legend">桌面悬浮歌词</legend>
-              <label className="fnm-settings__option">
+            <fieldset className="sanlos-settings__group">
+              <legend className="sanlos-settings__legend">桌面悬浮歌词</legend>
+              <label className="sanlos-settings__option">
                 <input
                   type="checkbox"
-                  name="fnm-lyric-overlay"
+                  name="sanlos-lyric-overlay"
                   checked={lyricOverlayVisible}
                   onChange={(event) => handleToggleLyricOverlay(event.target.checked)}
                 />
@@ -534,16 +534,16 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               </label>
             </fieldset>
 
-            <fieldset className="fnm-settings__group">
-              <legend className="fnm-settings__legend">桌面歌词样式</legend>
-              <p className="fnm-settings__hint">
+            <fieldset className="sanlos-settings__group">
+              <legend className="sanlos-settings__legend">桌面歌词样式</legend>
+              <p className="sanlos-settings__hint">
                 「灵动态词岛」= 屏幕顶部居中的胶囊（像灵动岛）；「经典悬浮窗」= 透明背景的纯歌词（像酷狗桌面歌词）。
                 两种形态**互斥**，切换后立刻生效。
               </p>
-              <label className="fnm-settings__option">
+              <label className="sanlos-settings__option">
                 <input
                   type="radio"
-                  name="fnm-lyric-overlay-mode"
+                  name="sanlos-lyric-overlay-mode"
                   // ⚠️ **显式 aria-label**：`<label>` 包着 radio 时，可访问名会把
                   //    整个说明文字都带进去 → 名字不稳定、没法精确选中。
                   aria-label="经典悬浮窗"
@@ -552,10 +552,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 />
                 <span>经典悬浮窗（透明背景 · 纯歌词 · 点击穿透）</span>
               </label>
-              <label className="fnm-settings__option">
+              <label className="sanlos-settings__option">
                 <input
                   type="radio"
-                  name="fnm-lyric-overlay-mode"
+                  name="sanlos-lyric-overlay-mode"
                   aria-label="灵动态词岛"
                   checked={lyricOverlayMode === 'island'}
                   onChange={() => handleSelectLyricMode('island')}
@@ -564,18 +564,18 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               </label>
             </fieldset>
 
-            <fieldset className="fnm-settings__group">
-              <legend className="fnm-settings__legend">歌词来源</legend>
-              <p className="fnm-settings__hint">
+            <fieldset className="sanlos-settings__group">
+              <legend className="sanlos-settings__legend">歌词来源</legend>
+              <p className="sanlos-settings__hint">
                 这里是先用哪个外部源；这个源匹配不上时，会自动按顺序试下一个线上源
                 （网易云 → lrclib → QQ → 酷狗 → 酷我 → 咪咕 → 自定义模板），全都试完才回落到 NAS 自带的。
                 谁优先（线上还是 NAS 自带的），见下一组「歌词优先级」。
               </p>
-              <label className="fnm-settings__option fnm-settings__option--stack">
+              <label className="sanlos-settings__option sanlos-settings__option--stack">
                 <span>外部歌词源</span>
                 <select
-                  className="fnm-settings__input"
-                  name="fnm-lyric-source"
+                  className="sanlos-settings__input"
+                  name="sanlos-lyric-source"
                   // ⚠️ **显式 aria-label**：`<label>` 包着 `<select>` 时，
                   //    可访问名会把**所有选项文字**也带进去 → 名字不稳定、没法精确选中
                   //    （与 T30 那个「复选框把曲目数带进名字」是同一个坑）。
@@ -593,12 +593,12 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   <option value="off">不用外部（只用 NAS）</option>
                 </select>
               </label>
-              <label className="fnm-settings__option fnm-settings__option--stack">
+              <label className="sanlos-settings__option sanlos-settings__option--stack">
                 <span>自定义歌词 API 模板</span>
                 <input
                   type="text"
-                  className="fnm-settings__input"
-                  name="fnm-lyric-template"
+                  className="sanlos-settings__input"
+                  name="sanlos-lyric-template"
                   // ⚠️ 显式 aria-label（同上：别让 `<label>` 的文字拼进名字）。
                   aria-label="自定义歌词 API 模板"
                   value={lyricTemplateDraft}
@@ -607,10 +607,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   onChange={(event) => setLyricTemplateDraft(event.target.value)}
                 />
               </label>
-              <div className="fnm-settings__row">
+              <div className="sanlos-settings__row">
                 <button
                   type="button"
-                  className="fnm-settings__button"
+                  className="sanlos-settings__button"
                   onClick={handleSaveLyricSource}
                   disabled={lyricSourceSaved}
                 >
@@ -619,23 +619,23 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   保存歌词源
                 </button>
               </div>
-              <p className="fnm-settings__hint">
+              <p className="sanlos-settings__hint">
                 占位符：{'{title}'} {'{artist}'} {'{album}'} {'{duration}'}；
                 地址必须是 https（不许带账号密码）；返回的正文必须是**带时间戳的 LRC**。
               </p>
             </fieldset>
 
-            <fieldset className="fnm-settings__group">
-              <legend className="fnm-settings__legend">歌词优先级</legend>
-              <p className="fnm-settings__hint">
+            <fieldset className="sanlos-settings__group">
+              <legend className="sanlos-settings__legend">歌词优先级</legend>
+              <p className="sanlos-settings__hint">
                 线上 = 上面的外部歌词源（多数能给出**真逐字**时间戳，卡拉OK 填色更跟嘴）；
                 本地 = NAS 自带的歌词（断网也有，但多半只有行级时间戳）。
                 选了「线上优先」而线上没匹配上时，**自动回落到本地**。
               </p>
-              <label className="fnm-settings__option">
+              <label className="sanlos-settings__option">
                 <input
                   type="radio"
-                  name="fnm-lyric-priority"
+                  name="sanlos-lyric-priority"
                   // ⚠️ **显式 aria-label**：`<label>` 包着 radio 时，可访问名会把
                   //    整个说明文字都带进去 → 名字不稳定、没法精确选中。
                   aria-label="线上优先"
@@ -644,10 +644,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 />
                 <span>线上优先（默认）</span>
               </label>
-              <label className="fnm-settings__option">
+              <label className="sanlos-settings__option">
                 <input
                   type="radio"
-                  name="fnm-lyric-priority"
+                  name="sanlos-lyric-priority"
                   aria-label="本地优先"
                   checked={lyricPriority === 'local-first'}
                   onChange={() => void setLyricPriority('local-first')}
@@ -659,32 +659,32 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         )}
 
         {category === 'download' && (
-          <fieldset className="fnm-settings__group">
-            <legend className="fnm-settings__legend">本地下载</legend>
-            <label className="fnm-settings__option">
+          <fieldset className="sanlos-settings__group">
+            <legend className="sanlos-settings__legend">本地下载</legend>
+            <label className="sanlos-settings__option">
               <input
                 type="checkbox"
-                name="fnm-local-first"
+                name="sanlos-local-first"
                 checked={localFirst}
                 onChange={(event) => handleToggleLocalFirst(event.target.checked)}
               />
               <span>本地优先播放（本地有副本就播本地，不再走 NAS）</span>
             </label>
-            <label className="fnm-settings__option fnm-settings__option--stack">
+            <label className="sanlos-settings__option sanlos-settings__option--stack">
               <span>下载目录</span>
               <input
                 type="text"
-                className="fnm-settings__input"
-                name="fnm-download-dir"
+                className="sanlos-settings__input"
+                name="sanlos-download-dir"
                 value={dirDraft}
                 placeholder="默认：我的音乐\Sanlos music"
                 onChange={(event) => setDirDraft(event.target.value)}
               />
             </label>
-            <div className="fnm-settings__row">
+            <div className="sanlos-settings__row">
               <button
                 type="button"
-                className="fnm-settings__button"
+                className="sanlos-settings__button"
                 onClick={handleSaveDir}
                 disabled={dirDraft.trim() === dir.trim()}
               >
@@ -692,18 +692,18 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               </button>
               <button
                 type="button"
-                className="fnm-settings__button fnm-settings__button--danger"
+                className="sanlos-settings__button sanlos-settings__button--danger"
                 onClick={handleClearDownloads}
                 disabled={downloadedCount === 0}
               >
                 清空本地下载
               </button>
             </div>
-            <p className="fnm-settings__hint">
+            <p className="sanlos-settings__hint">
               已下载 {downloadedCount} 首，占用 {formatBytes(downloadedBytes)}。
             </p>
             {downloadError && (
-              <p className="fnm-settings__error" role="alert">
+              <p className="sanlos-settings__error" role="alert">
                 {downloadError}
               </p>
             )}
@@ -712,36 +712,36 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
 
         {category === 'decoder' && (
           <>
-            <fieldset className="fnm-settings__group">
-              <legend className="fnm-settings__legend">音质偏好</legend>
-              <label className="fnm-settings__option">
+            <fieldset className="sanlos-settings__group">
+              <legend className="sanlos-settings__legend">音质偏好</legend>
+              <label className="sanlos-settings__option">
                 <input
                   type="radio"
-                  name="fnm-stream-quality"
+                  name="sanlos-stream-quality"
                   value="original"
                   checked={streamQuality === 'original'}
                   onChange={() => handleSelectStreamQuality('original')}
                 />
                 <span>原始音质（直拉 NAS 上的原文件，FLAC 无损）</span>
               </label>
-              <label className="fnm-settings__option">
+              <label className="sanlos-settings__option">
                 <input
                   type="radio"
-                  name="fnm-stream-quality"
+                  name="sanlos-stream-quality"
                   value="standard"
                   checked={streamQuality === 'standard'}
                   onChange={() => handleSelectStreamQuality('standard')}
                 />
                 <span>标准音质（由 NAS 服务端转码，流量小得多）</span>
               </label>
-              <p className="fnm-settings__hint">
+              <p className="sanlos-settings__hint">
                 标准音质由 NAS 服务端转码后播放（官方协议里是 MP3 320k），流量比原始文件小一个量级。
                 若服务端没启用转码、或转码失败，会自动改用原始音质播放，并在播放条上说明原因。
               </p>
-              <div className="fnm-settings__row">
+              <div className="sanlos-settings__row">
                 <button
                   type="button"
-                  className="fnm-settings__button"
+                  className="sanlos-settings__button"
                   onClick={() => {
                     void handleProbeTranscode()
                   }}
@@ -751,33 +751,33 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 </button>
               </div>
               {qualityProbe && (
-                <p className="fnm-settings__hint" data-testid="stream-quality-probe">
+                <p className="sanlos-settings__hint" data-testid="stream-quality-probe">
                   {qualityProbe.supported
                     ? '服务端转码可用：标准音质能正常生效。'
                     : `服务端转码不可用：${qualityProbe.detail ?? '未知原因'}。标准音质会自动回退原始音质。`}
                 </p>
               )}
             </fieldset>
-            <fieldset className="fnm-settings__group">
-              <legend className="fnm-settings__legend">FFmpeg 兜底解码</legend>
-              <p className="fnm-settings__hint" data-testid="ffmpeg-status">
+            <fieldset className="sanlos-settings__group">
+              <legend className="sanlos-settings__legend">FFmpeg 兜底解码</legend>
+              <p className="sanlos-settings__hint" data-testid="ffmpeg-status">
                 {ffmpeg.available
                   ? `已检测到 FFmpeg：${ffmpeg.version || ffmpeg.path}`
                   : '未检测到 FFmpeg。'}
               </p>
-              <p className="fnm-settings__hint">
+              <p className="sanlos-settings__hint">
                 APE / ALAC / DSF 等格式 Chromium 解不了：把歌曲下载到本地后，客户端会用 FFmpeg
                 转码成 Opus 播放（音质有损，原始文件不变）。
               </p>
               {!ffmpeg.available && (
-                <p className="fnm-settings__hint">
+                <p className="sanlos-settings__hint">
                   安装方式：<code>winget install Gyan.FFmpeg</code>，装完后点「重新检测」。
                 </p>
               )}
-              <div className="fnm-settings__row">
+              <div className="sanlos-settings__row">
                 <button
                   type="button"
-                  className="fnm-settings__button"
+                  className="sanlos-settings__button"
                   onClick={refreshFfmpeg}
                   disabled={ffmpegChecking}
                 >
@@ -789,38 +789,38 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         )}
 
         {category === 'update' && (
-          <fieldset className="fnm-settings__group">
-            <legend className="fnm-settings__legend">自动更新</legend>
-            <p className="fnm-settings__hint" data-testid="update-current-version">
+          <fieldset className="sanlos-settings__group">
+            <legend className="sanlos-settings__legend">自动更新</legend>
+            <p className="sanlos-settings__hint" data-testid="update-current-version">
               {`当前版本：${appVersion ? `v${appVersion}` : '（读取中…）'}　更新源：项目 Releases`}
             </p>
-            <label className="fnm-settings__option fnm-settings__option--stack">
+            <label className="sanlos-settings__option sanlos-settings__option--stack">
               <span>更新服务器地址</span>
               <input
                 type="text"
-                className="fnm-settings__input"
-                name="fnm-update-base-url"
+                className="sanlos-settings__input"
+                name="sanlos-update-base-url"
                 value={baseUrlDraft}
                 placeholder={APP_INFO.updateBaseUrl}
                 onChange={(event) => setBaseUrlDraft(event.target.value)}
               />
             </label>
-            <div className="fnm-settings__row">
+            <div className="sanlos-settings__row">
               <button
                 type="button"
-                className="fnm-settings__button"
+                className="sanlos-settings__button"
                 onClick={handleUseProjectSource}
                 data-testid="update-use-project-source"
               >
                 用项目地址
               </button>
             </div>
-            <label className="fnm-settings__option fnm-settings__option--stack">
+            <label className="sanlos-settings__option sanlos-settings__option--stack">
               <span>预期的代码签名者</span>
               <input
                 type="text"
-                className="fnm-settings__input"
-                name="fnm-update-signer"
+                className="sanlos-settings__input"
+                name="sanlos-update-signer"
                 value={signerDraft}
                 placeholder="签发者主体名（如 SignPath Foundation）"
                 onChange={(event) => setSignerDraft(event.target.value)}
@@ -828,20 +828,20 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
             </label>
             {/* ⚠️ T82：默认**关**——本项目暂未办理代码签名证书，
                 未签名包默认**拒绝安装**（原行为一字不变）。 */}
-            <label className="fnm-settings__checkbox">
+            <label className="sanlos-settings__checkbox">
               <input
                 type="checkbox"
-                name="fnm-update-allow-unsigned"
+                name="sanlos-update-allow-unsigned"
                 checked={allowUnsignedDraft}
                 onChange={handleToggleAllowUnsigned}
                 data-testid="update-allow-unsigned"
               />
               <span>允许安装未签名的更新包</span>
             </label>
-            <div className="fnm-settings__row">
+            <div className="sanlos-settings__row">
               <button
                 type="button"
-                className="fnm-settings__button"
+                className="sanlos-settings__button"
                 onClick={handleSaveUpdate}
                 disabled={updateSaved}
               >
@@ -849,7 +849,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               </button>
               <button
                 type="button"
-                className="fnm-settings__button"
+                className="sanlos-settings__button"
                 onClick={handleCheckUpdate}
                 disabled={updateBusy}
               >
@@ -857,24 +857,24 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               </button>
             </div>
             {updateResult?.status === 'up-to-date' && (
-              <p className="fnm-settings__hint" data-testid="update-latest">
+              <p className="sanlos-settings__hint" data-testid="update-latest">
                 {`已是最新版本（${updateResult.current}）。`}
               </p>
             )}
             {updateResult?.status === 'not-configured' && (
-              <p className="fnm-settings__hint" data-testid="update-not-configured">
+              <p className="sanlos-settings__hint" data-testid="update-not-configured">
                 还没填「更新服务器地址」，无法检查更新。
               </p>
             )}
             {updateResult?.status === 'available' && (
-              <p className="fnm-settings__hint" data-testid="update-available">
+              <p className="sanlos-settings__hint" data-testid="update-available">
                 {`发现新版本 ${updateResult.manifest.version}${
                   updateResult.manifest.notes ? `：${updateResult.manifest.notes}` : ''
                 }`}
               </p>
             )}
             {updateDownload?.status === 'ok' && (
-              <p className="fnm-settings__hint" data-testid="update-downloaded">
+              <p className="sanlos-settings__hint" data-testid="update-downloaded">
                 {`安装包已下载（${formatBytes(updateDownload.bytes)}）。${
                   updateDownload.signature.ok
                     ? '签名校验通过。'
@@ -885,10 +885,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               </p>
             )}
             {updateResult?.status === 'available' && (
-              <div className="fnm-settings__row">
+              <div className="sanlos-settings__row">
                 <button
                   type="button"
-                  className="fnm-settings__button"
+                  className="sanlos-settings__button"
                   onClick={handleDownloadUpdate}
                   disabled={updateBusy}
                 >
@@ -896,7 +896,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 </button>
                 <button
                   type="button"
-                  className="fnm-settings__button"
+                  className="sanlos-settings__button"
                   onClick={handleInstallUpdate}
                   disabled={updateBusy || !signatureOk}
                   title={
@@ -910,22 +910,22 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               </div>
             )}
             {updateError && (
-              <p className="fnm-settings__error" role="alert">
+              <p className="sanlos-settings__error" role="alert">
                 {updateError}
               </p>
             )}
-            <p className="fnm-settings__hint">
+            <p className="sanlos-settings__hint">
               默认从**项目自己的 Releases** 拉更新（不用填地址）；填了别的地址就用别的源。
             </p>
-            <p className="fnm-settings__hint">
+            <p className="sanlos-settings__hint">
               安装包**带**代码签名时，必须与「预期的代码签名者」一致才会被启动；
               没填预期签名者就一律拒绝（自动更新 = 远程代码执行，这道闸不省）。
             </p>
-            <p className="fnm-settings__hint">
+            <p className="sanlos-settings__hint">
               ⚠️ **没有签名**的安装包（例如更早的版本）需要勾选「允许安装未签名的更新包」
               并**保存**后才允许安装（**SHA-512 与同源校验照旧**，哈希不符一律拒绝）。
             </p>
-            <p className="fnm-settings__hint">
+            <p className="sanlos-settings__hint">
               「预期的代码签名者」填**签发者主体名**即可（**不必**抄整串 <code>CN=…, O=…, C=…</code>），
               也可以填**多个**（用逗号分隔）；公开安装包由 <code>SignPath Foundation</code> 签发时就填它。
             </p>
@@ -934,10 +934,10 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 ⚠️ 措辞只描述**产物**的状态（「当前发布的安装包没有签名」），
                 **不写**「本项目暂未办理证书」这种项目状态 —— 那是**会过期**的说法
                 （拿到证书后就是假的；既有测试也盯着这类文案）。 */}
-            <p className="fnm-settings__hint" data-testid="update-verify-hint">
+            <p className="sanlos-settings__hint" data-testid="update-verify-hint">
               ⚠️ 当前公开发布的安装包**没有代码签名**（Windows 会提示「未知发布者」）。
             </p>
-            <p className="fnm-settings__hint" data-testid="update-verify-howto">
+            <p className="sanlos-settings__hint" data-testid="update-verify-howto">
               <strong>怎么验证这个安装包</strong>：① 用 GitHub CLI 验证**构建来源**——
               <code>gh attestation verify "SanlosMusic-Setup-版本号.exe" --repo pure2199/sanlos-music</code>
               （证明它确实是本仓库的 CI 从对应标签构建出来的，换一字节就验不过）；
@@ -945,7 +945,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
               应用内更新还会再核对清单里的 <strong>SHA-512</strong>（不符一律拒绝安装）。
             </p>
             {!updateSaved && (
-              <p className="fnm-settings__hint" data-testid="update-unsaved-hint">
+              <p className="sanlos-settings__hint" data-testid="update-unsaved-hint">
                 有未保存的修改 —— 点「保存」后才会生效。
               </p>
             )}
@@ -953,32 +953,32 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
         )}
 
         {category === 'about' && (
-          <fieldset className="fnm-settings__group">
-            <legend className="fnm-settings__legend">关于</legend>
-            <dl className="fnm-settings__about" data-testid="app-about">
-              <div className="fnm-settings__about-row">
+          <fieldset className="sanlos-settings__group">
+            <legend className="sanlos-settings__legend">关于</legend>
+            <dl className="sanlos-settings__about" data-testid="app-about">
+              <div className="sanlos-settings__about-row">
                 <dt>应用名称</dt>
                 <dd>{APP_INFO.name}</dd>
               </div>
-              <div className="fnm-settings__about-row">
+              <div className="sanlos-settings__about-row">
                 <dt>版本</dt>
                 <dd data-testid="app-about-version">{appVersion ? `v${appVersion}` : '（读取中…）'}</dd>
               </div>
-              <div className="fnm-settings__about-row">
+              <div className="sanlos-settings__about-row">
                 <dt>开发者</dt>
                 <dd data-testid="app-about-developer">{APP_INFO.developer}</dd>
               </div>
-              <div className="fnm-settings__about-row">
+              <div className="sanlos-settings__about-row">
                 <dt>公司</dt>
                 <dd data-testid="app-about-company">{APP_INFO.company}</dd>
               </div>
-              <div className="fnm-settings__about-row">
+              <div className="sanlos-settings__about-row">
                 <dt>官网</dt>
                 <dd>
                   {/* ⚠️ 必须 `preventDefault`（见 `handleOpenWebsite`）：
                       不拦住的话浏览器会把**应用窗口**导航到那个网站。 */}
                   <a
-                    className="fnm-settings__about-link"
+                    className="sanlos-settings__about-link"
                     href={APP_INFO.website}
                     onClick={handleOpenWebsite}
                   >
@@ -986,16 +986,16 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                   </a>
                 </dd>
               </div>
-              <div className="fnm-settings__about-row">
+              <div className="sanlos-settings__about-row">
                 <dt>备案号</dt>
                 <dd data-testid="app-about-icp">{APP_INFO.icp}</dd>
               </div>
-              <div className="fnm-settings__about-row">
+              <div className="sanlos-settings__about-row">
                 <dt>项目地址</dt>
                 <dd>
                   {/* ⚠️ 同样必须 `preventDefault`（见 `handleOpenRepository`）。 */}
                   <a
-                    className="fnm-settings__about-link"
+                    className="sanlos-settings__about-link"
                     href={APP_INFO.repository}
                     onClick={handleOpenRepository}
                     data-testid="app-about-repository"
@@ -1005,7 +1005,7 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 </dd>
               </div>
             </dl>
-            <p className="fnm-settings__hint">
+            <p className="sanlos-settings__hint">
               点官网 / 项目地址都会用系统默认浏览器打开（不在应用内跳转）。
             </p>
           </fieldset>

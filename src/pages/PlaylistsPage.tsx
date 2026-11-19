@@ -267,22 +267,22 @@ export function PlaylistsPage({
       loading={playlists.loading}
       loadingText="正在加载歌单…"
     >
-      <div className="fnm-playlists">
-        <div className="fnm-playlists__side">
+      <div className="sanlos-playlists">
+        <div className="sanlos-playlists__side">
           {/* 随机歌单（T97）：从**你的**曲库随机挑 20 首 ⇒ 能直接播，也能存回 NAS。 */}
           <button
             type="button"
-            className="fnm-playlists__random-button"
+            className="sanlos-playlists__random-button"
             aria-pressed={randomOpen}
             onClick={handleToggleRandom}
           >
             {randomOpen ? '关闭随机歌单' : '随机 20 首'}
           </button>
           {/* 新建歌单（T26）：这是「一个歌单都没有」的账号**唯一的建单入口**。 */}
-          <div className="fnm-playlists__create">
+          <div className="sanlos-playlists__create">
             <input
-              className="fnm-playlists__name"
-              name="fnm-playlist-name"
+              className="sanlos-playlists__name"
+              name="sanlos-playlist-name"
               type="text"
               placeholder="新歌单名称"
               aria-label="新歌单名称"
@@ -292,7 +292,7 @@ export function PlaylistsPage({
             />
             <button
               type="button"
-              className="fnm-playlists__create-button"
+              className="sanlos-playlists__create-button"
               onClick={() => void handleCreate()}
               disabled={busy || newName.trim().length === 0}
             >
@@ -312,7 +312,7 @@ export function PlaylistsPage({
           />
         </div>
 
-        <div className="fnm-playlists__detail">
+        <div className="sanlos-playlists__detail">
           {randomOpen ? (
             <RandomPlaylistPanel
               save={handleSaveRandom}
@@ -322,10 +322,10 @@ export function PlaylistsPage({
           ) : playlistId ? (
             <>
               {/* 删除当前歌单（T26）：两步确认。 */}
-              <div className="fnm-playlists__toolbar">
+              <div className="sanlos-playlists__toolbar">
                 <button
                   type="button"
-                  className="fnm-playlists__delete"
+                  className="sanlos-playlists__delete"
                   onClick={() => void handleDelete()}
                   disabled={busy}
                 >
@@ -334,7 +334,7 @@ export function PlaylistsPage({
                 {confirmDelete && (
                   <button
                     type="button"
-                    className="fnm-playlists__cancel-delete"
+                    className="sanlos-playlists__cancel-delete"
                     onClick={() => setConfirmDelete(false)}
                     disabled={busy}
                   >
@@ -370,14 +370,14 @@ export function PlaylistsPage({
               />
             </>
           ) : (
-            <p className="fnm-playlists__hint">
+            <p className="sanlos-playlists__hint">
               {playlists.items.length > 0
                 ? '请选择一个歌单'
                 : '还没有歌单：在左边填个名字点「新建歌单」'}
             </p>
           )}
           {message && (
-            <p className="fnm-playlists__message" role="status">
+            <p className="sanlos-playlists__message" role="status">
               {message}
             </p>
           )}

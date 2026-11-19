@@ -2,7 +2,7 @@
 // T89-⑪：全屏页「强调色当文字色」在取色背景上的对比度
 // ---------------------------------------------------------------------------
 //
-// ⚠️ **背景**：全屏页的背景 = 封面的**平均色**（`--fnm-fullplayer__tint`），
+// ⚠️ **背景**：全屏页的背景 = 封面的**平均色**（`--sanlos-fullplayer__tint`），
 //    强调色 = 封面的**主色**（Fluent）或主题固定色（Apple）
 //    ⇒ 两者来自**同一张图**、亮度天然接近
 //    ⇒ 直接把 `--accent` 当文字色用，真机实测只有 **2.94**（AA 要求 4.5）。
@@ -10,7 +10,7 @@
 //
 // ⚠️ **方向是实测定的（T89-⑪ 真机诊断，修复前）**：
 //    「强调色当文字色」的**真实落点**与它们**真正压着的背景**是：
-//      · 歌词当前行 `.fnm-lyricview__line--whole` ⇒ 压在**全屏页渐变**上 ⇒ 3.67
+//      · 歌词当前行 `.sanlos-lyricview__line--whole` ⇒ 压在**全屏页渐变**上 ⇒ 3.67
 //      · 悬停的底部控制按钮图标 ⇒ 压在 `--surface-sunken`（不透明）上 ⇒ 3.91
 //    这两处背景**都是浅色** ⇒ **只压暗**必然提升对比度。
 //    ⇒ 「深色背景就提亮」那条前提**被实测推翻** ⇒ 改写为
@@ -215,7 +215,7 @@ describe('T89-⑪：全屏页发布「按背景校正过」的强调色', () => 
     document.documentElement.removeAttribute('style')
   })
 
-  it('取到背景后发布 `--fnm-fullplayer__accent-text`，且与取色背景的对比度 ≥ 4.5', async () => {
+  it('取到背景后发布 `--sanlos-fullplayer__accent-text`，且与取色背景的对比度 ≥ 4.5', async () => {
     // ⚠️ **桩掉 Image 与 canvas**：让取色拿到**真机上实测的那一个像素**
     //    ⇒ 平均色 = #d0cbc7（浅米灰）。
     class StubImage {
@@ -258,24 +258,24 @@ describe('T89-⑪：全屏页发布「按背景校正过」的强调色', () => 
 
     await waitFor(() => {
       const root = container.querySelector('[data-testid="full-player"]')
-      expect(root?.getAttribute('style') ?? '').toContain('--fnm-fullplayer__tint')
+      expect(root?.getAttribute('style') ?? '').toContain('--sanlos-fullplayer__tint')
     })
     // 背景取到了（平均色 = #d0cbc7）
     expect(getCachedCoverColor('track_abc')).toBe(REAL_TINT)
 
     await waitFor(() => {
       const root = container.querySelector('[data-testid="full-player"]')
-      expect(root?.getAttribute('style') ?? '').toContain('--fnm-fullplayer__accent-text')
+      expect(root?.getAttribute('style') ?? '').toContain('--sanlos-fullplayer__accent-text')
     })
 
     const style = container.querySelector('[data-testid="full-player"]')?.getAttribute('style') ?? ''
-    const match = /--fnm-fullplayer__accent-text:\s*([^;]+)/.exec(style)
+    const match = /--sanlos-fullplayer__accent-text:\s*([^;]+)/.exec(style)
     const readable = match?.[1]?.trim() ?? ''
     expect(readable).not.toBe('')
     expect(contrastRatio(readable, REAL_TINT)).toBeGreaterThanOrEqual(ACCENT_TEXT_MIN_CONTRAST)
 
     // ⚠️ 悬停态用的是**它自己真正的背景**（`--surface-sunken`，不透明）⇒ 单独校正。
-    const hoverMatch = /--fnm-fullplayer__accent-text-hover:\s*([^;]+)/.exec(style)
+    const hoverMatch = /--sanlos-fullplayer__accent-text-hover:\s*([^;]+)/.exec(style)
     const readableHover = hoverMatch?.[1]?.trim() ?? ''
     expect(readableHover).not.toBe('')
     expect(contrastRatio(readableHover, APPLE_SUNKEN)).toBeGreaterThanOrEqual(ACCENT_TEXT_MIN_CONTRAST)
@@ -290,20 +290,20 @@ describe('T89-⑪：样式表里「当文字色用」与「当底色用」必须
 
     // ⚠️ **文字色 / 图标色** ⇒ 用校正后的变量（带回退）。
     expect(css).toMatch(
-      /\.fnm-fullplayer__queue-item--current\s*\{[^}]*color:\s*var\(--fnm-fullplayer__accent-text,\s*var\(--accent\)\)/,
+      /\.sanlos-fullplayer__queue-item--current\s*\{[^}]*color:\s*var\(--sanlos-fullplayer__accent-text,\s*var\(--accent\)\)/,
     )
     expect(css).toMatch(
-      /\.fnm-fullplayer__button:hover:not\(:disabled\)\s*\{[^}]*color:\s*var\(--fnm-fullplayer__accent-text,\s*var\(--accent\)\)/,
+      /\.sanlos-fullplayer__button:hover:not\(:disabled\)\s*\{[^}]*color:\s*var\(--sanlos-fullplayer__accent-text,\s*var\(--accent\)\)/,
     )
     expect(css).toMatch(
-      /\.fnm-fullplayer__button:active:not\(:disabled\)\s*\{[^}]*color:\s*var\(--fnm-fullplayer__accent-text-hover,\s*var\(--accent-hover\)\)/,
+      /\.sanlos-fullplayer__button:active:not\(:disabled\)\s*\{[^}]*color:\s*var\(--sanlos-fullplayer__accent-text-hover,\s*var\(--accent-hover\)\)/,
     )
 
     // ⚠️ **底色 + 白字** ⇒ 仍用全局 `--accent` + `--accent-text`（设计保证的那条）。
-    expect(css).toMatch(/\.fnm-fullplayer__tab--active\s*\{[^}]*background:\s*var\(--accent\)/)
-    expect(css).toMatch(/\.fnm-fullplayer__tab--active\s*\{[^}]*color:\s*var\(--accent-text\)/)
-    expect(css).toMatch(/\.fnm-fullplayer__button--primary\s*\{[^}]*background:\s*var\(--accent\)/)
-    expect(css).toMatch(/\.fnm-fullplayer__button--primary:hover:not\(:disabled\)\s*\{[^}]*background:\s*var\(--accent-hover\)/)
+    expect(css).toMatch(/\.sanlos-fullplayer__tab--active\s*\{[^}]*background:\s*var\(--accent\)/)
+    expect(css).toMatch(/\.sanlos-fullplayer__tab--active\s*\{[^}]*color:\s*var\(--accent-text\)/)
+    expect(css).toMatch(/\.sanlos-fullplayer__button--primary\s*\{[^}]*background:\s*var\(--accent\)/)
+    expect(css).toMatch(/\.sanlos-fullplayer__button--primary:hover:not\(:disabled\)\s*\{[^}]*background:\s*var\(--accent-hover\)/)
   })
 
   it('**歌词视图**里当文字色用的那三处也要用校正变量（真机实测 3.67 的主犯）', async () => {
@@ -313,19 +313,19 @@ describe('T89-⑪：样式表里「当文字色用」与「当底色用」必须
 
     // 整行强调色（当前行）
     expect(css).toMatch(
-      /\.fnm-lyricview__line--whole\s*\{[^}]*color:\s*var\(--fnm-fullplayer__accent-text,\s*var\(--accent\)\)/,
+      /\.sanlos-lyricview__line--whole\s*\{[^}]*color:\s*var\(--sanlos-fullplayer__accent-text,\s*var\(--accent\)\)/,
     )
     // 已唱过的词
     expect(css).toMatch(
-      /\.fnm-lyricview__word--sung\s*\{[^}]*color:\s*var\(--fnm-fullplayer__accent-text,\s*var\(--accent\)\)/,
+      /\.sanlos-lyricview__word--sung\s*\{[^}]*color:\s*var\(--sanlos-fullplayer__accent-text,\s*var\(--accent\)\)/,
     )
     // 卡拉OK 逐字填色（`background-clip: text` ⇒ 字形被强调色填充）
-    expect(css).toMatch(/\.fnm-lyricview__word--karaoke\s*\{[^}]*var\(--fnm-fullplayer__accent-text,\s*var\(--accent\)\)/)
+    expect(css).toMatch(/\.sanlos-lyricview__word--karaoke\s*\{[^}]*var\(--sanlos-fullplayer__accent-text,\s*var\(--accent\)\)/)
 
     // ⚠️ **顺序不变式**：`--whole` 必须排在 `--active` **之后**
     //    （两者特异性相同 ⇒ 后者胜 ⇒ `--active` 的 `--text-primary` 才会被盖掉）。
-    expect(css.indexOf('.fnm-lyricview__line--active')).toBeLessThan(
-      css.indexOf('.fnm-lyricview__line--whole'),
+    expect(css.indexOf('.sanlos-lyricview__line--active')).toBeLessThan(
+      css.indexOf('.sanlos-lyricview__line--whole'),
     )
   })
 })
@@ -393,16 +393,16 @@ describe('T89-⑮：全屏页的取色背景会被提亮到亮度下限', () => 
     const { container } = render(<FullPlayerPage store={store} lyricApi={api as never} />)
     await waitFor(() => {
       const root = container.querySelector('[data-testid="full-player"]')
-      expect(root?.getAttribute('style') ?? '').toContain('--fnm-fullplayer__tint')
+      expect(root?.getAttribute('style') ?? '').toContain('--sanlos-fullplayer__tint')
     })
     await waitFor(() => {
       const root = container.querySelector('[data-testid="full-player"]')
-      expect(root?.getAttribute('style') ?? '').toContain('--fnm-fullplayer__accent-text')
+      expect(root?.getAttribute('style') ?? '').toContain('--sanlos-fullplayer__accent-text')
     })
 
     const style = container.querySelector('[data-testid="full-player"]')?.getAttribute('style') ?? ''
-    const tint = /--fnm-fullplayer__tint:\s*([^;]+)/.exec(style)?.[1]?.trim() ?? ''
-    const accentText = /--fnm-fullplayer__accent-text:\s*([^;]+)/.exec(style)?.[1]?.trim() ?? ''
+    const tint = /--sanlos-fullplayer__tint:\s*([^;]+)/.exec(style)?.[1]?.trim() ?? ''
+    const accentText = /--sanlos-fullplayer__accent-text:\s*([^;]+)/.exec(style)?.[1]?.trim() ?? ''
     return { tint, accentText }
   }
 

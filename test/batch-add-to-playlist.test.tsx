@@ -101,7 +101,7 @@ describe('加入歌单（T28）', () => {
     // ⚠️ **还没点开** → 不该发请求。
     expect(api.list).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
 
     await waitFor(() => expect(api.list).toHaveBeenCalledTimes(1))
     // ⚠️ T30：面板从「单选下拉」改成「复选列表」→ 角色由 `option` 变成 `checkbox`。
@@ -120,7 +120,7 @@ describe('加入歌单（T28）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单' })
     // ⚠️ T30：复选列表 → 要**先勾选**才谈得上「加入」（原来下拉框默认选中第一个）。
     fireEvent.click(screen.getByRole('checkbox', { name: '占位歌单' }))
@@ -151,7 +151,7 @@ describe('加入歌单（T28）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单' })
     fireEvent.click(screen.getByRole('checkbox', { name: '占位歌单' }))
     fireEvent.click(screen.getByRole('button', { name: '加入' }))
@@ -179,7 +179,7 @@ describe('加入歌单（T28）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单' })
     fireEvent.click(screen.getByRole('checkbox', { name: '占位歌单' }))
     fireEvent.click(screen.getByRole('button', { name: '加入' }))
@@ -197,7 +197,7 @@ describe('加入歌单（T28）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
 
     expect(await screen.findByText('还没有歌单 —— 先到「歌单」页新建一个')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '加入' })).toBeNull()
@@ -216,7 +216,7 @@ describe('加入歌单（T28）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单' })
     fireEvent.click(screen.getByRole('checkbox', { name: '占位歌单' }))
     fireEvent.click(screen.getByRole('button', { name: '加入' }))
@@ -235,7 +235,7 @@ describe('加入歌单（T28）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单' })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
@@ -248,7 +248,7 @@ describe('加入歌单（T28）', () => {
       'utf8',
     ).replace(/\/\*[\s\S]*?\*\//g, '')
     // ⚠️ 契约测试要**先剥注释再匹配**（否则匹配到注释正文 = 空断言）。
-    expect(css).toMatch(/\.fnm-addtoplaylist__panel\s*\{[^}]*position:\s*absolute/)
+    expect(css).toMatch(/\.sanlos-addtoplaylist__panel\s*\{[^}]*position:\s*absolute/)
   })
 
   it('工具条的高度恒定契约仍在（flex: 0 0 auto + 固定高度）', () => {
@@ -256,17 +256,17 @@ describe('加入歌单（T28）', () => {
       join(__dirname, '..', 'src', 'components', 'batch-download-bar.css'),
       'utf8',
     ).replace(/\/\*[\s\S]*?\*\//g, '')
-    expect(css).toMatch(/\.fnm-batchdownload\s*\{[^}]*height:\s*36px/)
-    expect(css).toMatch(/\.fnm-batchdownload\s*\{[^}]*flex:\s*0 0 auto/)
+    expect(css).toMatch(/\.sanlos-batchdownload\s*\{[^}]*height:\s*36px/)
+    expect(css).toMatch(/\.sanlos-batchdownload\s*\{[^}]*flex:\s*0 0 auto/)
     // ⚠️ **不能裁剪**：面板是浮层（挂在工具条内部）→ 被裁掉就永远点不到。
-    expect(css).not.toMatch(/\.fnm-batchdownload\s*\{[^}]*overflow:\s*hidden/)
+    expect(css).not.toMatch(/\.sanlos-batchdownload\s*\{[^}]*overflow:\s*hidden/)
   })
 })
 
 describe('批量工具条插槽（T28）', () => {
   it('不传 extra → 工具条里**没有**「加入歌单」', () => {
     render(createElement(BatchDownloadBar, { songs: [SONG_A] }))
-    expect(screen.queryByTestId('fnm-add-to-playlist-button')).toBeNull()
+    expect(screen.queryByTestId('sanlos-add-to-playlist-button')).toBeNull()
   })
 
   it('传 extra → 插槽内容出现在工具条里', () => {
@@ -279,7 +279,7 @@ describe('批量工具条插槽（T28）', () => {
         }),
       }),
     )
-    expect(screen.getByTestId('fnm-add-to-playlist-button')).toBeTruthy()
+    expect(screen.getByTestId('sanlos-add-to-playlist-button')).toBeTruthy()
   })
 })
 
@@ -307,7 +307,7 @@ describe('加入歌单：多选与搜索（T30）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单甲' })
     fireEvent.click(screen.getByRole('checkbox', { name: '占位歌单甲' }))
     fireEvent.click(screen.getByRole('checkbox', { name: '占位歌单乙' }))
@@ -348,7 +348,7 @@ describe('加入歌单：多选与搜索（T30）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单甲' })
     fireEvent.click(screen.getByRole('checkbox', { name: '占位歌单甲' }))
     fireEvent.click(screen.getByRole('checkbox', { name: '占位歌单乙' }))
@@ -379,7 +379,7 @@ describe('加入歌单：多选与搜索（T30）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单甲' })
     fireEvent.click(screen.getByRole('checkbox', { name: '占位歌单甲' }))
     fireEvent.click(screen.getByRole('button', { name: '加入' }))
@@ -404,7 +404,7 @@ describe('加入歌单：多选与搜索（T30）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单甲' })
 
     fireEvent.change(screen.getByLabelText('搜索歌单'), { target: { value: '乙' } })
@@ -425,7 +425,7 @@ describe('加入歌单：多选与搜索（T30）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单甲' })
 
     expect(screen.getByRole('button', { name: '加入' })).toBeDisabled()
@@ -446,7 +446,7 @@ describe('加入歌单：多选与搜索（T30）', () => {
       }),
     )
 
-    fireEvent.click(screen.getByTestId('fnm-add-to-playlist-button'))
+    fireEvent.click(screen.getByTestId('sanlos-add-to-playlist-button'))
     await screen.findByRole('checkbox', { name: '占位歌单甲' })
 
     expect((screen.getByRole('checkbox', { name: '占位歌单甲' }) as HTMLInputElement).checked).toBe(false)

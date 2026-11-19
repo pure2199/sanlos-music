@@ -59,7 +59,7 @@ export function pathnameOf(url: string): string {
  * `+` 替换为 `%20`，最后整体 decodeURIComponent。
  *
  * 空值参数（如 `k=`）**保留**，只丢弃值为字面量 `'undefined'` / `'null'` 的参数——
- * 这与上游参考实现（`tools/fn-probe.mjs`、`tools/fn-api-probe.mjs`）语义一致。
+ * 这与上游参考实现（`tools/sanlos-probe.mjs`、`tools/sanlos-api-probe.mjs`）语义一致。
  *
  * 选择理由（M9）：官方 Web 端按此语义发送，某些网关或服务端将来可能加强校验，
  * 实现应与上游行为一致以免将来行为突变。实测（M8）服务端当前并不校验 authx，

@@ -70,7 +70,7 @@ export interface RandomSampleOptions {
   random?: () => number
 }
 
-/** 生产用的抽样依赖（走渲染层既有的 `fnm://srv` 通道 ⇒ 自动带当前账号的凭证）。 */
+/** 生产用的抽样依赖（走渲染层既有的 `sanlos://srv` 通道 ⇒ 自动带当前账号的凭证）。 */
 export const defaultRandomSampleDeps: RandomSampleDeps = {
   // ⚠️ **只取 1 条**就能拿到 `total`（`/track/list` 的信封里带 `total`）。
   total: async () => (await libraryApi.songs(1, 1)).total,

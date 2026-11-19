@@ -7,7 +7,7 @@
 // - `pendingTagCount()`：数一数还有多少首**没读标签**（`tagSource` 缺省）；
 // - `installLocalLibraryStore()`：订阅主进程推来的清单变化 → **按 id 合并**。
 //
-// ⚠️ **不碰文件系统**：渲染层只认 `globalThis.fnPlayer` 这一个入口。
+// ⚠️ **不碰文件系统**：渲染层只认 `globalThis.sanlosPlayer` 这一个入口。
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -49,7 +49,7 @@ function installBridge(overrides: Partial<PlayerBridge> = {}): void {
     }),
     ...overrides,
   } as unknown as PlayerBridge
-  ;(globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer = bridge
+  ;(globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer = bridge
 }
 
 beforeEach(() => {
@@ -58,7 +58,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete (globalThis as unknown as { fnPlayer?: PlayerBridge }).fnPlayer
+  delete (globalThis as unknown as { sanlosPlayer?: PlayerBridge }).sanlosPlayer
 })
 
 // ---------------------------------------------------------------------------

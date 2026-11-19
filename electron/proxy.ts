@@ -1,9 +1,9 @@
-// `fnm://` 协议代理：渲染进程唯一的出网出口。
+// `sanlos://` 协议代理：渲染进程唯一的出网出口。
 //
 // ---------------------------------------------------------------------------
 // 安全边界（不可放宽）
 // ---------------------------------------------------------------------------
-// 1. **渲染进程永远拿不到凭证**：渲染进程只发 `fnm://srv/<相对路径>`，本模块在**主进程**里
+// 1. **渲染进程永远拿不到凭证**：渲染进程只发 `sanlos://srv/<相对路径>`，本模块在**主进程**里
 //    补上 `authx` 签名与 `Cookie: music-token=…`（中继链路再追加 `mode=relay`），
 //    token 只存在于主进程内存（Task 7 的 `SessionManager`）里。
 // 2. **渲染进程不能指定目标主机**：上游地址**只**来自 `session.state.base`，
@@ -38,7 +38,7 @@
 // - `protocol.registerSchemesAsPrivileged()` **只能在 app ready 之前调用**；
 // - `protocol.handle()` **必须在 ready 之后调用**。
 //
-// 故导出 `registerFnmSchemePrivileges()`：**主进程必须在 `app.whenReady()` 之前调用它**
+// 故导出 `registerSanlosSchemePrivileges()`：**主进程必须在 `app.whenReady()` 之前调用它**
 // （Task 9 的主进程入口会这么做）。`registerProxy()` 内部会**防御性地**再调一次
 // （ready 之后调用会抛错，包在 try/catch 里忽略）。
 //
@@ -57,7 +57,7 @@ import { SessionStateError, type SessionManager } from './session'
 import { createHttpStack, type HttpStack, type UpstreamStream } from './http'
 import {
   APP_SCHEME_PRIVILEGES,
-  FNM_SCHEME,
+  SANLOS_SCHEME,
   registerAppSchemes,
   registerSchemePrivileges,
   resolveElectronProtocol,
@@ -68,8 +68,8 @@ import {
 // 常量
 // ---------------------------------------------------------------------------
 
-/** 协议 scheme 名（与渲染进程 `src/api/client.ts` 的 `fnm://srv` 前缀一致）。 */
-const SCHEME = FNM_SCHEME
+/** 协议 scheme 名（与渲染进程 `src/api/client.ts` 的 `sanlos://srv` 前缀一致）。 */
+const SCHEME = SANLOS_SCHEME
 
 /** 唯一允许的虚拟主机名：渲染进程只能用 `srv`（**不接受任何真实主机名**）。 */
 const ALLOWED_HOST = 'srv'
@@ -136,7 +136,7 @@ const SEGMENT_RE = /^[A-Za-z0-9_-]+$/
  */
 const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304])
 
-/** 跨源放行头：渲染进程页面来自 `file://` / dev server，与 `fnm://` 跨源。 */
+/** 跨源放行头：渲染进程页面来自 `file://` / dev server，与 `sanlos://` 跨源。 */
 const CORS_HEADERS: Readonly<Record<string, string>> = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
@@ -161,7 +161,7 @@ export type {
 // ---------------------------------------------------------------------------
 
 // ⚠️ `resolveElectronProtocol` 住在 `electron/schemes.ts`——
-//    `fnm` 与 `fnml` **共用**同一个「惰性取 protocol」的实现（见该文件的说明：
+//    `sanlos` 与 `sanlos-media` **共用**同一个「惰性取 protocol」的实现（见该文件的说明：
 //    两个 scheme 必须**一次**注册，第二个会把第一个覆盖掉）。
 
 /** `registerProxy` 的可选参数。 */
@@ -201,7 +201,7 @@ export interface UpstreamRequestInput {
 // ---------------------------------------------------------------------------
 
 // ⚠️ `resolveElectronProtocol` 住在 `electron/schemes.ts`——
-//    `fnm` 与 `fnml` **共用**同一个「惰性取 protocol」的实现（见该文件的说明：
+//    `sanlos` 与 `sanlos-media` **共用**同一个「惰性取 protocol」的实现（见该文件的说明：
 //    两个 scheme 必须**一次**注册，第二个会把第一个覆盖掉）。
 
 // ---------------------------------------------------------------------------
@@ -273,8 +273,8 @@ interface ParsedTarget {
  *
  * ⚠️ **关于 `..` 与 `%2e%2e`（如实说明，勿误读）**：
  * WHATWG 的 URL 解析器在**构造 `Request` 时**就把它们规范化掉了
- * （`fnm://srv/album/../user/list` 与 `fnm://srv/album/%2e%2e/user/list`
- * **都**变成 `fnm://srv/user/list`），Chromium 同规范。
+ * （`sanlos://srv/album/../user/list` 与 `sanlos://srv/album/%2e%2e/user/list`
+ * **都**变成 `sanlos://srv/user/list`），Chromium 同规范。
  * 因此**运行期的 handler 收到的是规范化后的路径**，本护栏看到的是规范化之后的结果——
  * 它**不能**在这里识别出「渲染进程原本想穿越」（也不需要：见下）。
  * 兜底的安全保证是：规范化后的路径**仍然是一个普通的相对路径**，
@@ -292,12 +292,12 @@ function normalizeRest(rawPath: string): string | null {
 }
 
 /**
- * 解析渲染进程发来的 `fnm://srv/<path>?<query>`。
+ * 解析渲染进程发来的 `sanlos://srv/<path>?<query>`。
  *
  * **刻意手工切分而不是用 `new URL()`**：要拿到**未经 URL 规范化**的原始路径，
  * 才知道渲染进程到底写了什么（`new URL()` 会把 `..` / `%2e%2e` 规范化掉）。
  *
- * ⚠️ **反斜杠分支的适用面**：`fnm` 注册为 `standard: true` 之后，
+ * ⚠️ **反斜杠分支的适用面**：`sanlos` 注册为 `standard: true` 之后，
  * Chromium 可能把 `\` 当作路径分隔符（Node / 单测里它是普通字符）。
  * 所以「反斜杠被拒」这条分支主要在**原始路径形态**下生效；
  * 即便生产环境把它当成分隔符，结果也只是多切一个段，**仍在 API 前缀内**，
@@ -376,7 +376,7 @@ function jsonResponse(status: number, json: unknown): Response {
 /**
  * CORS 预检应答。
  *
- * 渲染进程页面来自 `file://` / dev server，与 `fnm://` 跨源；
+ * 渲染进程页面来自 `file://` / dev server，与 `sanlos://` 跨源；
  * `POST` + `content-type: application/json` 会触发预检，这里直接应答（**不打到上游**）。
  */
 function preflightResponse(): Response {
@@ -633,7 +633,7 @@ async function renewSession(session: SessionManager): Promise<boolean> {
 // 协议处理器
 // ---------------------------------------------------------------------------
 
-/** 处理一次 `fnm://` 请求。 */
+/** 处理一次 `sanlos://` 请求。 */
 async function handleProxyRequest(
   session: SessionManager,
   request: Request,
@@ -654,9 +654,9 @@ async function dispatch(
   opts: { isRelay?: () => boolean; binaryPaths: readonly string[]; http: HttpStack },
 ): Promise<Response> {
   const target = parseTarget(request.url)
-  if (!target) return errorResponse('无法识别的 fnm:// 请求地址')
+  if (!target) return errorResponse('无法识别的 sanlos:// 请求地址')
   if (target.host !== ALLOWED_HOST) {
-    return errorResponse(`不支持的 fnm:// 主机（只允许 ${ALLOWED_HOST}）`)
+    return errorResponse(`不支持的 sanlos:// 主机（只允许 ${ALLOWED_HOST}）`)
   }
   if (target.rest === null) {
     return errorResponse('非法的 API 路径：只允许形如 segment/segment 的 ASCII 路径')
@@ -679,27 +679,27 @@ async function dispatch(
 // ---------------------------------------------------------------------------
 
 /**
- * 注册 `fnm` scheme 的特权（**单个** scheme）。
+ * 注册 `sanlos` scheme 的特权（**单个** scheme）。
  *
  * ⚠️⚠️ **应用启动时不要用本函数**——Electron 的
  *    `registerSchemesAsPrivileged()` **整个进程只能调用一次**，
  *    第二次会**静默覆盖**第一次的注册结果。
  *    应用启动的正确入口是 `electron/schemes.ts` 的 `registerAppSchemes()`
- *    （把 `fnm` 与 `fnml` **合并成一次**注册）。
- *    本函数保留下来是为了**单测**（钉住 `fnm` 的特权形状）与按需单注册。
+ *    （把 `sanlos` 与 `sanlos-media` **合并成一次**注册）。
+ *    本函数保留下来是为了**单测**（钉住 `sanlos` 的特权形状）与按需单注册。
  */
-export function registerFnmSchemePrivileges(protocol?: ProtocolLike): void {
+export function registerSanlosSchemePrivileges(protocol?: ProtocolLike): void {
   registerSchemePrivileges(
-    [{ scheme: FNM_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } }],
+    [{ scheme: SANLOS_SCHEME, privileges: { ...APP_SCHEME_PRIVILEGES } }],
     protocol,
   )
 }
 
 /**
- * 注册 `fnm://` 协议代理（**必须在 app ready 之后调用**）。
+ * 注册 `sanlos://` 协议代理（**必须在 app ready 之后调用**）。
  *
  * - `protocol` 缺省时**惰性**取 Electron 的 `protocol`（模块顶层不 import Electron）；
- * - 内部防御性地调用一次 `registerFnmSchemePrivileges()`：
+ * - 内部防御性地调用一次 `registerSanlosSchemePrivileges()`：
  *   ready 之后调用它会抛错，包在 try/catch 里忽略（Task 9 会在 ready 前先调一次）；
  * - `opts.isRelay` 是中继判定的覆盖钩子，实际取值 `opts.isRelay?.() ?? session.state.isRelay`；
  * - `opts.binaryPaths` 可覆盖默认的二进制（流式）路径白名单。
@@ -707,14 +707,14 @@ export function registerFnmSchemePrivileges(protocol?: ProtocolLike): void {
 export function registerProxy(session: SessionManager, opts: ProxyOptions = {}): void {
   const protocol = opts.protocol ?? resolveElectronProtocol()
   if (!protocol) {
-    throw new Error('fnm:// 协议代理注册失败：当前进程没有可用的 Electron protocol 模块')
+    throw new Error('sanlos:// 协议代理注册失败：当前进程没有可用的 Electron protocol 模块')
   }
 
   try {
     // ⚠️ **防御性调用**：ready 之后调 `registerSchemesAsPrivileged()` 会抛错，
     //    包在 try/catch 里忽略（正常流程由主进程入口在 ready 前调一次）。
     // ⚠️ 这里必须调 `registerAppSchemes()`（**两个 scheme 一起**），
-    //    **不能**只调 `registerFnmSchemePrivileges()`——
+    //    **不能**只调 `registerSanlosSchemePrivileges()`——
     //    `registerSchemesAsPrivileged()` 整个进程**只能调用一次**，
     //    单个注册会**覆盖掉**另一个 scheme 的特权（见 `electron/schemes.ts`）。
     registerAppSchemes(protocol)

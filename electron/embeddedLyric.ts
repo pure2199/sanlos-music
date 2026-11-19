@@ -34,7 +34,7 @@ export interface EmbeddedLyricDeps {
   /**
    * 按曲目 id 查**本地文件的绝对路径**；查不到 ⇒ `null`。
    *
-   * ⚠️ 调用方给的顺序是「下载索引 → 本地登记表」（与 `fnml://` 的查找链一致）。
+   * ⚠️ 调用方给的顺序是「下载索引 → 本地登记表」（与 `sanlos-media://` 的查找链一致）。
    */
   resolveTrackPath?: (id: string) => string | null
   /** 读文件的一段字节。 */

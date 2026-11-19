@@ -67,11 +67,11 @@ export const MEDIA_ARTWORK_CACHE_ENTRIES = 16
  *
  * - Chromium 的**媒体会话**封面（`navigator.mediaSession.metadata.artwork`）
  *   走的是**图片加载器**那条路，它**只认** `http/https/data/blob`；
- * - 我们自己的协议代理 `fnm://` **不在这个名单里** → 封面被直接拒掉，
+ * - 我们自己的协议代理 `sanlos://` **不在这个名单里** → 封面被直接拒掉，
  *   表现是 **Windows 侧（快速设置 / SMTC / 锁屏）不显示专辑图**，
  *   渲染进程还会刷一串
- *   `MediaImage src can only be of http/https/data/blob scheme: fnm://…`。
- * - ⚠️ **应用内 `<img src="fnm://…">` 是另一条加载器**（能正常显示）——
+ *   `MediaImage src can only be of http/https/data/blob scheme: sanlos://…`。
+ * - ⚠️ **应用内 `<img src="sanlos://…">` 是另一条加载器**（能正常显示）——
  *   所以「曲库封面有图、但系统媒体面板没图」是**同一个根因**，
  *   别误判成「封面整体挂了」。
  *
@@ -113,7 +113,7 @@ export function dataUrlMime(src: string): string | undefined {
 /**
  * **默认**的封面取字节实现：渲染层直接 `fetch` 协议代理地址。
  *
- * ⚠️ 渲染层能 `fetch('fnm://…')`（协议已注册 `supportFetchAPI` + `corsEnabled`，
+ * ⚠️ 渲染层能 `fetch('sanlos://…')`（协议已注册 `supportFetchAPI` + `corsEnabled`，
  *    代理也带 CORS 头）—— 真机实测取到 `200 / image/jpeg / 8684 字节` ✓。
  * ⚠️ 取不到就返回 `null`（**不抛**）：封面只是锦上添花，不能因此影响播放。
  *
@@ -187,7 +187,7 @@ export interface MediaSessionDeps {
   /**
    * 取封面字节并转成 Chromium 认得的 `data:` URL。
    *
-   * ⚠️ **为什么不是直接把 `fnm://` 塞进 artwork**：Chromium 的媒体会话封面
+   * ⚠️ **为什么不是直接把 `sanlos://` 塞进 artwork**：Chromium 的媒体会话封面
    *    只认 `http/https/data/blob`（详见 `bytesToDataUrl` 上方的说明）。
    * ⚠️ 缺省用渲染层 `fetch` 自取；单测注入替身即可（不必真联网）。
    */
@@ -259,7 +259,7 @@ export function createMediaSession(deps: MediaSessionDeps = {}): MediaSessionCon
   // --- 封面（T21）-----------------------------------------------------------
   //
   // ⚠️ 媒体会话的封面**必须**是 Chromium 认得的 URL（`data:`）——
-  //    `fnm://` 会被图片加载器拒掉（详见 `bytesToDataUrl` 上方的说明）。
+  //    `sanlos://` 会被图片加载器拒掉（详见 `bytesToDataUrl` 上方的说明）。
   /** 封面 `data:` URL 缓存（键 = `coverId|size`；插入序即 LRU 序）。 */
   const artworkCache = new Map<string, string>()
   /** 已经发起过封面请求的键（避免同一首歌反复请求）。 */
@@ -362,7 +362,7 @@ export function createMediaSession(deps: MediaSessionDeps = {}): MediaSessionCon
         lastCurrent = current
 
         // 封面 URL 仍然由 `coverUrl()` 拼装（**全项目唯一拼装点**不变），
-        // 只是**不再直接塞进 artwork**（Chromium 不认 `fnm://`）。
+        // 只是**不再直接塞进 artwork**（Chromium 不认 `sanlos://`）。
         const url = current.coverId ? coverUrlFor(current.coverId, MEDIA_ARTWORK_SIZE) : null
         const cacheKey = url ? `${current.coverId ?? ''}|${MEDIA_ARTWORK_SIZE}` : ''
         const cached = cacheKey ? (artworkCache.get(cacheKey) ?? null) : null
@@ -450,8 +450,8 @@ export interface InstalledMediaSession {
 
 /** 取渲染进程的播放器桥（桌面壳里恒定存在；纯浏览器预览时为 `null`）。 */
 function playerBridge(): PlayerBridge | null {
-  const scope = globalThis as unknown as { fnPlayer?: PlayerBridge }
-  return scope.fnPlayer ?? null
+  const scope = globalThis as unknown as { sanlosPlayer?: PlayerBridge }
+  return scope.sanlosPlayer ?? null
 }
 
 /** 把 store 的状态压成**跨进程的精简快照**。 */

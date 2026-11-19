@@ -165,24 +165,24 @@ test.describe.serial('T99「同名专辑归并」+「集号在中段」', () => 
     await fixture.window.getByRole('button', { name: '扫描这个目录' }).click()
 
     // ⭐ 核心：服务端是**两张**同名专辑，客户端要**合成一条**。
-    const items = fixture.window.locator('.fnm-audiobooks__item')
+    const items = fixture.window.locator('.sanlos-audiobooks__item')
     await expect(items).toHaveCount(1)
-    await expect(items.first().locator('.fnm-audiobooks__title')).toHaveText(WORK_NAME)
+    await expect(items.first().locator('.sanlos-audiobooks__title')).toHaveText(WORK_NAME)
 
     // 集数是**组合计**（12 + 1 = 13）⇒ 原来「丢的那一集」在计数里已经补回来了。
-    const meta = items.first().locator('.fnm-audiobooks__meta')
+    const meta = items.first().locator('.sanlos-audiobooks__meta')
     await expect(meta).toContainText('13 集')
     // 如实说明合并了几张（不黑箱）。
     await expect(meta).toContainText('合并了 2 张专辑')
   })
 
   test('点进去 ⇒ 两张专辑的曲目**合并**后按集序排 ⇒ **第 02 集出现**', async () => {
-    await fixture.window.locator('.fnm-audiobooks__title').click()
+    await fixture.window.locator('.sanlos-audiobooks__title').click()
 
     // 徽标：真的排成集序了。
-    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
+    await expect(fixture.window.locator('.sanlos-detail__audiobook-note')).toHaveText('已按集序排列')
 
-    const rows = fixture.window.locator('.fnm-songlist__row')
+    const rows = fixture.window.locator('.sanlos-songlist__row')
     // ⚠️ **T104（2026-11-17）**：「DOM 里有 13 行」只在**滚不动**（旧缺陷）时成立
     //    ⇒ 改成**滚着收齐**（按 `data-index` 去重）：**收齐 13 行 = 能滚到底**。
     const all = await collectSongListRows(fixture.window)
@@ -190,10 +190,10 @@ test.describe.serial('T99「同名专辑归并」+「集号在中段」', () => 
     expect(all).toHaveLength(13)
 
     // ⭐ **第 02 集来自另一张专辑**（服务端把它拆开了）⇒ 合并后它**必须出现**。
-    await expect(rows.nth(0).locator('.fnm-detail__episode')).toHaveText('第 1 集')
-    await expect(rows.nth(1).locator('.fnm-detail__episode')).toHaveText('第 2 集')
+    await expect(rows.nth(0).locator('.sanlos-detail__episode')).toHaveText('第 1 集')
+    await expect(rows.nth(1).locator('.sanlos-detail__episode')).toHaveText('第 2 集')
     // ⭐ 这一行的标题**只可能**来自被拆出去的那张专辑（主专辑里**没有**第 02 集）。
-    await expect(rows.nth(1).locator('.fnm-songlist__title')).toHaveText(`${WORK_NAME} 02 承上`)
+    await expect(rows.nth(1).locator('.sanlos-songlist__title')).toHaveText(`${WORK_NAME} 02 承上`)
     expect(all[12]?.episode).toBe('第 13 集')
 
     // 集号**连续**（1…13，中间没有洞）。
@@ -202,20 +202,20 @@ test.describe.serial('T99「同名专辑归并」+「集号在中段」', () => 
     )
 
     // 总数按**整组**算（不是主专辑那 12 集）⇒ 不能出现「已加载 13 / 12」。
-    await expect(fixture.window.locator('.fnm-songlist__status')).toHaveText('已加载 13 / 13')
+    await expect(fixture.window.locator('.sanlos-songlist__status')).toHaveText('已加载 13 / 13')
   })
 
   test('「这不是有声」⇒ **整组**都不再出现在「有声」页（组级改判）', async () => {
     await fixture.window.getByRole('button', { name: '这不是有声' }).click()
 
     // 不再按集序排（回到原序）⇒ 徽标与集号标签都消失。
-    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveCount(0)
-    await expect(fixture.window.locator('.fnm-detail__episode')).toHaveCount(0)
+    await expect(fixture.window.locator('.sanlos-detail__audiobook-note')).toHaveCount(0)
+    await expect(fixture.window.locator('.sanlos-detail__episode')).toHaveCount(0)
 
     // 回「有声」页 ⇒ 整组都消失（**不是只消失一张**）。
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
-    await expect(fixture.window.locator('.fnm-audiobooks__item')).toHaveCount(0)
-    await expect(fixture.window.locator('.fnm-audiobooks__empty')).toContainText(
+    await expect(fixture.window.locator('.sanlos-audiobooks__item')).toHaveCount(0)
+    await expect(fixture.window.locator('.sanlos-audiobooks__empty')).toContainText(
       '当前曲库里没有识别到有声读物',
     )
   })
@@ -229,27 +229,27 @@ test.describe.serial('T99「同名专辑归并」+「集号在中段」', () => 
     await fixture.window.getByPlaceholder('输入作品名，例如：牧神记').fill(WORK_NAME)
     await fixture.window.getByRole('button', { name: '搜作品' }).click()
 
-    const results = fixture.window.locator('.fnm-audiobooks__result')
+    const results = fixture.window.locator('.sanlos-audiobooks__result')
     // ⭐ 服务端是**两张**同名专辑 ⇒ 界面**只给一条**（= 一本小说）。
     await expect(results).toHaveCount(1)
     // 集数是**组合计**（12 + 1 = 13）⇒ 并如实说明合并了几张。
-    await expect(results.first().locator('.fnm-audiobooks__result-meta')).toHaveText(
+    await expect(results.first().locator('.sanlos-audiobooks__result-meta')).toHaveText(
       '13 集 · 合并了 2 张专辑',
     )
 
     // 点它 ⇒ 进的是**整组**（13 集）⇒ **第 02 集在场**（从搜索进去以前会丢）。
-    await results.first().locator('.fnm-audiobooks__title').click()
-    await expect(fixture.window.locator('.fnm-detail__audiobook-note')).toHaveText('已按集序排列')
-    const rows = fixture.window.locator('.fnm-songlist__row')
+    await results.first().locator('.sanlos-audiobooks__title').click()
+    await expect(fixture.window.locator('.sanlos-detail__audiobook-note')).toHaveText('已按集序排列')
+    const rows = fixture.window.locator('.sanlos-songlist__row')
     // ⚠️ T104：同上（「DOM 行数」→「滚着收齐」；收齐 13 行 = 能滚到底）。
     const all = await collectSongListRows(fixture.window)
     expect(all).toHaveLength(13)
-    await expect(rows.nth(1).locator('.fnm-detail__episode')).toHaveText('第 2 集')
-    await expect(rows.nth(1).locator('.fnm-songlist__title')).toHaveText(`${WORK_NAME} 02 承上`)
+    await expect(rows.nth(1).locator('.sanlos-detail__episode')).toHaveText('第 2 集')
+    await expect(rows.nth(1).locator('.sanlos-songlist__title')).toHaveText(`${WORK_NAME} 02 承上`)
 
     // 改判 ⇒ **整组**都不再出现在「有声」页（改判是**组级**的）。
     await fixture.window.getByRole('button', { name: '这不是有声' }).click()
     await fixture.window.getByRole('button', { name: '有声', exact: true }).click()
-    await expect(fixture.window.locator('.fnm-audiobooks__item')).toHaveCount(0)
+    await expect(fixture.window.locator('.sanlos-audiobooks__item')).toHaveCount(0)
   })
 })

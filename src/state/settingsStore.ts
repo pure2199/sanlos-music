@@ -12,7 +12,7 @@ import type { ThemeName } from '../../shared/types'
 //
 // ⚠️ **主题名不在这里**（Task 17 起）：主题的**单一真相源 = 主进程 `prefs.json`**
 //    （通道 `prefs:get` / `prefs:set` / `theme:set`，由 Task 17 建）。
-//    早先这里持久化过主题名（localStorage 键 `fnmusic-settings`），
+//    早先这里持久化过主题名（localStorage 键 `sanlos-settings`），
 //    与 `prefs.json` 构成「双真相源」——Task 17 已把 `theme` / `setTheme`
 //    与 `partialize` 白名单里的 `theme` 一并删除，
 //    主题改由 Task 18 通过 `prefs:*` 读写。
@@ -42,7 +42,7 @@ const store = create<SettingsStore>()(
       setLastServer: (lastServer) => set({ lastServer }),
     }),
     {
-      name: 'fnmusic-settings',
+      name: 'sanlos-settings',
       // 持久化白名单：**只有**服务器地址落盘，setter 之类的函数不落盘。
       // ⚠️ **主题名不在白名单里**——主题的真相源是主进程 `prefs.json`。
       partialize: (state) => ({ lastServer: state.lastServer }),

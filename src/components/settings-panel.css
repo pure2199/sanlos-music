@@ -22,11 +22,11 @@
  * 页面根容器：左导航 + 右内容
  * -------------------------------------------------------------------------- */
 
-.fnm-settings {
+.sanlos-settings {
   /*
    * ⚠️ **撑满主区**：主区 `.app-shell__main` 是 flex 列容器 →
    *    这里必须 `flex: 1 1 auto` + `min-height: 0` + `height: 100%`
-   *    （与曲库页面外壳 `.fnm-page` 同一套，否则高度百分比解析不出来）。
+   *    （与曲库页面外壳 `.sanlos-page` 同一套，否则高度百分比解析不出来）。
    */
   display: flex;
   flex: 1 1 auto;
@@ -39,7 +39,7 @@
  * 左侧分类导航
  * -------------------------------------------------------------------------- */
 
-.fnm-settings__nav {
+.sanlos-settings__nav {
   flex: 0 0 190px;
   display: flex;
   flex-direction: column;
@@ -50,7 +50,7 @@
 }
 
 /* 页面标题 */
-.fnm-settings__title {
+.sanlos-settings__title {
   margin: 0 0 10px;
   padding: 0 8px;
   font-size: 17px;
@@ -59,7 +59,7 @@
 }
 
 /* 一个分类项 */
-.fnm-settings__nav-item {
+.sanlos-settings__nav-item {
   padding: 7px 10px;
   border: none;
   border-radius: var(--radius-field);
@@ -71,25 +71,25 @@
   cursor: pointer;
 }
 
-.fnm-settings__nav-item:hover {
+.sanlos-settings__nav-item:hover {
   background: var(--surface-raised);
   color: var(--text-primary);
 }
 
-.fnm-settings__nav-item:focus-visible {
+.sanlos-settings__nav-item:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
 /* 当前分类 */
-.fnm-settings__nav-item[aria-current='page'] {
+.sanlos-settings__nav-item[aria-current='page'] {
   background: var(--accent);
   color: var(--accent-text);
   font-weight: 600;
 }
 
 /* 关闭按钮（贴在导航底部） */
-.fnm-settings__close {
+.sanlos-settings__close {
   margin-top: auto;
   padding: 7px 10px;
   border: 1px solid var(--border);
@@ -102,12 +102,12 @@
   cursor: pointer;
 }
 
-.fnm-settings__close:hover {
+.sanlos-settings__close:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-settings__close:focus-visible {
+.sanlos-settings__close:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
@@ -116,7 +116,7 @@
  * 右侧内容区
  * -------------------------------------------------------------------------- */
 
-.fnm-settings__content {
+.sanlos-settings__content {
   flex: 1 1 auto;
   min-width: 0;
   padding: 22px 32px 40px;
@@ -127,7 +127,7 @@
  * 一组设置
  * -------------------------------------------------------------------------- */
 
-.fnm-settings__group {
+.sanlos-settings__group {
   margin: 0 0 28px;
   padding: 0;
   border: none;
@@ -138,7 +138,7 @@
 }
 
 /* 组标题：当成**小标题**（加粗 + 下方分隔线），别再是灰色小字 */
-.fnm-settings__legend {
+.sanlos-settings__legend {
   width: 100%;
   padding: 0 0 8px;
   border-bottom: 1px solid var(--border);
@@ -148,7 +148,7 @@
 }
 
 /* 一个选项 */
-.fnm-settings__option {
+.sanlos-settings__option {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -157,13 +157,13 @@
   cursor: pointer;
 }
 
-.fnm-settings__option:focus-within {
+.sanlos-settings__option:focus-within {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
 /* 说明文案 */
-.fnm-settings__hint {
+.sanlos-settings__hint {
   margin: 0;
   max-width: 860px;
   font-size: 12px;
@@ -172,7 +172,7 @@
 }
 
 /* 保存失败的提示 */
-.fnm-settings__error {
+.sanlos-settings__error {
   margin: 0 0 16px;
   padding: 8px 12px;
   border: 1px solid var(--danger);
@@ -183,7 +183,7 @@
 
 /* --- 竖排选项（标签在上、控件在下） ------------------------------------ */
 
-.fnm-settings__option--stack {
+.sanlos-settings__option--stack {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
@@ -191,7 +191,7 @@
 }
 
 /* 勾选项（T82：「允许安装未签名的更新包」） */
-.fnm-settings__checkbox {
+.sanlos-settings__checkbox {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -201,13 +201,13 @@
   cursor: pointer;
 }
 
-.fnm-settings__checkbox:focus-within {
+.sanlos-settings__checkbox:focus-within {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
 /* 输入框 / 下拉框 */
-.fnm-settings__input {
+.sanlos-settings__input {
   padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -218,24 +218,24 @@
   line-height: 20px;
 }
 
-.fnm-settings__input:focus-visible {
+.sanlos-settings__input:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.fnm-settings__input:disabled {
+.sanlos-settings__input:disabled {
   color: var(--disabled);
   cursor: not-allowed;
 }
 
 /* 一行按钮 */
-.fnm-settings__row {
+.sanlos-settings__row {
   display: flex;
   gap: 8px;
 }
 
 /* 面板内按钮 */
-.fnm-settings__button {
+.sanlos-settings__button {
   padding: 6px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
@@ -247,23 +247,23 @@
   cursor: pointer;
 }
 
-.fnm-settings__button:hover:not(:disabled) {
+.sanlos-settings__button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.fnm-settings__button:focus-visible {
+.sanlos-settings__button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 /* 危险操作（清空本地下载） */
-.fnm-settings__button--danger:hover:not(:disabled) {
+.sanlos-settings__button--danger:hover:not(:disabled) {
   border-color: var(--danger);
   color: var(--danger);
 }
 
-.fnm-settings__button:disabled {
+.sanlos-settings__button:disabled {
   border-color: var(--border);
   color: var(--disabled);
   cursor: not-allowed;
@@ -274,7 +274,7 @@
  * -------------------------------------------------------------------------- */
 
 /* 信息表：左列字段名、右列值。 */
-.fnm-settings__about {
+.sanlos-settings__about {
   margin: 0;
   max-width: 560px;
   display: flex;
@@ -283,19 +283,19 @@
   font-size: 13px;
 }
 
-.fnm-settings__about-row {
+.sanlos-settings__about-row {
   display: flex;
   align-items: baseline;
   gap: 12px;
 }
 
 /* 字段名（固定宽 → 值列对齐）。 */
-.fnm-settings__about-row dt {
+.sanlos-settings__about-row dt {
   flex: 0 0 72px;
   color: var(--text-secondary);
 }
 
-.fnm-settings__about-row dd {
+.sanlos-settings__about-row dd {
   margin: 0;
   color: var(--text-primary);
   /* ⚠️ 官网链接很长 → 窄窗口下允许断行，别把内容列撑破。 */
@@ -303,17 +303,17 @@
 }
 
 /* 官网链接（**用系统浏览器打开**，不在应用内跳转）。 */
-.fnm-settings__about-link {
+.sanlos-settings__about-link {
   color: var(--accent);
   text-decoration: none;
   cursor: pointer;
 }
 
-.fnm-settings__about-link:hover {
+.sanlos-settings__about-link:hover {
   text-decoration: underline;
 }
 
-.fnm-settings__about-link:focus-visible {
+.sanlos-settings__about-link:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }

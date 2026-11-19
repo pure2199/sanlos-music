@@ -37,7 +37,7 @@ export const ISLAND_COVER_SIZE = 160
  * 封面在词岛里的**显示**边长（像素）。
  *
  * ⚠️ 这只是**显示尺寸**，与**服务端** `size` 参数**无关**——
- *    显示尺寸写在 CSS 里（`.fnm-island__cover`）。
+ *    显示尺寸写在 CSS 里（`.sanlos-island__cover`）。
  */
 export const ISLAND_COVER_BOX = 56
 
@@ -70,8 +70,8 @@ export function IslandCover({ coverId }: IslandCoverProps): ReactElement {
   if (!url || failed) {
     return (
       <div
-        className="fnm-island__cover fnm-island__cover--placeholder"
-        data-testid="fnm-island-cover-placeholder"
+        className="sanlos-island__cover sanlos-island__cover--placeholder"
+        data-testid="sanlos-island-cover-placeholder"
         aria-hidden="true"
       >
         ♪
@@ -81,8 +81,8 @@ export function IslandCover({ coverId }: IslandCoverProps): ReactElement {
 
   return (
     <img
-      className="fnm-island__cover"
-      data-testid="fnm-island-cover"
+      className="sanlos-island__cover"
+      data-testid="sanlos-island-cover"
       src={url}
       // ⚠️ 封面是**装饰性**的（曲名就在旁边）⇒ 空 alt（不给读屏器重复念一遍）。
       alt=""

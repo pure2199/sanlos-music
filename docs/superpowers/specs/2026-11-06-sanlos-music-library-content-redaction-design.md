@@ -52,7 +52,7 @@ T58 把「明文口令 / 用户自有域名 / 真实 IP / 本机路径 / 会话�
 
 ### 2.3 探针是唯一的例外：搜索词要能配
 
-`tools/fn-album-detail-probe.mjs` 与 `tools/fn-live-check.mjs` 里有一处**按歌手名搜索**
+`tools/sanlos-album-detail-probe.mjs` 与 `tools/sanlos-live-check.mjs` 里有一处**按歌手名搜索**
 （真机联调时要搜一个**用户曲库里真实存在的**歌手，否则搜不到任何东西）。
 
 直接换成占位 → **探针立刻失效**（搜一个不存在的歌手，返回空列表），
@@ -76,9 +76,9 @@ const q = encodeURIComponent(process.env.FN_ARTIST ?? '占位歌手')
 | `docs/calibration.md`（**CRLF**） | 真机校准记录里的歌名、歌手、track guid |
 | `docs/changelog.md` | 码位引用（首字符 + 码位数值） |
 | `docs/superpowers/specs/2026-11-02-fnmusic-desktop-design.md`（**CRLF**） | 实测样本歌名、serverGUID |
-| `docs/superpowers/specs/2026-11-04-fnmusic-lyric-provider-design.md` | 歌名 |
-| `docs/superpowers/specs/2026-11-04-fnmusic-lyric-qq-source-design.md` | 歌名 |
-| `docs/superpowers/specs/2026-11-05-fnmusic-local-music-design.md` | 文件名反推示例里的歌名/歌手 |
+| `docs/superpowers/specs/2026-11-04-sanlos-music-lyric-provider-design.md` | 歌名 |
+| `docs/superpowers/specs/2026-11-04-sanlos-music-lyric-qq-source-design.md` | 歌名 |
+| `docs/superpowers/specs/2026-11-05-sanlos-music-local-music-design.md` | 文件名反推示例里的歌名/歌手 |
 | `docs/superpowers/specs/2026-11-05-sanlos-music-stream-quality-ready-design.md` | 抽样曲目表 |
 | `docs/superpowers/specs/2026-11-06-sanlos-music-upstream-net-request-design.md` | 文件名示例 + 码位引用 |
 | `electron/http.ts` | 注释里的中文文件名示例 |
@@ -93,8 +93,8 @@ const q = encodeURIComponent(process.env.FN_ARTIST ?? '占位歌手')
 
 **已跟踪，2 个探针改造（搜索词走环境变量）**
 
-- `tools/fn-album-detail-probe.mjs`
-- `tools/fn-live-check.mjs`
+- `tools/sanlos-album-detail-probe.mjs`
+- `tools/sanlos-live-check.mjs`
 
 **仓库外**
 

@@ -128,7 +128,7 @@ CN=SignPath Foundation, O=SignPath Foundation GmbH, C=AT
 
 ### 3.2 签名断言加严（87.3）
 
-`tools/fn-check-signature.mjs` 新增：
+`tools/sanlos-check-signature.mjs` 新增：
 
 | 选项 | 语义 |
 |---|---|
@@ -285,7 +285,7 @@ git tag v0.2.5  ──►  GitHub Actions（release.yml，workflow_dispatch，re
 |---|---|---|
 | 87.1 | 申请材料与政策文档 | **新** `CODE_SIGNING_POLICY.md`、**新** `docs/signing.md` |
 | 87.2 | 签名者匹配口径（前置缺陷） | `shared/update.ts`、`electron/update.ts`、`src/components/SettingsPanel.tsx`、`src/state/updateStore.ts`、`test/update.test.ts`、`test/settings-page.test.tsx` |
-| 87.3 | 签名断言加严（时间戳 + CN） | `tools/fn-check-signature.mjs`、`test/t86-signing-contract.test.ts` |
+| 87.3 | 签名断言加严（时间戳 + CN） | `tools/sanlos-check-signature.mjs`、`test/t86-signing-contract.test.ts` |
 | 87.5 | 打包适配 CI | `scripts/pack.cjs`（若需要） |
 | 87.4 | CI 打包 + 送签工作流 | **新** `.github/workflows/release.yml`、`test/t87-signing-workflow.test.ts`（新） |
 | 87.6 | 客户端与文档 | `README.md`、`docs/packaging.md`、`docs/changelog.md`、`docs/calibration.md` |
