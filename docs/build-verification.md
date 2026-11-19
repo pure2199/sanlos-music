@@ -91,6 +91,27 @@
 > 完整记录见 [calibration.md](./calibration.md) 第九十八、九十九节与规格
 > `docs/superpowers/specs/2026-11-19-sanlos-music-t120-folder-scan.md`。
 
+> ✅ **v0.4.4 已于 2026-11-20 发布并**装版**真机复验完毕**（发布链：注解 tag `v0.4.4`
+> ⇒ commit `c21dab5` ⇒ 网页 dispatch `release.yml`（`tag=v0.4.4`、**`pack_only` 关**、
+> **`sign` 关**）⇒ CI run **44568675852**（#21）= success ⇒ SignPath 那几步**全部 skipped**
+> ⇒ 走**未签名**路径 ＋ **attestation 成功** ⇒ Release 资产**恰好 3 个**
+> ⇒ **三处 sha256 逐字一致**）
+> ⇒ **原地升级**装到 `D:\Sanlos Music`（**不卸载 v0.4.3**）：exe FileVersion **0.4.4**、
+> `app.asar` 844 415 B 且内含 **5/5** 个 v0.4.4 标志、注册表「**Sanlos Music 0.4.4**」
+> 且**无残留 0.4.3**、`session.bin`（286 B）**逐字未变**、`Local Storage` **11 个文件未变**、
+> `prefs.json` 未变；
+> ⇒ **真机复验（已装版 ＋ 真实 FN NAS ＋ 真实账号 ＋ 隔离 userData）三阶段全过**：
+> **①** 「有声」页走目录浏览 —— **16 075 ms**、**9 部**（与 v0.4.3 **逐字一致**）、
+> **扫描窗口内 `/track/list` 零次**、`/folder-view/list` **69 次**、
+> 落盘 `version` **仍 3** ＋ `folderPaths: ["/vol02/1000-0-3d135437/有声小说"]` ＋ `scannedCount` **5 244**；
+> **②** ⭐ **T118 第一次在真机上验过** —— 扫描**进行中**点「这不是有声」
+> ⇒ 改判**落在扫描窗口内**（**true**）⇒ 扫完落盘**还留着**该改判、按钮**没有回来**；
+> **③** 对照组②（目录名换成不存在的）⇒ 如实报「没找到」**且不回落**（`/track/list` **1 → 0**）。
+> ⚠ **回落路径真机上验不了**（真 NAS 已是新版 ⇒ 回落不触发）⇒ 靠 mock 的 ② 号钉子覆盖
+> ⇒ **不假装真机验过**。
+> 完整记录见 [calibration.md](./calibration.md) 第一百节、
+> [releases/v0.4.4.md](./releases/v0.4.4.md) 第五节与规格
+> `docs/superpowers/specs/2026-11-20-sanlos-music-v0.4.4-release.md`。
 **验证时间**：2026-11-04
 **平台**：Windows 10.0.26300 x64 / Node v26.13.0 / npm 11.x
 **分支**：`feature/fnmusic-desktop`
