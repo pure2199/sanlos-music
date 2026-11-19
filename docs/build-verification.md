@@ -14,6 +14,15 @@
 > `sanlos` / `sanlosAuth` / `sanlosPlayer`）。
 > 下面记的**旧名**是**当时**的名字 —— 那是**历史记录，不改**。
 
+> ✅ **v0.4.2 已于 2026-11-19 发布并真机复验完毕**（发布链：注解 tag `v0.4.2` ⇒
+> 网页 dispatch `release.yml` ⇒ CI run **44492657546** = success ⇒ Release 资产**恰好 3 个**
+> ⇒ **三处 sha256 逐字一致**）⇒ 装到 `D:\Sanlos Music` 之后的**真机复验 6 项全过**
+> （曲库拉得出、桌面歌词仍成立、本地播放走 `sanlos-media://` 真起播、
+> 「检查更新」真拉到清单、登录态还在）。
+> ⚠ 复验**顺带查出 T115 漏了第四个 `localStorage` 键的旧键回落**（有声扫描状态）
+> ⇒ **已记为 T117**。完整记录见 [calibration.md](./calibration.md) 第九十四节
+> 与 [releases/v0.4.2.md](./releases/v0.4.2.md) 第三节。
+
 **验证时间**：2026-11-04
 **平台**：Windows 10.0.26300 x64 / Node v26.13.0 / npm 11.x
 **分支**：`feature/fnmusic-desktop`

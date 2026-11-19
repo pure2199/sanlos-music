@@ -7346,3 +7346,100 @@ CSS 类名前缀 `fnm-`、preload 桥 `window.fn` / `window.fnmusic` / `window.f
 - ❌ **没改** 历史文档的**正文**（只改了文件名 ＋ 指向被改名文件的指针）；
 - ❌ **没改** `release/verify/fnm-*`（**gitignore** 的历史一次性脚本 ⇒ 改了会让台账与历史文档的引用全成死链）；
 - ❌ **没动** `docs/releases/*.md` 与历史 changelog 段。
+
+## 九十四、T116：发版 **v0.4.2** ＋ 真机复验（2026-11-19）
+
+### 一、这一版装了什么
+
+T115（里层改名）＋ T114（默认分支改名）的**对外产物**。功能零变化，只改对外标识：
+`package.json` 的 `version` **1 行** ⇒ `0.4.2`；`package-lock.json` root version **两处**
+（顺手把自 v0.2.4 起就没同步的 **0.2.4** 对齐成 0.4.2 —— 实证 v0.4.1 在 lock=0.2.4 时 CI 照样 success）。
+
+### 二、发版链路（**CI 自动**，本机不打包）
+
+| 步 | 实测 |
+|---|---|
+| 改 5 个文件 ＋ 规格 | commit `3f570f7`（规格）→ `e6cd000`（实现） |
+| 推分支 ＋ 打**注解** tag | `v0.4.2` → `e6cd000`（说明「里层命名全量改名（T115）＋ 默认分支改名（T114）」） |
+| 网页 dispatch | run **44492657546** = **success**（sha `e6cd000`） |
+| Release 验收 | id **451100772**、published **2026-11-19T09:07:48Z**、资产**恰好 3 个** |
+
+⚠ **三处 sha256 逐字一致**：Release 正文表 ≡ 资产 API `digest` ≡ **本机实算**
+⇒ Setup `8c97ac42…f01a7841`、Portable `611b5b47…db6f7ebf`。
+
+### 三、装机（**踩了两个坑**）
+
+| 坑 | 现象 | 对策 |
+|---|---|---|
+| ⚠ **NSIS 卸载器的父进程先退、子进程继续删目录** | 「卸完立刻装」⇒ **刚装进去的文件被卸载器的子进程删光**（只剩悬空注册表条目 ＋ 悬空快捷方式） | 卸载后**等卸载器真正结束**再装；本轮手工清理了悬空条目 ＋ 悬空 `.lnk` ＋ 空目录后重装 |
+| ⚠ **安装作用域变了** | 旧 v0.4.1 是**按机器**（HKLM `/allusers`），新 v0.4.2 成了**按用户**（HKCU `/currentuser`） | 因为**先卸载了旧版** ⇒ 安装器没有旧版可沿用作用域。功能等价、卸载项干净只有一条；要回按机器需 `/allusers`（触发 UAC，非交互环境不可用） |
+
+⚠ **`/D=` 必须是最后一个参数且不含引号**（哪怕路径里有空格）⇒ 用 Node
+`spawn(exe, ['/S', '/D=D:\\…'], { windowsVerbatimArguments: true })` 自己拼命令行。
+
+### 四、真机复验 6 项（**已发布的二进制** ＋ 真实 NAS ＋ 真实账号）
+
+口径：**跑的是 GitHub Release 的产物**（CI 构建、已装到 `D:\Sanlos Music`），**不是**源码构建的开发实例。
+Phase A = **隔离 userData**（只复制 `session.bin` ＋ `Local State`）⇒ 真实账号 ＋ 真 NAS，**不碰**用户偏好/历史；
+Phase B = **真实 userData**、**只看不播**。
+
+| # | 项 | 结果 | 实测 |
+|---|---|---|---|
+| ① | 主窗口能起来 | ✅ | exe `FileVersion` 0.4.2；`app.asar` 839 536 B |
+| ② | **曲库拉得出来** | ✅ | 连上真实 NAS（导航 13 项）；曲库首屏 15 首 |
+| ③ | **桌面歌词仍成立** | ✅ | 对照组「庙堂之外 (五四特别版)」**67 行** ＋ 窗口可见；有声那集「0001」**0 行** ＋ 窗口不可见 ＋ 窗口没被干掉 |
+| ④ | 本地播放 `sanlos-media://` 真起播 | ✅ | `src = sanlos-media://local/track/local%3A…`；`currentTime` **0.005 ⇒ 0.310 s**；`paused = false` |
+| ⑤ | **「检查更新」真拉到清单** | ✅ | `{"status":"up-to-date","current":"0.4.2"}` |
+| ⑥ | **登录态还在** | ✅ | 真实 userData 自动登录；`session.bin` 286 B 未被动 |
+
+### 五、⚠ 复验查出的一条 T115 遗留缺陷（**已记为 T117**）
+
+`src/state/audiobookStore.ts` 的 `STORAGE_KEY`：`fnmusic-audiobook-state` ⇒ `sanlos-audiobook-state`
+—— **没有**进 `shared/legacyStorageKeys.ts` 的旧键回落名单（那里只有**三个**键）。
+
+⇒ **本机实测**：真实 userData 里旧键**在**、新键**不在** ⇒ **v0.4.2 读不到**用户的有声扫描结果：
+
+- **自动判定失效**（`hits` 为空）⇒ `isAudiobook()` 对自动判定的专辑返回 `false`
+  ⇒ **T112 修的「有声读物被误配桌面歌词」又回来了**（直到「有声」页重扫一次）；
+- 「有声」页的**手工改判**（`这是有声读物` / `这不是有声`）**丢**；
+- 「有声」页下次进入**自动全库扫描**（实测 87 页 / 6–47 分钟）⇒ 打 NAS 流量。
+
+⇒ **T116 不改代码**（本轮只发版）⇒ 记为 **T117**：补旧键回落 ＋ 钉测试 ＋ 发 v0.4.3。
+
+### 六、这一轮踩的坑（**跨项目可复用**）
+
+1. ⚠ **探针的「异常被吞」＝假绿**：最终判定读 `a.checks ?? []`，
+   而 Phase A 抛异常时 `a.checks` 是 `undefined` ⇒ 判定「一条没过都没有」⇒ 照样打印 `REALMACHINE_OK`。
+   ⇒ **异常必须单独计入失败**（`ok !== true` 同样算失败）。
+2. ⚠ **页面切换会**销毁**目标容器**：第一轮把「本地播放」放在「桌面歌词对照组」前面
+   ⇒ 它切到「本地」页 ⇒「歌曲列表」那个 listbox **不存在了** ⇒ `dblclick` 30 秒超时。
+   ⇒ **会切页的步骤必须放最后**（或先切回去）。
+3. ⚠ **`<audio>` 元素**从不进 DOM**：播放引擎是 `document.createElement('audio')`（**不 append**）
+   ⇒ `document.querySelector('audio')` **永远抓不到** ⇒ 第二轮实测 `no-audio-element-after-20s`。
+   ⇒ 只能在**造元素 / 改 `src` 的那一刻**捕获（打 `document.createElement` ＋
+   `HTMLMediaElement.prototype.src` 的 setter）⇒ 捕获器必须**装在第一次播放之前**
+   （引擎懒建元素，整个会话只建一次，换歌只改 `src`）。
+4. ⚠ **进「有声」页会自动全库扫描**（`scannedAt` 为空 ⇒ 自动开扫，实测 87 页 / 6–47 分钟）
+   ⇒ 探针要么**先播种** `sanlos-audiobook-state`（把 `scannedAt` 置位），要么**不去那个页**。
+   ⇒ 顺带发现一个**既有竞态**：扫描每页落盘用的是**启动时的 `overrides` 快照**
+   ⇒ 秒搜写入的手工改判**可能被扫描覆盖**。
+5. ⚠ **GitHub `workflow_dispatch` 的布尔输入按 YAML 默认值渲染** ⇒ `sign` / `pack_only` 默认**勾上**
+   ⇒ 不显式取消就提交 ⇒ **必然**失败在对应检查步骤 ⇒ 复核用 `input[type="checkbox"]:checked` 查无此元素。
+
+### 七、复验结果
+
+| 项 | 实测 |
+|---|---|
+| 发布前 | tsc **0 错**；Vitest **146 文件 / 3 024 条全绿**；Playwright **72 passed**；build exit **0**；字节体检 ＋ 控制字符 **bad=0** |
+| CI | run **44492657546** = **success** |
+| Release | 资产 **3 个**；**三处 sha256 逐字一致**；`latest.json` version=0.4.2、sha512 **128 位** |
+| 真机 | **6 项全过**（Phase A **14/14** ＋ Phase B **2/3**）＋ **查出 1 条 T115 遗留缺陷**（⇒ T117） |
+
+⇒ 规格 `docs/superpowers/specs/2026-11-19-sanlos-music-v0.4.2-release.md`（§八 / §九 已回填）。
+
+### 八、遗留 / 待办
+
+- ⏳ **T117**：补 `sanlos-audiobook-state` 的**旧键回落** ＋ 钉测试 ＋ 发 **v0.4.3**；
+- ⏳ Release `v0.4.2` 的**线上正文**还是发版时那一版（「⏳ 尚未复验」）⇒ 待同步本节结论；
+- ⏳ GitHub 账号 **2FA 未启用**（已知安全缺口，待用户决定）；
+- ⏳ v0.4.2 的卸载项是**按用户**（HKCU）⇒ 要回按机器需 `/allusers`（触发 UAC）。

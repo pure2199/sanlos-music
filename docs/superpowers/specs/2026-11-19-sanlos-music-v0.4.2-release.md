@@ -195,23 +195,38 @@ CI（windows-latest，Node 22）：
 
 ---
 
-## 八、⚠ 真机复验状态（**待回填**，不预写结论）
+## 八、真机复验状态（**已回填**）
 
 | 批次 | 真机复验 | 说明 |
 |---|---|---|
-| **T115**（里层改名） | ⏳ **待本轮** | 源码层已绿（tsc / Vitest 3 024 / E2E 72 / build / 字节 bad=0 / 验收探针 19 条）⇒ **本轮在已发布的二进制上复验 6 项**（口径升级） |
+| **T115**（里层改名） | ✅ **已复验**（在**已发布的 v0.4.2 二进制**上，2026-11-19） | 源码层已绿（tsc / Vitest 3 024 / E2E 72 / build / 字节 bad=0 / 验收探针 19 条）⇒ **本轮在已发布的二进制上复验 6 项**（口径升级）⇒ **6 项全过**（Phase A **14/14** ＋ Phase B **2/3**，那 1 条没过的是**另一批次**的遗留缺陷，见下） |
 | **T114**（仓库改名） | ✅ **有** | 远端只剩 `sanlos-music`、API `default_branch=sanlos-music`、`master` 已删、tag `v0.4.1` 未动、提交数未变、CI success |
+
+### ⚠ 复验**顺带查出**的一条 T115 遗留缺陷（**不是** T116 的验收点，但属「用户数据不丢」这条底线）
+
+`src/state/audiobookStore.ts` 的落盘键 `fnmusic-audiobook-state` ⇒ `sanlos-audiobook-state`
+**没有**进 `shared/legacyStorageKeys.ts` 的旧键回落名单（那里只有**三个**键）。
+
+⇒ **本机实测**：真实 userData 里 `fnmusic-audiobook-state` **在**、`sanlos-audiobook-state` **不在**
+⇒ v0.4.2 **读不到**用户的有声扫描结果：
+
+- 有声读物的**自动判定失效**（`hits` 为空）⇒ `isAudiobook()` 对自动判定的专辑返回 `false`
+  ⇒ **T112 修的「有声读物被误配桌面歌词」那条缺陷又回来了**（直到「有声」页重扫一次）；
+- 「有声」页的**手工改判**（`这是有声读物` / `这不是有声`）**丢**；
+- 「有声」页下次进入会**自动全库扫描**（实测 87 页 / 6–47 分钟）⇒ 打 NAS 流量。
+
+⇒ **已记为 T117**（补旧键回落 ＋ 钉测试 ＋ 发 v0.4.3）—— **本轮不改代码**（T116 只发版）。
 
 ---
 
-## 九、发版状态（**待回填**）
+## 九、发版状态（**已回填**）
 
 | 项 | 状态 |
 |---|---|
-| 规格 | ✅ 本文件 |
-| 实现（7 个文件） | ⏳ 待回填 |
-| 发布前验证 | ⏳ 待回填 |
-| tag ＋ 推送 | ⏳ 待回填 |
-| CI 出包 ＋ Release 验收 | ⏳ 待回填 |
-| 装上 ＋ 真机复验 6 项 | ⏳ 待回填 |
-| 复验文档 ＋ 台账 | ⏳ 待回填 |
+| 规格 | ✅ 本文件（commit `3f570f7`） |
+| 实现（7 个文件） | ✅ commit `e6cd000`（`package.json` **1 行** / `package-lock.json` **2 处** / `docs/releases/v0.4.2.md` **新增** / `docs/changelog.md` **0.4.2 段** / `README.md` **10 行 / 12 处**版本引用 —— 比规格预估多几处，逐处判读**全是**版本引用；`docs/calibration.md` 见「复验文档」行） |
+| 发布前验证 | ✅ tsc **0 错**；Vitest **146 文件 / 3 024 条全绿**（既有 2 997 一条未删）；Playwright **72 passed**；`npm run build` exit **0**；字节体检 ＋ 控制字符 **bad=0**；`docs/changelog.md` = CRLF 1 383 / 裸 LF 0 / BOM 0 / 孤立 CR 0 / U+FFFD 0；发版脚本**连跑 3 次 sha256 一致**（幂等） |
+| tag ＋ 推送 | ✅ 注解 tag `v0.4.2` → `e6cd000`（说明「v0.4.2 —— 里层命名全量改名（T115）＋ 默认分支改名（T114）」）已推；分支 `0ba8346..e6cd000` 已推 |
+| CI 出包 ＋ Release 验收 | ✅ dispatch run **44492657546** = **success**（`workflow_dispatch` / sha `e6cd000` / `pack_only=false` / `sign=false`）；Release `v0.4.2` id **451100772**、非草稿非预发布、published **2026-11-19T09:07:48Z**；资产**恰好 3 个**（Setup 86 138 824 B / Portable 79 046 855 B / `latest.json` 472 B）；Setup sha256 `8c97ac42…f01a7841`、Portable sha256 `611b5b47…db6f7ebf` ⇒ **正文表 ≡ 资产 API digest ≡ 本机实算三处逐字一致**；`latest.json` version=0.4.2、sha512 **128 位** |
+| 装上 ＋ 真机复验 6 项 | ✅ 静默装到 `D:\Sanlos Music`（exe `FileVersion` **0.4.2**、`app.asar` 839 536 B、卸载项「Sanlos Music 0.4.2」）；**真机复验 6 项全过**（Phase A **14/14**：版本 / 主窗口 / NAS / 曲库 / 检查更新 `up-to-date` / 桌面歌词对照组 **67 行**＋窗口可见 / 有声那集 **0 行**＋窗口不可见＋窗口还在 / 本地播放 `sanlos-media://local/track/…`、`currentTime` **0.005 ⇒ 0.310 s**、`paused=false`；Phase B **2/3**：自动登录 ✅、三个旧键都在 ✅）⇒ **但查出 T115 漏了第四个键的旧键回落**（见 §八） |
+| 复验文档 ＋ 台账 | ✅ `docs/releases/v0.4.2.md` §三 ＋ §二.2 ＋ §七 已回填；`docs/changelog.md` 新增「真机复验」＋「⚠ 复验发现」两段；`docs/calibration.md` 新增第九十四节；本规格 §八 / §九 已回填；台账 `progress-ledger.md` 已回填（**T116 = ACCEPTED**） |
