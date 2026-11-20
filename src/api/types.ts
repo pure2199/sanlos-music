@@ -110,6 +110,13 @@ export interface RawSong {
   genres?: RawGenre[]
   /** **服务端给出的收藏态**（实测 true / false 都有；缺失时按未收藏处理）。 */
   isFavorite?: boolean | null
+  /**
+   * **相关性分**（T127）。
+   *
+   * 实测（2026-11-20，真实 NAS）：`/search/track` 与 `/search/suggest` 的条目
+   * **本来就带**这个字段（如 `2.195477722355097`）⇒ 客户端之前一直把它丢掉了。
+   */
+  score?: number | null
 }
 
 /**
@@ -137,6 +144,8 @@ export interface RawAlbum {
   updatedAt?: number | string | null
   /** 歌曲数。 */
   trackCount?: number
+  /** **相关性分**（T127；实测 `/search/suggest` 的专辑条目带它）。 */
+  score?: number | null
 }
 
 /** 服务端原始歌手。 */
@@ -155,6 +164,8 @@ export interface RawArtist {
   albumCount?: number
   /** 歌曲数。 */
   trackCount?: number
+  /** **相关性分**（T127；实测 `/search/suggest` 的歌手条目带它）。 */
+  score?: number | null
 }
 
 /** 服务端原始风格。 */
@@ -232,6 +243,20 @@ export interface Page<T> {
   list: T[]
   /** 全量条数（供增量加载与虚拟滚动判断是否还有下一页）。 */
   total: number
+}
+
+/**
+ * 服务端「搜索建议」端的分段形状（T127）。
+ *
+ * ⚠ **与 `RawPage` 不同**：建议端点给的是 **`{ total, items }`**
+ *    （**不是** `{ list, total }`）—— 实测 2026-11-20 真实 NAS。
+ * ⇒ 客户端必须做一次形状转换（`items` → `list`）。
+ */
+export interface RawSuggestSegment<T> {
+  /** 该段的条数（实测恒为 5 —— 是「给了几条」，**不是**「总命中数」）。 */
+  total?: number
+  /** 该段的条目。 */
+  items?: T[]
 }
 
 /**

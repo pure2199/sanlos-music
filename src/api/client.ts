@@ -528,7 +528,26 @@ export function mapSong(json: RawSong): Song {
     createdAt: unixSeconds(json.createdAt),
     genres: mapGenres(json.genres),
     audioSpec: mapAudioSpec(spec),
+    // ⚠ **条件透传**（T127）：服务端**没给** `score` 时**不放这个键**
+    //    （不是放 `null`）⇒ 既有断言一个都不受影响。
+    ...mapScore(json.score),
   }
+}
+
+/**
+ * 相关性分的**条件透传**（T127）。
+ *
+ * ⚠ **为什么不能直接写 `score: nullableNum(json.score)`**：
+ *    那会让**每一个**领域对象都多出 `score: null` 这个键
+ *    ⇒ 任何**整对象比较**（`toEqual` / `toMatchObject`）的既有断言都会被打破。
+ *    ⇒ 正解：**服务端给了才放这个键**（给了就是数字，没给就**键不存在**）。
+ *
+ * 实测（2026-11-20，真实 NAS）：`/search/track` 与 `/search/suggest` 的条目带 `score`；
+ * `/artist/list`、`/album/list` 等**不带** ⇒ 同一个 `mapSong` 要同时伺候两种来源。
+ */
+function mapScore(value: unknown): { score?: number } {
+  const score = nullableNum(value)
+  return score === null ? {} : { score }
 }
 
 /**
@@ -550,6 +569,8 @@ export function mapAlbum(json: RawAlbum): Album {
     year: deriveYear(json.releaseDate),
     trackCount: num(json.trackCount, 0),
     releaseDate: nullableStr(json.releaseDate),
+    // ⚠ 条件透传（见 `mapScore` 的注释）：没给 `score` 就不放这个键。
+    ...mapScore(json.score),
   }
 }
 
@@ -575,6 +596,8 @@ export function mapArtist(json: RawArtist): Artist {
     coverId: nullableStr(json.coverId),
     albumCount: num(json.albumCount, 0),
     trackCount: num(json.trackCount, 0),
+    // ⚠ 条件透传（见 `mapScore` 的注释）：没给 `score` 就不放这个键。
+    ...mapScore(json.score),
   }
 }
 

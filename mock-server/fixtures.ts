@@ -115,6 +115,13 @@ export interface RawSong {
   genres: RawGenre[]
   /** **服务端给出的收藏态**（实测 true / false 都有）。 */
   isFavorite: boolean
+  /**
+   * **相关性分**（T127）。
+   *
+   * ⚠ 真机实测（2026-11-20，真实 NAS）：`/search/track` 与 `/search/suggest` 的条目
+   * **本来就带**这个字段 ⇒ mock 的建议路由也要带上（客户端靠它显示排序）。
+   */
+  score?: number | null
 }
 
 /** 服务端原始专辑（**没有 `year` 字段**，只有 `releaseDate`）。 */
@@ -137,6 +144,8 @@ export interface RawAlbum {
   artists: RawRef[]
   /** 歌曲数。 */
   trackCount: number
+  /** **相关性分**（T127；真机实测 `/search/suggest` 的专辑条目带它）。 */
+  score?: number | null
 }
 
 /** 服务端原始歌手。 */
@@ -155,6 +164,8 @@ export interface RawArtist {
   albumCount: number
   /** 歌曲数。 */
   trackCount: number
+  /** **相关性分**（T127；真机实测 `/search/suggest` 的歌手条目带它）。 */
+  score?: number | null
 }
 
 /** 服务端原始歌单（⚠️ 该账号 `playlist/list` 返回空列表，形状仍未实测）。 */

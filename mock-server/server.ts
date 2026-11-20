@@ -257,6 +257,17 @@ export function resolvePageSize(raw: string | null | undefined): number {
   return Math.min(Math.floor(value), MAX_PAGE_SIZE)
 }
 
+/**
+ * 搜索建议的**一段**（T127）。
+ *
+ * ⚠ 形状是 **`{total, items}`**（**不是** `{list, total}`）—— 真服务端实测。
+ * ⚠ **`size` / `page` 被服务端忽略** ⇒ 这里**固定最多 5 条**（真服务端实测固定 top-5）。
+ */
+function suggestSegment<T>(items: T[], decorate: (item: T) => T): { total: number; items: T[] } {
+  const top = items.slice(0, 5).map(decorate)
+  return { total: top.length, items: top }
+}
+
 /** 服务端分页：返回该页切片与全量 total。 */
 function paginate<T>(items: T[], query: URLSearchParams): { list: T[]; total: number } {
   const page = resolvePage(query.get('page'))
@@ -1394,6 +1405,54 @@ export function createMockServer(options?: MockServerOptions): MockServer {
     }
     const hits = artists.filter((artist) => artist.name.toLowerCase().includes(keyword))
     sendJson(res, ok(paginate(hits, query)))
+  })
+
+  // -------------------------------------------------------------------------
+  // 搜索建议（T127）
+  // -------------------------------------------------------------------------
+  //
+  // ⚠ **形状与真服务端一致**（实测 2026-11-20，真实 NAS，只读 GET）：
+  //   - 请求参数只有 **`q`**（缺参 / 空 ⇒ 真服务端回 `code=100002 invalid arguments`）；
+  //   - 响应是**四段** `{ track, album, artist, playlist }`，每段是 **`{total, items}`**
+  //     （**不是** `{list, total}`）；
+  //   - `size` / `page` 被服务端**忽略**（固定 top-5）⇒ mock 也**忽略**；
+  //   - 条目**带 `score`**（相关性分）。
+  //
+  // ⚠ **一处与真服务端的已知差异**（如实标注）：真服务端对「纯空格」的 `q`
+  //    回 `code=0` 但四段全空；mock 这里把纯空格也回 `code=100002`。
+  //    ⇒ 影响为**零**：客户端**自己**就拦掉空 / 纯空格关键字（压根不发请求）。
+  // -------------------------------------------------------------------------
+  getRoutes.set(`${API_BASE}/search/suggest`, ({ res, query }) => {
+    const raw = query.get('q')
+    const keyword = raw === null ? '' : raw.trim().toLowerCase()
+    if (keyword.length === 0) {
+      // ⚠ 真服务端：缺参 / 空关键字 ⇒ `code=100002 invalid arguments`。
+      sendJson(res, err(100002, 'invalid arguments'))
+      return
+    }
+    // ⚠ **模糊匹配**（真服务端实测：搜「不存在的词」仍回 5 条）⇒ mock 也这么模拟。
+    const songHits = songs.filter(
+      (song) =>
+        song.title.toLowerCase().includes(keyword) ||
+        song.album.name.toLowerCase().includes(keyword) ||
+        song.artists.some((artist) => artist.name.toLowerCase().includes(keyword)),
+    )
+    const albumHits = albums.filter(
+      (album) =>
+        album.name.toLowerCase().includes(keyword) ||
+        album.artists.some((artist) => artist.name.toLowerCase().includes(keyword)),
+    )
+    const artistHits = artists.filter((artist) => artist.name.toLowerCase().includes(keyword))
+    sendJson(
+      res,
+      ok({
+        track: suggestSegment(songHits, (song) => ({ ...song, score: 2.195477722355097 })),
+        album: suggestSegment(albumHits, (album) => ({ ...album, score: 0.1210638803936593 })),
+        artist: suggestSegment(artistHits, (artist) => ({ ...artist, score: 0.5325566182263356 })),
+        // ⚠ 真服务端这一段恒为空（该账号 0 个歌单）⇒ mock 同样给空。
+        playlist: { total: 0, items: [] },
+      }),
+    )
   })
 
   getRoutes.set(`${API_BASE}/lyric/list`, ({ res, query }) => {

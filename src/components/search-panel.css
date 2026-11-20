@@ -200,3 +200,106 @@
   color: var(--disabled);
   cursor: not-allowed;
 }
+
+/* ---------------------------------------------------------------------------
+ * 搜索建议区（T127）
+ * ---------------------------------------------------------------------------
+ *
+ * ⚠ **建议**是「推荐」而不是「筛选结果」：
+ *    - 服务端的建议是**模糊匹配**的 top-N（实测搜「不存在的词」仍回 5 条）
+ *      ⇒ 条目**未必命中关键字** ⇒ 视觉上要和「命中 N 首」的正式结果**区分开**；
+ *    - 所以这里用**轻量文本行**（不是卡片网格），也不显示「命中 N」
+ *      （suggest 的 `total` 恒为 5，是「给了几条」不是「总命中数」）。
+ * --------------------------------------------------------------------------- */
+
+/* 建议区容器 */
+.sanlos-searchpanel__suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-sunken);
+}
+
+/* 一组建议（歌曲 / 专辑 / 歌手） */
+.sanlos-searchpanel__suggest-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 一组建议的小标题 */
+.sanlos-searchpanel__suggest-group-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* 建议条目列表 */
+.sanlos-searchpanel__suggest-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 一条建议 */
+.sanlos-searchpanel__suggest-item {
+  margin: 0;
+}
+
+/* 建议条目的按钮（整行可点） */
+.sanlos-searchpanel__suggest-button {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sanlos-searchpanel__suggest-button:hover {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+
+.sanlos-searchpanel__suggest-button:active {
+  background: var(--surface-sunken);
+}
+
+.sanlos-searchpanel__suggest-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* 建议条目的主标题 */
+.sanlos-searchpanel__suggest-title {
+  flex: 0 0 auto;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 建议条目的副标题（歌手 ＋ 专辑） */
+.sanlos-searchpanel__suggest-subtitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+}

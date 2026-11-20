@@ -56,7 +56,7 @@ import { useStore } from 'zustand'
 
 import type { Album, Artist, Song } from '../../shared/types'
 import { favoriteApi } from '../api/favorite'
-import { searchApi, type SearchResult } from '../api/search'
+import { searchApi, type SearchResult, type SuggestResult } from '../api/search'
 import type { Page } from '../api/types'
 import {
   resolveFavoriteState,
@@ -104,6 +104,15 @@ export interface SearchPanelApi {
    */
   query: (q: string, opts?: { page?: number; size?: number }) => Promise<SearchResult>
   /**
+   * 「搜索建议」（**可选**，T127）。
+   *
+   * 不提供时**不渲染建议区**（只读环境 / 老服务端没有这个端点）。
+   *
+   * ⚠ 服务端的建议是**模糊匹配**的 top-N（实测搜「不存在的词」仍回 5 条）
+   *    ⇒ 建议里的条目**未必命中关键字** ⇒ 界面上它是「推荐」而不是「筛选结果」。
+   */
+  suggest?: (q: string) => Promise<SuggestResult>
+  /**
    * 收藏写回（**可选**）。
    *
    * 不提供时收藏按钮**禁用**（只读环境）。
@@ -114,6 +123,7 @@ export interface SearchPanelApi {
 /** 默认实现：走 `src/api/*` 的真实实现。 */
 export const defaultSearchPanelApi: SearchPanelApi = {
   query: (q, opts) => searchApi.query(q, opts),
+  suggest: (q) => searchApi.suggest(q),
   setFavorite: (songId, on) => favoriteApi.set(songId, on),
 }
 
@@ -180,6 +190,40 @@ function emptyState(): SearchState {
     albums: emptySection<Album>(),
     artists: emptySection<Artist>(),
   }
+}
+
+// ---------------------------------------------------------------------------
+// 「搜索建议」的状态（T127）
+// ---------------------------------------------------------------------------
+//
+// ⚠ **不复用** `Section<T>`：建议是**固定 top-N**（实测服务端忽略 `page`/`size`）
+//    ⇒ **没有分页、没有「加载更多」** ⇒ `Section` 的 `nextPage`/`hasMore` 会是误导。
+// ---------------------------------------------------------------------------
+
+/** 建议区的状态。 */
+interface SuggestState {
+  /** 建议的歌曲。 */
+  tracks: Song[]
+  /** 建议的专辑。 */
+  albums: Album[]
+  /** 建议的歌手。 */
+  artists: Artist[]
+  /** 是否正在请求。 */
+  loading: boolean
+  /** 最后一次错误（**只影响建议区**，不污染完整搜索结果）。 */
+  error: string | null
+  /** 是否至少成功加载过一次。 */
+  loaded: boolean
+}
+
+/** 造一份空的建议状态。 */
+function emptySuggestState(): SuggestState {
+  return { tracks: [], albums: [], artists: [], loading: false, error: null, loaded: false }
+}
+
+/** 建议里的歌曲的副标题（歌手 ＋ 专辑）。 */
+function suggestSongSubtitle(song: Song): string {
+  return [song.artist, song.album].filter((part) => part.length > 0).join(' · ')
 }
 
 /** 要更新哪一段。 */
@@ -305,6 +349,9 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
   const [text, setText] = useState('')
   const [query, setQuery] = useState('')
   const [state, setState] = useState<SearchState>(emptyState)
+  // ⚠ T127：「搜索建议」是**独立状态**（建议**没有分页、没有「加载更多」**）
+  //    ⇒ **不复用** `Section<T>`。
+  const [suggestState, setSuggestState] = useState<SuggestState>(emptySuggestState)
 
   // 收藏态的**单一真相源**在 store 里（`favoriteStates`）。
   const resolved = useResolvedLibraryStore(undefined, store)
@@ -419,17 +466,54 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
     [api],
   )
 
-  // 关键字变化 → 重新搜索（第一页）。
+  /**
+   * 请求「搜索建议」（T127）。
+   *
+   * ⚠ **与完整搜索并发**（不互相等待）：实测建议端点 **1.4 s**、完整搜索 **5.8 s**
+   *    ⇒ 让建议**先出**，完整结果随后补上。
+   * ⚠ **失败只影响建议区**（自己的 `error`）⇒ 完整搜索结果照常显示。
+   * ⚠ **过期响应一律丢弃**（与完整搜索**共用同一个代次** `generationRef`）。
+   * ⚠ 接口**没提供** `suggest`（只读环境 / 老服务端）⇒ **不请求、不渲染**。
+   */
+  const loadSuggest = useCallback(
+    async (keyword: string): Promise<void> => {
+      const suggest = api.suggest
+      if (!suggest) return
+      const generation = generationRef.current
+      setSuggestState((prev) => ({ ...prev, loading: true, error: null }))
+      try {
+        const result = await suggest(keyword)
+        if (generation !== generationRef.current) return
+        setSuggestState({
+          tracks: result.tracks.list,
+          albums: result.albums.list,
+          artists: result.artists.list,
+          loading: false,
+          error: null,
+          loaded: true,
+        })
+      } catch (err) {
+        if (generation !== generationRef.current) return
+        setSuggestState((prev) => ({ ...prev, loading: false, error: describeError(err) }))
+      }
+    },
+    [api],
+  )
+
+  // 关键字变化 → 重新搜索（第一页）＋ 重新取建议（**并发**，互不等待）。
   useEffect(() => {
     generationRef.current += 1
     writeback.clearError()
     if (query.length === 0) {
       setState(emptyState())
+      setSuggestState(emptySuggestState())
       return
     }
     setState(emptyState())
+    setSuggestState(emptySuggestState())
     void loadPage(query, 1, 'all')
-  }, [query, loadPage, writeback])
+    void loadSuggest(query)
+  }, [query, loadPage, loadSuggest, writeback])
 
   // --- 派生数据 -----------------------------------------------------------
 
@@ -460,6 +544,11 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
   const showEmpty = query.length > 0 && state.tracks.loaded && !hasAnyResult
   const busy =
     state.tracks.loading || state.albums.loading || state.artists.loading
+  // ⚠ T127：建议区**只在真的拿到东西时**才渲染（不留空壳）。
+  const hasSuggest =
+    suggestState.tracks.length > 0 ||
+    suggestState.albums.length > 0 ||
+    suggestState.artists.length > 0
 
   // --- 交互 ---------------------------------------------------------------
 
@@ -518,6 +607,18 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
     [api.setFavorite, favoriteStates, writeback],
   )
 
+  /**
+   * 点建议里的歌曲 → 播放（整队是**建议里的歌曲**，不是完整搜索结果）。
+   *
+   * ⚠ 与完整搜索结果**分开**：建议是「推荐」，不是「筛选结果」。
+   */
+  const handleSuggestPlay = useCallback(
+    (song: Song, index: number): void => {
+      onPlay?.(song, index, suggestState.tracks)
+    },
+    [onPlay, suggestState.tracks],
+  )
+
   /** 「加载更多」：只补目标那一段。 */
   const handleLoadMore = useCallback(
     (target: Exclude<SectionTarget, 'all'>): void => {
@@ -572,6 +673,87 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
       )}
 
       {showEmpty && <p className="sanlos-searchpanel__empty">没有找到</p>}
+
+      {/* --- 搜索建议（T127）--- */}
+      {/* ⚠ 建议失败**只**报在建议区 ⇒ **绝不影响**完整搜索结果的显示。 */}
+      {suggestState.error && (
+        <p className="sanlos-searchpanel__error" role="alert" data-testid="sanlos-suggest-error">
+          {`建议加载失败：${suggestState.error}`}
+        </p>
+      )}
+
+      {hasSuggest && (
+        <section
+          className="sanlos-searchpanel__suggest"
+          data-testid="sanlos-suggest-section"
+          aria-label="搜索建议"
+        >
+          <header className="sanlos-searchpanel__section-header">
+            <h2 className="sanlos-searchpanel__section-title">建议</h2>
+          </header>
+
+          {suggestState.tracks.length > 0 && (
+            <div className="sanlos-searchpanel__suggest-group" data-testid="sanlos-suggest-tracks">
+              <h3 className="sanlos-searchpanel__suggest-group-title">歌曲</h3>
+              <ul className="sanlos-searchpanel__suggest-list">
+                {suggestState.tracks.map((song, index) => (
+                  <li key={song.id} className="sanlos-searchpanel__suggest-item">
+                    <button
+                      type="button"
+                      className="sanlos-searchpanel__suggest-button"
+                      onClick={() => handleSuggestPlay(song, index)}
+                    >
+                      <span className="sanlos-searchpanel__suggest-title">{song.title}</span>
+                      <span className="sanlos-searchpanel__suggest-subtitle">
+                        {suggestSongSubtitle(song)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {suggestState.albums.length > 0 && (
+            <div className="sanlos-searchpanel__suggest-group" data-testid="sanlos-suggest-albums">
+              <h3 className="sanlos-searchpanel__suggest-group-title">专辑</h3>
+              <ul className="sanlos-searchpanel__suggest-list">
+                {suggestState.albums.map((album) => (
+                  <li key={album.id} className="sanlos-searchpanel__suggest-item">
+                    <button
+                      type="button"
+                      className="sanlos-searchpanel__suggest-button"
+                      onClick={() => onOpenAlbum?.(album)}
+                    >
+                      <span className="sanlos-searchpanel__suggest-title">{album.title}</span>
+                      <span className="sanlos-searchpanel__suggest-subtitle">{album.artist}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {suggestState.artists.length > 0 && (
+            <div className="sanlos-searchpanel__suggest-group" data-testid="sanlos-suggest-artists">
+              <h3 className="sanlos-searchpanel__suggest-group-title">歌手</h3>
+              <ul className="sanlos-searchpanel__suggest-list">
+                {suggestState.artists.map((artist) => (
+                  <li key={artist.id} className="sanlos-searchpanel__suggest-item">
+                    <button
+                      type="button"
+                      className="sanlos-searchpanel__suggest-button"
+                      onClick={() => onOpenArtist?.(artist)}
+                    >
+                      <span className="sanlos-searchpanel__suggest-title">{artist.name}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* --- 歌曲段 --- */}
       <section className="sanlos-searchpanel__section" aria-label="歌曲结果">

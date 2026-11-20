@@ -132,6 +132,16 @@ export interface Song {
   genres?: Genre[]
   /** 音频规格明细。 */
   audioSpec?: AudioSpec
+  /**
+   * **相关性分**（T127）。
+   *
+   * ⚠ **可选 ＋ 条件透传**：服务端**给了**才有这个键（给了就是数字）；
+   *    没给时**键根本不存在**（不是 `null`）⇒ 既有断言一个都不受影响。
+   *
+   * 实测（2026-11-20，真实 NAS）：`/search/track` 与 `/search/suggest` 的条目
+   * **本来就带** `score`（如 `2.195477722355097`）⇒ 客户端之前一直把它丢掉了。
+   */
+  score?: number | null
 }
 
 /**
@@ -160,6 +170,13 @@ export interface Album {
   trackCount: number
   /** 发行日期（实测原始字段，可能是 `null`）。 */
   releaseDate?: string | null
+  /**
+   * **相关性分**（T127）。
+   *
+   * ⚠ **可选 ＋ 条件透传**：服务端**给了**才有这个键；没给时**键根本不存在**。
+   * 实测：`/search/suggest` 的专辑条目带 `score`（如 `0.1210638803936593`）。
+   */
+  score?: number | null
 }
 
 /**
@@ -180,6 +197,13 @@ export interface Artist {
   albumCount: number
   /** 歌曲数。 */
   trackCount: number
+  /**
+   * **相关性分**（T127）。
+   *
+   * ⚠ **可选 ＋ 条件透传**：服务端**给了**才有这个键；没给时**键根本不存在**。
+   * 实测：`/search/suggest` 的歌手条目带 `score`（如 `0.5325566182263356`）。
+   */
+  score?: number | null
 }
 
 /**
