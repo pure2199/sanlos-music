@@ -429,7 +429,11 @@ function newAggregator(
   albumId: string,
   albumTitle: string,
   coverId: string | null,
-  albumCoverId: string | null | undefined = null,
+  // ⚠⚠ **T131-D2**：默认必须是 **`undefined`（未知）**，**不能**是 `null`（确认没有）。
+  //   ⇒ JS 的默认参数在**显式传 `undefined` 时照样生效** ⇒ 默认写成 `null` 时，
+  //   调用点「传 undefined」反而拿到 `null` ⇒ 「未知」被写成了「确认没有」
+  //   ⇒ 页面永远不再补拉封面（实测：`agg.albumCoverId === null`）。
+  albumCoverId: string | null | undefined = undefined,
 ): Aggregator {
   return {
     albumId,
@@ -465,7 +469,11 @@ function accumulate(
       // ⚠️ **来源唯一**：同一张专辑的**所有**曲目内嵌的是**同一个专辑对象**
       //    ⇒ 专辑封面**每张专辑只有一个值** ⇒ 建聚合器时取**第一条**就够了
       //    （写成「每条曲目再补一次」会多出一条**等价**的路径 ⇒ 变异自证会分不清）。
-      agg = newAggregator(t.albumId, t.albumTitle, t.coverId || null, t.albumCoverId || null)
+      // ⚠ **T131-D2**：专辑封面为空 ⇒ 是「**未知**」（`undefined`）而不是「确认没有」（`null`）。
+      //   ⇒ **扫描根本没查过** `/album/detail` ⇒ 凭什么说「确认没有」？
+      //   ⇒ 写成 `null` ⇒ 落盘带 `albumCoverId: null` ⇒ 读回被当成「确认没有」
+      //   ⇒ 页面**永远不再补拉** ⇒ 卡片永远是占位图（T101/T102 的目的落空）。
+      agg = newAggregator(t.albumId, t.albumTitle, t.coverId || null, t.albumCoverId || undefined)
       target.set(t.albumId, agg)
     }
     agg.trackCount += 1
@@ -678,10 +686,13 @@ function selectCandidates(aggregator: Map<string, Aggregator>): Aggregator[] {
 }
 
 /** 把选中的聚合器压成落盘表。 */
-function snapshotCandidates(aggregator: Map<string, Aggregator>): Record<string, CandidateSnapshot> {
+function snapshotCandidates(
+  aggregator: Map<string, Aggregator>,
+  knownCovers?: Readonly<Record<string, string | null>>,
+): Record<string, CandidateSnapshot> {
   const candidates: Record<string, CandidateSnapshot> = {}
   for (const agg of selectCandidates(aggregator)) {
-    candidates[agg.albumId] = toSnapshot(agg)
+    candidates[agg.albumId] = toSnapshot(agg, knownCovers)
   }
   return candidates
 }
@@ -702,8 +713,52 @@ function emptyPersisted(): AudiobookPersisted {
   }
 }
 
-/** 把聚合器压成落盘形状。 */
-function toSnapshot(agg: Aggregator): CandidateSnapshot {
+/**
+ * 收集「**已经知道**」的专辑封面（T131-D2）。
+ *
+ * ⚠ **为什么需要**：扫描用的聚合器是**扫描时新建**的 ⇒ 它**不知道**专辑封面
+ *   ⇒ 落盘时若直接用聚合器的值，补拉到的封面会被**丢掉**
+ *   （`JSON.stringify` 会丢掉 `undefined` 的 key）
+ *   ⇒ 用户每次进「有声」页都要**重拉一次** `/album/detail`。
+ *
+ * ⚠ **两个来源都要**：
+ *   1. **旧落盘**（`saved.candidates`）—— 页面补拉后会写盘 ⇒ **重启应用后**也还在；
+ *   2. **内存活值**（`get().hits`）—— 扫描**进行中**补拉的，落盘里可能还没有。
+ *
+ * ⚠ **三态**：`undefined` = 未知（要补拉）/ `null` = 确认没有（不用再拉）/ 字符串 = 有封面。
+ *   ⇒ 只收「**不是 undefined**」的值（`null` 也要收 —— 它是「确认没有」这个**有效结论**）。
+ *
+ * ⚠ 与 T118 的 `overrides` **故意不同**：`overrides` **不能** merge
+ *   （那会把「撤销改判」复活）⇒ 只能整体替换；而**封面没有「撤销」语义**
+ *   （用户没有「删除封面」这个动作）⇒ 可以安全地保留已知值。
+ */
+function collectKnownAlbumCovers(
+  savedCandidates: Readonly<Record<string, CandidateSnapshot>>,
+  hits: readonly AudiobookHit[],
+): Record<string, string | null> {
+  const known: Record<string, string | null> = {}
+  // ① 内存活值（页面刚补拉的，最新鲜）。
+  for (const hit of hits) {
+    if (hit.albumCoverId !== undefined) known[hit.albumId] = hit.albumCoverId
+  }
+  // ② 落盘里的**覆盖**内存值 ⇒ 落盘是「**已确认写进去**」的，更可靠
+  //   （否则内存里的 `null`「确认没有」会白白覆盖掉落盘里已知的封面 id）。
+  for (const [albumId, snap] of Object.entries(savedCandidates)) {
+    if (snap.albumCoverId !== undefined) known[albumId] = snap.albumCoverId
+  }
+  return known
+}
+
+/**
+ * 把聚合器压成落盘形状。
+ *
+ * ⚠ **T131-D2**：`albumCoverId` 采用「**已经知道的**」那个值（`knownCovers`）
+ *   ⇒ 扫描落盘**不再冲掉**页面补拉到的封面。
+ */
+function toSnapshot(
+  agg: Aggregator,
+  knownCovers?: Readonly<Record<string, string | null>>,
+): CandidateSnapshot {
   return {
     albumId: agg.albumId,
     albumTitle: agg.albumTitle,
@@ -720,7 +775,10 @@ function toSnapshot(agg: Aggregator): CandidateSnapshot {
     // ⚠️ **T102**：**专辑自己的**封面也落盘 ⇒ 下次进来**不用**再补拉。
     // ⚠️ `undefined` ⇒ `JSON.stringify` 会**丢掉这个 key** ⇒ 读回来还是「未知」⇒ 会再补拉
     //    （这正是我们要的：**没拿到过**就得再试一次）。
-    albumCoverId: agg.albumCoverId,
+    // ⚠ **T131-D2**：扫描来的聚合器**不知道**专辑封面（恒为 undefined = 未知）
+    //   ⇒ 采用「**已经知道的**」那个（页面补拉过的）⇒ 落盘不再把它丢掉。
+    //   ⚠ 三态：undefined = 未知（要补拉）/ null = 确认没有（不用拉）/ 字符串 = 有。
+    albumCoverId: agg.albumCoverId !== undefined ? agg.albumCoverId : knownCovers?.[agg.albumId],
   }
 }
 
@@ -731,7 +789,6 @@ function fromSnapshot(snap: CandidateSnapshot): Aggregator {
   //   - 字段**缺省** ⇒ **未知**（T101 的旧落盘）⇒ 进页时要补拉一次 `/album/detail`；
   //   - 字段是 `null` ⇒ **确认没有封面** ⇒ 不用再拉；
   //   - 字段是字符串 ⇒ 有封面。
-  const hasAlbumCover = Object.prototype.hasOwnProperty.call(snap, 'albumCoverId')
   return {
     albumId: snap.albumId,
     albumTitle: snap.albumTitle,
@@ -746,11 +803,15 @@ function fromSnapshot(snap: CandidateSnapshot): Aggregator {
     dirs: Array.isArray(snap.dirs) ? snap.dirs.slice(0, DIR_SAMPLE) : [],
     // ⚠️ **T101**：旧落盘**没有**这个字段 ⇒ 读成 `null`（没封面）⇒ 进页时按需补拉。
     coverId: typeof snap.coverId === 'string' && snap.coverId.length > 0 ? snap.coverId : null,
-    albumCoverId: hasAlbumCover
-      ? typeof snap.albumCoverId === 'string' && snap.albumCoverId.length > 0
-        ? snap.albumCoverId
-        : null
-      : undefined,
+    // ⚠ **T131-D2**：三态还原 —— `null` = **确认没有** / 字符串 = 有 / 其余（含「字段缺省」）= **未知**。
+    //   ⚠ 旧实现把「字段存在但不是字符串」一律当成 `null`（「确认没有」）
+    //   ⇒ 与 `null` 这个**有效结论**混在一起 ⇒ 页面永远不再补拉封面。
+    albumCoverId:
+      snap.albumCoverId === null
+        ? null
+        : typeof snap.albumCoverId === 'string' && snap.albumCoverId.length > 0
+          ? snap.albumCoverId
+          : undefined,
   }
 }
 
@@ -850,7 +911,10 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
         scannedCount = folderResult.tracks.length
 
         const hits = judgeAggregator(aggregator)
-        const candidates = snapshotCandidates(aggregator)
+        const candidates = snapshotCandidates(
+          aggregator,
+          collectKnownAlbumCovers(port.load()?.candidates ?? {}, get().hits),
+        )
         const folderPaths = folderResult.folders.map((f) => f.path)
         const persisted: AudiobookPersisted = {
           version: STATE_VERSION,
@@ -933,7 +997,10 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
             nextPage: progress.page + 1,
             scannedCount,
             total: progress.total,
-            candidates: snapshotCandidates(aggregator),
+            candidates: snapshotCandidates(
+              aggregator,
+              collectKnownAlbumCovers(port.load()?.candidates ?? {}, get().hits),
+            ),
             // ⚠️ **T118**：**不再写「扫描启动时的那份快照」** ⇒ 扫描期间用户做的
             //    **手工改判**（详情页「这不是有声」/「这是有声读物」、秒搜点开）
             //    **不会被这一页覆盖**。
@@ -953,7 +1020,10 @@ export const useAudiobookStore = create<AudiobookStore>((set, get) => ({
       const hits = judgeAggregator(aggregator)
 
       // ---- 落盘（只留候选 + 改判）----
-      const candidates = snapshotCandidates(aggregator)
+      const candidates = snapshotCandidates(
+        aggregator,
+        collectKnownAlbumCovers(port.load()?.candidates ?? {}, get().hits),
+      )
       const persisted: AudiobookPersisted = {
         version: STATE_VERSION,
         // ⚠️ 扫完了 ⇒ **没有断点**（`nextPage = 0`）⇒ 下次扫描从头来。

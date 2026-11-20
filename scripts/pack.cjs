@@ -77,6 +77,9 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
+// ⚠ **T131-D4**：搬运逻辑抽到这里（`pack.cjs` 是脚本 ⇒ require 即执行 ⇒ 不能直接单测）。
+//   ⇒ 跨卷（EXDEV）回退与「失败保留源」的语义都能用临时目录真跑一遍（见 test/pack-publish-cross-volume.test.ts）。
+const { publishDir } = require('./lib/publish.cjs')
 
 const repoRoot = path.resolve(__dirname, '..')
 const electronDist = path.join(repoRoot, 'node_modules', 'electron', 'dist')
@@ -242,25 +245,20 @@ if (cscLink === '') {
 
 fs.mkdirSync(outDir, { recursive: true })
 
-/** 把 `from` 搬到 `to`（覆盖式；失败时保留 `from` 并回报）。 */
-function publish(from, to) {
-  try {
-    fs.rmSync(to, { recursive: true, force: true })
-    fs.renameSync(from, to)
-    return true
-  } catch {
-    return false
-  }
-}
-
 const published = []
 const kept = []
+// ⚠ **T131-D4**：「产物已经到目标、但暂存目录里的副本没删掉」（跨卷复制时源被占用）。
+const sourceKept = []
 
 for (const name of fs.readdirSync(stagingDir)) {
   const src = path.join(stagingDir, name)
   const dst = path.join(outDir, name)
-  if (publish(src, dst)) {
+  // ⚠ `publishDir`：同卷走改名；**跨卷（EXDEV）自动回退「复制 + 删源」**；
+  //   失败 ⇒ **保留源**（不删）⇒ 下面如实告诉用户产物还在暂存目录里。
+  const result = publishDir(src, dst)
+  if (result.ok) {
     published.push(name)
+    if (result.sourceKept) sourceKept.push(name)
   } else {
     kept.push(name)
   }
@@ -276,9 +274,20 @@ if (kept.length > 0) {
       '        处理：关闭占用者后重跑，或直接用暂存目录里的产物。',
   )
 }
+if (sourceKept.length > 0) {
+  // ⚠ **产物已经在目标位置了**（跨卷复制成功）⇒ 只是**暂存目录里的副本没删掉**。
+  console.log(
+    `[pack] ℹ️ 以下内容**已发布**（跨卷复制），但暂存目录里的副本**没能删掉**（文件被占用）：\n` +
+      `        ${stagingDir}\n` +
+      `        → ${sourceKept.join(', ')}\n` +
+      '        产物本身没问题；关闭占用者后重跑即可清掉暂存目录。',
+  )
+}
 
 // 暂存目录：发布成功的部分已被搬走，剩下的保留（上面已指明位置）。
-if (kept.length === 0) {
+// ⚠ **T131-D4**：`sourceKept` 非空时**不能**删暂存目录（里面还有东西没搬干净）
+//   ⇒ 否则会把「还没搬走的产物」直接删掉。
+if (kept.length === 0 && sourceKept.length === 0) {
   fs.rmSync(stagingDir, { recursive: true, force: true })
 }
 

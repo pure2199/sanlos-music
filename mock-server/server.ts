@@ -136,8 +136,60 @@ export const FETCH_BLOCKED_PORTS: ReadonlySet<number> = new Set([
   6668, 6669, 6697, 10080,
 ])
 
-/** 分配端口的最大尝试次数（落在禁用端口上就换一个）。 */
-const MAX_PORT_ATTEMPTS = 10
+/**
+ * 这个端口**能不能用来跑 mock**（T131-D1）。
+ *
+ * ⚠ **两个条件缺一不可**：
+ *   1. `port > 0` —— `server.address()` 返回 null（**绑定失败**或**尚未就绪**）时端口是 **0**
+ *      ⇒ 旧实现只查禁用端口清单，而 **0 不在清单里** ⇒ 会直接放行
+ *      ⇒ 返回 `http://127.0.0.1:0` ⇒ 实测 `fetch` 报 `EADDRNOTAVAIL`（**谁都连不上**）；
+ *   2. 不在 `FETCH_BLOCKED_PORTS` 里 —— `fetch` 规范附录 B 的禁用端口，打过去**请求根本发不出去**
+ *      （实测 undici 对清单里 **79** 个端口报 `bad port`；本清单是它的**超集**，
+ *      多出的 564/567/4160 只是**过度避开**，无副作用 ⇒ **没有漏项**）。
+ *
+ * ⚠ **为什么单独抽成函数**：这是**可单测的纯函数** ⇒ 能直接钉住「第 1 条」这个洞
+ *   （在真实环境里 `port === 0` 几乎抓不到）。
+ */
+export function isUsableMockPort(port: number): boolean {
+  return port > 0 && !FETCH_BLOCKED_PORTS.has(port)
+}
+
+/**
+ * 让系统分配一个端口并返回它（**默认的绑定动作**）。
+ *
+ * ⚠ `listen(0)` **不带 host** ⇒ 绑定是**同步**的 ⇒ `address()` 立刻能拿到端口。
+ *   （带 host 时 Node 会把绑定推迟到 nextTick，`address()` 当时还是 null。）
+ * ⚠ 绑定失败（EADDRINUSE 等）时 `address()` 返回 **null** ⇒ 这里返回 **0**
+ *   ⇒ 调用方按「不可用」处理 ⇒ 重试。
+ */
+export function bindSystemPort(server: Server): number {
+  server.listen(0)
+  const address = server.address()
+  return typeof address === 'object' && address !== null ? address.port : 0
+}
+
+/**
+ * mock server 的**诊断计数**（只增不减；给测试与排障看）。
+ *
+ * ⚠ `listenErrors` = 「绑定过程中出现过 `'error'` 事件」的次数
+ *   ⇒ 以前这会变成 **uncaught exception**（整个测试进程被带走）⇒ 现在只是被记下来。
+ */
+export const mockServerDiagnostics = {
+  listenErrors: 0,
+  lastListenError: '' as string,
+}
+
+/**
+ * 分配端口的最大尝试次数（落在**不可用**端口上就换一个）。
+ *
+ * ⚠ **为什么是 20 而不是 10**（T131-D1 实测）：
+ *   本机动态端口范围被改成 **1024–15000**，而 `FETCH_BLOCKED_PORTS` 里
+ *   **6665/6666/6667/6668/6669/6697 是连续 6 个**禁用端口；
+ *   端口又是**顺序递增**分配的（实测：800 次分配从 3799 连续涨到 4622，**不复用**）
+ *   ⇒ 一旦起点落在 6665，接连 7 次分配全落在禁用端口上
+ *   ⇒ 10 次只富余 3 次，余量太薄（并发下别的进程抢号还会再消耗尝试次数）⇒ 提到 20。
+ */
+const MAX_PORT_ATTEMPTS = 20
 
 /**
  * 关闭一个 server 并等它真正关闭（'close' 事件）。
@@ -774,6 +826,15 @@ export interface MockServerOptions {
    *    （共享歌手会连带影响别的用例的断言）⇒ 按实例注入。
    */
   artists?: RawArtist[]
+  /**
+   * 测试钩子：**绑定端口**的动作（默认 = `bindSystemPort`，让系统分配）。
+   *
+   * ⚠ **只给测试用**：默认实现一个字都不变 ⇒ 既有调用**零影响**。
+   * ⚠ 为什么要它：`port === 0`（绑定失败 / 尚未就绪）在真实环境里**几乎抓不到**
+   *   ⇒ 需要能**注入**一次失败，才能钉住「不可用就换一个」这条逻辑。
+   * ⚠ 约定：返回 **0** 表示「这次没绑上」⇒ 调用方会**换一个 server 重试**。
+   */
+  bindPort?: (server: Server) => number
 }
 
 // ---------------------------------------------------------------------------
@@ -1619,26 +1680,34 @@ export function createMockServer(options?: MockServerOptions): MockServer {
   }
 
   // 端口 0 = 由系统分配；不带 host 时绑定是同步的，address() 立刻可用。
-  // 落在 fetch 的「禁用端口」上就关掉重开（系统会分配下一个端口）——
-  // 见 FETCH_BLOCKED_PORTS 的说明：这类端口 `fetch` 根本不让连。
+  // ⚠ **T131-D1**：现在有**两种**「不可用」——① 落在 fetch 的禁用端口上；
+  //    ② **端口是 0**（`address()` 返回 null：绑定失败 / 尚未就绪）。
+  //    旧实现只挡 ① ⇒ ② 会**放行** ⇒ 返回 `http://127.0.0.1:0`
+  //    ⇒ 实测 `fetch` 报 `EADDRNOTAVAIL`（谁都连不上）⇒ 现在两者都算「不可用」⇒ 关掉重开。
   let server = createServer(requestHandler)
   let port = 0
+  const bind = options?.bindPort ?? bindSystemPort
   for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt += 1) {
-    server.listen(0)
-    const address = server.address()
-    port = typeof address === 'object' && address !== null ? address.port : 0
-    if (!FETCH_BLOCKED_PORTS.has(port)) break
-    // 落在禁用端口上：这个 server 谁也连不上，直接弃用。
+    // ⚠ 绑定失败时 Node 会**异步**抛 `'error'` ⇒ 没有监听器就是 **uncaught exception**
+    //    （会把整个 vitest 进程带走）⇒ 这里挂一个监听：只记下来，不让它变成进程级崩溃。
+    //    ⚠ 真正的重试由下面的「端口不可用 ⇒ 换一个」承担（绑定失败时 `address()` 就是 null ⇒ 端口 0）。
+    server.on('error', (err: unknown) => {
+      mockServerDiagnostics.listenErrors += 1
+      mockServerDiagnostics.lastListenError = err instanceof Error ? err.message : String(err)
+    })
+    port = bind(server)
+    if (isUsableMockPort(port)) break
+    // 不可用（禁用端口 / 端口 0）：这个 server 谁也连不上，直接弃用。
     // `close()` 会**同步**关掉监听句柄（端口即刻释放），'close' 事件在下一个 tick 触发；
     // 这里登记一下关闭收尾，避免留下未收尾的句柄。
     void closeServerAsync(server)
     server = createServer(requestHandler)
   }
-  if (FETCH_BLOCKED_PORTS.has(port)) {
-    // 重试耗尽还落在禁用端口上：直接抛错，别静默返回一个连不上的 server。
+  if (!isUsableMockPort(port)) {
+    // 重试耗尽还是不可用：直接抛错，别静默返回一个连不上的 server。
     void closeServerAsync(server)
     throw new Error(
-      `mock server 连续 ${MAX_PORT_ATTEMPTS} 次都分到 fetch 的禁用端口（最后是 ${port}），无法启动`,
+      `mock server 连续 ${MAX_PORT_ATTEMPTS} 次都没分到可用端口（最后是 ${port}），无法启动`,
     )
   }
 

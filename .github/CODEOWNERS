@@ -1,0 +1,33 @@
+# CODEOWNERS —— 代码所有权（改这些路径时，谁该被要求评审）
+#
+# ⚠️ **规则**：一个文件匹配到多条规则时，**最后匹配的那条优先**
+#    （GitHub 官方说明：
+#    https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#    —— “Order is important; the last matching pattern takes the most precedence.”）
+#    ⇒ **更具体的规则必须放在更一般的规则后面**（本文件就是按这个顺序排的）。
+#
+# ⚠️ **路径**：相对于**仓库根目录**、**大小写敏感**；末尾带 `/` 表示目录（含其下所有子目录）。
+#
+# ⚠️ **本项目是单人维护**（`pure2199` 是仓库所有者，也是唯一有推送权限的人）
+#    ⇒ 这份文件**不构成「职责分离」**（CODEOWNERS 不会替你创造第二个人）；
+#    它做的是把「这些路径必须由维护者本人确认」**写下来**，并在 PR 里自动点名。
+#
+# ⚠️ **哪些路径最该被盯住**：发版工作流、打包脚本、打包配置、以及**签名政策**本身
+#    —— 这几处一旦被改动，产物的**可验证性**（attestation / sha256 / 签名）就变了。
+#
+# ⚠️ 本文件本身也由仓库所有者维护（单人维护项目 ⇒ 没有第二个人可点名）。
+
+# ---- 目录级规则（先写；后面的精确规则优先级更高）------------------------------
+/shared/                       @pure2199
+/electron/                     @pure2199
+/src/                          @pure2199
+/test/                         @pure2199
+/mock-server/                  @pure2199
+/e2e/                          @pure2199
+
+# ---- 精确到文件（**放在最后**：最后匹配者优先）---------------------------------
+/.github/workflows/            @pure2199
+/scripts/pack.cjs              @pure2199
+/electron-builder.yml          @pure2199
+/CODE_SIGNING_POLICY.md        @pure2199
+/docs/signing.md               @pure2199

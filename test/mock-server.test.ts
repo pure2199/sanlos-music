@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { networkInterfaces } from 'node:os'
 import {
+  bindSystemPort,
   createMockServer,
   FETCH_BLOCKED_PORTS,
   isLoopbackAddress,
+  isUsableMockPort,
   resolvePage,
   resolvePageSize,
   type MockServer,
@@ -1075,5 +1077,79 @@ describe('mock server 生命周期', () => {
     await closing
     // 真正关闭后端口不可达。
     await expect(fetch(`${s.url}${API}/health`)).rejects.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T131-D1：mock server 的**端口分配**（禁用端口 ＋ 端口 0 ＋ 绑定失败）
+// ---------------------------------------------------------------------------
+//
+// ⚠ **为什么单独钉这一段**：端口分配失败会表现为「测试随随便便飘红」
+//   （连不上 / bad port），**与被测的业务毫无关系** ⇒ 必须有自己的回归网。
+//
+// ⚠ **实测依据**（本机）：
+//   - 动态端口范围 **1024–15000**（被人改过）⇒ 禁用端口都在范围内；
+//   - 端口**顺序递增、不复用**（实测 800 次分配：3799 → 4622）；
+//   - undici 实拦 **79** 个端口 ⇒ 本仓库的清单是它的**超集** ⇒ 无漏项；
+//   - **端口 0 不是 bad port**，实测 `fetch` 报 `EADDRNOTAVAIL`（同样连不上）。
+
+describe('T131-D1：mock server 的端口分配', () => {
+  it('isUsableMockPort：端口 0 与 fetch 的禁用端口都**不可用**，普通端口可用', () => {
+    // ⚠ **端口 0**：`server.address()` 返回 null（绑定失败 / 尚未就绪）时就是它
+    //   ⇒ 旧实现只查禁用端口清单，而 0 不在清单里 ⇒ 会**直接放行**
+    //   ⇒ 返回 `http://127.0.0.1:0` ⇒ 实测 `fetch` 报 EADDRNOTAVAIL（谁都连不上）。
+    expect(isUsableMockPort(0)).toBe(false)
+    // fetch 规范附录 B 的禁用端口 ⇒ 请求根本发不出去。
+    expect(isUsableMockPort(1)).toBe(false)
+    expect(isUsableMockPort(10080)).toBe(false)
+    expect(isUsableMockPort(6665)).toBe(false)
+    expect(isUsableMockPort(6697)).toBe(false)
+    // 普通端口可用。
+    expect(isUsableMockPort(3800)).toBe(true)
+  })
+
+  it('端口分配到 0（绑定失败）⇒ **换一个**重试，而不是返回一个连不上的 server', async () => {
+    // ⚠ 真实环境里 `port === 0` **几乎抓不到**（实测 800 次分配一次都没出现）
+    //   ⇒ 用 `bindPort` 钩子**注入**一次失败，才能钉住「不可用就换一个」这条逻辑。
+    let calls = 0
+    const s = createMockServer({
+      bindPort: (server) => {
+        calls += 1
+        if (calls === 1) return 0 // 第一次「没绑上」
+        return bindSystemPort(server)
+      },
+    })
+    // ⚠ **确实重试过**（不是一次就放行）。
+    expect(calls).toBeGreaterThan(1)
+    // ⚠ 而且最终拿到的是**能连**的端口。
+    const port = Number(new URL(s.url).port)
+    expect(isUsableMockPort(port)).toBe(true)
+    expect(port).toBeGreaterThan(0)
+    const res = await fetch(`${s.url}${API}/health`)
+    expect(res.ok).toBe(true)
+    await res.text()
+    await s.close()
+  })
+
+  it('连续开 20 个 server：端口互不相同、都不是禁用端口、每个都能连', async () => {
+    const servers: MockServer[] = []
+    const ports = new Set<number>()
+    for (let i = 0; i < 20; i += 1) servers.push(createMockServer())
+    for (const s of servers) {
+      const port = Number(new URL(s.url).port)
+      // ⚠ 互不相同（系统顺序分配、不复用 ⇒ 不会撞同一个端口）。
+      expect(ports.has(port)).toBe(false)
+      ports.add(port)
+      // ⚠ 都不是 fetch 的禁用端口（否则 fetch 根本发不出去）。
+      expect(FETCH_BLOCKED_PORTS.has(port)).toBe(false)
+      expect(port).toBeGreaterThan(0)
+    }
+    // ⚠ 每个都**真的连得上**（这才是「端口可用」的正面判据）。
+    for (const s of servers) {
+      const res = await fetch(`${s.url}${API}/health`)
+      expect(res.ok).toBe(true)
+      await res.text()
+    }
+    for (const s of servers) await s.close()
   })
 })

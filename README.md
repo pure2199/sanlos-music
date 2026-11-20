@@ -173,6 +173,23 @@ Windows 10 1809+ / x64. MIT licensed.
 - ⚠️ **v0.2.2 起**：「设置 → 更新」里的**更新服务器地址留空即可** —— 主进程会自动用
   **项目自己的 Releases**（永远指向最新那版，发新版不用换地址）。
 
+### Code signing policy
+
+产物**目前是未签名发布**的（SignPath Foundation 的申请已于 2026-11-12 被拒）⇒ 本节只当**总入口**：回答「这件事该看哪份文档」，**不复述**细节。
+
+| 你想知道 | 看哪里 |
+|---|---|
+| 现在的产物签没签、SmartScreen 怎么绕 | 上面「[下载安装](#下载安装)」一节（**未签名**是当前状态，不是故障） |
+| 下载到的包怎么确认是官方的 | 上面「怎么确认下载到的是官方产物」（**构建来源证明 attestation ＋ sha256**） |
+| 无证书期怎么发版（**attestation 路线**） | [`docs/packaging.md`](./docs/packaging.md) §7.10 |
+| 签名是怎么来的、怎么验证签名 | [`docs/signing.md`](./docs/signing.md)（中文操作手册） |
+| 提交给 SignPath 审核的**政策原文** | [`CODE_SIGNING_POLICY.md`](./CODE_SIGNING_POLICY.md)（英文） |
+| 维护者：怎么申请 / 怎么配 / 签名版怎么发 | [`docs/signing.md`](./docs/signing.md) 第三、四节 |
+| 签名出故障怎么排查 | [`docs/signing.md`](./docs/signing.md) 第四、五节 |
+
+> ℹ️ **为什么要有这一节**：签名同时牵涉**用户验证**与**维护者发版**两拨人、两套文档 ⇒ 没有统一入口时，用户在「下载安装」里找政策、维护者在「文档索引」里找申请流程 ⇒ 各自绕路。
+> ⚠️ **本节是索引，不是政策**：真要改签名相关的口径，改的是 [`CODE_SIGNING_POLICY.md`](./CODE_SIGNING_POLICY.md)（政策）与 [`docs/signing.md`](./docs/signing.md)（操作手册），**不要**只改这里。
+
 ### 有声小说放在哪里（必读）
 
 「有声」页不是从曲库里自动认出所有有声内容 —— 它按**目录名**挑。所以**文件要先放对地方**：
