@@ -51,7 +51,13 @@
 //   并允许通过 `opts.protocol` 注入替身。
 // - 不引入新依赖；只用 Node 内置模块与标准 Web API。
 
-import { API_PREFIX } from '../shared/constants'
+import {
+  API_PREFIX,
+  PROXY_ERROR_AUTH,
+  PROXY_ERROR_NETWORK,
+  PROXY_ERROR_REQUEST,
+  type ProxyErrorKind,
+} from '../shared/constants'
 import { authx, buildCookie } from './sign'
 import { SessionStateError, type SessionManager } from './session'
 import { createHttpStack, type HttpStack, type UpstreamStream } from './http'
@@ -348,9 +354,21 @@ function queryToRecord(query: string): Record<string, string> {
 // 响应构造
 // ---------------------------------------------------------------------------
 
-/** 构造错误响应：502 + `{ code: -1, msg }`（**不含**任何凭证或堆栈）。 */
-function errorResponse(msg: string): Response {
-  return new Response(JSON.stringify({ code: -1, msg }), {
+/**
+ * 构造错误响应：502 + `{ code: -1, msg, proxy }`（**不含**任何凭证或堆栈）。
+ *
+ * ⚠⚠ **`proxy` 是「类别标记」**（T130）：主进程原本把**所有**代理层故障都转成
+ *    `502 + { code: -1, msg }` ⇒ 而 `code = -1` **与服务端真实业务码撞码**
+ *    （实测：榜单端点 `page=list` 返回 `{ code: -1, subcode: 400 }`）
+ *    ⇒ 渲染层无歧义地分不出「代理层故障」与「服务端业务拒绝」
+ *    ⇒ 超时被当成**业务错误**抛成 `ApiError`（`ApiNetworkError` 永远收不到）。
+ * ⇒ `proxy` **不占用 `code` 空间** ⇒ 既不撞服务端业务码，
+ *    也**不改动既有的 `code: -1` 契约**（既有的 `expect(json.code).toBe(-1)` 一条都不用改）。
+ *
+ * ⚠ `kind` **必填**（不给就编译不过）⇒ 漏分类的调用点会在 `tsc` 阶段暴露。
+ */
+function errorResponse(msg: string, kind: ProxyErrorKind): Response {
+  return new Response(JSON.stringify({ code: -1, msg, proxy: kind }), {
     status: 502,
     headers: {
       'content-type': 'application/json; charset=utf-8',
@@ -409,6 +427,18 @@ function errorMessage(err: unknown): string {
 }
 
 /**
+ * 会话层抛出的异常属于**哪一类**代理层故障。
+ *
+ * - `SessionStateError`（未连接 / 未登录 / 会话状态异常）⇒ **会话失效**（`auth`）
+ *   ⇒ 渲染进程据此回登录页（规格 §5.4），避免用户卡在「已登录但每个请求都失败」的死状态；
+ * - 其它（**超时** / 网络不可达 / DNS 失败……）⇒ **网络 / 代理层故障**（`network`）
+ *   ⇒ 渲染进程据此提示「可重试」。
+ */
+function proxyErrorKind(err: unknown): ProxyErrorKind {
+  return err instanceof SessionStateError ? PROXY_ERROR_AUTH : PROXY_ERROR_NETWORK
+}
+
+/**
  * 会话前置检查：返回非 `null` 表示没有可用会话（未连接 / 未登录）。
  *
  * 二进制路径自己拼上游 URL（不走 `SessionManager.request()`），故需要自己检查；
@@ -447,7 +477,7 @@ async function proxyJson(
   try {
     body = await readJsonBody(request, method)
   } catch {
-    return errorResponse('请求体不是合法的 JSON')
+    return errorResponse('请求体不是合法的 JSON', PROXY_ERROR_REQUEST)
   }
 
   try {
@@ -461,7 +491,7 @@ async function proxyJson(
     })
     return jsonResponse(result.status, result.json)
   } catch (err) {
-    return errorResponse(errorMessage(err))
+    return errorResponse(errorMessage(err), proxyErrorKind(err))
   }
 }
 
@@ -491,7 +521,7 @@ async function proxyBinary(
   http: HttpStack,
 ): Promise<Response> {
   const stateError = checkSession(session)
-  if (stateError) return errorResponse(errorMessage(stateError))
+  if (stateError) return errorResponse(errorMessage(stateError), PROXY_ERROR_AUTH)
 
   const url = `${session.state.base}${API_PREFIX}/${rest}${query.length > 0 ? `?${query}` : ''}`
   const method = request.method.toUpperCase()
@@ -503,7 +533,7 @@ async function proxyBinary(
     try {
       requestBody = await request.text()
     } catch {
-      return errorResponse('无法读取请求体')
+      return errorResponse('无法读取请求体', PROXY_ERROR_REQUEST)
     }
   }
 
@@ -532,7 +562,7 @@ async function proxyBinary(
   try {
     upstream = await send()
   } catch {
-    return errorResponse('无法连接音乐服务（网络不可达或服务未响应）')
+    return errorResponse('无法连接音乐服务（网络不可达或服务未响应）', PROXY_ERROR_NETWORK)
   }
 
   // token 失效：流式路径拿不到「200 + JSON 信封里的 99999」（读 body 就破坏流式），
@@ -542,13 +572,13 @@ async function proxyBinary(
     const renewed = await renewSession(session)
     if (!renewed) {
       // 续期失败：按「上游异常」处理，**不把上游的 401 原样透给渲染进程**。
-      return errorResponse('身份凭据已失效，自动续期失败，请重新登录')
+      return errorResponse('身份凭据已失效，自动续期失败，请重新登录', PROXY_ERROR_AUTH)
     }
     try {
       // 重新构造请求：续期后 token 已变，必须带上新 token。
       upstream = await send()
     } catch {
-      return errorResponse('无法连接音乐服务（网络不可达或服务未响应）')
+      return errorResponse('无法连接音乐服务（网络不可达或服务未响应）', PROXY_ERROR_NETWORK)
     }
   }
 
@@ -643,7 +673,7 @@ async function handleProxyRequest(
     return await dispatch(session, request, opts)
   } catch {
     // 兜底：任何未预期的异常也只回 502 + 通用提示，**不把异常消息 / 堆栈带给渲染进程**。
-    return errorResponse('无法连接音乐服务（网络不可达或服务未响应）')
+    return errorResponse('无法连接音乐服务（网络不可达或服务未响应）', PROXY_ERROR_NETWORK)
   }
 }
 
@@ -654,12 +684,12 @@ async function dispatch(
   opts: { isRelay?: () => boolean; binaryPaths: readonly string[]; http: HttpStack },
 ): Promise<Response> {
   const target = parseTarget(request.url)
-  if (!target) return errorResponse('无法识别的 sanlos:// 请求地址')
+  if (!target) return errorResponse('无法识别的 sanlos:// 请求地址', PROXY_ERROR_REQUEST)
   if (target.host !== ALLOWED_HOST) {
-    return errorResponse(`不支持的 sanlos:// 主机（只允许 ${ALLOWED_HOST}）`)
+    return errorResponse(`不支持的 sanlos:// 主机（只允许 ${ALLOWED_HOST}）`, PROXY_ERROR_REQUEST)
   }
   if (target.rest === null) {
-    return errorResponse('非法的 API 路径：只允许形如 segment/segment 的 ASCII 路径')
+    return errorResponse('非法的 API 路径：只允许形如 segment/segment 的 ASCII 路径', PROXY_ERROR_REQUEST)
   }
 
   const method = request.method.toUpperCase()

@@ -14,7 +14,12 @@
 // 依赖约束：只用浏览器 API（`fetch` / `URLSearchParams` / `Response`），
 // 不得引入 Node 内置模块或 Electron API（`src/` 会被打进渲染进程的 ESM bundle）。
 
-import { CODE_OK, CODE_TOKEN_EXPIRED } from '../../shared/constants'
+import {
+  CODE_OK,
+  CODE_TOKEN_EXPIRED,
+  PROXY_ERROR_AUTH,
+  PROXY_ERROR_NETWORK,
+} from '../../shared/constants'
 import type { Album, Artist, AudioSpec, Genre, Playlist, Song } from '../../shared/types'
 import type {
   LyricEntry,
@@ -267,6 +272,25 @@ function isEnvelope(value: unknown): value is Envelope {
   return isRecord(value) && typeof value['code'] === 'number'
 }
 
+/**
+ * 读信封里的**代理层类别标记**（`proxy` 字段）。
+ *
+ * ⚠⚠ **为什么必须有它**（T130）：
+ *    主进程把**所有**代理层故障都转成 `502 + { code: -1, msg }`
+ *    （超时、网络不可达、未连接、未登录、路径非法、请求体非法 —— 全是同一个形状），
+ *    而 `code = -1` **与服务端真实业务码撞码**（实测：榜单端点 `page=list` 返回
+ *    `{ code: -1, subcode: 400 }`）⇒ 不看这个标记就**分不出**
+ *    「网络 / 代理层故障（可重试）」与「服务端业务拒绝（按 code 处理）」。
+ *
+ * ⚠ **只有主进程代理层错误才带它**；服务端自己的业务错误**没有**这个字段
+ *    ⇒ 读不到就当「不是代理层错误」（语义与改动前完全一致）。
+ */
+function readProxyKind(value: unknown): string | null {
+  if (!isRecord(value)) return null
+  const kind = value['proxy']
+  return typeof kind === 'string' ? kind : null
+}
+
 /** 拼接查询串；`undefined` / `null` 的键跳过。 */
 function buildQuery(query: Record<string, string | number | undefined> | undefined): string {
   if (!query) return ''
@@ -412,13 +436,36 @@ export async function apiCall<T>(path: string, opts: ApiCallOptions = {}): Promi
   try {
     parsed = JSON.parse(text)
   } catch {
-    throw new Error(`服务器响应异常（HTTP ${res.status}）`)
+    // ⚠⚠ **响应不是 JSON**（中继 / 网关返回的 HTML 错误页）⇒ 属**链路故障**
+    //    ⇒ 归 `ApiNetworkError`（可重试），而不是「服务端拒绝」。
+    // ⚠ **消息逐字不变** ⇒ 既有断言 `服务器响应异常（HTTP 502）` 一条都不用改。
+    throw new ApiNetworkError(`服务器响应异常（HTTP ${res.status}）`)
   }
   if (!isEnvelope(parsed)) {
     // 是 JSON 但没有信封结构：说「不是预期信封」，别报 HTTP 异常（HTTP 200 报 HTTP 异常会误导排障）。
+    // ⚠ 保持普通 `Error`（**不是**网络故障：服务端返回了合法 JSON，只是不是本协议的信封）
+    //    ⇒ `sharedLibrary` 的 `isUnsupportedError()`（按消息文本匹配）仍然成立。
     throw new Error('响应不是预期信封')
   }
   if (parsed.code !== CODE_OK) {
+    const message = str(parsed.msg) ?? ''
+    // ⚠⚠ **代理层错误先按「类别标记」分流**（T130）：
+    //    主进程把「超时 / 网络不可达 / 未登录 / 请求不合法」都转成
+    //    `502 + { code: -1, msg, proxy }` ⇒ 而 `code = -1` **与服务端真实业务码撞码**
+    //    ⇒ 不看 `proxy` 就**分不出**「可重试的网络故障」与「服务端业务拒绝」。
+    const proxyKind = readProxyKind(parsed)
+    if (proxyKind === PROXY_ERROR_NETWORK) {
+      // 网络 / 代理层故障（**超时**也走这里）⇒ 抛 `ApiNetworkError`。
+      // ⚠ 消息**沿用主进程给的那句**（既有文案口径「以『无法连接音乐服务』开头」不变）。
+      throw new ApiNetworkError(message.length > 0 ? message : '无法连接音乐服务（网络不可达或服务未响应）')
+    }
+    if (proxyKind === PROXY_ERROR_AUTH) {
+      // ⚠ 会话失效（未连接 / 未登录 / 续期失败）⇒ 派发「会话失效」→ 外壳回登录页（规格 §5.4）
+      //    ⇒ 否则用户卡在「已登录、但每个请求都失败」的死状态里。
+      //    ⚠ 抛出的错误与「上游 99999」那条**完全一致**（同一句话、同一个业务码）。
+      notifyAuthLost()
+      throw new ApiError('登录已失效，请重新登录', CODE_TOKEN_EXPIRED)
+    }
     // ⚠️ **99999 = 身份凭据已失效**。
     //    主进程收到 99999 时会**先静默续期一次**再重试；只有**续期也失败**
     //    （口令改了 / 中继不通）时，99999 才会透到渲染进程。
@@ -428,7 +475,8 @@ export async function apiCall<T>(path: string, opts: ApiCallOptions = {}): Promi
       notifyAuthLost()
       throw new ApiError('登录已失效，请重新登录', parsed.code)
     }
-    const message = str(parsed.msg) ?? ''
+    // ⚠ `proxy: 'request'`（客户端用错了：地址 / 路径 / 请求体）与**服务端业务错误**
+    //    都仍然是 `ApiError` ⇒ 业务码原样带出去，**语义一点没变**。
     throw new ApiError(message.length > 0 ? message : `请求失败（code=${parsed.code}）`, parsed.code)
   }
   // ⚠️ 一次**成功**的请求说明会话又可用了 → **重新武装**「会话失效」通知
