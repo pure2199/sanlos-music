@@ -118,3 +118,56 @@ describe('T119：文档/源码不许再说「服务端不能浏览目录」', ()
     expect(STALE_CLAIM.test(read('docs/changelog.md'))).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// T133：T119 那张端点表里 `reconnect-check` 写错了 ⇒ **订正标注 ＋ 钉子**
+// ---------------------------------------------------------------------------
+//
+// ⚠ **为什么要另立小任务**：台账明写「历史段不篡改 ⇒ 另立小任务订正」
+//    ⇒ 原表那一行**保留不动**，订正写在**紧邻表下方**（读者看表时**当场**看得见）。
+//
+// ⚠ **本节钉三件事**：
+//    ① 两处表（calibration 的 T119 节 ＋ T119 规格文档）的**紧邻处**都有订正标注；
+//    ② **代码**里用的是**真实路径**（客户端**不接**这个端点 ⇒ 代码不会跟着错）；
+//    ③ ⚠ **原表那一行仍然保留 `reconnect-check`**
+//       ⇒ 把「历史段不篡改」变成**可执行的契约**：
+//       将来有人「好心」把历史表直接改对 ⇒ 测试变红 ⇒ 提醒他该**另加订正**而不是改历史。
+
+describe('T133：T119 端点表的订正', () => {
+  /** T119 那张端点表 `sharedLibrary` 那一行（**历史原文，一个字都不能改**）。 */
+  const HISTORIC_ROW =
+    '| `sharedLibrary` | `/shared-library/{list,detail,create,edit,delete,scan,scan-all,reconnect,reconnect-check}` |'
+
+  it('① calibration 的 T119 端点表**紧邻处**有订正标注（真实路径 = reconnect/check）', () => {
+    const md = read('docs/calibration.md')
+    const at = md.indexOf(HISTORIC_ROW)
+    expect(at).toBeGreaterThan(-1)
+    // ⚠ 只看表**后面**的一段 ⇒ 订正必须在表**旁边**，不能塞到文末某处。
+    const nearby = md.slice(at, at + 2000)
+    expect(nearby).toContain('/shared-library/reconnect/check')
+    expect(nearby).toContain('订正')
+  })
+
+  it('② T119 规格文档里同样有订正标注', () => {
+    const md = read('docs/superpowers/specs/2026-11-19-sanlos-music-t119-doc-claims.md')
+    const at = md.indexOf(HISTORIC_ROW)
+    expect(at).toBeGreaterThan(-1)
+    const nearby = md.slice(at, at + 2000)
+    expect(nearby).toContain('/shared-library/reconnect/check')
+    expect(nearby).toContain('订正')
+  })
+
+  it('③ **原表那一行仍然保留 `reconnect-check`**（历史段不篡改 ⇒ 钉成可执行的契约）', () => {
+    expect(read('docs/calibration.md')).toContain(HISTORIC_ROW)
+    expect(read('docs/superpowers/specs/2026-11-19-sanlos-music-t119-doc-claims.md')).toContain(
+      HISTORIC_ROW,
+    )
+  })
+
+  it('④ **代码**里用的是真实路径（客户端不接这个端点 ⇒ 代码不会跟着错）', () => {
+    const src = read('src/api/sharedLibrary.ts')
+    expect(src).toContain('/shared-library/reconnect/check')
+    // ⚠ 不许把**错的**路径当成真实路径写进代码注释。
+    expect(src).not.toContain('`/shared-library/reconnect-check`')
+  })
+})

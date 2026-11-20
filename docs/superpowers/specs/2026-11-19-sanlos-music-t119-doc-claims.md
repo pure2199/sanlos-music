@@ -33,6 +33,14 @@
 | `appCenter` | `/app-center/authed-dir/list`（GET）、`/app-center/authed-dir/sub/list`（GET）、`/app-center/authed-dir/sub/create`（POST） |
 | `sharedLibrary` | `/shared-library/{list,detail,create,edit,delete,scan,scan-all,reconnect,reconnect-check}` |
 
+> ⚠ **T133 订正（2026-11-21）**：上面这张表 `sharedLibrary` 一族的**最后一个端点写错了** ——
+> 真实路径是 `/shared-library/reconnect/check`（**不是** `reconnect-check`）
+> （2026-11-20 T122 真机反解飞牛前端确认 ⇒ 见
+> `docs/superpowers/specs/2026-11-20-sanlos-music-t122-shared-library.md` §二.3）。
+> ⚠ **原表那一行按纪律保留不动**（历史段不篡改）⇒ 订正写在这里，让看表的人**当场**看到。
+> ⚠ 客户端**不接**这个端点（**全是 POST 写操作**；客户端是播放端 ⇒ 只读 `list` / `detail`）
+> ⇒ **代码里没有这个错**（`src/api/sharedLibrary.ts` 写的就是真实路径）。
+
 **真机实测**（只打 GET，**不碰任何写操作**）：
 
 | 端点 | 实测 |

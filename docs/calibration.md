@@ -7713,6 +7713,15 @@ Phase B = **真实 userData**、**只看不播**。
 | `appCenter` | `/app-center/authed-dir/list`（GET）、`/app-center/authed-dir/sub/list`（GET）、`/app-center/authed-dir/sub/create`（POST） |
 | `sharedLibrary` | `/shared-library/{list,detail,create,edit,delete,scan,scan-all,reconnect,reconnect-check}` |
 
+> ⚠ **T133 订正（2026-11-21）**：上面这张表 `sharedLibrary` 一族的**最后一个端点写错了** ——
+> 真实路径是 `/shared-library/reconnect/check`（**不是** `reconnect-check`）
+> （2026-11-20 T122 真机反解飞牛前端确认 ⇒ 见 calibration **第一百零一节** 与
+> `docs/superpowers/specs/2026-11-20-sanlos-music-t122-shared-library.md` §二.3）。
+> ⚠ **原表那一行按纪律保留不动**（历史段不篡改）⇒ 订正写在这里，让看表的人**当场**看到。
+> ⚠ 客户端**不接**这个端点（`create` / `edit` / `delete` / `scan` / `scan-all` / `reconnect` /
+> `reconnect/check` **全是 POST 写操作**；客户端是播放端 ⇒ 只读 `list` / `detail`）
+> ⇒ **代码里没有这个错**（`src/api/sharedLibrary.ts` 写的就是真实路径）。
+
 **真机实测**（只打 GET，**不碰任何写操作**）：
 
 | 端点 | 实测 |
@@ -9288,3 +9297,70 @@ NAS 重启后首次请求撞上 **30 s 超时**时，主进程协议代理返回
 3. ⚠ **「歌单」页侧栏仍不排序**（本轮不修）；
 4. ⚠ 面板**首次打开仍全量取回**（服务端接口如此）⇒ 歌单极多时首次打开仍要拉全量；
 5. ⚠ 本轮**没有真机复验**（改动还没发版）⇒ 线上产物仍精确对应 tag `v0.4.5`。
+
+---
+
+## 第一百一十三节、T133：T119 端点表订正（`reconnect-check` → `reconnect/check`）（2026-11-21）
+
+⚠ 本节记的是队列里挂了很久的**最后一项**（台账从 T122 起就写着「待另立小任务订正」）。
+⚠ **纯文档改动** ⇒ 对用户**无感**；⚠ **本轮没有真机复验**（改动还没发版）⇒ 线上产物仍精确对应 tag `v0.4.5`。
+
+### 一、订正的是什么
+
+- T119（2026-11-19）从飞牛音乐 Web 前端反解出 **19 组 / 92 条**端点，其中 `sharedLibrary` 族那张表把
+  **最后一个**端点写成 `reconnect-check` ⇒ **真实路径是 `/shared-library/reconnect/check`**
+  （2026-11-20 T122 真机反解确认；`src/api/sharedLibrary.ts` 的注释里**早就写的是真实路径**）。
+- ⚠ **同族的其余 8 条已核对**：`list` / `detail` / `create` / `edit` / `delete` / `scan` / `scan-all` / `reconnect`
+  ⇒ 与 T122 规格里的写法**一致**（只有 `reconnect-check` 这条**带连字符**的写法是错的）。
+
+### 二、怎么订正（**不动历史**）
+
+⚠ **纪律冲突**：一边是「历史段不篡改」，一边是「表里那一行是错的」。
+⇒ **决定**：**原表那一行保留不动**，订正写在**紧邻表下方**（读者看表时**当场**看得见）⇒ **两处表都加**：
+
+| 位置 | 加了什么 |
+|---|---|
+| `docs/calibration.md` T119 节（第九十七节）的端点表**下方** | 引用块：真实路径 ＋ 指向 T122（第一百零一节）＋ 说明「客户端不接这个端点 ⇒ 代码里没错」 |
+| `docs/superpowers/specs/2026-11-19-sanlos-music-t119-doc-claims.md` 的同款表**下方** | 同一条引用块（**逐字一致**） |
+
+⚠ **两处都加**：只改一处 ⇒ 另一处仍会误导。
+
+### 三、钉子（`test/t119-doc-claims.test.ts` 追加 4 条，既有 4 条**一条不动**）
+
+1. ① calibration 的 T119 端点表**紧邻处**有订正标注；
+2. ② T119 规格文档里同样有订正标注；
+3. ③ ⚠ **原表那一行仍然保留 `reconnect-check`** ⇒ 把「历史段不篡改」变成**可执行的契约**
+   （将来有人「好心」把历史直接改对 ⇒ 测试变红 ⇒ 提醒他该**另加订正**而不是改历史）；
+4. ④ **代码**里用的是**真实路径**（且不许把错路径写成真实路径）。
+
+### 四、验证
+
+| 项 | 结果 |
+|---|---|
+| `tsc --noEmit` | **0** 错误 |
+| 新增用例 | **4 条**全过（该文件 4 → **8** 条，既有 4 条**零改动**） |
+| 变异自证 | **4 个变异（M1–M4）全部按预期红**（M1 红 1 / M2 红 1 / M3 红 2 / M4 红 1，判据**双向匹配**）；三个文件跑完 sha256 **都回到基线** |
+| vitest 全量 | **162 文件 / 3149 条**（⚠ **跑了 3 次：2 次全绿、1 次有 1 条既有 flaky 红** ⇒ 见「五」） |
+| 字节体检 | **bad=0** |
+
+### 五、⚠ 如实标注：全量回归里**偶发**红的那一条（**与本轮无关**）
+
+- ⚠ **现象**：全量 vitest 跑了 3 次 ⇒ **2 次全绿**、**1 次**有 1 条红：
+  `test/download-manager.test.ts` →「下载：管理器 › 取消排队中的任务 → 状态 canceled，且**不再取流**」。
+- ⚠ **与本轮无关**：本轮只改**文档与注释**（`docs/calibration.md`、T119 规格文档、`test/t119-doc-claims.test.ts`）
+  ⇒ 碰不到下载链路；且该文件**单跑 3 次全绿**（27 条）。
+- ⚠ **根因（读代码坐实）**：`run()` 在调用 `fetchStream` **之前**有一个
+  `await (deps.statSize ?? defaultStatSize)(partPath)`（`electron/downloadManager.ts:585`）
+  ⇒ 那条用例断言 `fetched` 里**已经有** 'song-a'，而「发起取流」要等这个 await 走完
+  ⇒ 用例却只 `await tick(); await tick()`（**两个固定宏任务**）
+  ⇒ **负载高时两个宏任务不够** ⇒ `fetched` 还是 `[]` ⇒ 断言红。
+- ⚠ **产品代码没有 bug**：`cancel()` 对 `pending` 任务是**同步**出队并标 canceled（`downloadManager.ts:464-474`），
+  `pump()` 只从 `queue` 取 ⇒ 被取消的排队任务**永远不会被取流**（判据方向是对的）。
+- ⏳ **记为 T134**：把「等固定两个宏任务」换成「**等条件成立**」（轮询到取流已发起 / 任务状态变化，带超时）
+  ⇒ ⚠ 这是**改既有测试的等待方式**（不是删断言、不是弱化断言）⇒ 单独一轮做，先给方案。
+
+### 六、遗留 / 待办
+
+- ⏳ **T134**：修 `download-manager.test.ts` 那条 flaky（固定宏任务 ⇒ 条件等待）；
+- ⏳ **v0.4.6 发版 ＋ 装版真机复验**（发版属外部可见动作 ⇒ 到那一步先找用户确认）；
+- ⏳ GitHub **2FA 未启用**；卸载项在 **HKCU**。
