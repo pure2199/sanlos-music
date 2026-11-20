@@ -150,6 +150,30 @@ function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+/**
+ * **等条件成立**（轮询 ＋ 超时上限）。
+ *
+ * ⚠ **为什么不能用「固定几个 `tick()`」**（T134 实测踩到）：
+ *    等待可能要跨过**真磁盘 IO** —— 那条用例**故意不传 `statSize`**
+ *    ⇒ 走的是默认的 `fs.stat`（真 IO，不是内存替身）
+ *    ⇒ 负载高时两个 `tick()` **根本不够**（取流都还没发起）
+ *    ⇒ 用例会**偶发**红（2026-11-21 实测：全量并行下 3 次里红 1 次，单跑 3 次全绿）。
+ *
+ * ⚠ **返回布尔而不是直接抛**：调用方要能区分「条件没成立」与「条件成立了但结果不对」。
+ *
+ * @param predicate 条件（成立即返回 true）。
+ * @param timeoutMs 超时上限（毫秒）。
+ * @returns 条件在超时内成立 ⇒ true；超时 ⇒ false。
+ */
+async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (predicate()) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}
+
 const SONG_ID = 'track_example01'
 const DIR = 'C:\\Music\\飞牛音乐'
 const FINAL = `${DIR}\\示例歌手 - 示例歌名.flac`
@@ -477,8 +501,20 @@ describe('下载：管理器', () => {
     expect(manager.list().tasks.find((t) => t.songId === 'song-b')?.status).toBe('canceled')
 
     releasers.forEach((release) => release())
-    await tick()
-    await tick()
+
+    // ⚠ **T134：等条件，不等「固定几个宏任务」**。
+    //   ① 先等 song-a **真的完成** —— 这是「队列确实推进过」的可靠信号
+    //      （song-a 完成后，pump 的 while 循环才会去处理下一个 ⇒ song-b 若还在队列里就会被取流）；
+    //      ⚠ 这一步**超时即失败**：否则后面的断言会在「song-a 还没完成」时**假绿**。
+    const songADone = await waitUntil(
+      () => manager.list().tasks.find((t) => t.songId === 'song-a')?.status === 'done',
+    )
+    expect(songADone).toBe(true)
+
+    //   ② 再给一个**有上限的观察窗**：若「取消」失效，song-b 会被取流 ⇒ 这里会看到。
+    //      ⚠ 观察窗是**必要的**：「没发生」这类判据必须有对照窗口才成立（否则等于没断言）。
+    const songBTaken = await waitUntil(() => fetched.includes('song-b'), 300)
+    expect(songBTaken).toBe(false)
 
     expect(fetched).toEqual(['song-a'])
   })
