@@ -68,9 +68,11 @@
   gap: 6px;
 }
 
-/* 搜索框（T30）：歌单多了以后光靠滚动找不动。 */
+/* 搜索框（T30）：歌单多了以后光靠滚动找不动。
+ * ⚠️ **T132**：宽度从「独占一行」改成「与排序下拉并排」
+ *    ⇒ 面板**只多一行**（分页那行）⇒ 浮层不会更挡下面的列表。 */
 .sanlos-addtoplaylist__search {
-  flex: 1 1 100%;
+  flex: 1 1 160px;
   box-sizing: border-box;
   padding: 4px 8px;
   border: 1px solid var(--border);
@@ -107,6 +109,42 @@
 
 .sanlos-addtoplaylist__option:hover {
   background: var(--surface-sunken);
+}
+
+/* 分页（T132）：歌单极多时一页只给 20 个（服务端是全量接口 ⇒ 本地切片）。 */
+.sanlos-addtoplaylist__pager {
+  flex: 1 1 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.sanlos-addtoplaylist__page-button {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.sanlos-addtoplaylist__page-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sanlos-addtoplaylist__page-button:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.sanlos-addtoplaylist__page-info {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .sanlos-addtoplaylist__checkbox {

@@ -63,11 +63,85 @@ export interface AddToPlaylistProps {
 }
 
 /** 面板里的一个歌单条目。 */
-interface PlaylistEntry {
+export interface PlaylistEntry {
   id: string
   name: string
   /** 歌单里的曲目数（展示用，可能为空）。 */
   trackCount?: number
+  /**
+   * 更新时间（ISO 串；**未实测** ⇒ 可能没有）。
+   *
+   * ⚠ 服务端 `playlist/list` 的字段形状**至今未实测**（该账号实测 `total=0`）
+   *   ⇒ 这里**允许缺省**，缺省时按「未知」处理（排序时排最后）。
+   */
+  updatedAt?: string | null
+}
+
+/**
+ * 面板里的排序方式。
+ *
+ * - `name`：按**名称**升序（默认）；
+ * - `updatedAt`：按**更新时间新→旧**（缺失的排最后）。
+ */
+export type PlaylistSortKey = 'name' | 'updatedAt'
+
+/**
+ * 面板每页显示多少个歌单。
+ *
+ * ⚠ **为什么是前端分页**：`playlist/list` 是**全量**接口（`fetchAllByPaging` 取全）
+ *   ⇒ 面板拿到的本来就是**全部**歌单 ⇒ 分页只能是**本地切片**。
+ * ⚠ **为什么不能改成服务端分页**：面板有**搜索**（前端子串匹配）⇒
+ *   一旦只取一页，搜索就**搜不到不在这一页的歌单** ⇒ 功能倒退。
+ */
+export const PANEL_PAGE_SIZE = 20
+
+/** 把「更新时间」解析成毫秒时间戳；**解析不出来 ⇒ NaN**（= 未知）。 */
+function parseUpdatedAt(value: string | null | undefined): number {
+  if (!value) return Number.NaN
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? Number.NaN : parsed
+}
+
+/** 按名称升序（同名 ⇒ 按 id ⇒ 保证顺序**确定**）。 */
+function compareByName(a: PlaylistEntry, b: PlaylistEntry): number {
+  const byName = a.name.localeCompare(b.name, 'zh-Hans-CN')
+  if (byName !== 0) return byName
+  return a.id.localeCompare(b.id)
+}
+
+/**
+ * 按更新时间**新→旧**排序。
+ *
+ * ⚠ **未知（没有 / 解析不出来）的排最后**（不是最前）——
+ *   理由：「不知道什么时候改过的」比「明确知道它很旧」更值得被看见。
+ * ⚠ **全部未知时退化为按名称**（服务端可能**根本不给**这个字段）。
+ */
+function compareByUpdatedAt(a: PlaylistEntry, b: PlaylistEntry): number {
+  const at = parseUpdatedAt(a.updatedAt)
+  const bt = parseUpdatedAt(b.updatedAt)
+  const aKnown = Number.isFinite(at)
+  const bKnown = Number.isFinite(bt)
+  if (!aKnown && !bKnown) return compareByName(a, b)
+  if (!aKnown) return 1
+  if (!bKnown) return -1
+  if (at !== bt) return bt - at
+  return compareByName(a, b)
+}
+
+/**
+ * 按指定方式排序（**不改动入参** ⇒ 返回新数组）。
+ *
+ * @param entries 待排序的歌单。
+ * @param key 排序方式。
+ * @returns 排好序的歌单（新的数组）。
+ */
+export function sortPlaylistEntries(
+  entries: readonly PlaylistEntry[],
+  key: PlaylistSortKey,
+): PlaylistEntry[] {
+  const sorted = [...entries]
+  sorted.sort(key === 'updatedAt' ? compareByUpdatedAt : compareByName)
+  return sorted
 }
 
 /** 一次写回的逐项结果。 */
@@ -139,6 +213,12 @@ export function AddToPlaylist({
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   /** 搜索关键词（T30）。 */
   const [query, setQuery] = useState('')
+  /** 排序方式（T132：默认按名称）。 */
+  const [sortKey, setSortKey] = useState<PlaylistSortKey>('name')
+  /** 当前页（T132：1 起）。 */
+  const [page, setPage] = useState(1)
+  /** 列表容器（翻页后要把滚动位置复位到顶部）。 */
+  const listRef = useRef<HTMLSpanElement | null>(null)
   /** 在途（防重复点击）。 */
   const [busy, setBusy] = useState(false)
   /** 提示（成功）/ 错误（失败）。 */
@@ -155,6 +235,36 @@ export function AddToPlaylist({
     if (!keyword) return playlists
     return playlists.filter((item) => item.name.toLowerCase().includes(keyword))
   }, [playlists, query])
+
+  /**
+   * 过滤后**再排序**（T132）。
+   *
+   * ⚠ 排序在**过滤之后** ⇒ 「搜到的那些」按所选方式排，不是全量排完再筛。
+   */
+  const sorted = useMemo(() => sortPlaylistEntries(filtered, sortKey), [filtered, sortKey])
+
+  /** 总页数（至少 1）。 */
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PANEL_PAGE_SIZE))
+
+  /**
+   * 当前页（**夹上界**）。
+   *
+   * ⚠ **为什么要夹**：搜索 / 换排序会让结果变少 ⇒ 原来的页码可能**越界**
+   *   ⇒ 不夹的话会渲染出**空页**（「这一页什么都没有」）。
+   */
+  const currentPage = Math.min(Math.max(1, page), totalPages)
+
+  /** 当前页显示的那一批。 */
+  const paged = useMemo(
+    () => sorted.slice((currentPage - 1) * PANEL_PAGE_SIZE, currentPage * PANEL_PAGE_SIZE),
+    [currentPage, sorted],
+  )
+
+  /** 服务端**有没有**给更新时间（一个都没有 ⇒ 「按更新时间」不可用）。 */
+  const hasUpdatedAt = useMemo(
+    () => playlists.some((item) => Number.isFinite(parseUpdatedAt(item.updatedAt))),
+    [playlists],
+  )
 
   /** 取歌单名（写回汇报用）。 */
   const nameOf = useCallback(
@@ -175,10 +285,13 @@ export function AddToPlaylist({
           id: item.id,
           name: item.name,
           trackCount: item.trackCount,
+          updatedAt: item.updatedAt,
         })),
       )
       // ⚠️ **默认一个都不勾**：多选场景下默认勾第一个会让用户「以为已经选好了」。
       setSelectedIds([])
+      // ⚠ 重新打开面板 ⇒ **回到第 1 页**（上次的页码对这一次没意义）。
+      setPage(1)
     } catch (err) {
       setError(describeError(err))
     } finally {
@@ -280,6 +393,13 @@ export function AddToPlaylist({
 
   // ⚠️ 没选中**且**面板没开 → 不渲染。
   //    （写回成功后选中被清空，但面板要**留在原地**显示成功提示。）
+  // ⚠ **T132**：换页 / 换排序 / 改搜索 ⇒ 列表滚动位置**回到顶部**
+  //   （否则停在上一页的滚动位置 ⇒ 用户看到的是中间几行，像是乱序）。
+  useEffect(() => {
+    const list = listRef.current
+    if (list) list.scrollTop = 0
+  }, [currentPage, query, sortKey])
+
   if (count === 0 && !open) return null
 
   return (
@@ -319,16 +439,46 @@ export function AddToPlaylist({
                 aria-label="搜索歌单"
                 placeholder="搜索歌单…"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                // ⚠ **T132**：改搜索词 ⇒ **回到第 1 页**
+                //   （否则搜到的结果可能落在第 3 页 ⇒ 用户眼前一片空白 ⇒ 假「搜不到」）。
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setPage(1)
+                }}
               />
 
-              {filtered.length === 0 ? (
+              {/* ⚠️ **T132：排序**（默认按名称）。 */}
+              <label className="sanlos-addtoplaylist__field">
+                <span className="sanlos-addtoplaylist__label">排序</span>
+                <select
+                  className="sanlos-addtoplaylist__select"
+                  aria-label="歌单排序"
+                  value={sortKey}
+                  onChange={(event) => {
+                    setSortKey(event.target.value === 'updatedAt' ? 'updatedAt' : 'name')
+                    // ⚠ 换排序 ⇒ **回到第 1 页**（顺序变了，页码没有意义）。
+                    setPage(1)
+                  }}
+                >
+                  <option value="name">按名称</option>
+                  <option value="updatedAt" disabled={!hasUpdatedAt}>
+                    按更新时间（新→旧）
+                  </option>
+                </select>
+              </label>
+
+              {sorted.length === 0 ? (
                 <span className="sanlos-addtoplaylist__empty">
                   {`没有匹配「${query.trim()}」的歌单`}
                 </span>
               ) : (
-                <span className="sanlos-addtoplaylist__list" role="group" aria-label="歌单列表">
-                  {filtered.map((item) => (
+                <span
+                  className="sanlos-addtoplaylist__list"
+                  role="group"
+                  aria-label="歌单列表"
+                  ref={listRef}
+                >
+                  {paged.map((item) => (
                     <label key={item.id} className="sanlos-addtoplaylist__option">
                       <input
                         type="checkbox"
@@ -347,6 +497,31 @@ export function AddToPlaylist({
                       )}
                     </label>
                   ))}
+                </span>
+              )}
+
+              {/* ⚠️ **T132：分页**（前端切片；服务端 `playlist/list` 是全量接口 ⇒ 只能本地切）。 */}
+              {totalPages > 1 && (
+                <span className="sanlos-addtoplaylist__pager" role="group" aria-label="歌单分页">
+                  <button
+                    type="button"
+                    className="sanlos-addtoplaylist__page-button"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage(currentPage - 1)}
+                  >
+                    上一页
+                  </button>
+                  <span className="sanlos-addtoplaylist__page-info">
+                    {`第 ${currentPage}/${totalPages} 页`}
+                  </span>
+                  <button
+                    type="button"
+                    className="sanlos-addtoplaylist__page-button"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage(currentPage + 1)}
+                  >
+                    下一页
+                  </button>
                 </span>
               )}
 
