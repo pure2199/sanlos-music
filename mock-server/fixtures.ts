@@ -1105,3 +1105,63 @@ export const EMBEDDED_LYRIC_SONG_GUID = 't2'
 
 /** 内嵌歌词的内容（写进 WAV 的 `ID3 ` 块里的 `USLT` 帧）。 */
 export const EMBEDDED_LYRIC_LRC = '[00:01.00]内嵌歌词第一行\n[00:05.00]内嵌歌词第二行'
+
+// ---------------------------------------------------------------------------
+// T126：MP4 / M4A 的 `moov` 在**文件尾**
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **这首不进共享 `SONGS`** —— 共享 fixtures 一条不改
+//    （T97 断言「随机挑了 **8** 首」⇒ 加了就不是 8 首了）
+//    ⇒ 由 E2E **按实例注入**（`createMockServer({ songs: [...SONGS, MP4_TAIL_LYRIC_SONG] })`）。
+//
+// ⚠️ mock 的 `track/stream` 对这个 guid 返回一个「**`moov` 在文件尾**」的 MP4：
+//    `mdat` **故意 > 64 KB** ⇒ 头 64 KB 里**没有** `moov`
+//    ⇒ 客户端的流式层**必须尾读文件尾**才拿得到 `©lyr`。
+//
+// ⚠️ **音频不可解码**（`mdat` 是占位字节，不是真 AAC）⇒ E2E **不断言「能播」**，
+//    只断言「歌词确实从**内嵌层**拿到了」⇒ 如实标注，不假装验过播放。
+
+/** 那首「`moov` 在文件尾的 MP4」的 guid。 */
+export const MP4_TAIL_LYRIC_SONG_GUID = 't126-mp4'
+
+/** 内嵌歌词的内容（写进 MP4 的 `©lyr`）。 */
+export const MP4_TAIL_LYRIC_LRC = '[00:01.00]尾读内嵌第一行\n[00:05.00]尾读内嵌第二行'
+
+/** 那首歌（**按实例注入**用；共享 `SONGS` 一条不改）。 */
+export const MP4_TAIL_LYRIC_SONG: RawSong = {
+  guid: MP4_TAIL_LYRIC_SONG_GUID,
+  title: '示例曲目 尾读 MP4',
+  duration: 212500,
+  coverId: null,
+  artists: [{ guid: 'a1', name: '示例歌手甲', coverId: 'artist_0123456789abcdef', createdAt: T0, updatedAt: T0 }],
+  album: {
+    guid: 'al1',
+    name: '示例专辑一',
+    coverId: 'album_0123456789abcdef',
+    releaseDate: '2003-07-31',
+    barcode: '6941234567890',
+    createdAt: T0,
+    updatedAt: T0,
+  },
+  audioSpec: {
+    bitDepth: 16,
+    sampleRate: 44100,
+    channel: 2,
+    bitrate: 128000,
+    codec: 'aac',
+    container: '',
+    duration: 212500,
+    format: 'm4a',
+    path: '/vol02/1000-0-music/sample/t126-mp4.m4a',
+    size: 200000000,
+  },
+  year: 2003,
+  trackNo: 1,
+  discNo: 1,
+  isrc: 'CNA120300002',
+  isCue: false,
+  createdAt: T0,
+  updatedAt: T0,
+  genres: [],
+  isFavorite: false,
+}

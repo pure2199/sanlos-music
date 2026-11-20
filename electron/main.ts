@@ -25,7 +25,7 @@ import { createHttpStack } from './http'
 import { attachAppShortcuts } from './appShortcuts'
 import { createLyricProvider, resolveAllowedLyricSources } from './lyricProvider'
 import { createChartProvider, createQqChartSource, resolveChartBaseUrl, DEFAULT_QQ_TOPLIST_URL, type ChartFetchLike } from './chartProvider'
-import { readAtMostBytes } from './embeddedLyric'
+import { parseContentRangeTotal, readAtMostBytes, type StreamSlice } from './embeddedLyric'
 import { registerLocalMedia } from './localMedia'
 import { LOCAL_LIBRARY_FILE_NAME, LocalLibrary, readFileBytes, registerLocalLibraryIpc } from './localLibrary'
 import { registerAppSchemes } from './schemes'
@@ -604,6 +604,55 @@ if (!isPrimaryInstance) {
         }
       }
 
+      /**
+       * 取音频流的**一段字节**（T126：尾读文件尾 / 续读 `moov`）。
+       *
+       * ⚠ **尾读**：起点为负 ⇒ 发 `Range: bytes=-N`（**服务端实测支持**：
+       *    回 `206` ＋ `content-range: bytes <起>-<止>/<总长>`，**确实是文件尾**）。
+       * ⚠ **读满就断开** ⇒ 绝不把整首歌拉下来。
+       * ⚠ **总长度**从 `Content-Range` 的 `/total` 取（取不到 ⇒ `null`）。
+       *
+       * @param songId 歌曲 guid。
+       * @param start 起始偏移；**负数** = 从文件尾往回数。
+       * @param length 取多少字节。
+       */
+      const fetchStreamRange = async (
+        songId: string,
+        start: number,
+        length: number,
+      ): Promise<StreamSlice | null> => {
+        const base = session.state.base
+        const token = session.state.token
+        if (!base || !token) return null
+        const want = Math.max(0, Math.floor(length))
+        if (want <= 0) return null
+        try {
+          const url = `${base}${API_PREFIX}/track/stream?guid=${encodeURIComponent(songId)}`
+          const headers = new Headers()
+          if (start < 0) {
+            // ⚠ 尾读：最后 `want` 字节。
+            headers.set('range', `bytes=-${want}`)
+          } else {
+            const from = Math.max(0, Math.floor(start))
+            headers.set('range', `bytes=${from}-${from + want - 1}`)
+          }
+          const request = buildUpstreamRequest(
+            { method: 'GET', url, headers },
+            token,
+            session.state.isRelay,
+          )
+          const response = await http.fetch(request)
+          if (!response.ok) return null
+          const body = response.body
+          if (!body) return null
+          const bytes = await readAtMostBytes(body, want)
+          if (bytes.length <= 0) return null
+          return { bytes, totalSize: parseContentRangeTotal(response.headers.get('content-range')) }
+        } catch {
+          return null
+        }
+      }
+
       const downloads = new DownloadManager({
         fetchStream: fetchDownloadStream,
         getDownloadDir: resolveDownloadDir,
@@ -1134,6 +1183,7 @@ if (!isPrimaryInstance) {
             }
           },
           fetchStreamHead,
+          fetchStreamRange,
         },
       })
 

@@ -1102,10 +1102,24 @@ function isMp4Magic(buffer: Buffer): boolean {
   return type === 'ftyp' || type === 'moov' || type === 'styp' || type === 'mdat'
 }
 
+/**
+ * 这段字节是不是 **MP4 / M4A 容器**（ISO BMFF）。
+ *
+ * ⚠ **按文件头嗅探**，不靠扩展名猜（与本文件其它容器一致）。
+ * ⚠ **流式层用它当「要不要补读」的开关**：不是 MP4 ⇒ 头读就够了 ⇒ 不白花请求。
+ */
+export function isMp4Container(head: Buffer): boolean {
+  return isMp4Magic(head)
+}
+
 /** 一个 MP4 原子（盒子）。 */
-interface Mp4Atom {
+export interface Mp4Atom {
   /** 原子类型（4 字节 ASCII）。 */
   type: string
+  /** 原子**头**的起始偏移（相对缓冲起点）。 */
+  start: number
+  /** 原子头的长度（8 字节；`size==1` 的 64 位长度是 16 字节）。 */
+  headerSize: number
   /** 原子**内容**的起始偏移。 */
   contentOffset: number
   /** 原子内容长度（字节）。 */
@@ -1134,7 +1148,13 @@ function readMp4AtomIn(buffer: Buffer, offset: number): Mp4Atom | null {
     contentSize = buffer.length - offset
   }
   if (contentSize < headerSize) return null
-  return { type, contentOffset: offset + headerSize, contentSize: contentSize - headerSize }
+  return {
+    type,
+    start: offset,
+    headerSize,
+    contentOffset: offset + headerSize,
+    contentSize: contentSize - headerSize,
+  }
 }
 
 /** 在**内存缓冲**里找**第一个**指定类型的原子（**不递归**）。 */
@@ -1173,7 +1193,13 @@ async function readMp4Atom(reader: TagReader, offset: number): Promise<Mp4Atom |
     size = reader.size - offset
   }
   if (size < headerSize) return null
-  return { type, contentOffset: offset + headerSize, contentSize: size - headerSize }
+  return {
+    type,
+    start: offset,
+    headerSize,
+    contentOffset: offset + headerSize,
+    contentSize: size - headerSize,
+  }
 }
 
 /** 按文件偏移在 `[start, end)` 区间里找**第一个**指定类型的原子（**不递归**）。 */
@@ -1193,6 +1219,83 @@ async function findMp4Atom(
     offset = next
   }
   return null
+}
+
+/**
+ * 在**内存缓冲**里走**顶层原子表**找**第一个**指定类型的原子（**不递归**）。
+ *
+ * ⚠ **为什么需要它**：流式层只拿到**文件头**一段字节，
+ *    要「按绝对偏移续读 `moov`」就得先知道它在**文件里的位置与大小**。
+ *    - 缓冲若从**文件 0** 开始 ⇒ `start` / `contentOffset` **就是文件绝对偏移**；
+ *    - 顶层原子表按 `size` 前进 ⇒ **不靠猜**（音频数据里的同名字节不会被当成原子）。
+ */
+export function findMp4AtomInBuffer(buffer: Buffer, type: string): Mp4Atom | null {
+  return findMp4AtomIn(buffer, 0, buffer.length, type)
+}
+
+/** 在**尾段**里定位到的 `moov`。 */
+export interface Mp4MoovInTail {
+  /** `moov` 原子在**尾段**里的起始偏移（= 类型字段位置 − 头长度）。 */
+  atomStart: number
+  /** 原子声明的**总大小**（含头；`size==0` 时是实际占用的字节数）。 */
+  atomSize: number
+  /** 原子**内容**（⚠ 可能被尾窗口**截断**）。 */
+  content: Buffer
+  /** 原子是否**完整**落在尾段里。 */
+  complete: boolean
+}
+
+/**
+ * 在**文件尾段**里定位 `moov` 原子（**T126**：流式层读不到文件尾时的兜底）。
+ *
+ * ⚠ **为什么不能走顶层原子表**：尾段是从文件中间**截断**的，
+ *    它的第一个字节多半在某个原子的**载荷中间** ⇒ 从 0 走原子表必然错位。
+ *    ⇒ 只能**按 `'moov'` 签名找**，再用「大小是否自洽」校验。
+ *
+ * ⚠ **校验**（避免把音频数据里的同名字节当成原子）：
+ * - `size < 8` ⇒ 比原子头还小 ⇒ **不是**原子头；
+ * - `size == 0` ⇒ ISO 规定「延伸到文件尾」⇒ 尾段就是它的全部；
+ * - 否则必须**完整落在尾段里**才算 `complete`（截断了就标 `complete: false`，
+ *   由调用方拿 `totalSize` 换算绝对偏移后**整读**）。
+ *
+ * ⚠ **从尾往头扫**：真正的 `moov`（在文件尾时）通常是**最后一个**顶层原子
+ *    ⇒ 音频数据里的同名字节更靠前 ⇒ 先命中的是**更可能真的**那个。
+ */
+export function findMp4MoovInTail(tail: Buffer): Mp4MoovInTail | null {
+  if (!tail || tail.length < 16) return null
+  let fallback: Mp4MoovInTail | null = null
+  for (let i = tail.length - 4; i >= 4; i -= 1) {
+    if (
+      tail[i] !== 0x6d || // m
+      tail[i + 1] !== 0x6f || // o
+      tail[i + 2] !== 0x6f || // o
+      tail[i + 3] !== 0x76 // v
+    ) {
+      continue
+    }
+    const atomStart = i - 4
+    const size = readUint32BE(tail, atomStart)
+    if (size === 0) {
+      // 长度 0 = 延伸到文件尾 ⇒ 尾段就是它的全部。
+      return {
+        atomStart,
+        atomSize: tail.length - atomStart,
+        content: tail.subarray(atomStart + 8),
+        complete: true,
+      }
+    }
+    if (size < 8) continue // ⚠ 比原子头还小 ⇒ 不是原子头
+    const complete = atomStart + size <= tail.length
+    const candidate: Mp4MoovInTail = {
+      atomStart,
+      atomSize: size,
+      content: tail.subarray(atomStart + 8, complete ? atomStart + size : tail.length),
+      complete,
+    }
+    if (complete) return candidate
+    fallback = candidate
+  }
+  return fallback
 }
 
 /** MP4 的 iTunes 标签码（`©` 在 latin1 里是 0xA9）。 */
@@ -1228,6 +1331,58 @@ function parseMp4Ilst(buffer: Buffer, ilst: Mp4Atom): Map<string, string> {
 }
 
 /**
+ * 解析 **`moov` 原子的内容**（不含原子头）→ 标签。
+ *
+ * ⚠ **单独抽出来**：`moov` 的内容有两条来路 ——
+ *    ① 本地文件层：按偏移**随机访问**读出来（`parseMp4Tags`）；
+ *    ② 流式层（T126）：按**绝对偏移续读**或**尾读文件尾**读出来。
+ *    ⇒ 解析逻辑**只有这一份**，两条路共用（免得改一处漏一处）。
+ *
+ * @param content `moov` 原子的**内容**（从 `mvhd` 开始）。
+ */
+export function parseMp4MoovContent(content: Buffer): AudioTags {
+  const tags: AudioTags = {}
+  if (!content || content.length < 8) return tags
+
+  // --- 时长：moov → mvhd ---
+  const mvhd = findMp4AtomIn(content, 0, content.length, 'mvhd')
+  if (mvhd) {
+    const c = mvhd.contentOffset
+    const version = byteAt(content, c)
+    // v0：timescale / duration 各 4 字节；v1：各 8 字节（时间戳也是 8 字节）。
+    const timescale = version === 1 ? readUint32BE(content, c + 20) : readUint32BE(content, c + 12)
+    const duration = version === 1 ? readUint64BE(content, c + 24) : readUint32BE(content, c + 16)
+    if (timescale > 0 && duration > 0) tags.duration = duration / timescale
+  }
+
+  // --- 标签：moov → udta → meta → ilst ---
+  const udta = findMp4AtomIn(content, 0, content.length, 'udta')
+  if (udta) {
+    const udtaEnd = udta.contentOffset + udta.contentSize
+    const meta = findMp4AtomIn(content, udta.contentOffset, udtaEnd, 'meta')
+    if (meta) {
+      // ⚠️ `meta` 是 FullBox：头 4 字节是 version + flags → 子原子从 +4 开始。
+      const metaStart = meta.contentOffset + 4
+      const ilst = findMp4AtomIn(content, metaStart, meta.contentOffset + meta.contentSize, 'ilst')
+      if (ilst) {
+        const items = parseMp4Ilst(content, ilst)
+        const title = items.get(MP4_TAG_TITLE)
+        const artist = items.get(MP4_TAG_ARTIST)
+        const album = items.get(MP4_TAG_ALBUM)
+        if (title) tags.title = title
+        if (artist) tags.artist = artist
+        if (album) tags.album = album
+        // ⚠️ **内嵌歌词**（`©lyr`）。
+        const lyrics = items.get(MP4_TAG_LYRICS)
+        if (lyrics) tags.lyrics = lyrics
+      }
+    }
+  }
+
+  return tags
+}
+
+/**
  * 解析 MP4 / M4A 的标签。
  *
  * @param reader 读取器。
@@ -1243,44 +1398,7 @@ export async function parseMp4Tags(reader: TagReader, head: Buffer): Promise<Aud
   const buffer = await reader.read(moov.contentOffset, size)
   if (buffer.length < 8) return null
 
-  const tags: AudioTags = {}
-
-  // --- 时长：moov → mvhd ---
-  const mvhd = findMp4AtomIn(buffer, 0, buffer.length, 'mvhd')
-  if (mvhd) {
-    const c = mvhd.contentOffset
-    const version = byteAt(buffer, c)
-    // v0：timescale / duration 各 4 字节；v1：各 8 字节（时间戳也是 8 字节）。
-    const timescale = version === 1 ? readUint32BE(buffer, c + 20) : readUint32BE(buffer, c + 12)
-    const duration = version === 1 ? readUint64BE(buffer, c + 24) : readUint32BE(buffer, c + 16)
-    if (timescale > 0 && duration > 0) tags.duration = duration / timescale
-  }
-
-  // --- 标签：moov → udta → meta → ilst ---
-  const udta = findMp4AtomIn(buffer, 0, buffer.length, 'udta')
-  if (udta) {
-    const udtaEnd = udta.contentOffset + udta.contentSize
-    const meta = findMp4AtomIn(buffer, udta.contentOffset, udtaEnd, 'meta')
-    if (meta) {
-      // ⚠️ `meta` 是 FullBox：头 4 字节是 version + flags → 子原子从 +4 开始。
-      const metaStart = meta.contentOffset + 4
-      const ilst = findMp4AtomIn(buffer, metaStart, meta.contentOffset + meta.contentSize, 'ilst')
-      if (ilst) {
-        const items = parseMp4Ilst(buffer, ilst)
-        const title = items.get(MP4_TAG_TITLE)
-        const artist = items.get(MP4_TAG_ARTIST)
-        const album = items.get(MP4_TAG_ALBUM)
-        if (title) tags.title = title
-        if (artist) tags.artist = artist
-        if (album) tags.album = album
-        // ⚠️ **内嵌歌词**（`©lyr`）。
-        const lyrics = items.get(MP4_TAG_LYRICS)
-        if (lyrics) tags.lyrics = lyrics
-      }
-    }
-  }
-
-  return tags
+  return parseMp4MoovContent(buffer)
 }
 
 // ---------------------------------------------------------------------------

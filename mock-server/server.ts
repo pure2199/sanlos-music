@@ -46,6 +46,8 @@ import {
   GENRES,
   INITIAL_PLAYLIST_TRACKS,
   LYRICS,
+  MP4_TAIL_LYRIC_LRC,
+  MP4_TAIL_LYRIC_SONG_GUID,
   PLAY_HISTORY,
   PLAYLISTS,
   SONGS,
@@ -621,6 +623,74 @@ function buildWavWithId3(lrc: string): Buffer {
 /** 带 `ID3 ` 块的 WAV（**懒加载一次**）。 */
 let cachedWavWithId3: Buffer | null = null
 
+// ---------------------------------------------------------------------------
+// T126：MP4 / M4A（`moov` 在**文件尾**）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **为什么要专门造一个 MP4**：MP4 的标签在 `moov.udta.meta.ilst` 里，
+//    而 **`moov` 常在文件尾**（不流式写入的 mp4/m4a 会把索引放在末尾）
+//    ⇒ 客户端的**流式层**（只读头 64 KB）**读不到** ⇒ 必须**尾读文件尾**。
+//
+// ⚠️ **`mdat` 故意 > 64 KB** ⇒ 头 64 KB 里**只有** `ftyp` ＋ `mdat` 的一部分
+//    ⇒ **没有** `moov` ⇒ 尾读是**唯一**能拿到歌词的路。
+//
+// ⚠️ **音频不可解码**（`mdat` 是占位字节，不是真 AAC）⇒ E2E **不断言「能播」**。
+// ---------------------------------------------------------------------------
+
+/** 造一个 MP4 原子（`size` + `type` + 载荷）。 */
+function mp4Atom(type: string, payload: Buffer): Buffer {
+  const head = Buffer.alloc(8)
+  head.writeUInt32BE(payload.length + 8, 0)
+  head.write(type, 4, 'latin1')
+  return Buffer.concat([head, payload])
+}
+
+/**
+ * 造一个 iTunes 标签条目（`©nam` / `©lyr`）。
+ *
+ * ⚠️ `data` 原子的载荷前有 **8 字节**（4 字节类型指示 ＋ 4 字节 locale）—— 真文件核对过。
+ */
+function mp4IlstItem(code: string, text: string): Buffer {
+  const body = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x01]),
+    Buffer.from([0x00, 0x00, 0x00, 0x00]),
+    Buffer.from(text, 'utf8'),
+  ])
+  return mp4Atom(code, mp4Atom('data', body))
+}
+
+/**
+ * 造一个 **`moov` 在文件尾**的 MP4（内嵌歌词写在 `©lyr` 里）。
+ *
+ * @param lrc 内嵌歌词（LRC 文本）。
+ * @param mdatBytes `mdat` 载荷长度（**必须 > 64 KB** ⇒ 头窗口里没有 `moov`）。
+ */
+export function buildMp4TailMoov(lrc: string, mdatBytes = 100 * 1024): Buffer {
+  const ftyp = mp4Atom(
+    'ftyp',
+    Buffer.concat([Buffer.from('M4A ', 'latin1'), Buffer.from([0, 0, 0, 0]), Buffer.from('M4A isom', 'latin1')]),
+  )
+  const mdat = mp4Atom('mdat', Buffer.alloc(mdatBytes, 0x5a))
+  const mvhd = Buffer.alloc(100)
+  mvhd.writeUInt8(0, 0)
+  mvhd.writeUInt32BE(1000, 12)
+  mvhd.writeUInt32BE(212500, 16)
+  const meta = mp4Atom(
+    'meta',
+    Buffer.concat([
+      Buffer.from([0, 0, 0, 0]),
+      mp4Atom('hdlr', Buffer.alloc(12)),
+      mp4Atom('ilst', Buffer.concat([mp4IlstItem('©nam', '示例曲目 尾读 MP4'), mp4IlstItem('©lyr', lrc)])),
+    ]),
+  )
+  const udta = mp4Atom('udta', meta)
+  const moov = mp4Atom('moov', Buffer.concat([mp4Atom('mvhd', mvhd), mp4Atom('trak', Buffer.alloc(64)), udta]))
+  return Buffer.concat([ftyp, mdat, moov])
+}
+
+/** `moov` 在文件尾的 MP4（**懒加载一次**）。 */
+let cachedMp4TailMoov: Buffer | null = null
+
 /**
  * 解析 `Range: bytes=…` 请求头。
  *
@@ -1102,40 +1172,46 @@ export function createMockServer(options?: MockServerOptions): MockServer {
     }
     // ⚠️ **T83**：那首「内嵌歌词」的歌 ⇒ 返回一个**带 `ID3 ` 块**的 WAV
     //    （客户端读内嵌歌词时只取文件头 ⇒ 块必须在 `data` 之前）。
-    const wav =
-      guid === EMBEDDED_LYRIC_SONG_GUID
+    // ⚠️ **T126**：那首「`moov` 在**文件尾**」的歌 ⇒ 返回一个 MP4
+    //    （`mdat` > 64 KB ⇒ 头里**没有** `moov` ⇒ 客户端必须**尾读**）。
+    const isMp4Tail = guid === MP4_TAIL_LYRIC_SONG_GUID
+    const payload = isMp4Tail
+      ? (cachedMp4TailMoov ??= buildMp4TailMoov(MP4_TAIL_LYRIC_LRC))
+      : guid === EMBEDDED_LYRIC_SONG_GUID
         ? (cachedWavWithId3 ??= buildWavWithId3(EMBEDDED_LYRIC_LRC))
         : buildWav()
+    const contentType = isMp4Tail ? 'audio/mp4' : 'audio/wav'
 
     // ⚠️ **Range / 206**（T20）：拖动进度条定位靠分段请求。
     //    没有 Range 头 → 整段 200（但**必须**带 `accept-ranges: bytes`，
     //    否则客户端不知道这个资源可以分段请求）。
-    const range = parseByteRange(headers.range, wav.length)
+    //    ⚠️ **T126**：**后缀形式 `bytes=-N`（尾读）也要支持** ⇒ 真机实测服务端认。
+    const range = parseByteRange(headers.range, payload.length)
     if (range === 'unsatisfiable') {
       res.writeHead(416, {
-        'content-type': 'audio/wav',
+        'content-type': contentType,
         'content-length': '0',
         'accept-ranges': 'bytes',
-        'content-range': `bytes */${wav.length}`,
+        'content-range': `bytes */${payload.length}`,
       })
       res.end()
       return
     }
     if (range === null) {
       res.writeHead(200, {
-        'content-type': 'audio/wav',
-        'content-length': String(wav.length),
+        'content-type': contentType,
+        'content-length': String(payload.length),
         'accept-ranges': 'bytes',
       })
-      res.end(wav)
+      res.end(payload)
       return
     }
-    const slice = wav.subarray(range.start, range.end + 1)
+    const slice = payload.subarray(range.start, range.end + 1)
     res.writeHead(206, {
-      'content-type': 'audio/wav',
+      'content-type': contentType,
       'content-length': String(slice.length),
       'accept-ranges': 'bytes',
-      'content-range': `bytes ${range.start}-${range.end}/${wav.length}`,
+      'content-range': `bytes ${range.start}-${range.end}/${payload.length}`,
     })
     res.end(slice)
   })
