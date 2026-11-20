@@ -9027,3 +9027,50 @@ NAS 重启后首次请求撞上 **30 s 超时**时，主进程协议代理返回
 - ⏳ **T132**：B 组最后一项「歌单排序 / 分页」（真实账号 `playlist/list` `total=0` ⇒ **只能靠 mock 验**）；
 - ⏳ **T119 端点表订正**（`reconnect-check` 应为 `reconnect/check`）⇒ 历史段不篡改 ⇒ 另立小任务；
 - ⏳ GitHub 账号 **2FA 未启用**；卸载项落在 **HKCU** ⇒ 要回按机器需 `/allusers`。
+## 第一百零九节、T129：发版 v0.4.5（发布后核对 ＋ 装版复验）（2026-11-20）
+
+> 这一节记的是**发布之后**的那一轮：Release 核对 ＋ **把线上安装包装进 `D:\Sanlos Music`** ＋ **已装版**的真机复验。
+
+### 一、Release 核对（公开 API，只读）
+
+| 项 | 实测 |
+|---|---|
+| `draft` / `prerelease` | `false` / `false` |
+| 发布于 | `2026-11-20T12:48:38Z` |
+| 资产 | **3 个**：`latest.json`（472 B）、`SanlosMusic-Portable-0.4.5.exe`（79,046,880 B）、`SanlosMusic-Setup-0.4.5.exe`（86,143,023 B） |
+| 资产 digest（GitHub 侧） | `latest.json` → `5c38a3588760f38b…`；`SanlosMusic-Portable-0.4.5.exe` → `140f1c50daea7daa…`；`SanlosMusic-Setup-0.4.5.exe` → `096c754b88f182a5…` |
+
+### 二、装版（**原地升级**，不卸载旧版）
+
+| 环节 | 实测 | 结论 |
+|---|---|---|
+| 升级前 exe 版本 | `0.4.4` | — |
+| 升级后 exe 版本 | `0.4.5` | ✅ |
+| 已装 asar 标志 | **8/8**（① 共享库页(shared-library)、② 退出前补写(beforeunload/pagehide)、③ 发现页先出(discover/chart)、④ 页码上界(1e6)、⑤ MP4 补读(moov)、⑥ 搜索建议(search/suggest)、⑦ 初始化状态(initialization/state)、⑧ 相关性分（弱标志）(score)） | ✅ |
+| 卸载项 | `Sanlos Music 0.4.5`（HKCU） | ✅ |
+| 用户数据 | `session.bin` sha256 b7430e29ed9c ⇒ b7430e29ed9c（**逐字未变**） | ✅ |
+
+⚠ **本机没装程序在跑**才装（脚本会先查 `tasklist`，发现就在跑就**停下**，**不替用户杀进程**）。
+
+### 三、已装版的真机复验
+
+隔离 userData（只带 `session.bin` ＋ `Local State`）＋ 走 `sanlos://srv/...`（不碰凭证）＋ **静音**：
+
+- ✅ `ep-init` 探针：/initialization/state —— {"http":200,"code":0,"initialized":true,"raw":"{\"code\":0,\"msg\":\"\",\"data\":{\"initialized\":true}}"}
+- ✅ `ep-suggest` 探针：/search/suggest（固定 top-5 ＋ 带 score） —— {"ok":true,"http":200,"code":0,"msg":"","segs":{"track":{"total":5,"len":5},"album":{"total":5,"len":5},"artist":{"total":5,"len":5},"playlist":{"total":0,"len":0}},"totalItems":15,"withScore":15,"firstTitle":"音乐节","firs
+- ✅ `ep-shared` 探针：/shared-library/list —— {"http":200,"code":0,"count":2,"names":["",""],"paths":["/vol02/1000-0-3d135437","/vol1/1000/music/music"]}
+- ✅ `ui-init` 界面：连接页显示「音乐服务：已初始化」且无未初始化提示 —— {"factValue":"已初始化","noticeCount":0}
+- ✅ `ui-shared` 界面：共享页列出共享库并能浏览 —— {"count":2,"names":["1000-0-3d135437","music"],"emptyText":null,"browsed":{"trail":"1000-0-3d135437","folders":11,"tracks":0,"empty":null}}
+- ✅ `ui-suggest` 界面：搜索页建议区出现 —— {"ms":2331,"tracks":5,"albums":5,"artists":5,"errorCount":0}
+- ✅ `ui-discover` 界面：发现页榜单先出（命中异步补） —— {"boardsMs":301,"boards":4,"matchMs":16450,"boardsFirst":true,"countSamples":["31/50","10/50","0/50","0/50"]}
+- ✅ `ui-resume-flush` 界面：退出前补写「上次播放」（退出后位置比退出前更新） —— {"quitVia":"close window (closeBehavior=quit)","before":1795179291284,"after":1795179298312,"playerPositionText":"0:20","p1":{"raw":"{\"id\":\"ce34e3d4f1d84e84ae98ccd582fba96d\",\"title\":\"音乐节\",\"artist\":\"A1Trip / Ni
+
+**合计 8/8 通过。**
+
+### 四、⚠ 如实标注
+
+1. ⚠ **线上 Release 正文** 是 CI 在**发版那一刻**读 `docs/releases/v0.4.5.md` 生成的
+   ⇒ 本地文件**事后**补的「十四、已装版复验」段**不在**线上正文里
+   ⇒ 线上正文要**另外**同步（外部可见动作）；
+2. ⚠ 产物**仍然没有代码签名**（SignPath 申请已被拒）⇒ 替代信任锚是 **GitHub 构建来源证明（attestation）**；
+3. ⚠ 页码上界 ＋ MP4 内嵌歌词 仍是**纯代码级** ⇒ 真机无可见差异 ⇒ 靠自动化测试。
