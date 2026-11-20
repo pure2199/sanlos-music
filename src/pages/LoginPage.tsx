@@ -6,6 +6,7 @@ import { stripUserInfo, withDefaultPort } from '../lib/address'
 import { getBridge } from '../lib/bridge'
 import { KIND_LABELS } from '../lib/connection'
 import { useSessionStore } from '../state/sessionStore'
+import { useInitializationStore } from '../state/initializationStore'
 import { useSettingsStore } from '../state/settingsStore'
 import './login-page.css'
 
@@ -107,6 +108,9 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
   const [busy, setBusy] = useState(false)
 
   const session = useSessionStore((s) => s.session)
+  // ⚠ T128：服务端有没有完成首次初始化（**三态**：`true` / `false` / **`null`＝未知**）。
+  //    ⚠ **「未知」不显示任何东西** ⇒ 老服务端上界面零变化。
+  const initialization = useInitializationStore((s) => s.initialized)
   const setSession = useSessionStore((s) => s.setSession)
   const setConnection = useSessionStore((s) => s.setConnection)
   const setStoreCandidates = useSessionStore((s) => s.setCandidates)
@@ -302,7 +306,28 @@ export function LoginPage({ notice, sessionLost = false }: LoginPageProps = {}):
                 <dt>登录方式</dt>
                 <dd>{session.mode === 'nas' ? 'NAS 授权登录' : '独立账号登录'}</dd>
               </div>
+              {/* --- T128：服务端有没有完成首次初始化（扫库 / 建索引）--- */}
+              {/*
+                * ⚠ **只在「明确未初始化」时才显示这一项**（`initialized === false`）。
+                * ⚠ **「未知」（`null`）不显示** —— 老服务端没这个端点 ⇒ 界面**零变化**。
+                */}
+              {initialization !== null && (
+                <div className="sanlos-login__fact">
+                  <dt>音乐服务</dt>
+                  <dd>{initialization ? '已初始化' : '未初始化'}</dd>
+                </div>
+              )}
             </dl>
+            {/*
+              * ⚠ **未初始化的可行动提示**（T128）。
+              * ⚠ 文案里**不能出现「已连接」三个字** —— 既有断言是
+              *    `findByText('已连接')` ⇒ 多一个匹配就会**红**。
+              */}
+            {initialization === false && (
+              <p className="sanlos-login__notice" role="alert">
+                飞牛音乐服务尚未初始化（曲库索引还没建好）⇒ 搜索、建议、榜单都会是空的。请在飞牛音乐网页端完成初始化后再来。
+              </p>
+            )}
             <button
               type="button"
               className="sanlos-login__button sanlos-login__button--ghost"

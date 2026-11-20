@@ -755,6 +755,13 @@ function parseByteRange(
  *      **默认行为一字不变**。
  */
 export interface MockServerOptions {
+  /**
+   * 服务端有没有完成首次初始化（T128）。
+   *
+   * ⚠ **不传** = 默认 `true`（**已初始化**）⇒ 既有 E2E 用例**一个字都不受影响**。
+   * ⚠ 要验「服务端未初始化」的界面 ⇒ **在自己的实例里**传 `false`。
+   */
+  initialized?: boolean
   /** 覆盖曲库曲目（**不传** = 用默认的 `SONGS`）。 */
   songs?: RawSong[]
   /** 覆盖专辑列表（**不传** = 用默认的 `ALBUMS`）。 */
@@ -908,6 +915,8 @@ export function createMockServer(options?: MockServerOptions): MockServer {
   const authedRoots = mockAuthedRoots(songs)
   const albums = options?.albums ?? ALBUMS
   const artists = options?.artists ?? ARTISTS
+  // ⚠ T128：服务端「有没有完成首次初始化」（默认 = 已初始化 ⇒ 既有用例零影响）。
+  const initialized = options?.initialized ?? true
 
   // ---- 状态 ----
   const state: MockState = {
@@ -1250,6 +1259,13 @@ export function createMockServer(options?: MockServerOptions): MockServer {
     }
     state.favorites.delete(guid)
     sendJson(res, ok({ trackGUID: guid }))
+  })
+
+  // ⚠ T128：服务端「有没有完成首次初始化」（扫库 / 建索引）。
+  //    ⚠ **形状照真实服务端**（实测 2026-11-20，真实 NAS）：`data = { initialized: true }`
+  //    ⇒ **只有这一个字段**。
+  getRoutes.set(`${API_BASE}/initialization/state`, ({ res }) => {
+    sendJson(res, ok({ initialized }))
   })
 
   getRoutes.set(`${API_BASE}/artist/list`, ({ res, query }) => {

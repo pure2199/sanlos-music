@@ -63,6 +63,7 @@ import {
   useResolvedLibraryStore,
   type LibraryStoreApi,
 } from '../state/libraryStore'
+import { useInitializationStore } from '../state/initializationStore'
 import { AlbumCard, ArtistCard, CardGrid, formatCount } from './Cards'
 import {
   createFavoriteWriteback,
@@ -356,6 +357,9 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
   // 收藏态的**单一真相源**在 store 里（`favoriteStates`）。
   const resolved = useResolvedLibraryStore(undefined, store)
   const favoriteStates = useStore(resolved, (s) => s.favoriteStates)
+  // ⚠ T128：服务端有没有完成首次初始化（**三态**：`true` / `false` / **`null`＝未知**）。
+  //    ⚠ **「未知」不提示** ⇒ 老服务端上界面与今天**完全一样**。
+  const initialization = useInitializationStore((s) => s.initialized)
 
   /** 搜索代次：换关键字就 +1；**过期响应一律丢弃**（避免旧结果盖掉新结果）。 */
   const generationRef = useRef(0)
@@ -542,6 +546,12 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
     state.albums.items.length > 0 ||
     state.artists.items.length > 0
   const showEmpty = query.length > 0 && state.tracks.loaded && !hasAnyResult
+  // ⚠ T128：**服务端未初始化** ⇒ 曲库索引还没建好 ⇒ 搜不到是**必然**的。
+  //    ⇒ 此时说「没有找到」会把用户引向错误方向（以为歌不存在）⇒ 换成如实说明。
+  //    ⚠ **只有明确未初始化（`false`）才换** ⇒ 「未知」（`null`）保持原样。
+  const emptyText = initialization === false
+    ? '服务端尚未初始化（曲库索引还没建好）⇒ 现在搜不到东西；请先在飞牛音乐网页端完成初始化'
+    : '没有找到'
   const busy =
     state.tracks.loading || state.albums.loading || state.artists.loading
   // ⚠ T127：建议区**只在真的拿到东西时**才渲染（不留空壳）。
@@ -672,7 +682,7 @@ export function SearchPanel(props: SearchPanelProps): ReactElement {
         </p>
       )}
 
-      {showEmpty && <p className="sanlos-searchpanel__empty">没有找到</p>}
+      {showEmpty && <p className="sanlos-searchpanel__empty">{emptyText}</p>}
 
       {/* --- 搜索建议（T127）--- */}
       {/* ⚠ 建议失败**只**报在建议区 ⇒ **绝不影响**完整搜索结果的显示。 */}

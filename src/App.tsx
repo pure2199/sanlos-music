@@ -31,6 +31,7 @@ import { findSongById, restoreLastPlayback } from './state/resumeFlow'
 import { resumePort } from './player/resumeBridge'
 import { installResumeFlush } from './player/resumeFlush'
 import { useSessionStore } from './state/sessionStore'
+import { useInitializationStore } from './state/initializationStore'
 import { useCoverAccent } from './ui/useCoverAccent'
 import './styles/global.css'
 import './styles/app-shell.css'
@@ -191,6 +192,25 @@ export default function App() {
   const restored = useSessionStore((s) => s.restored)
   /** 恢复会话的动作（T38：已收敛进 `sessionStore`）。 */
   const restoreSession = useSessionStore((s) => s.restore)
+  /** T128：拉一次服务端的初始化状态（登录后 ⇒ 拉一次）。 */
+  const loadInitializationState = useInitializationStore((s) => s.load)
+
+  // -------------------------------------------------------------------------
+  // T128：登录成功后拉一次服务端的「初始化状态」
+  // -------------------------------------------------------------------------
+  //
+  // ⚠ **为什么在 App 这一层**：登录有**两条路** —— 用户手动登录 ＋ 启动时恢复会话
+  //    ⇒ 挂在 `connected` 上 ⇒ **两条路都覆盖**，且只挂**一处**。
+  //
+  // ⚠ **只拉一次**：这个状态是**服务端级**的（整个运行期不会变）
+  //    ⇒ 不轮询、不重复打 NAS（登录一次只多一个 174 ms 的请求）。
+  //
+  // ⚠ **拉不到不会影响任何东西**：`initializationApi.state()` 把异常吞成「未知」
+  //    ⇒ 老服务端上界面一个字都不显示（**零可见变化**）。
+  useEffect(() => {
+    if (!connected) return
+    void loadInitializationState()
+  }, [connected, loadInitializationState])
 
   // -------------------------------------------------------------------------
   // 会话恢复（T38：**从 App 发起**，与当前视图无关）

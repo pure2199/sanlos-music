@@ -201,6 +201,24 @@
   color: var(--text-primary);
 }
 
+/* ---------------------------------------------------------------------------
+ * T128：服务端「未初始化」的可行动提示
+ * ---------------------------------------------------------------------------
+ *
+ * ⚠ **只用语义变量**（`src/styles/tokens.css`）＋ `var(--radius-*)`。
+ * ⚠ 用 `role="alert"` 的段落 ⇒ 辅助技术也会读出来。
+ * --------------------------------------------------------------------------- */
+.sanlos-login__notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-field);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
 .sanlos-login__candidates {
   display: flex;
   flex-direction: column;
