@@ -169,26 +169,60 @@
 
 ---
 
-## 六、执行记录（**待回填**）
+## 六、执行记录
 
 ### 1. commit 与 tag
 
-（待回填）
+| 序 | commit / 对象 | 内容 |
+|---|---|---|
+| ① | `2366e79` | release：版本号四处同步 ＋ 发布说明 ＋ changelog 转正式段 |
+| ② | `37f4d36` | docs：发版**前**真机复验 ＋ calibration 第一百一十五节 ＋ 规格 §五回填 |
+| ③ | tag `v0.4.6` | annotated（tag 对象 `9abfdde`）⇒ 指向 **`37f4d36`** |
+| ④ | `5fb2306` | docs：发布说明**追加 §十**（已装版复验）⇒ **线上正文的来源** |
+
+⇒ **tag 指向 ②**（与 v0.4.5 的口径一致：先落发版前复验，再打 tag）。
 
 ### 2. 发版实测（CI run 号 / asset / attestation）
 
-（待回填）
+| 项 | 实测 |
+|---|---|
+| dispatch | `workflow_dispatch`：`release.yml`，`inputs.tag=v0.4.6`、`pack_only` **取消**、`sign` **取消** |
+| run | **#23**（id `44796425889`）⇒ **success** |
+| Release | id `453068428`，**draft=false**、**prerelease=false**，`published_at=2026-11-20T18:55:58Z` |
+| 资产（**3** 个） | `SanlosMusic-Setup-0.4.6.exe` 86143776 B ／ `SanlosMusic-Portable-0.4.6.exe` 79043109 B ／ `latest.json` 472 B |
+| sha256 | **3/3** 与 GitHub API 的 `digest` **逐字一致**（下载后本地重算） |
+| attestation | `https://github.com/pure2199/sanlos-music/attestations/70285000` |
 
 ### 3. 装版实测
 
-（待回填）
+| 项 | 实测 |
+|---|---|
+| 安装包 | Release 上的 `SanlosMusic-Setup-0.4.6.exe`（sha256 `adb3a687…`） |
+| 方式 | 静默 `NSIS /S /D=D:\Sanlos Music`（**原地升级**，**不卸载**） |
+| 主程序 | `FileVersion` **0.4.5 ⇒ 0.4.6** |
+| `app.asar` | 866419 B；`version` = **0.4.6**；**6/6** 个 v0.4.6 标志命中 |
+| 「已安装的应用」 | **只有**「Sanlos Music 0.4.6」（**HKCU**）⇒ **无 0.4.5 残留** |
+| **userData** | `session.bin`（286 B）**逐字未变**；`Local Storage` **11 → 11**；`prefs.json` 未变 |
+| 已装版真机复验 | **11 项：10 通过 / 0 失败 / 1 项真机不可观测**（逐项见 `docs/releases/v0.4.6.md` §十） |
+
+### 4. 线上正文同步（网页编辑页）
+
+| 项 | 改前（CI 生成） | 改后（网页回填） |
+|---|---|---|
+| 长度 | 6488 字符 | 8423 字符 |
+| 行尾 | **混合**（136 CRLF ＋ 23 LF） | **全 CRLF**（197 CRLF ＋ 0 LF） |
+| 内容 | §一…§九 ＋ 校验表 ＋ attestation 段 | 同上 ＋ **§十 已装版复验状态** |
+
+⇒ **归一行尾后与本地生成物逐字一致**（8226 字符，sha256 `7dedcb8e…`）
+⇒ 字节 sha256 与本地不同**属预期**（网页表单统一成 CRLF）。
 
 ---
 
 ## 七、遗留 / 待办
 
-- ⏳ **v0.4.6 的线上 Release 正文同步**（本地补的「已装版复验」段不在 CI 生成的正文里
-  ⇒ 走网页编辑页补 ⇒ 行尾会被网页表单统一成 CRLF ⇒ **字节 sha256 与本地不同属预期**）；
+- ✅ **v0.4.6 的线上 Release 正文已同步**（§六·4）⇒ 正文现在含第十节「已装版复验状态」，
+  且**全篇统一成 CRLF**（不再是「前半 CRLF ＋ 后半 LF」的混合行尾）
+  ⇒ **归一行尾后与本地 `docs/releases/v0.4.6.md` 逐字一致**；
 - ⏳ **歌单面板排序 / 分页** 的**真机**复验（真实账号 `playlist/list` `total=0` ⇒ 面板是空态
   ⇒ **控件不渲染** ⇒ 真机不可观测）⇒ 需要一个**有歌单的账号**才能验；
 - ⏳ **代理层故障分类**的**故障注入**那一支（网络故障 / 会话失效）在真机上**未验**
