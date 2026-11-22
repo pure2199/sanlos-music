@@ -987,10 +987,6 @@ export function SettingsPanel(props: SettingsPanelProps): ReactElement {
                 </dd>
               </div>
               <div className="sanlos-settings__about-row">
-                <dt>备案号</dt>
-                <dd data-testid="app-about-icp">{APP_INFO.icp}</dd>
-              </div>
-              <div className="sanlos-settings__about-row">
                 <dt>项目地址</dt>
                 <dd>
                   {/* ⚠️ 同样必须 `preventDefault`（见 `handleOpenRepository`）。 */}

@@ -165,7 +165,7 @@ describe('设置页：「关于」分类（T41）', () => {
     delete (globalThis as unknown as { sanlosPlayer?: unknown }).sanlosPlayer
   })
 
-  it('点「关于」→ 显示开发者 / 公司 / 官网 / 备案号', () => {
+  it('点「关于」→ 显示开发者 / 公司 / 官网（**不再显示备案号**）', () => {
     render(<SettingsPanel />)
 
     pickCategory('关于')
@@ -173,9 +173,11 @@ describe('设置页：「关于」分类（T41）', () => {
     expect(screen.getByRole('group', { name: '关于' })).toBeTruthy()
     expect(screen.getByTestId('app-about-developer').textContent).toBe('pure2199')
     expect(screen.getByTestId('app-about-company').textContent).toBe('广西闪链时空网络科技有限公司')
-    expect(screen.getByTestId('app-about-icp').textContent).toBe('桂ICP备202507161号-1')
     // 官网：文字就是那个地址。
     expect(screen.getByRole('link', { name: 'https://www.sanlos.cn' })).toBeTruthy()
+    // T136：备案号**已去掉** ⇒ 关于页里不许再出现它（既没有那个元素，也没有任何备案字样）。
+    expect(screen.queryByTestId('app-about-icp')).toBeNull()
+    expect(screen.getByTestId('app-about').textContent ?? '').not.toContain('备案')
   })
 
   it('点官网 → **请主进程**用系统浏览器打开（不在应用内跳转）', () => {

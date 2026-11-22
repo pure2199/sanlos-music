@@ -16,12 +16,16 @@ import { APP_INFO, EXTERNAL_LINK_ALLOWED_HOSTS, isAllowedExternalUrl } from '../
 import { resolveFileUrl, resolveManifestUrl, validateUpdateBaseUrl } from '../electron/update'
 
 describe('软件信息（T41）', () => {
-  it('开发者 / 公司 / 官网 / 备案号**齐全**', () => {
+  it('开发者 / 公司 / 官网**齐全**，且**没有备案号**（T136：已移除）', () => {
     expect(APP_INFO.name).toBe('Sanlos Music')
     expect(APP_INFO.developer).toBe('pure2199')
     expect(APP_INFO.company).toBe('广西闪链时空网络科技有限公司')
     expect(APP_INFO.website).toBe('https://www.sanlos.cn')
-    expect(APP_INFO.icp).toBe('桂ICP备202507161号-1')
+    // T136：备案号**已去掉** ⇒ 单一真相源里不许再有这个字段
+    //（留着就是「界面上不显示、数据还在」的半吊子 ⇒ 将来很容易被人顺手加回去）。
+    expect(Object.keys(APP_INFO)).not.toContain('icp')
+    // ⇒ 并且**任何**字段里都不许再出现备案号字样（防「换个字段名又塞回来」）。
+    expect(Object.values(APP_INFO).some((v) => v.includes('ICP备'))).toBe(false)
   })
 
   it('官网**自己**就在白名单里（白名单跟软件信息不许对不上）', () => {
