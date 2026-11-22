@@ -9733,3 +9733,108 @@ asar 版本 = **0.4.7**；asar 文本里含「ICP备」= **false**、含「备�
 - ⏳ **歌单面板排序 / 分页**的**真机**复验（真实账号 `playlist/list` `total=0` ⇒ 面板是空态
   ⇒ **控件不渲染**）⇒ 需要一个**有歌单的账号**才能验；
 - ⏳ GitHub 账号 **2FA 未启用**；卸载项落在 **HKCU** ⇒ 要回按机器需 `/allusers`。
+
+---
+
+## 第一百一十八节、T137：发版 v0.4.7（发版**后**：dispatch → Release → 装版 → 已装版复验 → 线上正文同步）（2026-11-22）
+
+> 起因：接上一节（第一百一十七节 ＝ **发版前**的闸门）⇒ 本节记的是**发版之后**这一整轮。
+> ⚠ 本节的数字全部来自**本机**（这台 Windows 11 开发机）＋ **真实 NAS**（FN 中继）＋ **公开 API**。
+> ⚠ 线上产物：`https://github.com/pure2199/sanlos-music/releases/tag/v0.4.7`（**公开**）。
+
+### 一、这一轮做了什么（**一条链，每步都有证据**）
+
+| 步 | 动作 | 结果 |
+|---|---|---|
+| ① | 网页 dispatch（Release 工作流） | run **#24**（id `45011492868`）⇒ **success** |
+| ② | 公开 API 核对 Release ＋ 下载资产 | Release id `454361943`，**非 draft / 非 prerelease**，资产 **3** 个，sha256 **3/3** 匹配 |
+| ③ | 原地升级装版（`D:\Sanlos Music`） | `INSTALL046_OK`（exe = **0.4.7**，userData **逐字未变**） |
+| ④ | **已装版**真机复验 12 项 | `REALMACHINE_OK`：**11 通过 / 0 失败 / 1 不可观测** |
+| ⑤ | 线上 Release 正文同步 | 6731 字符 ⇒ 归一化行尾后与仓库**逐字节一致** |
+
+### 二、dispatch 的两个入参（**默认值都是 true ⇒ 不改必然失败**）
+
+`.github/workflows/release.yml` 的三个输入：`tag`（必填）/ `pack_only`（default **true**）/ `sign`（default **true**）。
+
+⚠ `pack_only=true` ⇒ **只打包、不发版**；`sign=true` ⇒ 必然卡在 `Check SignPath configuration`
+（SignPath 申请**已被拒**）⇒ 本轮用 `tag=v0.4.7` / `pack_only=false` / `sign=false`。
+
+⭐ **「入参生效」的证据不是「我勾了」，而是「步骤被 skipped」**：
+`Summary (pack only)`、`Check SignPath configuration`、`SignPath — submit signing request…`、
+`Verify signed artifact`、`Replace artifacts with signed ones`、`Write update manifest (signed)`
+共 **6** 个步骤 **skipped** ⇒ 未签名路径**确实**走通了。
+
+⚠⚠ **GitHub 的复选框 `aria-checked` 会骗人**：取消勾选后 `aria-checked` **仍然报 `true`**
+⇒ 判据必须读 DOM 的 **checked 属性**，并顺带看**隐藏域**
+`inputs[pack_only]` / `inputs[sign]` 的 `value` 是否已经是 `false`。
+
+### 三、Release 与资产（**3/3 sha256 匹配**）
+
+| 资产 | 字节数 | sha256 |
+|---|---|---|
+| `SanlosMusic-Setup-0.4.7.exe` | 86143705 | `c78fd5a41fc723c9e98cb038d3fd5a0b2578d3c2e3989c9039a00ca552626864` |
+| `SanlosMusic-Portable-0.4.7.exe` | 79049945 | `fbeb0153a95bd2fd793b7a03e625e0cda4e94b7555222363871e76e124065a79` |
+| `latest.json` | 472 | `6f9013deacae9d4485701c1799a700fb8cc580659b847128b1b6a440c5556152` |
+
+⇒ 判据是**下载到本地后重算 sha256**，与 **GitHub API 的 `digest`** 逐个比对 ⇒ 全中。
+
+构建来源证明（attestation）：`https://slsa.dev/provenance/v1` **#70730867**
+（Created 2026-11-22 10:20:59 GMT；commit `0a3c9d86…`；run `45011492868/attempts/1`；
+trigger `workflow_dispatch`）。
+
+⚠ **`/repos/{owner}/{repo}/attestations` 这个 REST 接口对未认证请求回 404**
+⇒ **别拿这个 404 判「证明不存在」** ⇒ 那只是**权限造成的 404** ⇒
+**用浏览器打开用户真正会点的那个页面**核实（本轮就是靠浏览器确认的）。
+
+### 四、装版（**原地升级，用户数据一个字没动**）
+
+- 安装包 ＝ Release 里的 `SanlosMusic-Setup-0.4.7.exe`（sha256 与上表**逐字一致**）；
+- **没有卸载 v0.4.6** ⇒ 「已安装的应用」里**只有**「Sanlos Music 0.4.7」一条（作用域 **HKCU**）；
+- exe `FileVersion` = **0.4.7**；`app.asar` 里 `package.json` 的 `version` = **0.4.7**；
+  **6/6** 个正向标志命中；⭐ **负向标志「ICP备」「备案号」都不在**
+  ⇒ 这一版是真的把备案号**删掉**了，不是界面藏起来；
+- `session.bin`（登录态）**逐字未变**、`Local Storage` **8 → 8**、`prefs.json` 未变。
+
+### 五、已装版真机复验（**12 项：11 通过 / 0 失败 / 1 不可观测**）
+
+⚠ 手段与发版前**完全相同**（隔离 userData ＋ 真实 NAS ＋ `sanlos://srv/...` ＋ 静音）。
+
+⭐ 关键项「关于」页没有备案号：备案号元素 **0** 个、整块关于**没有**「备案」/「ICP备」字样，
+而**开发者 `pure2199` / 公司「广西闪链时空网络科技有限公司」/ 官网都在**（页面显示「版本 v0.4.7」）
+⇒ 判据**双向**，不会「整个关于块压根没渲染」也判过。
+
+⚠ 仍然 **1 项真机不可观测**（歌单面板的排序 / 分页，真实账号 0 个歌单 ⇒ 控件不渲染）
+⇒ **如实标注**，不假装验过。
+
+### 六、线上正文同步（**行尾归一化是预期内的**）
+
+- 本地重建：`docs/releases/v0.4.7.md` ＋ CI 追加的 sha256 表与 attestation 段
+  ⇒ `release/verify/t137-body-final.md`：**6731** 字符、**全 LF**、
+  sha256 `cac2cb5ed6dc3b66ad2ad4604d5b3a263fd64ef7446dee8811850a3eaf7aec28`；
+- ⚠ **网页表单提交后 GitHub 把 `\n` 统一成 `\r\n`** ⇒ 线上正文 **6906** 字符（CRLF **175** 处、
+  **无落单** `\r`）⇒ **归一化行尾后与本地文件逐字节一致** ⇒ **属预期内**（渲染效果相同）。
+
+### 七、⭐ 本轮踩到的坑（**跨项目通用**）
+
+1. ⚠⚠⚠ **Node 的 `fetch` 不走系统代理** ⇒ 拉 `github.com` 的 Release 资产必然中途 `ECONNRESET`
+   （`api.github.com` 直连反而是通的 ⇒ **同一个仓库两个域名，走的路不一样**）。
+   ✅ 正解：**Node ≥ 24.5 内置 `--use-env-proxy`** ⇒ `node --use-env-proxy` ＋
+   `HTTPS_PROXY=http://127.0.0.1:7897`（本机是 `verge-mihomo`）。
+   ⚠ 配套：**必须带断点续传（`Range`）＋ 多次重试**（本轮 Portable 第 **2** 次才成、
+   Setup 第 **3** 次才成）⇒ **一次失败不算失败**；
+   ⚠ ⚠ **curl 在这个代理下 TLS 握手直接失败**（schannel `error 35`）⇒ **别在 curl 上死磕**；
+   ⚠ ⚠ **浏览器（Chromium）却能正常打开 github.com** ⇒ **「浏览器能开」≠「命令行能通」**
+   （Chromium 走的是 QUIC/UDP 那条路）⇒ **两条路要分别测**。
+2. ⚠⚠⚠ **「人工把几千字抄进网页表单」必然出错**：本轮第一次填入**抄错 1 个字符**
+   （`**1795341901098**` 被抄成 `` **1795341901098` ``）**且末尾多 1 个换行**
+   ⇒ ⚠ **长度完全相同（6731）但 sha256 不同** ⇒ **长度相同 ≠ 内容相同**！
+   ✅ 正解：**在页面里用 `crypto.subtle` 算 sha256**，与本地文件**逐字节**比对；
+   定位到行用**逐行 sha256 数组**（本轮 176 行逐行比对 ⇒ 差异只剩「末尾多一个换行」）。
+   ⇒ 推论：**能算 hash 就别靠肉眼**；抄 6000 多字进表单是不可靠的。
+3. ⚠ **GitHub 网页表单提交会把 `\n` 统一成 `\r\n`** ⇒ 线上正文长度会 **＋换行数**
+   ⇒ 判据必须**先归一化行尾再比 sha256**，否则会误判成「内容不一致」。
+4. ⚠ **Actions 页 30 秒自动刷新会让元素 ref 过期** ⇒ `fill` 报 `STALE_ELEMENT_REF`
+   ⇒ **重新 query 取新 ref**（不是拿旧 ref 重试）。
+5. ⚠ **`attestations` 的 REST 404 ≠ 证明不存在**（见第三节）⇒ 用**浏览器打开那个页面**核实。
+6. ⚠ **旧 `.pack-staging*` 目录仍删不掉**（约 722 MB，被工作区监听器占用）
+   ⇒ 本会话内**清不掉** ⇒ 需**退出 MiniMax Code 后**再清（不绕过可恢复删除）。

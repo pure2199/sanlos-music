@@ -174,23 +174,68 @@ asar 版本 = **0.4.7**；asar 文本里含「ICP备」= **false**、含「备�
 
 ---
 
-## 六、执行记录（**待回填**）
+## 六、执行记录（**实测**）
 
 ### 1. commit 与 tag
 
-（待回填）
+- 发版内容那一笔：`d74f959`（版本号四处同步 ＋ 新建 `docs/releases/v0.4.7.md` ＋ 发版规格）；
+- 发版**前**复验那一笔：`0a3c9d8`（calibration 第一百一十七节 ＝ 发版前的闸门）；
+- 注解 tag：`v0.4.7`（tag 对象 `6509b947` ⇒ 指向 `0a3c9d8`），**已推送**；
+  tag 内 `package.json` 的 `version` = **0.4.7**，tag 内含 `docs/releases/v0.4.7.md` ＋ 发版规格；
+- 分支 `sanlos-music`：`0a3c9d8` ⇒ `f4ad12d`（发版后补记「已装版复验」那一笔）。
 
 ### 2. 发版实测（CI run 号 / asset / attestation）
 
-（待回填）
+- 网页 dispatch：Release 工作流（`release.yml`），入参 `tag=v0.4.7` / `pack_only=false` / `sign=false`；
+- run：**#24**（id `45011492868`，`workflow_dispatch`，
+  `head_sha=0a3c9d8650bb9abf75bafeca810ed4810f19ff66`）⇒ **success**（约 7 分钟）；
+- 步骤：`Typecheck` / `Unit tests` / `Build` / `Pack` / `Upload unsigned artifacts` /
+  `Verify unsigned artifacts` / `Write update manifest (unsigned)` / `Normalize asset names` /
+  `Attest build provenance` / `Prepare release notes with checksums` / `Publish GitHub Release`
+  全 **success**；
+  `Summary (pack only)` 与 `Check SignPath configuration` 等 **6** 个步骤 **skipped**
+  ⇒ `pack_only=false` 与 `sign=false` **真的生效**（否则会卡在 SignPath 检查）；
+- Release：**id `454361943`**，`tag=v0.4.7`，**非 draft**、**非 prerelease**，
+  `published_at=2026-11-22T10:21:09Z`，资产 **3** 个；
+- 三个资产：下载到本地后 **sha256 与 GitHub API 的 digest 逐个一致（3/3）** ⇒
+
+| 资产 | 字节数 | sha256 |
+|---|---|---|
+| `SanlosMusic-Setup-0.4.7.exe` | 86143705 | `c78fd5a41fc723c9e98cb038d3fd5a0b2578d3c2e3989c9039a00ca552626864` |
+| `SanlosMusic-Portable-0.4.7.exe` | 79049945 | `fbeb0153a95bd2fd793b7a03e625e0cda4e94b7555222363871e76e124065a79` |
+| `latest.json` | 472 | `6f9013deacae9d4485701c1799a700fb8cc580659b847128b1b6a440c5556152` |
+
+- 构建来源证明（attestation）：`https://slsa.dev/provenance/v1` **#70730867**
+  （页面 `https://github.com/pure2199/sanlos-music/attestations/70730867`；
+  Created 2026-11-22 10:20:59 GMT；commit `0a3c9d86…`；run `45011492868/attempts/1`；
+  trigger `workflow_dispatch`；workflow `release.yml`）。
 
 ### 3. 装版实测
 
-（待回填）
+- 安装包：Release 里的 `SanlosMusic-Setup-0.4.7.exe`（86,143,705 字节，
+  sha256 与上表**逐字一致**）⇒ 静默**原地升级**装到 `D:\Sanlos Music`
+  ⇒ **没有卸载 v0.4.6** ⇒ `INSTALL046_OK`；
+- 主程序 exe `FileVersion` = **0.4.7**；`app.asar` 里 `package.json` 的 `version` = **0.4.7**；
+  **6/6** 个 v0.4.7 正向标志命中；**负向标志**「ICP备」「备案号」**都不在**
+  ⇒ 这一版是真的把备案号删掉了（不是界面藏起来）；
+- 「已安装的应用」**只有**「Sanlos Music 0.4.7」一条（作用域 **HKCU**）⇒ **没有残留 0.4.6**；
+- 用户数据：`session.bin`（登录态）**逐字未变**、`Local Storage` **8 → 8** 个文件、
+  `prefs.json` 状态未变 ⇒ **升级没有动用户自己的东西**；
+- **已装版真机复验 12 项：11 通过 / 0 失败 / 1 不可观测**（`REALMACHINE_OK`，
+  证据 `release/verify/t137-04-realmachine-result-installed.json`）：
+  ⭐「关于」页**没有备案号**，而**开发者 `pure2199` / 公司「广西闪链时空网络科技有限公司」/ 官网都在**
+  （页面显示「版本 v0.4.7」）。
 
 ### 4. 线上正文同步（网页编辑页）
 
-（待回填）
+- Release 编辑页（`/pure2199/sanlos-music/releases/edit/v0.4.7`）⇒ 正文填入
+  `docs/releases/v0.4.7.md` ＋ CI 追加段（本地重建文件 `release/verify/t137-body-final.md`：
+  **6731** 字符、**全 LF**、sha256 `cac2cb5ed6dc3b66ad2ad4604d5b3a263fd64ef7446dee8811850a3eaf7aec28`）；
+- ⚠ **网页表单提交后 GitHub 把 `\n` 统一成 `\r\n`** ⇒ 线上正文 **6906** 字符
+  （CRLF **175** 处、**无落单** `\r`）⇒ **归一化行尾后与本地文件逐字节一致**
+  （`EQUAL_LOCAL_FILE=true`）⇒ **属预期内**（渲染效果相同，且不再混行尾）；
+- 提交后复核（公开 API）：`id=454361943`、draft=false、prerelease=false、
+  三个资产的 name / size / digest **均未变**。
 
 ---
 
