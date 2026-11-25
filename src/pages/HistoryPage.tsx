@@ -105,8 +105,14 @@ export function HistoryPage({
           />
         }
       />
+      {/*
+       * ⚠️ **T138**：两段各自的**高度角色**写在 `history-page.css` 里——
+       *    本机段 `--local`（次要列表，**有上限**，不许把 NAS 段挤没）、
+       *    NAS 段 `--nas`（主要列表，吃**剩余高度**、自己内部滚）。
+       *    少了这套约束 ⇒ 整页被列表顶破、末尾几行压在播放条底下。
+       */}
       <div className="sanlos-history">
-        <section className="sanlos-history__section">
+        <section className="sanlos-history__section sanlos-history__section--local">
           <h2 className="sanlos-history__section-title">本机播放记录</h2>
           <p className="sanlos-history__hint">这台电脑上播过的歌（只保存在本机，不会写回 NAS）</p>
           <SongList
@@ -121,7 +127,7 @@ export function HistoryPage({
           />
         </section>
 
-        <section className="sanlos-history__section">
+        <section className="sanlos-history__section sanlos-history__section--nas">
           <h2 className="sanlos-history__section-title">NAS 播放历史</h2>
           <p className="sanlos-history__hint">
             fnOS 音乐服务记录的播放历史（服务端未开放写入接口，客户端只能读取）

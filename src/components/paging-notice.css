@@ -18,6 +18,12 @@
   border: 1px solid var(--warning);
   border-radius: var(--radius-field);
   background: var(--surface-raised);
+  /*
+   * ⚠️ **T138**：提示条**不参与伸缩**（`flex: 0 0 auto`）。
+   *    它常常是某个 flex 段里的**最后一个子元素**（如「最近」页的 NAS 段）——
+   *    不钉住的话空间一紧，它先被压扁（文字被裁掉），而列表才是要看清的东西。
+   */
+  flex: 0 0 auto;
 }
 
 /* 提示文案 */

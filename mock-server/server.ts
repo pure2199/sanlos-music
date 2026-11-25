@@ -827,6 +827,14 @@ export interface MockServerOptions {
    */
   artists?: RawArtist[]
   /**
+   * 覆盖播放历史（**不传** = 用默认的 `PLAY_HISTORY`）。
+   *
+   * ⚠️ **T138 新增**：「最近」页要验「NAS 列表**自己滚**、整页**不溢出**」
+   *    ⇒ 得有一条**够长**的历史（默认 `PLAY_HISTORY` 只有 4 条 ⇒ 列表不满一屏）。
+   *    ⚠️ 共享 fixtures **一条不改** ⇒ 别的 E2E 用例**一个字都不受影响**。
+   */
+  history?: RawSong[]
+  /**
    * 测试钩子：**绑定端口**的动作（默认 = `bindSystemPort`，让系统分配）。
    *
    * ⚠ **只给测试用**：默认实现一个字都不变 ⇒ 既有调用**零影响**。
@@ -976,6 +984,8 @@ export function createMockServer(options?: MockServerOptions): MockServer {
   const authedRoots = mockAuthedRoots(songs)
   const albums = options?.albums ?? ALBUMS
   const artists = options?.artists ?? ARTISTS
+  // ⚠️ **T138**：播放历史也**按实例注入**（默认 = 共享 fixtures ⇒ 既有用例零影响）。
+  const history = options?.history ?? PLAY_HISTORY
   // ⚠ T128：服务端「有没有完成首次初始化」（默认 = 已初始化 ⇒ 既有用例零影响）。
   const initialized = options?.initialized ?? true
 
@@ -1541,7 +1551,7 @@ export function createMockServer(options?: MockServerOptions): MockServer {
 
   // 播放历史（实测确认的端点；条目形状未实测，见 fixtures 的说明）。
   getRoutes.set(`${API_BASE}/play-history/list`, ({ res, query }) => {
-    sendJson(res, ok(paginate(PLAY_HISTORY, query)))
+    sendJson(res, ok(paginate(history, query)))
   })
 
   // ---- 请求处理 ----
