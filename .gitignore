@@ -1,7 +1,12 @@
 node_modules/
 dist/
 release/
-release-probe/
+# 探针产物目录（打「探针包」用）—— 用通配而不是精确名：
+# 每一轮发版可能换一个带版本后缀的目录（如 release-probe-048/），
+# 否则它不会被忽略 ⇒ `git status` 变脏 ⇒ 有误提交 800 MB 产物的风险
+# （2026-11-26 发 v0.4.8 时发现：上一轮那个目录被文件监听器占用、删不掉，
+#  改用新目录名后 `git status` 里冒了出来）。
+release-probe*/
 # CI（.github/workflows/release.yml）的产物输出目录 —— 同样要忽略，
 # 否则本地试跑 CI 流程后 `git status` 会变脏。
 release-ci/
