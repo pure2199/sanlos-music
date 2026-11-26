@@ -9912,3 +9912,212 @@ trigger `workflow_dispatch`）。
 - ⏳ **本机记录段的「上限 240px」只在「本机记录很多条」时才起作用** ⇒ 真机（本机记录为空）**观察不到**它的视觉效果
   ⇒ 由契约单测钉住；要看视觉效果得用**本机有播放记录**的账号；
 - ⏳ GitHub 账号 **2FA 未启用**；卸载项落在 **HKCU**。
+
+---
+
+## 第一百二十节、T139：发版 v0.4.8（发版**前**的真机复验 ＝ 闸门）（2026-11-26）
+
+> 起因：T138 把「最近」页的布局缺陷修好了（commit `b40a495`）⇒ 这一节记的是**发版之前**这一轮：
+> 版本同步 → 探针打包 → asar 核对 → **真机闸门** → 全量验证 → 提交 ＋ tag。
+> ⚠ 本节的数字全部来自**本机**（这台 Windows 11 开发机）＋ **真实 NAS**（FN 中继）＋ **本地构建产物**。
+
+### 一、这一版要发的东西
+
+| 项 | 值 |
+|---|---|
+| 版本 | **0.4.8**（四处同步：`package.json` 1 处、`package-lock.json` 2 处、`README.md` 12 处、`docs/changelog.md` 转正式段）⇒ `BUMP_OK` |
+| 发布说明 | `docs/releases/v0.4.8.md`（**新建**，LF）—— CI 的 Release 正文**就来自它** ⇒ 缺它工作流直接 `throw` |
+| 提交 | `24a167b`（7 文件，+381/−17）⇒ 推远端 |
+| tag | annotated tag `v0.4.8`（tag 对象 `eebc4ab5…` → commit `24a167b5…`）⇒ 推远端 |
+
+### 二、⚠⚠ 探针打包被「镜像没生效」卡住（**本轮最值钱的坑**）
+
+现象：探针打包跑到一半 `connect ETIMEDOUT 57.155.223.240:443` ⇒ 回落到了 **GitHub**。
+
+根因（**不是网络问题**）：
+
+1. 仓库 `.npmrc` 里**本来就配了** `electron_builder_binaries_mirror` / `electron_mirror`；
+2. 但 **electron-builder 只读环境变量**（`ELECTRON_BUILDER_BINARIES_MIRROR` / `ELECTRON_MIRROR`，
+   或 `npm_config_*` 同名）⇒ **`.npmrc` 里的这两个键对它无效**；
+3. 而打包脚本是**直接 `node` 调 CLI**（**不过 npm**）⇒ 连 `npm_config_*` 那条路也走不到。
+
+✅ 正解：**只给本地探针打包脚本注入两个镜像环境变量**
+（`release/verify/t139-02c-add-mirror-env.mjs`，MARK 幂等守卫）⇒
+⚠ **不动** `scripts/pack.cjs` / `electron-builder.yml` ⇒ **CI 与正式产物的口径一个字没变**。
+
+完整性不变：镜像上 `winCodeSign-2.6.0.7z` 的 sha256 =
+`cdaec7154dda7cc31f88d886e2489379a0625a737d610b5ae7f62a12f16743a4`
+与 **builder 内置的官方校验完全一致**（实测 **MATCH**）；
+electron zip 走镜像时**命中已有缓存** `fb5e87f4…`（= `https://npmmirror.com/mirrors/electron/v32.3.3`）
+⇒ **没重下 113 MB**。
+
+⇒ 产物：`PACK_EXIT=0`；Setup **86,143,659** B ＋ Portable **79,058,363** B ＋ blockmap ＋ latest.yml ＋ win-unpacked。
+
+### 三、asar 核对（`PROBE_OK`）
+
+- `package.json` 的 version = **0.4.8**；asar 文本长 **828,714**；
+- **无**「ICP备」/「备案号」；
+- **无缺陷版那条「最近」页 CSS**（`.sanlos-history{display:flex;flex-direction:column;gap:24px;padding:16px 20px 24px}`）；
+- 正向标志 **6/6** 命中；exe 存在。
+
+⚠ **光有「正向标志命中」证明不了布局真修好了** ⇒ 几何判据在下面那一节（`ui-history-layout`）。
+
+### 四、真机闸门（13 项）：第 1 轮失败 ⇒ **做了对照诊断** ⇒ 第 2 轮全过
+
+第 1 轮：**11 通过 / 1 失败（`ui-shared`）/ 1 跳过**。
+
+失败现象：`.sanlos-shared__item` **一度出现后消失** ⇒ click **扑空**
+（Playwright 的报错只有 `waiting for locator(...)` ⇒ 是**元素消失**而不是被遮挡）。
+
+⚠⚠ **「本版回归」这个结论不能靠猜** ⇒ 新建 `release/verify/t139-03a-diag-shared-page.mjs` 做**对照诊断**：
+
+- 探针 **0.4.8** 与已装 **0.4.7** 各跑一轮，点「共享」后**逐 500 ms 采样 12 秒**；
+- 结果：**两版完全一致**（items 恒 **2**、item 可见 **1120×89**、**全程未消失**）⇒ **非本版回归**；
+- 根因在 `src/pages/SharedLibrariesPage.tsx:87`：`loadLibraries()` 失败即 `setLibraries([])` **清空列表**
+  （**既有行为**，中继带宽受限容易触发）⇒ **本版不顺手改**（另立任务），**如实记录**。
+
+第 2 轮复跑：**12 通过 / 0 失败 / 1 跳过**（`ui-playlist-sort` **真机不可观测**）。
+
+⭐ 核心第 ⑬ 项 `ui-history-layout` **通过**：
+
+| 判据 | 实测 |
+|---|---|
+| 文档高 == 视口高 | **761 == 761** ⇒ 整页**不滚动** |
+| 列表视口可视 vs 内容 | **201** < **672** ⇒ 列表**自己滚** |
+| 视口底边 vs 播放条上沿 | **630** ≤ **696** ⇒ 末尾几行**不被压住** |
+| 状态行 | 「NAS 播放历史：已加载 14 / 14」 |
+
+### 五、全量验证（`FULL_VERIFY_OK`）
+
+| 项 | 结果 |
+|---|---|
+| `build:electron` / `vite build` | **0** / **0** |
+| `tsc --noEmit` | **0 错**（6.6s） |
+| `vitest` | **163 文件 / 3155 条全绿**（28.8s；既有测试一条没少、断言一条没弱化） |
+| Playwright | **82 passed**（1.9m，**先 build 再跑** ⇒ 测的是含本次改动的 bundle） |
+| 字节体检 | `bad=0`（字节 ＋ 控制字符两轮） |
+
+### 六、⚠ 本轮踩到的坑（**跨项目通用**）
+
+1. ⚠⚠⚠ **electron-builder 不读 `.npmrc` 里的镜像键**（只读环境变量）
+   ⇒ 「仓库里明明配了镜像」**不等于**「打包走了镜像」⇒ 排查打包超时时**先看它到底连的谁**。
+2. ⚠⚠ **「本版回归」必须做「同版 vs 旧版」的对照诊断**，不能靠单次现象下结论
+   （本轮 `ui-shared` 靠 12 秒逐帧采样才定性成「既有偶发」）。
+3. ⚠ **GitHub 的复选框 `aria-checked` 会骗人**（取消勾选后仍报 `true`）
+   ⇒ 判据要读 DOM 的 **checked 属性** ＋ **隐藏域** `inputs[pack_only]` / `inputs[sign]` 的 `value`。
+4. ⚠ **Actions 页 30 秒自动刷新会让元素 ref 过期**（`STALE_ELEMENT_REF`）⇒ **重新 query 取新 ref**。
+5. ⚠ **编辑工具写中文会偶发 U+FFFD** ⇒ 写完必须扫（`t137-00-scan-fffd.mjs`）。
+6. ⚠ **`.gitignore` 里写精确目录名会漏掉同前缀的新目录**
+   （本轮 `release-probe/` 没盖住 `release-probe-048/` ⇒ 788 MB 产物进了 `git status`）
+   ⇒ 改用通配 `release-probe*/` ＋ `git check-ignore` 验证。
+
+---
+
+## 第一百二十一节、T139：发版 v0.4.8（发版**后**：dispatch → Release → 装版 → 已装版复验 → 线上正文同步）（2026-11-26）
+
+> 起因：接上一节（第一百二十节 ＝ **发版前**的闸门）⇒ 本节记的是**发版之后**这一整轮。
+> ⚠ 本节的数字全部来自**本机**（这台 Windows 11 开发机）＋ **真实 NAS**（FN 中继）＋ **公开 API**。
+> ⚠ 线上产物：`https://github.com/pure2199/sanlos-music/releases/tag/v0.4.8`（**公开**）。
+
+### 一、这一轮做了什么（**一条链，每步都有证据**）
+
+| 步 | 动作 | 结果 |
+|---|---|---|
+| ① | 网页 dispatch（Release 工作流） | run **#25**（id `45791885822`）⇒ **success** |
+| ② | 公开 API 核对 Release ＋ 下载资产 | Release id `459197760`，**非 draft / 非 prerelease**，资产 **3** 个，sha256 **3/3** 匹配，attestation **3/3** 有 |
+| ③ | 原地升级装版（`D:\Sanlos Music`） | `INSTALL048_OK`（exe = **0.4.8**，userData **逐字未变**） |
+| ④ | **已装版**真机复验 13 项 | `REALMACHINE_OK`：**12 通过 / 0 失败 / 1 不可观测** |
+| ⑤ | 线上 Release 正文同步 | `ONLINE_BODY_OK`：归一化行尾后与仓库**逐字节一致** |
+
+### 二、dispatch 的两个入参（**默认值都是 true ⇒ 不改必然失败**）
+
+`.github/workflows/release.yml` 的三个输入：`tag`（必填）/ `pack_only`（default **true**）/ `sign`（default **true**）。
+
+⚠ `pack_only=true` ⇒ **只打包、不发版**；`sign=true` ⇒ 必然卡在 `Check SignPath configuration`
+（SignPath 申请**已被拒**）⇒ 本轮用 `tag=v0.4.8` / `pack_only=false` / `sign=false`。
+
+⭐ **「入参生效」的证据不是「我勾了」，而是「步骤被 skipped」**：
+`Summary (pack only)`、`Check SignPath configuration`、`SignPath — submit signing request…`、
+`Verify signed artifact`、`Replace artifacts with signed ones`、`Write update manifest (signed)`
+共 **6** 个步骤 **skipped** ⇒ 未签名路径**确实**走通了。
+
+⚠⚠⚠ **GitHub 的复选框会骗人**：`aria-checked` 取消勾选后**仍然报 `true`**
+⇒ 判据必须读 DOM 的 **checked 属性**（本轮两个都是 `false`），
+并顺带看**隐藏域** `inputs[pack_only]` / `inputs[sign]` 的 `value`（都是 `false`）。
+
+⚠⚠⚠ **隐藏域 `value="false"` 也**不能**当判据**：本轮实测**勾选态下**隐藏域**也是** `false`
+（浏览器软刷新会把表单状态还原、隐藏域被重置）⇒ **判据只有一个：`checked` 属性**。
+
+### 三、Release 与资产（**3/3 sha256 匹配**）
+
+| 资产 | 字节数 | sha256 |
+|---|---|---|
+| `SanlosMusic-Setup-0.4.8.exe` | 86143720 | `6538775317537ab3118cadd6fbca9a70fd435fcd723b3a88f98a46ae2e2c6695` |
+| `SanlosMusic-Portable-0.4.8.exe` | 79049116 | `3f3b7b3190e47bd577a2628e62244142d4b3a322538520be3be9a2fd84e078cd` |
+| `latest.json` | 472 | `b2ce298fa6639b78f53f49f0a30b47cf0d67479ba123a0bc28d0a42cf8f9db23` |
+
+⇒ 判据是**下载到本地后重算 sha256**，与 **GitHub API 的 `digest`** 逐个比对 ⇒ 全中。
+（下载走 `--use-env-proxy` ＋ `HTTPS_PROXY=http://127.0.0.1:7897`；`api.github.com` 直连反而是通的。）
+
+构建来源证明（attestation）：**3 个资产全有**（bundle = `application/vnd.dev.sigstore.bundle.v0.3+json`），
+attestation 页面 `https://github.com/pure2199/sanlos-music/attestations/72582964`。
+
+⭐ **本轮订正了第一百一十八节的一条说法**：
+`GET /repos/{owner}/{repo}/attestations/{subject_digest}`（**带 digest**）
+**未认证也能通** ⇒ 本轮 3 个资产各查到 **1** 条；
+而**不带 digest** 的 `/repos/{owner}/{repo}/attestations` 才回 404
+⇒ **两个路径行为不同**，**别拿 404 判「证明不存在」**。
+
+### 四、装版（**原地升级，用户数据一个字没动**）
+
+- 安装包 ＝ Release 里的 `SanlosMusic-Setup-0.4.8.exe`（sha256 与上表**逐字一致**）；
+- **没有卸载 v0.4.7** ⇒ 「已安装的应用」里**只有**「Sanlos Music 0.4.8」一条（作用域 **HKCU**）；
+- exe `FileVersion` = **0.4.8**（`ProductVersion` 0.4.8.0）；
+- `app.asar` = **866,409** 字节，里面 `package.json` 的 `version` = **0.4.8**；
+  **7/7** 个正向标志命中（多出来的第 ⑦ 个是**「最近」页布局**）；
+  ⭐ **负向标志**「ICP备」「备案号」**都不在**，**缺陷版那条「最近」页 CSS 也都不在**
+  ⇒ 这一版是真的带上了修复；
+- `session.bin`（登录态）**逐字未变**、`Local Storage` **11 → 11**、`prefs.json` 未变。
+
+### 五、已装版真机复验（**13 项：12 通过 / 0 失败 / 1 不可观测**）
+
+⚠ 手段与发版前**完全相同**（隔离 userData ＋ 真实 NAS ＋ `sanlos://srv/...` ＋ 静音）。
+
+⭐ 关键项「最近」页布局：文档高 **761** == 视口高 **761**（整页不滚动）、
+列表视口可视 **201** < 内容 **672**（列表自己滚）、视口底边 **630** ≤ 播放条上沿 **696**（末尾几行不被压住）、
+状态行「NAS 播放历史：已加载 14 / 14」。
+
+⚠ 仍然 **1 项真机不可观测**（歌单面板的排序 / 分页，真实账号 0 个歌单 ⇒ 控件不渲染）
+⇒ **如实标注**，不假装验过。
+
+### 六、线上正文同步（**行尾归一化是预期内的**）
+
+- 本地重建：`docs/releases/v0.4.8.md`（已含「§七 已装版复验状态」）＋ CI 追加的 sha256 表与 attestation 段
+  ⇒ `release/verify/t139-body-final.md`：**8069** 字符、**全 LF**、
+  sha256 `f19cb92052295205cf2504b8bfa806450d59af44503ac829872e71a72fedd8fd`；
+- ⚠ **网页表单提交后 GitHub 把 `\n` 统一成 `\r\n`** ⇒ 线上正文 **8253** 字符（CRLF **184** 处、
+  **无落单** `\r`）⇒ **归一化行尾后与本地文件逐字节一致**（sha256 **仍是** `f19cb920…`）⇒ **属预期内**（渲染效果相同）；
+- 章节顺序：**§一 → §七 → CI 追加的「下载校验（sha256）」「怎么确认这个安装包是官方的」**
+  ⇒ 与 v0.4.7 的版式**一致**（⇒ §七 里那句「与本页**末尾**那张表逐字一致」仍然成立）。
+
+### 七、⭐⭐ 本轮踩到的坑（**跨项目通用**；其中第 1 条是**第一百一十八节已经踩过一次**的）
+
+1. ⚠⚠⚠ **「几千字抄进网页表单」仍然靠不住** ⇒ 但本轮**用对了方法，一次命中**：
+   - **不抄全文**，只搬**新增的那一段**（2489 字符）⇒ 抄错概率与体积一起降下来；
+   - 先在本地算出**基准 sha256**，再在页面里用 `crypto.subtle` **逐字节**比对 ⇒ **一次命中**（`f19cb920…`）。
+   ⇒ 推论（**比上一轮更明确**）：**能算 hash 就别靠肉眼**；要搬的正文**越少越好**。
+2. ⚠⚠ **本 provider 没有 `paste` 动作**（枚举里根本不存在）⇒ 只能用 `fill` / `type`；
+   而 `type` **默认会清空** ⇒ 要在正文**中间**插入必须：
+   `evaluate` 里 `setSelectionRange` **先把光标定位到分隔行** → 再 `type(clear:false)`。
+3. ⚠ **textarea 的 value 里 `\r\n` 被浏览器归一化成了 `\n`**（页面里 **5580** vs API 的 **5700**，差 **120** 个 CRLF）
+   ⇒ **在页面里算 hash 得到的是 LF 版本** ⇒ 必须与**本地 LF 文件**比，才对得上。
+4. ⚠ **页面内 `fetch` 跨站被浏览器策略拦掉**（`raw.githubusercontent.com` 标 `blocked`）
+   ⇒ **不能**在页面里现取仓库里的正文 ⇒ 只能「**本地算好 → 搬进去**」。
+5. ⚠ **Actions / 编辑页 30 秒自动刷新 ⇒ ref 会过期**（`STALE_ELEMENT_REF`）
+   ⇒ 这次改用**稳定选择器**（`textarea#release_body` / `button[type="submit"].btn-primary`）⇒ **一次通过**。
+6. ⚠ **同名按钮要靠「类型 + class」区分**：本页有 **3** 个 `button[type=submit]`
+   （`flash-close` / `Enable 2FA` / `Update release`）⇒ 用 `button[type="submit"].btn-primary` 命中**唯一**。
+7. ⚠ **隐藏域的 `value` 不可信**（见第二节）⇒ 判据只认 `checked`。
+8. ⚠ **旧 `.pack-staging*` 目录仍删不掉**（约 722 MB，被工作区监听器占用）
+   ⇒ 本会话内**清不掉** ⇒ 需**退出 MiniMax Code 后**再清（不绕过可恢复删除）；
+   回收站内 **738.3 MB** 也需用户**清空回收站**才真正释放。

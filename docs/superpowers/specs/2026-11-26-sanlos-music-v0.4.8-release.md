@@ -202,23 +202,85 @@ electron-builder 需要 `winCodeSign`（含 `rcedit`，改 exe 图标 / 元数�
 
 ---
 
-## 六、执行记录（**待回填**）
+## 六、执行记录（**实测**）
 
 ### 1. commit 与 tag
 
-（待回填）
+1. 发版内容那一笔：`24a167b569ea245c59071cc79eadad194ef0f4b1`（短 `24a167b`）——
+   版本号四处同步（0.4.7 ⇒ 0.4.8）＋ 新建 `docs/releases/v0.4.8.md` ＋ changelog 转正式段 ＋ 发版规格
+   （**7** 文件，**+381/−17**）；
+2. 注解 tag：`v0.4.8`（tag 对象 `eebc4ab5330ca7a35be2185be99a2a7592aeeb46`
+   ⇒ 指向 commit `24a167b569ea245c59071cc79eadad194ef0f4b1`），**已推送**；
+   tag 内 `package.json` 的 `version` = **0.4.8**，tag 内含 `docs/releases/v0.4.8.md` ＋ 发版规格；
+3. 提交说明：`release/verify/commit-msg-t139-release.md`；tag 说明：`release/verify/tag-msg-v0.4.8.txt`；
+4. 分支 `sanlos-music`：`b40a495`（T138）⇒ `24a167b`（本轮 release 笔）⇒ `（发版后补记「已装版复验」那一笔，postrelease）`。
 
 ### 2. 发版实测（CI run 号 / asset / attestation）
 
-（待回填）
+1. 网页 dispatch：Release 工作流（`release.yml`），入参 `tag=v0.4.8` / `pack_only=false` / `sign=false`；
+2. run：**#25**（id `45791885822`，`workflow_dispatch`，
+   `head_sha=24a167b569ea245c59071cc79eadad194ef0f4b1`）⇒ **success**（约 **6** 分钟）；
+3. 步骤：`Typecheck` / `Unit tests` / `Build` / `Pack` / `Upload unsigned artifacts` /
+   `Verify unsigned artifacts` / `Write update manifest (unsigned)` / `Normalize asset names` /
+   `Attest build provenance` / `Summary (attestation)` / `Prepare release notes with checksums` /
+   `Publish GitHub Release` 全 **success**；
+   `Summary (pack only)`、`Check SignPath configuration`、`SignPath — submit signing request and fetch signed artifact`、
+   `Verify signed artifact`、`Replace artifacts with signed ones`、`Write update manifest (signed)`
+   共 **6** 个步骤 **skipped**
+   ⇒ `pack_only=false` 与 `sign=false` **真的生效**（否则会卡在 SignPath 检查）；
+4. Release：**id `459197760`**，`tag=v0.4.8`，**非 draft**、**非 prerelease**，
+   `published_at=2026-11-26T09:32:00Z`，资产 **3** 个；
+5. 三个资产：下载到本地后 **sha256 与 GitHub API 的 digest 逐个一致（3/3）** ⇒
+
+| 资产 | 字节数 | sha256 |
+|---|---|---|
+| `SanlosMusic-Setup-0.4.8.exe` | 86143720 | `6538775317537ab3118cadd6fbca9a70fd435fcd723b3a88f98a46ae2e2c6695` |
+| `SanlosMusic-Portable-0.4.8.exe` | 79049116 | `3f3b7b3190e47bd577a2628e62244142d4b3a322538520be3be9a2fd84e078cd` |
+| `latest.json` | 472 | `b2ce298fa6639b78f53f49f0a30b47cf0d67479ba123a0bc28d0a42cf8f9db23` |
+
+6. 构建来源证明（attestation）：**3 个资产各 1 条**（bundle `application/vnd.dev.sigstore.bundle.v0.3+json`）；
+   页面 `https://github.com/pure2199/sanlos-music/attestations/72582964`；
+   ⭐ 路径订正：`GET /repos/{owner}/{repo}/attestations/{subject_digest}`（**带 digest**）
+   **未认证也能通** ⇒ 本轮 3 个资产各查到 1 条；**不带 digest** 的那个路径才回 404
+   ⇒ **两个路径行为不同**，别拿 404 判「证明不存在」。
 
 ### 3. 装版实测
 
-（待回填）
+1. 安装包：Release 里的 `SanlosMusic-Setup-0.4.8.exe`（86,143,720 字节，
+   sha256 与上表**逐字一致**）⇒ 静默**原地升级**装到 `D:\Sanlos Music`
+   ⇒ **没有卸载 v0.4.7** ⇒ `INSTALL048_OK`；
+2. 主程序 exe `FileVersion` = **0.4.8**（`ProductVersion` 0.4.8.0）；
+   `app.asar` = **866,409** 字节，里面 `package.json` 的 `version` = **0.4.8**；
+   **7/7** 个 v0.4.8 正向标志命中（代理层故障分类、封面落盘保留、歌单面板排序 / 分页、共享库页、
+   初始化状态、搜索建议、**最近页布局**）；
+   ⭐ **负向标志**「ICP备」「备案号」**都不在**，**缺陷版那条「最近」页 CSS**
+   （`.sanlos-history{display:flex;flex-direction:column;gap:24px;padding:16px 20px 24px}`）**也不在**
+   ⇒ 这一版真的带上了 T138 的「最近」页布局修复；
+3. 「已安装的应用」**只有**「Sanlos Music 0.4.8」一条（作用域 **HKCU**）⇒ **没有残留 0.4.7**；
+4. 用户数据：`session.bin`（登录态）**逐字未变**、`Local Storage` **11 → 11** 个文件、
+   `prefs.json` 状态未变 ⇒ **升级没有动用户自己的东西**；
+5. **已装版真机复验 13 项：12 通过 / 0 失败 / 1 不可观测**（`REALMACHINE_OK`，
+   证据 `release/verify/t139-04-realmachine-result-installed.json`）：
+   ⭐「最近」页布局：文档高 **761** == 视口高 **761**（整页不滚动）、
+   列表视口可视 **201** < 内容 **672**（列表自己滚）、视口底边 **630** ≤ 播放条上沿 **696**（末尾几行不被压住）、
+   状态行「NAS 播放历史：已加载 14 / 14」；
+   ⭐「关于」页**没有备案号**，而**开发者 `pure2199` / 公司「广西闪链时空网络科技有限公司」/ 官网都在**
+   （页面显示「版本 v0.4.8」）。
 
 ### 4. 线上正文同步（网页编辑页）
 
-（待回填）
+1. Release 编辑页（`/pure2199/sanlos-music/releases/edit/v0.4.8`）⇒ 正文填入
+   `docs/releases/v0.4.8.md`（**已含「§七 已装版复验状态」**）＋ CI 追加段
+   （本地重建文件 `release/verify/t139-body-final.md`：**8069** 字符、**全 LF**、
+   sha256 `f19cb92052295205cf2504b8bfa806450d59af44503ac829872e71a72fedd8fd`）；
+2. ⚠ **网页表单提交后 GitHub 把 `\n` 统一成 `\r\n`** ⇒ 线上正文 **8253** 字符
+   （CRLF **184** 处、**无落单** `\r`）⇒ **归一化行尾后与本地文件逐字节一致**
+   （`EQUAL_AFTER_LF_NORMALIZE=true`）⇒ **属预期内**（渲染效果相同）；
+3. 提交后复核（公开 API，`release/verify/t139-10-verify-online-body.mjs` ⇒ `ONLINE_BODY_OK`）：
+   `id=459197760`、draft=false、prerelease=false、`updated_at=2026-11-26T09:45:15Z`、
+   三个资产的 name / size / digest **均未变**；
+4. 章节顺序：**§一 → §七 → CI 追加的「下载校验（sha256）」「怎么确认这个安装包是官方的」**
+   ⇒ 与 v0.4.7 的版式**一致**（⇒ §七 里那句「与本页**末尾**那张表逐字一致」仍然成立）。
 
 ---
 
